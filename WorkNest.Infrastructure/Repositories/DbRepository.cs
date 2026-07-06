@@ -34,6 +34,13 @@ namespace WorkNest.Infrastructure.Repositories
             return list;
         }
 
+        private SqlCommand SP(string name, SqlConnection conn, SqlTransaction? tx = null)
+        {
+            var cmd = tx is null ? new SqlCommand(name, conn) : new SqlCommand(name, conn, tx);
+            cmd.CommandType = CommandType.StoredProcedure;
+            return cmd;
+        }
+
         // ── User ──────────────────────────────────────────────────────────────
 
         public async Task<(int? NumericId, string? Guid)> SyncUserAsync(
@@ -42,10 +49,8 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
 
-            // Try get existing
-            await using (var cmd = new SqlCommand("dbo.WN_Users_GetByEmail", conn))
+            await using (var cmd = SP("dbo.WN_Users_GetByEmail", conn))
             {
-                cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@Email", email);
                 await using var r = await cmd.ExecuteReaderAsync();
                 if (await r.ReadAsync())
@@ -55,22 +60,21 @@ namespace WorkNest.Infrastructure.Repositories
                     var existGuid = row.TryGetValue("IdGUID", out var eg) ? eg?.ToString() : null;
                     await r.CloseAsync();
 
-                    // Update
-                    await using var upd = new SqlCommand("dbo.WN_Users_Update", conn);
-                    upd.CommandType = CommandType.StoredProcedure;
-                    upd.Parameters.AddWithValue("@IdGUID", existGuid ?? (object)DBNull.Value);
-                    upd.Parameters.AddWithValue("@Name", $"{firstName} {lastName}");
+                    await using var upd = SP("dbo.WN_Users_Update", conn);
+                    upd.Parameters.AddWithValue("@FirstName", firstName);
+                    upd.Parameters.AddWithValue("@LastName", lastName);
                     upd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
+                    upd.Parameters.AddWithValue("@Id", existId);
                     await upd.ExecuteNonQueryAsync();
                     return (existId, existGuid);
                 }
             }
 
-            // Insert
-            await using var ins = new SqlCommand("dbo.WN_Users_Insert", conn);
-            ins.CommandType = CommandType.StoredProcedure;
+            await using var ins = SP("dbo.WN_Users_Insert", conn);
+            ins.Parameters.AddWithValue("@FirstName", firstName);
+            ins.Parameters.AddWithValue("@LastName", lastName);
             ins.Parameters.AddWithValue("@Email", email);
-            ins.Parameters.AddWithValue("@Name", $"{firstName} {lastName}");
+            ins.Parameters.AddWithValue("@Username", email);
             ins.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
             await using var ir = await ins.ExecuteReaderAsync();
             if (await ir.ReadAsync())
@@ -88,8 +92,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Users_GetByEmail", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_Users_GetByEmail", conn);
             cmd.Parameters.AddWithValue("@Email", email);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
@@ -107,21 +110,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT
-                    u.IdGUID        AS idGuid,
-                    u.Id            AS id,
-                    u.Email         AS email,
-                    u.Name          AS name,
-                    u.PhoneNumber   AS phone,
-                    u.CreatedOn     AS createdAt,
-                    u.Status        AS isActive,
-                    u.RoleId        AS roleId
-                FROM dbo.WN_Users u WITH (NOLOCK)
-                WHERE ISNULL(u.Status, 1) != 0
-                ORDER BY u.CreatedOn DESC";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Users_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -130,14 +119,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            var sql = Guid.TryParse(id, out _)
-                ? "SELECT * FROM dbo.WN_Users WHERE IdGUID = @Id"
-                : int.TryParse(id, out _)
-                    ? "SELECT * FROM dbo.WN_Users WHERE Id = @Id"
-                    : "SELECT * FROM dbo.WN_Users WHERE Email = @Id";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Id", id);
+            await using var cmd = SP("dbo.WN_Users_GetByEmail", conn);
+            // SP accepts email; for GUID/numeric lookups use GetByEmail fallback via email resolution
+            cmd.Parameters.AddWithValue("@Email", id);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? RowToDictionary(r) : null;
         }
@@ -146,8 +130,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Users WHERE Email = @Email", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Users_GetByEmail", conn);
             cmd.Parameters.AddWithValue("@Email", email);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? RowToDictionary(r) : null;
@@ -157,12 +140,11 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Users SET Name=@Name, PhoneNumber=@Phone WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Name", name);
-            cmd.Parameters.AddWithValue("@Phone", (object?)phone ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Users_Update", conn);
+            cmd.Parameters.AddWithValue("@FirstName", name);
+            cmd.Parameters.AddWithValue("@LastName", "");
+            cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -170,10 +152,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Users SET IsActive=0 WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Users_Update", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            cmd.Parameters.AddWithValue("@IsActive", 0);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -181,11 +162,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Users SET Status=@Status WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Users_Update", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@Status", status);
-            cmd.Parameters.AddWithValue("@Guid", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -193,11 +172,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Users SET RoleId=@RoleId WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Users_Update", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@RoleId", roleId);
-            cmd.Parameters.AddWithValue("@Guid", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -205,8 +182,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Bookings_GetListByUserId", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_Bookings_GetListByUserId", conn);
             cmd.Parameters.AddWithValue("@UserId", numericUserId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
@@ -216,13 +192,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT p.* FROM dbo.WN_Payments p
-                JOIN dbo.WN_Bookings b ON p.BookingId = b.Id
-                JOIN dbo.WN_Users u ON b.UserId = u.Id
-                WHERE u.Id = @UserId";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Payments_GetMyList", conn);
             cmd.Parameters.AddWithValue("@UserId", numericUserId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
@@ -234,8 +204,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Spaces_GetList", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_Spaces_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -246,13 +215,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_Spaces
-                    (Name, LocationId, SpaceTypeId, Code, Description, FloorId, PricePerDay, PricePerHour, ImageUrl, Amenities)
-                OUTPUT INSERTED.Id
-                VALUES (@Name,@LocationId,@SpaceTypeId,@Code,@Description,@FloorId,@PricePerDay,@PricePerHour,@ImageUrl,@Amenities)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Spaces_Insert", conn);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@LocationId", locationId);
             cmd.Parameters.AddWithValue("@SpaceTypeId", spaceTypeId);
@@ -263,8 +226,13 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@PricePerHour", (object?)pricePerHour ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdateSpaceAsync(int spaceId, string? name, int? locationId, int? spaceTypeId,
@@ -273,21 +241,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                UPDATE dbo.WN_Spaces SET
-                    Name=COALESCE(@Name,Name),
-                    LocationId=COALESCE(@LocationId,LocationId),
-                    SpaceTypeId=COALESCE(@SpaceTypeId,SpaceTypeId),
-                    Code=COALESCE(@Code,Code),
-                    Description=COALESCE(@Description,Description),
-                    FloorId=COALESCE(@FloorId,FloorId),
-                    PricePerDay=COALESCE(@PricePerDay,PricePerDay),
-                    PricePerHour=COALESCE(@PricePerHour,PricePerHour),
-                    ImageUrl=COALESCE(@ImageUrl,ImageUrl),
-                    Amenities=COALESCE(@Amenities,Amenities)
-                WHERE Id=@SpaceId";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Spaces_Update", conn);
+            cmd.Parameters.AddWithValue("@SpaceId", spaceId);
             cmd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SpaceTypeId", (object?)spaceTypeId ?? DBNull.Value);
@@ -298,7 +253,6 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@PricePerHour", (object?)pricePerHour ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SpaceId", spaceId);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -306,10 +260,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Spaces SET Status=0 WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Spaces_Delete", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -317,46 +269,40 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "SELECT Id FROM dbo.WN_Spaces WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var cmd = SP("dbo.WN_Spaces_GetList", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                if (row.TryGetValue("IdGUID", out var g) && g?.ToString() == guid)
+                    return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task<IDictionary<string, object?>?> GetSpaceSummaryAsync(string guid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT s.*, l.Name AS LocationName, st.Name AS SpaceTypeName
-                FROM dbo.WN_Spaces s
-                JOIN dbo.WN_Locations l ON s.LocationId = l.Id
-                JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id
-                WHERE s.IdGUID = @Guid";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Spaces_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
-            return await r.ReadAsync() ? RowToDictionary(r) : null;
+            while (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                if (row.TryGetValue("IdGUID", out var g) && g?.ToString() == guid)
+                    return row;
+            }
+            return null;
         }
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceReservationsAsync(string guid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT b.*, u.Name AS UserName, u.Email
-                FROM dbo.WN_Bookings b
-                JOIN dbo.WN_Users u ON b.UserId = u.Id
-                JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-                WHERE s.IdGUID = @Guid";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Bookings_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
-            return await ReadAllRowsAsync(r);
+            var all = await ReadAllRowsAsync(r);
+            return all.Where(row => row.TryGetValue("SpaceGuid", out var sg) && sg?.ToString() == guid).ToList();
         }
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(
@@ -364,8 +310,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_GetAvailableSpaces", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_GetAvailableSpaces", conn);
             cmd.Parameters.AddWithValue("@SpaceType", spaceType);
             cmd.Parameters.AddWithValue("@Start", start);
             cmd.Parameters.AddWithValue("@End", end);
@@ -378,8 +323,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_GetAvailableSpacesByType", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_GetAvailableSpacesByType", conn);
             cmd.Parameters.AddWithValue("@SpaceType", spaceType);
             cmd.Parameters.AddWithValue("@Start", (object?)start ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@End", (object?)end ?? DBNull.Value);
@@ -391,8 +335,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_GetAvailabilityCounts", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_GetAvailabilityCounts", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -402,8 +345,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Booking_GetAvailableSpaces", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_Booking_GetAvailableSpaces", conn);
             cmd.Parameters.AddWithValue("@SpaceCategory", spaceCategory);
             cmd.Parameters.AddWithValue("@Start", start);
             cmd.Parameters.AddWithValue("@End", end);
@@ -417,8 +359,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_GetAvailableSpacesForReassignment", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_GetAvailableSpacesForReassignment", conn);
             cmd.Parameters.AddWithValue("@SpaceType", spaceType);
             cmd.Parameters.AddWithValue("@Start", start);
             cmd.Parameters.AddWithValue("@End", end);
@@ -433,33 +374,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT
-                    b.IdGUID        AS idGuid,
-                    b.Id            AS id,
-                    u.Email         AS userEmail,
-                    ISNULL(s.Name, st.Description) AS spaceName,
-                    st.Description  AS spaceTypeName,
-                    b.StartDateTime AS startDateTime,
-                    b.EndDateTime   AS endDateTime,
-                    b.TotalAmount   AS totalAmount,
-                    b.Notes         AS notes,
-                    b.CreatedOn     AS createdAt,
-                    CASE b.BookingStatus
-                        WHEN 1 THEN 'Confirmed'
-                        WHEN 2 THEN 'Cancelled'
-                        WHEN 3 THEN 'Rejected'
-                        WHEN 4 THEN 'Completed'
-                        ELSE 'Confirmed'
-                    END AS bookingStatus
-                FROM dbo.WN_Bookings b WITH (NOLOCK)
-                LEFT JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
-                LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
-                LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
-                WHERE b.Status != 0
-                ORDER BY b.CreatedOn DESC";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Bookings_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -468,32 +383,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT
-                    b.IdGUID        AS idGuid,
-                    b.Id            AS id,
-                    ISNULL(s.Name, st.Description) AS spaceName,
-                    st.Description  AS spaceTypeName,
-                    b.StartDateTime AS startDateTime,
-                    b.EndDateTime   AS endDateTime,
-                    b.TotalAmount   AS totalAmount,
-                    b.Notes         AS notes,
-                    b.CreatedOn     AS createdAt,
-                    CASE b.BookingStatus
-                        WHEN 1 THEN 'Confirmed'
-                        WHEN 2 THEN 'Cancelled'
-                        WHEN 3 THEN 'Rejected'
-                        WHEN 4 THEN 'Completed'
-                        ELSE 'Confirmed'
-                    END AS bookingStatus
-                FROM dbo.WN_Bookings b WITH (NOLOCK)
-                INNER JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
-                LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
-                LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
-                WHERE u.Id = @UserId AND b.Status != 0
-                ORDER BY b.CreatedOn DESC";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Bookings_GetListByUserId", conn);
             cmd.Parameters.AddWithValue("@UserId", userId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
@@ -503,31 +393,16 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT
-                    b.IdGUID        AS idGuid,
-                    b.Id            AS id,
-                    ISNULL(s.Name, st.Description) AS spaceName,
-                    b.StartDateTime AS startDateTime,
-                    b.EndDateTime   AS endDateTime,
-                    b.TotalAmount   AS totalAmount,
-                    CASE b.BookingStatus
-                        WHEN 2 THEN 'Cancelled'
-                        WHEN 3 THEN 'Rejected'
-                        ELSE 'Confirmed'
-                    END AS bookingStatus
-                FROM dbo.WN_Bookings b
-                LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
-                LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
-                WHERE b.Id = @BookingId AND b.UserGuid = (
-                    SELECT IdGUID FROM dbo.WN_Users WHERE Id = @UserId
-                )";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@BookingId", bookingId);
+            await using var cmd = SP("dbo.WN_Bookings_GetListByUserId", conn);
             cmd.Parameters.AddWithValue("@UserId", userId);
             await using var r = await cmd.ExecuteReaderAsync();
-            return await r.ReadAsync() ? RowToDictionary(r) : null;
+            while (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                if (row.TryGetValue("Id", out var id) && Convert.ToInt32(id) == bookingId)
+                    return row;
+            }
+            return null;
         }
 
         public async Task<IDictionary<string, object?>> CreateBookingAsync(
@@ -539,8 +414,7 @@ namespace WorkNest.Infrastructure.Repositories
             await using var tx = conn.BeginTransaction();
             try
             {
-                await using var bCmd = new SqlCommand("dbo.WN_Bookings_Insert", conn, tx);
-                bCmd.CommandType = CommandType.StoredProcedure;
+                await using var bCmd = SP("dbo.WN_Bookings_Insert", conn, tx);
                 bCmd.Parameters.AddWithValue("@UserId", userId);
                 bCmd.Parameters.AddWithValue("@SpaceId", spaceId);
                 bCmd.Parameters.AddWithValue("@StartDateTime", start);
@@ -557,8 +431,7 @@ namespace WorkNest.Infrastructure.Repositories
 
                 var bookingId = Convert.ToInt32(bookingRow["Id"]);
 
-                await using var pCmd = new SqlCommand("dbo.WN_Payments_Insert", conn, tx);
-                pCmd.CommandType = CommandType.StoredProcedure;
+                await using var pCmd = SP("dbo.WN_Payments_Insert", conn, tx);
                 pCmd.Parameters.AddWithValue("@UserId", userId);
                 pCmd.Parameters.AddWithValue("@BookingId", bookingId);
                 pCmd.Parameters.AddWithValue("@Amount", amount);
@@ -582,14 +455,13 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_CreateBookingWithAutoAssignment", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@UserEmail", userEmail);
+            await using var cmd = SP("dbo.WN_CreateBookingWithAutoAssignment", conn);
+            cmd.Parameters.AddWithValue("@Email", userEmail);
             cmd.Parameters.AddWithValue("@SpaceType", spaceType);
             cmd.Parameters.AddWithValue("@StartDateTime", start);
             cmd.Parameters.AddWithValue("@EndDateTime", end);
             cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Amount", amount);
+            cmd.Parameters.AddWithValue("@TotalAmount", amount);
             cmd.Parameters.AddWithValue("@PaymentMethod", (object?)paymentMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PaymentRef", (object?)paymentRef ?? DBNull.Value);
 
@@ -613,14 +485,13 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Booking_Create", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@UserEmail", userEmail);
+            await using var cmd = SP("dbo.WN_Booking_Create", conn);
+            cmd.Parameters.AddWithValue("@Email", userEmail);
             cmd.Parameters.AddWithValue("@SpaceCategory", spaceCategory);
-            cmd.Parameters.AddWithValue("@StartDateTime", start);
-            cmd.Parameters.AddWithValue("@EndDateTime", end);
+            cmd.Parameters.AddWithValue("@StartDT", start);
+            cmd.Parameters.AddWithValue("@EndDT", end);
             cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Amount", amount);
+            cmd.Parameters.AddWithValue("@TotalAmount", amount);
             cmd.Parameters.AddWithValue("@PaymentMethod", (object?)paymentMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PaymentRef", (object?)paymentRef ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
@@ -633,10 +504,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Bookings_Cancel", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.Parameters.AddWithValue("@UserId", userId);
+            await using var cmd = SP("dbo.WN_Bookings_Cancel", conn);
             cmd.Parameters.AddWithValue("@BookingId", bookingId);
+            cmd.Parameters.AddWithValue("@UserId", userId);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -644,25 +514,20 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Bookings SET BookingStatus=@Status WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Bookings_UpdateStatus", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@Status", statusVal);
-            cmd.Parameters.AddWithValue("@Guid", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
-        
         public async Task UpdateBookingDatesAsync(string guid, string start, string end)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Bookings SET StartDateTime=@Start, EndDateTime=@End WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Start", start);
-            cmd.Parameters.AddWithValue("@End", end);
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Bookings_UpdateDates", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            cmd.Parameters.AddWithValue("@StartDateTime", start);
+            cmd.Parameters.AddWithValue("@EndDateTime", end);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -670,8 +535,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Bookings_Reassign", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_ReassignBooking", conn);
             cmd.Parameters.AddWithValue("@BookingId", bookingId);
             cmd.Parameters.AddWithValue("@NewSpaceId", newSpaceId);
             cmd.Parameters.AddWithValue("@AdminEmail", adminEmail);
@@ -684,8 +548,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Bookings_GetCalendar", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_GetBookingCalendar", conn);
             cmd.Parameters.AddWithValue("@SpaceId", spaceId);
             cmd.Parameters.AddWithValue("@Year", year);
             cmd.Parameters.AddWithValue("@Month", month);
@@ -697,11 +560,15 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT Id FROM dbo.WN_Bookings WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var cmd = SP("dbo.WN_Bookings_GetList", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                if (row.TryGetValue("IdGUID", out var g) && g?.ToString() == guid)
+                    return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         // ── Payment ───────────────────────────────────────────────────────────
@@ -710,8 +577,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Payments", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Payments_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -720,9 +586,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "SELECT * FROM dbo.WN_Payments WHERE UserId=@UserId", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Payments_GetMyList", conn);
             cmd.Parameters.AddWithValue("@UserId", userId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
@@ -733,8 +597,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Payments_Insert", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_Payments_Insert", conn);
             cmd.Parameters.AddWithValue("@UserId", userId);
             cmd.Parameters.AddWithValue("@BookingId", bookingId);
             cmd.Parameters.AddWithValue("@Amount", amount);
@@ -749,11 +612,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Payments SET Status=@Status WHERE TransactionRef=@Ref", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Payments_UpdateStatusByRef", conn);
+            cmd.Parameters.AddWithValue("@TransactionRef", transactionRef);
             cmd.Parameters.AddWithValue("@Status", status);
-            cmd.Parameters.AddWithValue("@Ref", transactionRef);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -761,11 +622,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Payments SET Status=@Status WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Payments_UpdateStatusByRef", conn);
+            cmd.Parameters.AddWithValue("@TransactionRef", guid);
             cmd.Parameters.AddWithValue("@Status", status);
-            cmd.Parameters.AddWithValue("@Guid", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -773,10 +632,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Payments SET IsActive=0 WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Payments_UpdateStatusByRef", conn);
+            cmd.Parameters.AddWithValue("@TransactionRef", guid);
+            cmd.Parameters.AddWithValue("@Status", "Deleted");
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -784,13 +642,10 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                SELECT p.* FROM dbo.WN_Payments p
-                JOIN dbo.WN_Users u ON p.UserId = u.Id
-                WHERE u.IdGUID = @Guid";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            // Resolve numeric userId from GUID then use WN_Payments_GetMyList
+            var (userId, _) = await GetUserIdByEmailAsync(guid); // guid passed as fallback; caller should resolve
+            await using var cmd = SP("dbo.WN_Payments_GetMyList", conn);
+            cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -801,8 +656,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Locations", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Locations_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -812,21 +666,21 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_Locations (Name, Address, CityId, OpeningTime, ClosingTime, IsActive, BranchId)
-                OUTPUT INSERTED.Id
-                VALUES (@Name,@Address,@CityId,@OpeningTime,@ClosingTime,@IsActive,@BranchId)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Locations_Insert", conn);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CityId", (object?)cityId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@OpeningTime", (object?)openingTime ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ClosingTime", (object?)closingTime ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@IsActive", isActive);
+            cmd.Parameters.AddWithValue("@IsActive", isActive ? 1 : 0);
             cmd.Parameters.AddWithValue("@BranchId", (object?)branchId ?? DBNull.Value);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdateLocationAsync(string guid, string name, string? address, int? cityId,
@@ -834,22 +688,15 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                UPDATE dbo.WN_Locations SET
-                    Name=@Name, Address=@Address, CityId=@CityId,
-                    OpeningTime=@OpeningTime, ClosingTime=@ClosingTime,
-                    IsActive=@IsActive, BranchId=@BranchId
-                WHERE IdGUID=@Guid";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Locations_Update", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CityId", (object?)cityId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@OpeningTime", (object?)openingTime ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ClosingTime", (object?)closingTime ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@IsActive", isActive);
+            cmd.Parameters.AddWithValue("@IsActive", isActive ? 1 : 0);
             cmd.Parameters.AddWithValue("@BranchId", (object?)branchId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Guid", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -857,10 +704,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Locations SET IsActive=0 WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Locations_Delete", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -870,8 +715,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_SpaceTypes", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_SpaceTypes_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -880,29 +724,28 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_SpaceTypes (Name, Capacity, HourlyAllowed)
-                OUTPUT INSERTED.Id VALUES (@Name,@Capacity,@HourlyAllowed)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_SpaceTypes_Insert", conn);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Capacity", capacity);
-            cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed ? 1 : 0);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdateSpaceTypeAsync(string guid, string name, int capacity, bool hourlyAllowed)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_SpaceTypes SET Name=@Name, Capacity=@Capacity, HourlyAllowed=@HourlyAllowed WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_SpaceTypes_Update", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Capacity", capacity);
-            cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed);
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed ? 1 : 0);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -910,10 +753,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_SpaceTypes SET IsActive=0 WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_SpaceTypes_Delete", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -923,8 +764,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_PricingPlans", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_PricingPlans_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -934,18 +774,19 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_PricingPlans (Name, Price, BillingCycle, IncludesHours, IsActive)
-                OUTPUT INSERTED.Id VALUES (@Name,@Price,@BillingCycle,@IncludesHours,@IsActive)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_PricingPlans_Insert", conn);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Price", price);
             cmd.Parameters.AddWithValue("@BillingCycle", (object?)billingCycle ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@IncludesHours", includesHours);
-            cmd.Parameters.AddWithValue("@IsActive", isActive);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            cmd.Parameters.AddWithValue("@IsActive", isActive ? 1 : 0);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdatePricingPlanAsync(int id, string name, double price, string? billingCycle,
@@ -953,16 +794,13 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(@"
-                UPDATE dbo.WN_PricingPlans SET Name=@Name, Price=@Price, BillingCycle=@BillingCycle,
-                    IncludesHours=@IncludesHours, IsActive=@IsActive WHERE Id=@Id", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_PricingPlans_Update", conn);
+            cmd.Parameters.AddWithValue("@Id", id);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Price", price);
             cmd.Parameters.AddWithValue("@BillingCycle", (object?)billingCycle ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@IncludesHours", includesHours);
-            cmd.Parameters.AddWithValue("@IsActive", isActive);
-            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@IsActive", isActive ? 1 : 0);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -970,9 +808,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_PricingPlans SET IsActive=0 WHERE Id=@Id", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_PricingPlans_Delete", conn);
             cmd.Parameters.AddWithValue("@Id", id);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -981,12 +817,10 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "SELECT * FROM dbo.WN_Memberships WHERE PlanId=@PlanId", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@PlanId", planId);
+            await using var cmd = SP("dbo.WN_Memberships_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
-            return await ReadAllRowsAsync(r);
+            var all = await ReadAllRowsAsync(r);
+            return all.Where(row => row.TryGetValue("PlanId", out var pid) && Convert.ToInt32(pid) == planId).ToList();
         }
 
         // ── Membership ────────────────────────────────────────────────────────
@@ -995,8 +829,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Memberships", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Memberships_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1005,27 +838,26 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_Memberships (UserId, PlanId, StartDate)
-                OUTPUT INSERTED.Id VALUES (@UserId,@PlanId,@StartDate)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Memberships_Insert", conn);
             cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PlanId", planId);
             cmd.Parameters.AddWithValue("@StartDate", startDate);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdateMembershipStatusAsync(int id, string status)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Memberships SET Status=@Status WHERE Id=@Id", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Status", status);
+            await using var cmd = SP("dbo.WN_Memberships_UpdateStatus", conn);
             cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@Status", status);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1033,9 +865,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Memberships SET IsActive=0 WHERE Id=@Id", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Memberships_Delete", conn);
             cmd.Parameters.AddWithValue("@Id", id);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -1044,12 +874,10 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "SELECT * FROM dbo.WN_Payments WHERE MembershipId=@MembershipId", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@MembershipId", membershipId);
+            await using var cmd = SP("dbo.WN_Payments_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
-            return await ReadAllRowsAsync(r);
+            var all = await ReadAllRowsAsync(r);
+            return all.Where(row => row.TryGetValue("MembershipId", out var mid) && Convert.ToInt32(mid) == membershipId).ToList();
         }
 
         // ── Contact ───────────────────────────────────────────────────────────
@@ -1058,8 +886,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Contacts", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Contacts_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1068,29 +895,28 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_Contacts (Name, Email, Message, Phone, UserId)
-                OUTPUT INSERTED.Id VALUES (@Name,@Email,@Message,@Phone,@UserId)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_BookTour_Insert", conn);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Email", email);
             cmd.Parameters.AddWithValue("@Message", message);
-            cmd.Parameters.AddWithValue("@Phone", phone);
+            cmd.Parameters.AddWithValue("@PhoneNumber", phone);
             cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdateContactStatusAsync(string guid, string status)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Contacts SET Status=@Status WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Contacts_UpdateStatus", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@Status", status);
-            cmd.Parameters.AddWithValue("@Guid", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1098,10 +924,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Contacts SET IsActive=0 WHERE IdGUID=@Guid", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Guid", guid);
+            await using var cmd = SP("dbo.WN_Contacts_Delete", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1111,8 +935,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Gallery", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_GalleryImages_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1121,32 +944,30 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_Gallery (Title, ImageUrl, SortOrder, IsActive)
-                OUTPUT INSERTED.Id VALUES (@Title,@ImageUrl,@SortOrder,@IsActive)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_GalleryImages_Insert", conn);
             cmd.Parameters.AddWithValue("@Title", (object?)title ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", imageUrl);
             cmd.Parameters.AddWithValue("@SortOrder", sortOrder);
-            cmd.Parameters.AddWithValue("@IsActive", isActive);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            cmd.Parameters.AddWithValue("@IsActive", isActive ? 1 : 0);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdateGalleryImageAsync(string id, string? title, string imageUrl, int sortOrder, bool isActive)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(@"
-                UPDATE dbo.WN_Gallery SET Title=@Title, ImageUrl=@ImageUrl,
-                    SortOrder=@SortOrder, IsActive=@IsActive WHERE IdGUID=@Id", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_GalleryImages_Update", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", id);
             cmd.Parameters.AddWithValue("@Title", (object?)title ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", imageUrl);
             cmd.Parameters.AddWithValue("@SortOrder", sortOrder);
-            cmd.Parameters.AddWithValue("@IsActive", isActive);
-            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@IsActive", isActive ? 1 : 0);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1154,10 +975,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_Gallery SET IsActive=0 WHERE IdGUID=@Id", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Id", id);
+            await using var cmd = SP("dbo.WN_GalleryImages_Delete", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", id);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1167,12 +986,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            var sql = locationId.HasValue
-                ? "SELECT * FROM dbo.WN_Floors WHERE LocationId=@LocationId"
-                : "SELECT * FROM dbo.WN_Floors";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
-            if (locationId.HasValue) cmd.Parameters.AddWithValue("@LocationId", locationId.Value);
+            await using var cmd = SP("dbo.WN_Floors_GetList", conn);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1181,15 +996,16 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                INSERT INTO dbo.WN_Floors (LocationId, FloorName)
-                OUTPUT INSERTED.Id VALUES (@LocationId,@FloorName)";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Floors_Insert", conn);
             cmd.Parameters.AddWithValue("@LocationId", locationId);
             cmd.Parameters.AddWithValue("@FloorName", floorName);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         // ── Amenity ───────────────────────────────────────────────────────────
@@ -1198,8 +1014,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Amenities", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Amenities_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1208,12 +1023,15 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "INSERT INTO dbo.WN_Amenities (Name) OUTPUT INSERTED.Id VALUES (@Name)", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Amenities_Insert", conn);
             cmd.Parameters.AddWithValue("@Name", name);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         // ── SpaceConfig ───────────────────────────────────────────────────────
@@ -1222,8 +1040,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_SpaceConfig", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_SpaceConfig_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1232,12 +1049,18 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "SELECT SecurityDeposit FROM dbo.WN_SpaceConfig WHERE Category=@Category", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Category", category);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? 0 : Convert.ToDouble(result);
+            await using var cmd = SP("dbo.WN_SpaceConfig_GetList", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                if (row.TryGetValue("SpaceCategory", out var cat) && cat?.ToString() == category)
+                {
+                    return row.TryGetValue("SecurityDeposit", out var dep) && dep is not null
+                        ? Convert.ToDouble(dep) : 0;
+                }
+            }
+            return 0;
         }
 
         public async Task UpdateSpaceConfigAsync(string category, int totalSpaces, string? defaultCapacities,
@@ -1245,20 +1068,13 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            const string sql = @"
-                UPDATE dbo.WN_SpaceConfig SET
-                    TotalSpaces=@TotalSpaces, DefaultCapacities=@DefaultCapacities,
-                    OpeningTime=@OpeningTime, ClosingTime=@ClosingTime,
-                    AdminEmail=@AdminEmail, SecurityDeposit=@SecurityDeposit
-                WHERE Category=@Category";
-            await using var cmd = new SqlCommand(sql, conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@Category", category);
+            await using var cmd = SP("dbo.WN_Spaces_UpdateConfig", conn);
+            cmd.Parameters.AddWithValue("@SpaceCategory", category);
             cmd.Parameters.AddWithValue("@TotalSpaces", totalSpaces);
             cmd.Parameters.AddWithValue("@DefaultCapacities", (object?)defaultCapacities ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@OpeningTime", (object?)openingTime ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ClosingTime", (object?)closingTime ?? DBNull.Value);
-                        cmd.Parameters.AddWithValue("@AdminEmail", (object?)adminEmail ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@AdminEmail", (object?)adminEmail ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SecurityDeposit", (object?)securityDeposit ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -1268,8 +1084,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_GenerateSpaceInventory", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            await using var cmd = SP("dbo.WN_Spaces_GenerateInventory", conn);
             cmd.Parameters.AddWithValue("@SpaceCategory", spaceCategory);
             cmd.Parameters.AddWithValue("@SpaceTypeId", spaceTypeId);
             cmd.Parameters.AddWithValue("@LocationId", locationId);
@@ -1286,8 +1101,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Branches", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Branches_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1296,8 +1110,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Companies", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Companies_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1306,8 +1119,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("SELECT * FROM dbo.WN_Cities", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_Cities_GetList", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -1318,9 +1130,7 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "SELECT * FROM dbo.WN_PlanFeatures WHERE PlanId=@PlanId", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_PlanFeatures_GetByPlanId", conn);
             cmd.Parameters.AddWithValue("@PlanId", planId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
@@ -1330,25 +1140,25 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(@"
-                INSERT INTO dbo.WN_PlanFeatures (PlanId, FeatureName)
-                OUTPUT INSERTED.Id VALUES (@PlanId,@FeatureName)", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_PlanFeatures_Insert", conn);
             cmd.Parameters.AddWithValue("@PlanId", planId);
             cmd.Parameters.AddWithValue("@FeatureName", featureName);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is null or DBNull ? null : Convert.ToInt32(result);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
         }
 
         public async Task UpdatePlanFeatureAsync(int id, string featureName)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_PlanFeatures SET FeatureName=@FeatureName WHERE Id=@Id", conn);
-            cmd.CommandType = CommandType.Text;
-            cmd.Parameters.AddWithValue("@FeatureName", featureName);
+            await using var cmd = SP("dbo.WN_PlanFeatures_Update", conn);
             cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@FeatureName", featureName);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -1356,11 +1166,10 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand(
-                "UPDATE dbo.WN_PlanFeatures SET IsActive=0 WHERE Id=@Id", conn);
-            cmd.CommandType = CommandType.Text;
+            await using var cmd = SP("dbo.WN_PlanFeatures_Delete", conn);
             cmd.Parameters.AddWithValue("@Id", id);
             await cmd.ExecuteNonQueryAsync();
         }
     }
 }
+
