@@ -22,7 +22,8 @@ namespace WorkNest.Application.Services
         {
             var spaces = await _db.GetAllSpacesAsync();
             return spaces.Where(s =>
-                s.TryGetValue("spaceStatus", out var st) && st?.ToString() == "Available")
+                (s.TryGetValue("spaceStatus", out var st) && st?.ToString() == "Available") ||
+                (s.TryGetValue("status", out var s2) && Convert.ToString(s2) == "1"))
                 .Cast<object>();
         }
 
@@ -53,12 +54,12 @@ namespace WorkNest.Application.Services
             {
                 space = new
                 {
-                    id             = space.TryGetValue("idGuid", out var g) ? g?.ToString() : null,
-                    name           = space.TryGetValue("name", out var n) ? n?.ToString() : null,
-                    code           = space.TryGetValue("code", out var c) ? c?.ToString() : null,
-                    locationName   = space.TryGetValue("locationName", out var l) ? l?.ToString() : null,
-                    spaceTypeName  = space.TryGetValue("spaceTypeName", out var t) ? t?.ToString() : null,
-                    status         = space.TryGetValue("status", out var st) ? st?.ToString() : null,
+                    id            = space.TryGetValue("idGUID", out var g) ? g?.ToString() : null,
+                    name          = space.TryGetValue("name", out var n) ? n?.ToString() : null,
+                    code          = space.TryGetValue("code", out var c) ? c?.ToString() : null,
+                    locationName  = space.TryGetValue("locationName", out var l) ? l?.ToString() : null,
+                    spaceTypeName = space.TryGetValue("spaceTypeName", out var t) ? t?.ToString() : null,
+                    status        = space.TryGetValue("status", out var st) ? st?.ToString() : null,
                 },
                 stats = new
                 {

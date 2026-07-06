@@ -57,8 +57,8 @@ namespace WorkNest.Application.Services
             }
             else
             {
-                guid = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
-                role = Roles.MapRole(row.TryGetValue("RoleId", out var r) ? (int?)Convert.ToInt32(r) : null);
+                guid = row.TryGetValue("idGUID", out var g) ? g?.ToString() : null;
+                role = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null);
             }
 
             var token = _jwt.GenerateToken(guid ?? "", request.Email, role);
@@ -85,8 +85,8 @@ namespace WorkNest.Application.Services
 
                 if (row is not null)
                 {
-                    guid = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
-                    role = Roles.MapRole(row.TryGetValue("RoleId", out var r) ? (int?)Convert.ToInt32(r) : null);
+                    guid = row.TryGetValue("idGUID", out var g) ? g?.ToString() : null;
+                    role = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null);
                 }
                 else
                 {
@@ -120,11 +120,11 @@ namespace WorkNest.Application.Services
 
             return ApiResponse.Ok(new
             {
-                id    = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null,
-                email = row.TryGetValue("Email", out var e) ? e?.ToString() ?? "" : "",
-                name  = row.TryGetValue("Name", out var n) ? n?.ToString() ?? "" : "",
-                phone = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() ?? "" : "",
-                role  = Roles.MapRole(row.TryGetValue("RoleId", out var r) ? (int?)Convert.ToInt32(r) : null),
+                id    = row.TryGetValue("idGUID", out var g) ? g?.ToString() : null,
+                email = row.TryGetValue("email", out var e) ? e?.ToString() ?? "" : "",
+                name  = row.TryGetValue("name", out var n) ? n?.ToString() ?? "" : "",
+                phone = row.TryGetValue("phoneNumber", out var p) ? p?.ToString() ?? "" : "",
+                role  = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null),
             });
         }
 

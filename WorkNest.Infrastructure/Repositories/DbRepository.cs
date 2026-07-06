@@ -107,8 +107,21 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = new SqlCommand("dbo.WN_Users_GetList", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            const string sql = @"
+                SELECT
+                    u.IdGUID        AS idGuid,
+                    u.Id            AS id,
+                    u.Email         AS email,
+                    u.Name          AS name,
+                    u.PhoneNumber   AS phone,
+                    u.CreatedOn     AS createdAt,
+                    u.Status        AS isActive,
+                    u.RoleId        AS roleId
+                FROM dbo.WN_Users u WITH (NOLOCK)
+                WHERE ISNULL(u.Status, 1) != 0
+                ORDER BY u.CreatedOn DESC";
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.CommandType = CommandType.Text;
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -421,12 +434,30 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             const string sql = @"
-                SELECT b.*, u.Name AS UserName, u.Email,
-                       s.Name AS SpaceName, st.Name AS SpaceTypeName
-                FROM dbo.WN_Bookings b
-                JOIN dbo.WN_Users u ON b.UserId = u.Id
-                JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-                JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id";
+                SELECT
+                    b.IdGUID        AS idGuid,
+                    b.Id            AS id,
+                    u.Email         AS userEmail,
+                    ISNULL(s.Name, st.Description) AS spaceName,
+                    st.Description  AS spaceTypeName,
+                    b.StartDateTime AS startDateTime,
+                    b.EndDateTime   AS endDateTime,
+                    b.TotalAmount   AS totalAmount,
+                    b.Notes         AS notes,
+                    b.CreatedOn     AS createdAt,
+                    CASE b.BookingStatus
+                        WHEN 1 THEN 'Confirmed'
+                        WHEN 2 THEN 'Cancelled'
+                        WHEN 3 THEN 'Rejected'
+                        WHEN 4 THEN 'Completed'
+                        ELSE 'Confirmed'
+                    END AS bookingStatus
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
+                LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+                LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
+                WHERE b.Status != 0
+                ORDER BY b.CreatedOn DESC";
             await using var cmd = new SqlCommand(sql, conn);
             cmd.CommandType = CommandType.Text;
             await using var r = await cmd.ExecuteReaderAsync();
@@ -438,13 +469,29 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             const string sql = @"
-                SELECT b.*, u.Name AS UserName, u.Email,
-                       s.Name AS SpaceName, st.Name AS SpaceTypeName
-                FROM dbo.WN_Bookings b
-                JOIN dbo.WN_Users u ON b.UserId = u.Id
-                JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-                JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id
-                WHERE u.Id = @UserId";
+                SELECT
+                    b.IdGUID        AS idGuid,
+                    b.Id            AS id,
+                    ISNULL(s.Name, st.Description) AS spaceName,
+                    st.Description  AS spaceTypeName,
+                    b.StartDateTime AS startDateTime,
+                    b.EndDateTime   AS endDateTime,
+                    b.TotalAmount   AS totalAmount,
+                    b.Notes         AS notes,
+                    b.CreatedOn     AS createdAt,
+                    CASE b.BookingStatus
+                        WHEN 1 THEN 'Confirmed'
+                        WHEN 2 THEN 'Cancelled'
+                        WHEN 3 THEN 'Rejected'
+                        WHEN 4 THEN 'Completed'
+                        ELSE 'Confirmed'
+                    END AS bookingStatus
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                INNER JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
+                LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+                LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
+                WHERE u.Id = @UserId AND b.Status != 0
+                ORDER BY b.CreatedOn DESC";
             await using var cmd = new SqlCommand(sql, conn);
             cmd.CommandType = CommandType.Text;
             cmd.Parameters.AddWithValue("@UserId", userId);
@@ -457,11 +504,24 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             const string sql = @"
-                SELECT b.*, s.Name AS SpaceName, st.Name AS SpaceTypeName
+                SELECT
+                    b.IdGUID        AS idGuid,
+                    b.Id            AS id,
+                    ISNULL(s.Name, st.Description) AS spaceName,
+                    b.StartDateTime AS startDateTime,
+                    b.EndDateTime   AS endDateTime,
+                    b.TotalAmount   AS totalAmount,
+                    CASE b.BookingStatus
+                        WHEN 2 THEN 'Cancelled'
+                        WHEN 3 THEN 'Rejected'
+                        ELSE 'Confirmed'
+                    END AS bookingStatus
                 FROM dbo.WN_Bookings b
-                JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-                JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id
-                WHERE b.Id = @BookingId AND b.UserId = @UserId";
+                LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+                LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
+                WHERE b.Id = @BookingId AND b.UserGuid = (
+                    SELECT IdGUID FROM dbo.WN_Users WHERE Id = @UserId
+                )";
             await using var cmd = new SqlCommand(sql, conn);
             cmd.CommandType = CommandType.Text;
             cmd.Parameters.AddWithValue("@BookingId", bookingId);

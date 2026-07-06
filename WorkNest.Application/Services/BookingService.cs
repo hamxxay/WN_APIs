@@ -91,12 +91,12 @@ namespace WorkNest.Application.Services
 
                 return ApiResponse.Ok(new
                 {
-                    id                 = result.TryGetValue("idGuid", out var g) ? g : result.TryGetValue("id", out var i) ? i : null,
-                    assignedSpaceId    = result.TryGetValue("assignedSpaceId", out var asi) ? asi : null,
-                    assignedSpaceName  = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
-                    spaceType          = result.TryGetValue("spaceType", out var st) ? st : null,
-                    totalAmount        = amount,
-                    isAutoAssigned     = true,
+                    id                = result.TryGetValue("idGUID", out var g) ? g : result.TryGetValue("id", out var i) ? i : null,
+                    assignedSpaceId   = result.TryGetValue("assignedSpaceId", out var asi) ? asi : null,
+                    assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
+                    spaceType         = result.TryGetValue("spaceType", out var st) ? st : null,
+                    totalAmount       = amount,
+                    isAutoAssigned    = true,
                 }, "Booking successful with auto-assigned space.");
             }
 
@@ -119,7 +119,7 @@ namespace WorkNest.Application.Services
 
             return ApiResponse.Ok(new
             {
-                id          = booking.TryGetValue("idGuid", out var bg) ? bg : booking.TryGetValue("id", out var bi) ? bi : null,
+                id          = booking.TryGetValue("idGUID", out var bg) ? bg : booking.TryGetValue("id", out var bi) ? bi : null,
                 spaceId     = request.SpaceId,
                 totalAmount = amount,
             }, "Booking successful.");
@@ -136,7 +136,7 @@ namespace WorkNest.Application.Services
             {
                 success           = true,
                 id                = result.TryGetValue("id", out var id) ? id : null,
-                bookingId         = result.TryGetValue("idGuid", out var g) ? g : result.TryGetValue("id", out var i) ? i : null,
+                bookingId         = result.TryGetValue("idGUID", out var g) ? g : result.TryGetValue("id", out var i) ? i : null,
                 assignedSpace     = result.TryGetValue("assignedSpaceCode", out var asc) ? asc : null,
                 assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
                 assignedSpaceId   = result.TryGetValue("assignedSpaceId", out var asi) ? asi : null,
