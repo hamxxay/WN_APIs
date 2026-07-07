@@ -337,3 +337,43 @@ BEGIN
     END CATCH
 END
 GO
+
+-- ── WN_Bookings_GetListByUserGuid ─────────────────────────────────────────────
+IF OBJECT_ID('dbo.WN_Bookings_GetListByUserGuid', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.WN_Bookings_GetListByUserGuid;
+GO
+
+CREATE PROCEDURE dbo.WN_Bookings_GetListByUserGuid
+    @UserGuid UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        SELECT
+            b.Id,
+            b.IdGUID,
+            b.UserGuid,
+            b.SpaceGuid,
+            b.StartDateTime,
+            b.EndDateTime,
+            b.TotalAmount,
+            b.Notes,
+            b.BookingStatus,
+            b.Status,
+            b.CreatedOn,
+            s.Name                                              AS SpaceName,
+            st.Description                                      AS SpaceTypeName,
+            l.Name                                              AS LocationName,
+            DATEDIFF(DAY, b.StartDateTime, b.EndDateTime)       AS ReservedDays
+        FROM dbo.WN_Bookings b WITH (NOLOCK)
+        LEFT JOIN dbo.WN_Spaces     s  WITH (NOLOCK) ON s.IdGUID  = b.SpaceGuid
+        LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.IdGUID = s.SpaceTypeId
+        LEFT JOIN dbo.WN_Locations  l  WITH (NOLOCK) ON l.IdGUID  = s.LocationId
+        WHERE b.UserGuid = @UserGuid
+        ORDER BY b.CreatedOn DESC;
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH
+END
+GO

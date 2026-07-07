@@ -18,7 +18,8 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Recent([FromQuery] int limit = 5)
         {
             var all = await _contacts.GetAllContactsAsync();
-            return Ok(ApiResponse.Ok(all.Take(limit)));
+            var (items, total) = PaginationHelper.Paginate(all, 1, limit, "");
+            return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
         [HttpGet("api/contact")]

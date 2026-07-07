@@ -12,19 +12,7 @@ namespace WorkNest.Application.Services
         public BookingService(IDbRepository db) => _db = db;
 
         public async Task<IEnumerable<object>> GetAllBookingsAsync() =>
-            (await _db.GetAllBookingsAsync()).Select(r => (object)new
-            {
-                id            = r.TryGetValue("IdGuid",        out var g)  ? g?.ToString()  : null,
-                idGuid        = r.TryGetValue("IdGuid",        out var g2) ? g2?.ToString() : null,
-                userEmail     = r.TryGetValue("UserEmail",     out var ue) ? ue?.ToString() : null,
-                spaceName     = r.TryGetValue("SpaceName",     out var sn) ? sn?.ToString() : null,
-                startDateTime = r.TryGetValue("StartDateTime", out var sd) ? sd?.ToString() : null,
-                endDateTime   = r.TryGetValue("EndDateTime",   out var ed) ? ed?.ToString() : null,
-                totalAmount   = r.TryGetValue("TotalAmount",   out var ta) ? ta : null,
-                notes         = r.TryGetValue("Notes",         out var n)  ? n?.ToString()  : null,
-                bookingStatus = r.TryGetValue("BookingStatus", out var bs) ? bs?.ToString() : null,
-                createdAt     = r.TryGetValue("CreatedAt",     out var ca) ? ca?.ToString() : null,
-            });
+            (await _db.GetAllBookingsAsync()).Cast<object>();
 
         public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail)
         {
