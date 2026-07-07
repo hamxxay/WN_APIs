@@ -1,16 +1,10 @@
 using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
-using WorkNest.Common.Helpers;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
 {
-    /// <summary>
-    /// Booking lifecycle service.
-    /// Mirrors all Python booking endpoints in main.py exactly,
-    /// including auto-assignment and smart booking logic.
-    /// </summary>
     public class BookingService : IBookingService
     {
         private readonly IDbRepository _db;
@@ -18,24 +12,30 @@ namespace WorkNest.Application.Services
         public BookingService(IDbRepository db) => _db = db;
 
         public async Task<IEnumerable<object>> GetAllBookingsAsync() =>
-            (await _db.GetAllBookingsAsync()).Cast<object>();
+            (await _db.GetAllBookingsAsync()).Select(r => (object)new
+            {
+                id            = r.TryGetValue("IdGuid",        out var g)  ? g?.ToString()  : null,
+                idGuid        = r.TryGetValue("IdGuid",        out var g2) ? g2?.ToString() : null,
+                userEmail     = r.TryGetValue("UserEmail",     out var ue) ? ue?.ToString() : null,
+                spaceName     = r.TryGetValue("SpaceName",     out var sn) ? sn?.ToString() : null,
+                startDateTime = r.TryGetValue("StartDateTime", out var sd) ? sd?.ToString() : null,
+                endDateTime   = r.TryGetValue("EndDateTime",   out var ed) ? ed?.ToString() : null,
+                totalAmount   = r.TryGetValue("TotalAmount",   out var ta) ? ta : null,
+                notes         = r.TryGetValue("Notes",         out var n)  ? n?.ToString()  : null,
+                bookingStatus = r.TryGetValue("BookingStatus", out var bs) ? bs?.ToString() : null,
+                createdAt     = r.TryGetValue("CreatedAt",     out var ca) ? ca?.ToString() : null,
+            });
 
         public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail)
         {
-            var (userId, _) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userId is null) return [];
-            return (await _db.GetMyBookingsAsync(userId.Value)).Cast<object>();
+            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
+            if (userGuid is null) return [];
+            return (await _db.GetMyBookingsAsync(userGuid)).Cast<object>();
         }
 
         public async Task<ApiResponse> GetBookingByIdAsync(string id, string userEmail)
         {
-            var (userId, _) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userId is null) return ApiResponse.Fail("User not found");
-
-            var numericId = await _db.GetBookingNumericIdByGuidAsync(id);
-            if (numericId is null) return ApiResponse.Fail("Booking not found");
-
-            var data = await _db.GetBookingByIdAsync(userId.Value, numericId.Value);
+            var data = await _db.GetBookingByGuidAsync(id);
             if (data is null) return ApiResponse.Fail("Booking not found");
             return ApiResponse.Ok(data);
         }
@@ -48,7 +48,7 @@ namespace WorkNest.Application.Services
             foreach (var booking in result)
             {
                 var startStr = booking.TryGetValue("startDate", out var s) ? s?.ToString() : null;
-                var endStr   = booking.TryGetValue("endDate", out var e) ? e?.ToString() : null;
+                var endStr   = booking.TryGetValue("endDate",   out var e) ? e?.ToString() : null;
                 if (startStr is null || endStr is null) continue;
 
                 var start = DateTime.Parse(startStr);
@@ -60,10 +60,6 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new { bookedDates, bookings = result });
         }
 
-        /// <summary>
-        /// Creates a booking — auto-assignment if spaceId is absent/auto,
-        /// otherwise manual booking. Mirrors Python make_booking() exactly.
-        /// </summary>
         public async Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail)
         {
             var spaceIdStr = request.SpaceId?.ToString();
@@ -92,28 +88,20 @@ namespace WorkNest.Application.Services
                 return ApiResponse.Ok(new
                 {
                     id                = result.TryGetValue("idGUID", out var g) ? g : result.TryGetValue("id", out var i) ? i : null,
-                    assignedSpaceId   = result.TryGetValue("assignedSpaceId", out var asi) ? asi : null,
+                    assignedSpaceId   = result.TryGetValue("assignedSpaceId",   out var asi) ? asi : null,
                     assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
-                    spaceType         = result.TryGetValue("spaceType", out var st) ? st : null,
+                    spaceType         = result.TryGetValue("spaceType",         out var st)  ? st  : null,
                     totalAmount       = amount,
                     isAutoAssigned    = true,
                 }, "Booking successful with auto-assigned space.");
             }
 
-            // Manual booking
-            var (userId, _) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userId is null) return ApiResponse.Fail("User not found");
+            // Manual booking — resolve user GUID then book by space GUID
+            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
+            if (userGuid is null) return ApiResponse.Fail("User not found");
 
-            // Resolve GUID spaceId to numeric
-            object spaceId = request.SpaceId!;
-            if (GuidHelper.IsGuid(spaceIdStr))
-            {
-                var numericSpaceId = await _db.GetSpaceNumericIdByGuidAsync(spaceIdStr!);
-                if (numericSpaceId is null) return ApiResponse.Fail("Space not found");
-                spaceId = numericSpaceId.Value;
-            }
-
-            var booking = await _db.CreateBookingAsync(userId.Value, spaceId,
+            var spaceGuid = spaceIdStr!;
+            var booking = await _db.CreateBookingAsync(userGuid, spaceGuid,
                 request.StartDateTime, request.EndDateTime,
                 request.Notes ?? "", amount, method, refNum);
 
@@ -135,25 +123,22 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new
             {
                 success           = true,
-                id                = result.TryGetValue("id", out var id) ? id : null,
-                bookingId         = result.TryGetValue("idGUID", out var g) ? g : result.TryGetValue("id", out var i) ? i : null,
+                id                = result.TryGetValue("id",              out var id)  ? id  : null,
+                bookingId         = result.TryGetValue("idGUID",          out var g)   ? g   : result.TryGetValue("id", out var i) ? i : null,
                 assignedSpace     = result.TryGetValue("assignedSpaceCode", out var asc) ? asc : null,
                 assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
-                assignedSpaceId   = result.TryGetValue("assignedSpaceId", out var asi) ? asi : null,
-                spaceCategory     = result.TryGetValue("spaceCategory", out var sc) ? sc : null,
+                assignedSpaceId   = result.TryGetValue("assignedSpaceId",   out var asi) ? asi : null,
+                spaceCategory     = result.TryGetValue("spaceCategory",     out var sc)  ? sc  : null,
                 totalAmount       = request.TotalAmount,
             }, "Booking created with auto-assigned space.");
         }
 
         public async Task<ApiResponse> CancelBookingAsync(string id, string userEmail)
         {
-            var (userId, _) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userId is null) return ApiResponse.Fail("User not found");
+            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
+            if (userGuid is null) return ApiResponse.Fail("User not found");
 
-            var numericId = await _db.GetBookingNumericIdByGuidAsync(id);
-            if (numericId is null) return ApiResponse.Fail("Booking not found");
-
-            await _db.CancelBookingAsync(userId.Value, numericId.Value);
+            await _db.CancelBookingAsync(userGuid, id);
             return ApiResponse.Ok("Booking cancelled.");
         }
 
@@ -172,10 +157,7 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> ReassignBookingAsync(string id, ReassignBookingRequest request, string adminEmail)
         {
-            var numericId = await _db.GetBookingNumericIdByGuidAsync(id);
-            if (numericId is null) return ApiResponse.Fail("Booking not found");
-
-            var result = await _db.ReassignBookingAsync(numericId.Value, request.SpaceId, adminEmail);
+            var result = await _db.ReassignBookingAsync(id, request.SpaceId, adminEmail);
             return ApiResponse.Ok(result, "Booking reassigned successfully.");
         }
 

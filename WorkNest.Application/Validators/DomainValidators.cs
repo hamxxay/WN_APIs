@@ -34,8 +34,8 @@ namespace WorkNest.Application.Validators
         public SpaceInsertRequestValidator()
         {
             RuleFor(x => x.Name).NotEmpty();
-            RuleFor(x => x.LocationId).GreaterThan(0);
-            RuleFor(x => x.SpaceTypeId).GreaterThan(0);
+            RuleFor(x => x.LocationId).NotEmpty();
+            RuleFor(x => x.SpaceTypeId).NotEmpty();
         }
     }
 
@@ -62,7 +62,7 @@ namespace WorkNest.Application.Validators
     {
         public PayFastInitiateRequestValidator()
         {
-            RuleFor(x => x.BookingId).GreaterThan(0);
+            RuleFor(x => x.BookingId).NotEmpty();
             RuleFor(x => x.CustomerEmail).NotEmpty().EmailAddress();
             RuleFor(x => x.CustomerName).NotEmpty();
         }

@@ -30,7 +30,7 @@ namespace WorkNest.API.Middleware
             {
                 _logger.LogError(ex, "Unhandled exception on {Method} {Path}",
                     context.Request.Method, context.Request.Path);
-                await WriteErrorResponseAsync(context, ex.Message);
+                await WriteErrorResponseAsync(context, "An unexpected error occurred. Please try again later.");
             }
         }
 

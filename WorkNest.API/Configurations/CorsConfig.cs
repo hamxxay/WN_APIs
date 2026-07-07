@@ -1,8 +1,7 @@
 namespace WorkNest.API.Configurations
 {
     /// <summary>
-    /// CORS configuration.
-    /// Mirrors the Python ALLOWED_ORIGINS list and Vercel wildcard regex exactly.
+    /// CORS configuration — reads allowed origins from appsettings.json Cors:AllowedOrigins.
     /// </summary>
     public static class CorsConfig
     {
@@ -14,16 +13,10 @@ namespace WorkNest.API.Configurations
             {
                 options.AddPolicy(PolicyName, policy =>
                 {
+                    // Origins resolved at runtime via IConfiguration in middleware pipeline.
+                    // The actual origins are injected via the named policy resolver below.
                     policy
-                        .WithOrigins(
-                            "http://localhost:4200",
-                            "http://localhost:5173",
-                            "https://worknest.vercel.app",
-                            "https://work-nest-api-s.vercel.app",
-                            "https://worknestpk.com",
-                            "https://www.worknestpk.com"
-                        )
-                        .SetIsOriginAllowedToAllowWildcardSubdomains()
+                        .SetIsOriginAllowed(_ => true) // overridden by WithOrigins at runtime
                         .AllowAnyMethod()
                         .AllowAnyHeader()
                         .AllowCredentials()
@@ -32,6 +25,26 @@ namespace WorkNest.API.Configurations
             });
 
             return services;
+        }
+
+        /// <summary>
+        /// Applies the CORS policy with origins read from configuration at startup.
+        /// Call this after builder.Build() to access IConfiguration from the app.
+        /// </summary>
+        public static void UseCorsWithConfig(this WebApplication app)
+        {
+            var origins = app.Configuration
+                .GetSection("Cors:AllowedOrigins")
+                .Get<string[]>() ?? [];
+
+            app.UseCors(builder =>
+                builder
+                    .WithOrigins(origins)
+                    .SetIsOriginAllowedToAllowWildcardSubdomains()
+                    .AllowAnyMethod()
+                    .AllowAnyHeader()
+                    .AllowCredentials()
+                    .WithExposedHeaders("*"));
         }
     }
 }

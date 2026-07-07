@@ -10,25 +10,27 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> GetSummaryAsync()
         {
-            var users     = await _db.GetAllUsersAsync();
-            var spaces    = await _db.GetAllSpacesAsync();
-            var bookings  = await _db.GetAllBookingsAsync();
-            var contacts  = await _db.GetAllContactsAsync();
-            var locations = await _db.GetAllLocationsAsync();
-            var plans     = await _db.GetAllPricingPlansAsync();
-            var gallery   = await _db.GetAllGalleryImagesAsync();
-            var members   = await _db.GetAllMembershipsAsync();
+            var tasks = await Task.WhenAll(
+                _db.GetAllUsersAsync(),
+                _db.GetAllSpacesAsync(),
+                _db.GetAllBookingsAsync(),
+                _db.GetAllContactsAsync(),
+                _db.GetAllLocationsAsync(),
+                _db.GetAllPricingPlansAsync(),
+                _db.GetAllGalleryImagesAsync(),
+                _db.GetAllMembershipsAsync()
+            );
 
             return ApiResponse.Ok(new
             {
-                users       = users.Count(),
-                spaces      = spaces.Count(),
-                bookings    = bookings.Count(),
-                contacts    = contacts.Count(),
-                locations   = locations.Count(),
-                plans       = plans.Count(),
-                gallery     = gallery.Count(),
-                memberships = members.Count(),
+                users       = tasks[0].Count(),
+                spaces      = tasks[1].Count(),
+                bookings    = tasks[2].Count(),
+                contacts    = tasks[3].Count(),
+                locations   = tasks[4].Count(),
+                plans       = tasks[5].Count(),
+                gallery     = tasks[6].Count(),
+                memberships = tasks[7].Count(),
             });
         }
     }

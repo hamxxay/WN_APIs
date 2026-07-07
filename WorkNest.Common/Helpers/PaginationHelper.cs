@@ -23,14 +23,19 @@ namespace WorkNest.Common.Helpers
             {
                 var s = search.ToLowerInvariant();
                 list = list.Where(item =>
-                    item!.GetType()
+                {
+                    if (item is IDictionary<string, object?> dict)
+                        return dict.Values.Any(v =>
+                            v is not null && v.ToString()!.ToLowerInvariant().Contains(s));
+
+                    return item!.GetType()
                          .GetProperties()
                          .Any(p =>
                          {
                              var val = p.GetValue(item);
                              return val is not null && val.ToString()!.ToLowerInvariant().Contains(s);
-                         })
-                ).ToList();
+                         });
+                }).ToList();
             }
 
             var total = list.Count;

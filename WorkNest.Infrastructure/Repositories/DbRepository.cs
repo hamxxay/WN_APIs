@@ -2,6 +2,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using System.Data;
 using WorkNest.Application.Interfaces;
+using WorkNest.Common.Helpers;
 using WorkNest.Infrastructure.Database;
 
 namespace WorkNest.Infrastructure.Repositories
@@ -21,7 +22,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         private static IDictionary<string, object?> RowToDictionary(SqlDataReader r)
         {
-            var d = new Dictionary<string, object?>(r.FieldCount);
+            var d = new Dictionary<string, object?>(r.FieldCount, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < r.FieldCount; i++)
                 d[r.GetName(i)] = Normalize(r.GetValue(i));
             return d;
@@ -117,11 +118,29 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<IDictionary<string, object?>?> GetUserByIdAsync(string id)
         {
+            // Route to the correct SP based on identifier type
+            if (GuidHelper.IsGuid(id))
+                return await GetUserByGuidAsync(id);
+
+            if (GuidHelper.IsEmail(id))
+                return await GetUserByEmailAsync(id);
+
+            // Numeric ID — use GetByEmail SP is not suitable; use GetList and filter
+            // This path is rare; prefer GUID or email identifiers
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Users_GetByEmail", conn);
-            // SP accepts email; for GUID/numeric lookups use GetByEmail fallback via email resolution
-            cmd.Parameters.AddWithValue("@Email", id);
+            await using var cmd = SP("dbo.WN_Users_GetById", conn);
+            cmd.Parameters.AddWithValue("@Id", id);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? RowToDictionary(r) : null;
+        }
+
+        public async Task<IDictionary<string, object?>?> GetUserByGuidAsync(string guid)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Users_GetByGuid", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? RowToDictionary(r) : null;
         }
@@ -152,9 +171,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Users_Update", conn);
+            await using var cmd = SP("dbo.WN_Users_Delete", conn);
             cmd.Parameters.AddWithValue("@IdGUID", guid);
-            cmd.Parameters.AddWithValue("@IsActive", 0);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -162,9 +180,9 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Users_Update", conn);
+            await using var cmd = SP("dbo.WN_Users_SetStatus", conn);
             cmd.Parameters.AddWithValue("@IdGUID", guid);
-            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@IsActive", status);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -172,28 +190,18 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Users_Update", conn);
+            await using var cmd = SP("dbo.WN_Users_SetRole", conn);
             cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@RoleId", roleId);
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetBookingsByUserIdAsync(int numericUserId)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetBookingsByUserGuidAsync(string userGuid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Bookings_GetListByUserId", conn);
-            cmd.Parameters.AddWithValue("@UserId", numericUserId);
-            await using var r = await cmd.ExecuteReaderAsync();
-            return await ReadAllRowsAsync(r);
-        }
-
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByUserIdAsync(int numericUserId)
-        {
-            await using var conn = new SqlConnection(_connectionString);
-            await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Payments_GetMyList", conn);
-            cmd.Parameters.AddWithValue("@UserId", numericUserId);
+            await using var cmd = SP("dbo.WN_Bookings_GetListByUserGuid", conn);
+            cmd.Parameters.AddWithValue("@UserGuid", userGuid);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -209,7 +217,7 @@ namespace WorkNest.Infrastructure.Repositories
             return await ReadAllRowsAsync(r);
         }
 
-        public async Task<int?> InsertSpaceAsync(string name, int locationId, int spaceTypeId, string? code,
+        public async Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
             string? description, int? floorId, double? pricePerDay, double? pricePerHour,
             string? imageUrl, string? amenities)
         {
@@ -217,8 +225,8 @@ namespace WorkNest.Infrastructure.Repositories
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Spaces_Insert", conn);
             cmd.Parameters.AddWithValue("@Name", name);
-            cmd.Parameters.AddWithValue("@LocationId", locationId);
-            cmd.Parameters.AddWithValue("@SpaceTypeId", spaceTypeId);
+            cmd.Parameters.AddWithValue("@LocationId", locationGuid);
+            cmd.Parameters.AddWithValue("@SpaceTypeId", spaceTypeGuid);
             cmd.Parameters.AddWithValue("@Code", (object?)code ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Description", (object?)description ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@FloorId", (object?)floorId ?? DBNull.Value);
@@ -235,17 +243,17 @@ namespace WorkNest.Infrastructure.Repositories
             return null;
         }
 
-        public async Task UpdateSpaceAsync(int spaceId, string? name, int? locationId, int? spaceTypeId,
+        public async Task UpdateSpaceAsync(string spaceGuid, string? name, string? locationGuid, string? spaceTypeGuid,
             string? code, string? description, int? floorId, double? pricePerDay,
             double? pricePerHour, string? imageUrl, string? amenities)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Spaces_Update", conn);
-            cmd.Parameters.AddWithValue("@SpaceId", spaceId);
+            cmd.Parameters.AddWithValue("@IdGUID", spaceGuid);
             cmd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SpaceTypeId", (object?)spaceTypeId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationGuid ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceTypeId", (object?)spaceTypeGuid ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Code", (object?)code ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Description", (object?)description ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@FloorId", (object?)floorId ?? DBNull.Value);
@@ -269,13 +277,13 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Spaces_GetList", conn);
+            await using var cmd = SP("dbo.WN_Spaces_GetByGuid", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync())
+            if (await r.ReadAsync())
             {
                 var row = RowToDictionary(r);
-                if (row.TryGetValue("IdGUID", out var g) && g?.ToString() == guid)
-                    return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
+                return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
             }
             return null;
         }
@@ -284,25 +292,20 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Spaces_GetList", conn);
+            await using var cmd = SP("dbo.WN_Spaces_GetByGuid", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync())
-            {
-                var row = RowToDictionary(r);
-                if (row.TryGetValue("IdGUID", out var g) && g?.ToString() == guid)
-                    return row;
-            }
-            return null;
+            return await r.ReadAsync() ? RowToDictionary(r) : null;
         }
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceReservationsAsync(string guid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Bookings_GetList", conn);
+            await using var cmd = SP("dbo.WN_Bookings_GetBySpaceGuid", conn);
+            cmd.Parameters.AddWithValue("@SpaceGuid", guid);
             await using var r = await cmd.ExecuteReaderAsync();
-            var all = await ReadAllRowsAsync(r);
-            return all.Where(row => row.TryGetValue("SpaceGuid", out var sg) && sg?.ToString() == guid).ToList();
+            return await ReadAllRowsAsync(r);
         }
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(
@@ -379,34 +382,28 @@ namespace WorkNest.Infrastructure.Repositories
             return await ReadAllRowsAsync(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(int userId)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Bookings_GetListByUserId", conn);
-            cmd.Parameters.AddWithValue("@UserId", userId);
+            await using var cmd = SP("dbo.WN_Bookings_GetListByUserGuid", conn);
+            cmd.Parameters.AddWithValue("@UserGuid", userGuid);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
 
-        public async Task<IDictionary<string, object?>?> GetBookingByIdAsync(int userId, int bookingId)
+        public async Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Bookings_GetListByUserId", conn);
-            cmd.Parameters.AddWithValue("@UserId", userId);
+            await using var cmd = SP("dbo.WN_Bookings_GetByGuid", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", bookingGuid);
             await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync())
-            {
-                var row = RowToDictionary(r);
-                if (row.TryGetValue("Id", out var id) && Convert.ToInt32(id) == bookingId)
-                    return row;
-            }
-            return null;
+            return await r.ReadAsync() ? RowToDictionary(r) : null;
         }
 
         public async Task<IDictionary<string, object?>> CreateBookingAsync(
-            int userId, object spaceId, string start, string end, string notes,
+            string userGuid, string spaceGuid, string start, string end, string notes,
             double amount, string? paymentMethod, string? paymentRef)
         {
             await using var conn = new SqlConnection(_connectionString);
@@ -415,8 +412,8 @@ namespace WorkNest.Infrastructure.Repositories
             try
             {
                 await using var bCmd = SP("dbo.WN_Bookings_Insert", conn, tx);
-                bCmd.Parameters.AddWithValue("@UserId", userId);
-                bCmd.Parameters.AddWithValue("@SpaceId", spaceId);
+                bCmd.Parameters.AddWithValue("@UserGuid", userGuid);
+                bCmd.Parameters.AddWithValue("@SpaceGuid", spaceGuid);
                 bCmd.Parameters.AddWithValue("@StartDateTime", start);
                 bCmd.Parameters.AddWithValue("@EndDateTime", end);
                 bCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
@@ -429,11 +426,11 @@ namespace WorkNest.Infrastructure.Repositories
                     bookingRow = RowToDictionary(br);
                 }
 
-                var bookingId = Convert.ToInt32(bookingRow["Id"]);
+                var bookingGuid = bookingRow.TryGetValue("IdGUID", out var bg) ? bg?.ToString() : null;
 
                 await using var pCmd = SP("dbo.WN_Payments_Insert", conn, tx);
-                pCmd.Parameters.AddWithValue("@UserId", userId);
-                pCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                pCmd.Parameters.AddWithValue("@UserId", userGuid);
+                pCmd.Parameters.AddWithValue("@BookingId", (object?)bookingGuid ?? DBNull.Value);
                 pCmd.Parameters.AddWithValue("@Amount", amount);
                 pCmd.Parameters.AddWithValue("@PaymentMethod", (object?)paymentMethod ?? DBNull.Value);
                 pCmd.Parameters.AddWithValue("@TransactionRef", (object?)paymentRef ?? DBNull.Value);
@@ -500,13 +497,13 @@ namespace WorkNest.Infrastructure.Repositories
             return new Dictionary<string, object?>();
         }
 
-        public async Task CancelBookingAsync(int userId, int bookingId)
+        public async Task CancelBookingAsync(string userGuid, string bookingGuid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Bookings_Cancel", conn);
-            cmd.Parameters.AddWithValue("@BookingId", bookingId);
-            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@BookingGuid", bookingGuid);
+            cmd.Parameters.AddWithValue("@UserGuid", userGuid);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -531,13 +528,13 @@ namespace WorkNest.Infrastructure.Repositories
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task<IDictionary<string, object?>> ReassignBookingAsync(int bookingId, int newSpaceId, string adminEmail)
+        public async Task<IDictionary<string, object?>> ReassignBookingAsync(string bookingGuid, string newSpaceGuid, string adminEmail)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_ReassignBooking", conn);
-            cmd.Parameters.AddWithValue("@BookingId", bookingId);
-            cmd.Parameters.AddWithValue("@NewSpaceId", newSpaceId);
+            cmd.Parameters.AddWithValue("@BookingGuid", bookingGuid);
+            cmd.Parameters.AddWithValue("@NewSpaceGuid", newSpaceGuid);
             cmd.Parameters.AddWithValue("@AdminEmail", adminEmail);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return RowToDictionary(r);
@@ -556,21 +553,6 @@ namespace WorkNest.Infrastructure.Repositories
             return await ReadAllRowsAsync(r);
         }
 
-        public async Task<int?> GetBookingNumericIdByGuidAsync(string guid)
-        {
-            await using var conn = new SqlConnection(_connectionString);
-            await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Bookings_GetList", conn);
-            await using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync())
-            {
-                var row = RowToDictionary(r);
-                if (row.TryGetValue("IdGUID", out var g) && g?.ToString() == guid)
-                    return row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null;
-            }
-            return null;
-        }
-
         // ── Payment ───────────────────────────────────────────────────────────
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetAllPaymentsAsync()
@@ -582,24 +564,24 @@ namespace WorkNest.Infrastructure.Repositories
             return await ReadAllRowsAsync(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(int userId)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(string userGuid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Payments_GetMyList", conn);
-            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@UserGuid", userGuid);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
 
-        public async Task<IDictionary<string, object?>> CreatePaymentAsync(int userId, int bookingId,
+        public async Task<IDictionary<string, object?>> CreatePaymentAsync(string userGuid, string bookingGuid,
             double amount, string method, string transactionRef)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Payments_Insert", conn);
-            cmd.Parameters.AddWithValue("@UserId", userId);
-            cmd.Parameters.AddWithValue("@BookingId", bookingId);
+            cmd.Parameters.AddWithValue("@UserId", userGuid);
+            cmd.Parameters.AddWithValue("@BookingId", string.IsNullOrEmpty(bookingGuid) ? DBNull.Value : (object)bookingGuid);
             cmd.Parameters.AddWithValue("@Amount", amount);
             cmd.Parameters.AddWithValue("@PaymentMethod", method);
             cmd.Parameters.AddWithValue("@TransactionRef", transactionRef);
@@ -622,8 +604,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Payments_UpdateStatusByRef", conn);
-            cmd.Parameters.AddWithValue("@TransactionRef", guid);
+            await using var cmd = SP("dbo.WN_Payments_UpdateStatusByGuid", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@Status", status);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -632,20 +614,18 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Payments_UpdateStatusByRef", conn);
-            cmd.Parameters.AddWithValue("@TransactionRef", guid);
+            await using var cmd = SP("dbo.WN_Payments_UpdateStatusByGuid", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
             cmd.Parameters.AddWithValue("@Status", "Deleted");
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByUserGuidAsync(string guid)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByUserGuidAsync(string userGuid)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            // Resolve numeric userId from GUID then use WN_Payments_GetMyList
-            var (userId, _) = await GetUserIdByEmailAsync(guid); // guid passed as fallback; caller should resolve
             await using var cmd = SP("dbo.WN_Payments_GetMyList", conn);
-            cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UserGuid", userGuid);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }
@@ -817,10 +797,10 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Memberships_GetList", conn);
+            await using var cmd = SP("dbo.WN_Memberships_GetByPlanId", conn);
+            cmd.Parameters.AddWithValue("@PlanId", planId);
             await using var r = await cmd.ExecuteReaderAsync();
-            var all = await ReadAllRowsAsync(r);
-            return all.Where(row => row.TryGetValue("PlanId", out var pid) && Convert.ToInt32(pid) == planId).ToList();
+            return await ReadAllRowsAsync(r);
         }
 
         // ── Membership ────────────────────────────────────────────────────────
@@ -874,10 +854,10 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
-            await using var cmd = SP("dbo.WN_Payments_GetList", conn);
+            await using var cmd = SP("dbo.WN_Payments_GetByMembershipId", conn);
+            cmd.Parameters.AddWithValue("@MembershipId", membershipId);
             await using var r = await cmd.ExecuteReaderAsync();
-            var all = await ReadAllRowsAsync(r);
-            return all.Where(row => row.TryGetValue("MembershipId", out var mid) && Convert.ToInt32(mid) == membershipId).ToList();
+            return await ReadAllRowsAsync(r);
         }
 
         // ── Contact ───────────────────────────────────────────────────────────

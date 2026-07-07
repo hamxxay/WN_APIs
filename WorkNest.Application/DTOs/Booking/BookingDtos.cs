@@ -42,7 +42,7 @@ namespace WorkNest.Application.DTOs.Booking
 
     public class ReassignBookingRequest
     {
-        public int SpaceId { get; set; }
+        public string SpaceId { get; set; } = string.Empty;
     }
 
     public class BookingDto

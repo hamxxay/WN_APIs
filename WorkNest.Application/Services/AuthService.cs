@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Auth;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
@@ -14,11 +15,13 @@ namespace WorkNest.Application.Services
     {
         private readonly IDbRepository _db;
         private readonly IJwtService _jwt;
+        private readonly ILogger<AuthService> _logger;
 
-        public AuthService(IDbRepository db, IJwtService jwt)
+        public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger)
         {
-            _db  = db;
-            _jwt = jwt;
+            _db     = db;
+            _jwt    = jwt;
+            _logger = logger;
         }
 
         /// <summary>Syncs a user record — creates if not exists, updates if exists.</summary>
@@ -57,8 +60,8 @@ namespace WorkNest.Application.Services
             }
             else
             {
-                guid = row.TryGetValue("idGUID", out var g) ? g?.ToString() : null;
-                role = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null);
+                guid = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
+                role = Roles.FromRow(row);
             }
 
             var token = _jwt.GenerateToken(guid ?? "", request.Email, role);
@@ -85,8 +88,9 @@ namespace WorkNest.Application.Services
 
                 if (row is not null)
                 {
-                    guid = row.TryGetValue("idGUID", out var g) ? g?.ToString() : null;
-                    role = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null);
+                    _logger.LogInformation("User row keys: {Keys}", string.Join(", ", row.Select(kv => $"{kv.Key}={kv.Value}")));
+                    guid = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
+                    role = Roles.FromRow(row);
                 }
                 else
                 {
@@ -107,24 +111,30 @@ namespace WorkNest.Application.Services
             }
             catch (Exception ex)
             {
-                return ApiResponse.Fail(ex.Message);
+                _logger.LogError(ex, "Google login failed for {Email}", request.Email);
+                return ApiResponse.Fail("Google login failed. Please try again.");
             }
         }
 
         /// <summary>Returns the current user profile from the x-user-email header.</summary>
         public async Task<ApiResponse> GetMeAsync(string email)
         {
-            var row = await _db.GetUserByEmailAsync(email);
-            if (row is null)
+            var emailRow = await _db.GetUserByEmailAsync(email);
+            if (emailRow is null)
                 return ApiResponse.Fail("User not found");
+
+            var guid = emailRow.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
+            var row  = guid is not null
+                ? await _db.GetUserByGuidAsync(guid) ?? emailRow
+                : emailRow;
 
             return ApiResponse.Ok(new
             {
-                id    = row.TryGetValue("idGUID", out var g) ? g?.ToString() : null,
-                email = row.TryGetValue("email", out var e) ? e?.ToString() ?? "" : "",
-                name  = row.TryGetValue("name", out var n) ? n?.ToString() ?? "" : "",
-                phone = row.TryGetValue("phoneNumber", out var p) ? p?.ToString() ?? "" : "",
-                role  = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null),
+                id    = row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : guid,
+                email = row.TryGetValue("Email",       out var e) ? e?.ToString() ?? email : email,
+                name  = row.TryGetValue("Name",        out var n) ? n?.ToString() ?? "" : "",
+                phone = row.TryGetValue("PhoneNumber",  out var p) ? p?.ToString() ?? "" : "",
+                role  = Roles.FromRow(row),
             });
         }
 

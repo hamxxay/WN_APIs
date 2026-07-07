@@ -1,9 +1,5 @@
 namespace WorkNest.Application.Interfaces
 {
-    /// <summary>
-    /// Raw database access contract.
-    /// All methods map 1:1 to the Python db.py functions.
-    /// </summary>
     public interface IDbRepository
     {
         // ── User ──────────────────────────────────────────────────────────────
@@ -11,20 +7,21 @@ namespace WorkNest.Application.Interfaces
         Task<(int? NumericId, string? Guid)> GetUserIdByEmailAsync(string email);
         Task<IEnumerable<IDictionary<string, object?>>> GetAllUsersAsync();
         Task<IDictionary<string, object?>?> GetUserByIdAsync(string id);
+        Task<IDictionary<string, object?>?> GetUserByGuidAsync(string guid);
         Task<IDictionary<string, object?>?> GetUserByEmailAsync(string email);
         Task UpdateUserAsync(string guid, string name, string? phone);
         Task SoftDeleteUserAsync(string guid);
         Task SetUserStatusAsync(string guid, int status);
         Task SetUserRoleAsync(string guid, int roleId);
-        Task<IEnumerable<IDictionary<string, object?>>> GetBookingsByUserIdAsync(int numericUserId);
-        Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByUserIdAsync(int numericUserId);
+        Task<IEnumerable<IDictionary<string, object?>>> GetBookingsByUserGuidAsync(string userGuid);
+        Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByUserGuidAsync(string userGuid);
 
         // ── Space ─────────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpacesAsync();
-        Task<int?> InsertSpaceAsync(string name, int locationId, int spaceTypeId, string? code,
+        Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
             string? description, int? floorId, double? pricePerDay, double? pricePerHour,
             string? imageUrl, string? amenities);
-        Task UpdateSpaceAsync(int spaceId, string? name, int? locationId, int? spaceTypeId,
+        Task UpdateSpaceAsync(string spaceGuid, string? name, string? locationGuid, string? spaceTypeGuid,
             string? code, string? description, int? floorId, double? pricePerDay,
             double? pricePerHour, string? imageUrl, string? amenities);
         Task SoftDeleteSpaceAsync(string guid);
@@ -39,9 +36,9 @@ namespace WorkNest.Application.Interfaces
 
         // ── Booking ───────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllBookingsAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(int userId);
-        Task<IDictionary<string, object?>?> GetBookingByIdAsync(int userId, int bookingId);
-        Task<IDictionary<string, object?>> CreateBookingAsync(int userId, object spaceId, string start,
+        Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid);
+        Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid);
+        Task<IDictionary<string, object?>> CreateBookingAsync(string userGuid, string spaceGuid, string start,
             string end, string notes, double amount, string? paymentMethod, string? paymentRef);
         Task<IDictionary<string, object?>> CreateBookingWithAutoAssignmentAsync(string userEmail,
             string spaceType, string start, string end, string notes, double amount,
@@ -49,22 +46,20 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>> CreateSmartBookingAsync(string userEmail, string spaceCategory,
             string start, string end, string notes, double amount, string? paymentMethod,
             string? paymentRef, int? capacity);
-        Task CancelBookingAsync(int userId, int bookingId);
+        Task CancelBookingAsync(string userGuid, string bookingGuid);
         Task UpdateBookingStatusAsync(string guid, int statusVal);
         Task UpdateBookingDatesAsync(string guid, string start, string end);
-        Task<IDictionary<string, object?>> ReassignBookingAsync(int bookingId, int newSpaceId, string adminEmail);
+        Task<IDictionary<string, object?>> ReassignBookingAsync(string bookingGuid, string newSpaceGuid, string adminEmail);
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingCalendarAsync(int spaceId, int year, int month);
-        Task<int?> GetBookingNumericIdByGuidAsync(string guid);
 
         // ── Payment ───────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllPaymentsAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(int userId);
-        Task<IDictionary<string, object?>> CreatePaymentAsync(int userId, int bookingId, double amount,
+        Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(string userGuid);
+        Task<IDictionary<string, object?>> CreatePaymentAsync(string userGuid, string bookingGuid, double amount,
             string method, string transactionRef);
         Task UpdatePaymentStatusByRefAsync(string transactionRef, string status);
         Task UpdatePaymentStatusByGuidAsync(string guid, string status);
         Task SoftDeletePaymentAsync(string guid);
-        Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByUserGuidAsync(string guid);
 
         // ── Location ──────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllLocationsAsync();

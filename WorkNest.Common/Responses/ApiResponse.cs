@@ -43,12 +43,16 @@ namespace WorkNest.Common.Responses
     public class ApiResponse : ApiResponse<object>
     {
         /// <summary>Creates a successful response with an object payload.</summary>
-        public static ApiResponse Ok(object? data, string message = "Success") =>
+        public new static ApiResponse Ok(object? data, string message = "Success") =>
             new() { IsSuccessful = true, Message = message, Data = data };
 
         /// <summary>Creates a successful response with no payload.</summary>
         public new static ApiResponse Ok(string message = "Success") =>
             new() { IsSuccessful = true, Message = message };
+
+        /// <summary>Creates a successful response with no payload and default message.</summary>
+        public static ApiResponse Ok() =>
+            new() { IsSuccessful = true, Message = "Success" };
 
         /// <summary>Creates a failure response.</summary>
         public new static ApiResponse Fail(string message, IEnumerable<string>? errors = null) =>

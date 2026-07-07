@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.User;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
@@ -13,22 +14,33 @@ namespace WorkNest.Application.Services
     public class UserService : IUserService
     {
         private readonly IDbRepository _db;
+        private readonly ILogger<UserService> _logger;
 
-        public UserService(IDbRepository db) => _db = db;
+        public UserService(IDbRepository db, ILogger<UserService> logger)
+        {
+            _db     = db;
+            _logger = logger;
+        }
 
         public async Task<IEnumerable<object>> GetAllUsersAsync()
         {
             var rows = await _db.GetAllUsersAsync();
-            return rows.Select(row => (object)new
+            var list  = rows.ToList();
+            if (list.Count > 0)
+                _logger.LogInformation("WN_Users_GetList columns: {Cols}",
+                    string.Join(", ", list[0].Select(kv => $"{kv.Key}={kv.Value}")));
+            return list.Select(row => (object)new
             {
-                id        = row.TryGetValue("idGuid", out var g) ? g?.ToString() : null,
-                idGuid    = row.TryGetValue("idGuid", out var g2) ? g2?.ToString() : null,
-                email     = row.TryGetValue("email", out var e) ? e?.ToString() ?? "" : "",
-                name      = row.TryGetValue("name", out var n) ? n?.ToString() ?? "" : "",
-                phone     = row.TryGetValue("phone", out var p) ? p?.ToString() ?? "" : "",
-                createdAt = row.TryGetValue("createdAt", out var c) ? DateHelper.ToIso(c as DateTime?) : null,
-                isActive  = row.TryGetValue("isActive", out var a) && Convert.ToInt32(a) == 1,
-                role      = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null),
+                id        = row.TryGetValue("IdGuid", out var g)  ? g?.ToString()  : row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : null,
+                idGuid    = row.TryGetValue("IdGuid", out var g3) ? g3?.ToString() : row.TryGetValue("IdGUID", out var g4) ? g4?.ToString() : null,
+                email     = row.TryGetValue("Email",  out var e)  ? e?.ToString() ?? "" : "",
+                name      = row.TryGetValue("Name",   out var n)  ? n?.ToString() ?? "" : "",
+                phone     = row.TryGetValue("Phone",  out var p)  ? p?.ToString() ?? "" :
+                            row.TryGetValue("PhoneNumber", out var p2) ? p2?.ToString() ?? "" : "",
+                createdAt = row.TryGetValue("CreatedAt", out var c)  ? DateHelper.ToIso(c as DateTime?) :
+                            row.TryGetValue("CreatedOn",  out var c2) ? DateHelper.ToIso(c2 as DateTime?) : null,
+                isActive  = row.TryGetValue("Status", out var a) ? Convert.ToInt32(a) == 1 : true,
+                role      = Roles.FromRow(row),
             });
         }
 
@@ -43,13 +55,14 @@ namespace WorkNest.Application.Services
 
             return ApiResponse.Ok(new
             {
-                id        = row.TryGetValue("idGUID", out var g) ? g?.ToString() : null,
-                email     = row.TryGetValue("email", out var e) ? e?.ToString() ?? "" : "",
-                firstName = row.TryGetValue("name", out var n) ? n?.ToString() ?? "" : "",
-                phone     = row.TryGetValue("phoneNumber", out var p) ? p?.ToString() ?? "" : "",
-                isActive  = true,
-                createdAt = DateHelper.ToIso(row.TryGetValue("createdOn", out var c) ? c as DateTime? : null),
-                role      = Roles.MapRole(row.TryGetValue("roleId", out var r) ? (int?)Convert.ToInt32(r) : null),
+                id        = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null,
+                idGuid    = row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : null,
+                email     = row.TryGetValue("Email", out var e) ? e?.ToString() ?? "" : "",
+                name      = row.TryGetValue("Name", out var n) ? n?.ToString() ?? "" : "",
+                phone     = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() ?? "" : "",
+                isActive  = row.TryGetValue("Status", out var a2) && Convert.ToInt32(a2) == 1,
+                createdAt = DateHelper.ToIso(row.TryGetValue("CreatedOn", out var c) ? c as DateTime? : null),
+                role      = Roles.FromRow(row),
             });
         }
 
@@ -59,9 +72,12 @@ namespace WorkNest.Application.Services
             var userRow = await _db.GetUserByIdAsync(id);
             if (userRow is null) return ApiResponse.Fail("User not found");
 
-            var numericId = Convert.ToInt32(userRow["id"]);
-            var bookings  = (await _db.GetBookingsByUserIdAsync(numericId)).ToList();
-            var payments  = (await _db.GetPaymentsByUserIdAsync(numericId)).ToList();
+            if (!userRow.TryGetValue("IdGUID", out var rawGuid) || rawGuid is null)
+                return ApiResponse.Fail("User record missing GUID");
+
+            var userGuid = rawGuid.ToString()!;
+            var bookings = (await _db.GetBookingsByUserGuidAsync(userGuid)).ToList();
+            var payments = (await _db.GetPaymentsByUserGuidAsync(userGuid)).ToList();
 
             var totalPaid = payments
                 .Where(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Paid")

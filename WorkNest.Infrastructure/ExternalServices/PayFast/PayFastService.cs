@@ -33,7 +33,7 @@ namespace WorkNest.Infrastructure.ExternalServices.PayFast
         /// Builds the full PayFast payment payload including HMAC-SHA256 signature.
         /// Mirrors Python build_payfast_payload() exactly.
         /// </summary>
-        public Dictionary<string, string> BuildPayload(int bookingId, double amount, string description,
+        public Dictionary<string, string> BuildPayload(string bookingId, double amount, string description,
             string customerEmail, string customerName, string orderId)
         {
             var parameters = new Dictionary<string, string>

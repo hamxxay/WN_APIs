@@ -3,8 +3,8 @@ namespace WorkNest.Application.DTOs.Space
     public class SpaceInsertRequest
     {
         public string Name { get; set; } = string.Empty;
-        public int LocationId { get; set; }
-        public int SpaceTypeId { get; set; }
+        public string LocationId { get; set; } = string.Empty;
+        public string SpaceTypeId { get; set; } = string.Empty;
         public string? Code { get; set; }
         public string? Description { get; set; }
         public int? FloorId { get; set; }
@@ -17,8 +17,8 @@ namespace WorkNest.Application.DTOs.Space
     public class SpaceUpdateRequest
     {
         public string? Name { get; set; }
-        public int? LocationId { get; set; }
-        public int? SpaceTypeId { get; set; }
+        public string? LocationId { get; set; }
+        public string? SpaceTypeId { get; set; }
         public string? Code { get; set; }
         public string? Description { get; set; }
         public int? FloorId { get; set; }

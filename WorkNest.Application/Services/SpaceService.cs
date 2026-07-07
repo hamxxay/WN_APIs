@@ -16,7 +16,28 @@ namespace WorkNest.Application.Services
         public SpaceService(IDbRepository db) => _db = db;
 
         public async Task<IEnumerable<object>> GetAllSpacesAsync() =>
-            (await _db.GetAllSpacesAsync()).Cast<object>();
+            (await _db.GetAllSpacesAsync()).Select(r => (object)new
+            {
+                id            = r.TryGetValue("id",            out var i)   ? i   : null,
+                idGuid        = r.TryGetValue("idGuid",        out var g)   ? g?.ToString()  : null,
+                name          = r.TryGetValue("name",          out var n)   ? n?.ToString()  : null,
+                code          = r.TryGetValue("code",          out var c)   ? c?.ToString()  : null,
+                description   = r.TryGetValue("description",   out var d)   ? d?.ToString()  : null,
+                floorId       = r.TryGetValue("floorId",       out var fi)  ? fi  : null,
+                floorName     = r.TryGetValue("floorName",     out var fn)  ? fn?.ToString() : null,
+                pricePerDay   = r.TryGetValue("pricePerDay",   out var ppd) ? ppd : null,
+                pricePerHour  = r.TryGetValue("pricePerHour",  out var pph) ? pph : null,
+                imageUrl      = r.TryGetValue("imageUrl",      out var img) ? img?.ToString() : null,
+                amenities     = r.TryGetValue("amenities",     out var am)  ? am?.ToString()  : null,
+                status        = r.TryGetValue("status",        out var st)  ? st  : null,
+                locationId    = r.TryGetValue("locationId",    out var li)  ? li  : null,
+                locationIdGuid= r.TryGetValue("locationIdGuid",out var lig) ? lig?.ToString() : null,
+                locationName  = r.TryGetValue("locationName",  out var ln)  ? ln?.ToString()  : null,
+                spaceTypeId   = r.TryGetValue("spaceTypeId",   out var sti) ? sti : null,
+                spaceTypeIdGuid=r.TryGetValue("spaceTypeIdGuid",out var stg)? stg?.ToString() : null,
+                spaceTypeName = r.TryGetValue("spaceTypeName", out var stn) ? stn?.ToString() : null,
+                capacity      = r.TryGetValue("capacity",      out var cap) ? cap : null,
+            });
 
         public async Task<IEnumerable<object>> GetAvailableSpacesAsync()
         {
@@ -83,10 +104,7 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> UpdateSpaceAsync(string id, SpaceUpdateRequest request)
         {
-            var numericId = await _db.GetSpaceNumericIdByGuidAsync(id);
-            if (numericId is null) return ApiResponse.Fail("Space not found");
-
-            await _db.UpdateSpaceAsync(numericId.Value, request.Name, request.LocationId,
+            await _db.UpdateSpaceAsync(id, request.Name, request.LocationId,
                 request.SpaceTypeId, request.Code, request.Description, request.FloorId,
                 request.PricePerDay, request.PricePerHour, request.ImageUrl, request.Amenities);
             return ApiResponse.Ok("Space updated.");

@@ -2,7 +2,7 @@ namespace WorkNest.Application.DTOs.Payment
 {
     public class CardPaymentRequest
     {
-        public int BookingId { get; set; }
+        public string BookingId { get; set; } = string.Empty;
         public string CardHolderName { get; set; } = string.Empty;
         public string CardNumber { get; set; } = string.Empty;
         public string ExpiryMonth { get; set; } = string.Empty;
@@ -12,20 +12,20 @@ namespace WorkNest.Application.DTOs.Payment
 
     public class PayFastInitiateRequest
     {
-        public int BookingId { get; set; }
+        public string BookingId { get; set; } = string.Empty;
         public string CustomerName { get; set; } = string.Empty;
         public string CustomerEmail { get; set; } = string.Empty;
     }
 
     public class VoucherGenerateRequest
     {
-        public int BookingId { get; set; }
+        public string BookingId { get; set; } = string.Empty;
         public double Amount { get; set; }
     }
 
     public class CounterPaymentRequest
     {
-        public int BookingId { get; set; }
+        public string BookingId { get; set; } = string.Empty;
         public double Amount { get; set; }
     }
 
