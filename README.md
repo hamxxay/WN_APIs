@@ -553,5 +553,4 @@ Allowed origins are configured in `appsettings.json` under `Cors:AllowedOrigins`
   ]
 }
 ```
-
 All methods, headers, and credentials are allowed. Wildcard subdomains are supported.
