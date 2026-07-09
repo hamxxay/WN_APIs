@@ -88,7 +88,6 @@ namespace WorkNest.Application.Services
 
                 if (row is not null)
                 {
-                    _logger.LogInformation("User row keys: {Keys}", string.Join(", ", row.Select(kv => $"{kv.Key}={kv.Value}")));
                     guid = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
                     role = Roles.FromRow(row);
                 }

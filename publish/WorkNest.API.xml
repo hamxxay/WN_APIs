@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>WorkNest.API</name>
+    </assembly>
+    <members>
+        <member name="T:WorkNest.API.Configurations.CorsConfig">
+            <summary>
+            CORS configuration — reads allowed origins from appsettings.json Cors:AllowedOrigins.
+            </summary>
+        </member>
+        <member name="M:WorkNest.API.Configurations.CorsConfig.UseCorsWithConfig(Microsoft.AspNetCore.Builder.WebApplication)">
+            <summary>
+            Applies the CORS policy with origins read from configuration at startup.
+            Call this after builder.Build() to access IConfiguration from the app.
+            </summary>
+        </member>
+        <member name="T:WorkNest.API.Configurations.SwaggerConfig">
+            <summary>
+            Swagger/OpenAPI configuration with JWT bearer authentication support.
+            </summary>
+        </member>
+        <member name="T:WorkNest.API.Middleware.ExceptionMiddleware">
+            <summary>
+            Global exception middleware.
+            Catches all unhandled exceptions, logs them via Serilog,
+            and returns a standardized ApiResponse JSON — never exposes stack traces.
+            </summary>
+        </member>
+        <member name="T:WorkNest.API.Middleware.RequestLoggingMiddleware">
+            <summary>
+            Logs every incoming request and outgoing response using Serilog.
+            </summary>
+        </member>
+        <member name="T:Program">
+            <summary>
+            Auto-generated public partial Program class for top-level statement apps.
+            </summary>
+        </member>
+    </members>
+</doc>

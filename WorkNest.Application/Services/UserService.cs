@@ -26,9 +26,6 @@ namespace WorkNest.Application.Services
         {
             var rows = await _db.GetAllUsersAsync();
             var list  = rows.ToList();
-            if (list.Count > 0)
-                _logger.LogInformation("WN_Users_GetList columns: {Cols}",
-                    string.Join(", ", list[0].Select(kv => $"{kv.Key}={kv.Value}")));
             return list.Select(row => (object)new
             {
                 id        = row.TryGetValue("IdGuid", out var g)  ? g?.ToString()  : row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : null,
