@@ -33,7 +33,16 @@ namespace WorkNest.Application.Services
         {
             var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
             if (userGuid is null) return [];
-            return (await _db.GetMyPaymentsAsync(userGuid)).Cast<object>();
+            return (await _db.GetMyPaymentsAsync(userGuid)).Select(r => (object)new
+            {
+                id             = r.TryGetValue("Id",             out var i)  ? i  : null,
+                idGuid         = r.TryGetValue("IdGuid",         out var g)  ? g?.ToString()  : null,
+                amount         = r.TryGetValue("Amount",         out var a)  ? a  : null,
+                paymentMethod  = r.TryGetValue("PaymentMethod",  out var pm) ? pm?.ToString() : null,
+                paymentStatus  = r.TryGetValue("PaymentStatus",  out var ps) ? ps?.ToString() : null,
+                transactionRef = r.TryGetValue("TransactionRef", out var tr) ? tr?.ToString() : null,
+                paidAt         = r.TryGetValue("PaidAt",         out var pa) ? pa?.ToString() : null,
+            });
         }
 
         public async Task<ApiResponse> GetPaymentSummaryAsync(string id)
@@ -92,6 +101,23 @@ namespace WorkNest.Application.Services
             else
                 await _db.UpdatePaymentStatusByGuidAsync(id, status);
             return ApiResponse.Ok("Payment status updated.");
+        }
+
+        public async Task<ApiResponse> ApprovePaymentAsync(string id)
+        {
+            // id from the route is a numeric string — resolve the GUID first
+            var all = await _db.GetAllPaymentsAsync();
+            var row = all.FirstOrDefault(p =>
+                (p.TryGetValue("Id", out var i) ? i?.ToString() : null) == id ||
+                (p.TryGetValue("IdGuid", out var g) ? g?.ToString() : null) == id);
+
+            if (row is null) return ApiResponse.Fail("Payment not found.");
+
+            var guid = row.TryGetValue("IdGuid", out var gv) ? gv?.ToString() : null;
+            if (string.IsNullOrWhiteSpace(guid)) return ApiResponse.Fail("Payment GUID not found.");
+
+            await _db.UpdatePaymentStatusByGuidAsync(guid, "Paid");
+            return ApiResponse.Ok("Payment approved.");
         }
 
         public async Task<ApiResponse> DeletePaymentAsync(string id)

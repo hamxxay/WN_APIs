@@ -58,6 +58,14 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? transactionRef) =>
             Ok(await _payments.UpdatePaymentStatusAsync(id, status, transactionRef));
 
+        [HttpPost("api/payment/{id}/approve")]
+        public async Task<IActionResult> Approve(string id)
+        {
+            var result = await _payments.ApprovePaymentAsync(id);
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
+        }
+
         [HttpDelete("api/payment/{id}")]
         public async Task<IActionResult> Delete(string id) =>
             Ok(await _payments.DeletePaymentAsync(id));

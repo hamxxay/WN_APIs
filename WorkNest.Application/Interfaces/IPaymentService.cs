@@ -11,6 +11,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetPaymentSummaryAsync(string id);
         Task<ApiResponse> CreatePaymentAsync(PaymentCreateRequest request, string userEmail);
         Task<ApiResponse> UpdatePaymentStatusAsync(string id, string status, string? transactionRef);
+        Task<ApiResponse> ApprovePaymentAsync(string id);
         Task<ApiResponse> DeletePaymentAsync(string id);
         Task<ApiResponse> ProcessCardPaymentAsync(CardPaymentRequest request, string userEmail);
         Task<ApiResponse> GenerateVoucherAsync(VoucherGenerateRequest request, string userEmail);
