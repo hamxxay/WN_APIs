@@ -424,7 +424,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<IDictionary<string, object?>> CreateBookingAsync(
             string userGuid, string spaceGuid, string start, string end, string notes,
-            double amount, string? paymentMethod, string? paymentRef)
+            double amount, string? paymentMethod, string? paymentRef, string? customerCode = null)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
@@ -435,6 +435,7 @@ namespace WorkNest.Infrastructure.Repositories
             await using var ur = await getUser.ExecuteReaderAsync();
             if (!await ur.ReadAsync()) throw new InvalidOperationException("User not found.");
             var numericUserId = Convert.ToInt32(ur["Id"]);
+            var userEmail = ur["Email"]?.ToString();
             await ur.CloseAsync();
 
             // Resolve numeric space ID from GUID
@@ -444,6 +445,17 @@ namespace WorkNest.Infrastructure.Repositories
             if (!await sr.ReadAsync()) throw new InvalidOperationException("Space not found.");
             var numericSpaceId = Convert.ToInt32(sr["Id"]);
             await sr.CloseAsync();
+
+            // Resolve customer Code from WN_Customers by email (only if not already provided)
+            if (string.IsNullOrEmpty(customerCode) && !string.IsNullOrEmpty(userEmail))
+            {
+                await using var getCust = SP("dbo.WN_Customers_Search", conn);
+                getCust.Parameters.AddWithValue("@Query", userEmail);
+                await using var cr = await getCust.ExecuteReaderAsync();
+                if (await cr.ReadAsync())
+                    customerCode = cr["Code"]?.ToString();
+                await cr.CloseAsync();
+            }
 
             await using var tx = conn.BeginTransaction();
             try
@@ -455,6 +467,7 @@ namespace WorkNest.Infrastructure.Repositories
                 bCmd.Parameters.AddWithValue("@EndDateTime", DateTime.Parse(end));
                 bCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
                 bCmd.Parameters.AddWithValue("@TotalAmount", amount);
+                bCmd.Parameters.AddWithValue("@CustomerCode", (object?)customerCode ?? DBNull.Value);
 
                 IDictionary<string, object?> bookingRow;
                 await using (var br = await bCmd.ExecuteReaderAsync())
@@ -1126,6 +1139,92 @@ namespace WorkNest.Infrastructure.Repositories
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return RowToDictionary(r);
             return new Dictionary<string, object?>();
+        }
+
+        // ── Customer ──────────────────────────────────────────────────────────
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string search)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Customers_GetList", conn);
+            cmd.Parameters.AddWithValue("@Search", string.IsNullOrWhiteSpace(search) ? DBNull.Value : (object)search);
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> SearchCustomersAsync(string query)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Customers_Search", conn);
+            cmd.Parameters.AddWithValue("@Query", query);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetCustomerByGuidAsync(string guid)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Customers_GetByGuid", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? RowToDictionary(r) : null;
+        }
+
+        public async Task<IDictionary<string, object?>> CreateCustomerAsync(
+            string firstName, string? lastName, string email,
+            string? phoneNumber, string? cnicOrPassport, string? address,
+            int? cityId, string? notes, string? createdBy)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Customers_Insert", conn);
+            cmd.Parameters.AddWithValue("@FirstName",      firstName);
+            cmd.Parameters.AddWithValue("@LastName",       (object?)lastName       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Email",          email);
+            cmd.Parameters.AddWithValue("@PhoneNumber",    (object?)phoneNumber    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CnicOrPassport", (object?)cnicOrPassport ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Address",        (object?)address        ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CityId",         (object?)cityId         ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Notes",          (object?)notes          ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedBy",      (object?)createdBy      ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync()) return RowToDictionary(r);
+            return new Dictionary<string, object?>();
+        }
+
+        public async Task UpdateCustomerAsync(
+            string guid, string? firstName, string? lastName, string? email,
+            string? phoneNumber, string? cnicOrPassport, string? address,
+            int? cityId, string? notes, bool? isActive)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Customers_Update", conn);
+            cmd.Parameters.AddWithValue("@IdGUID",         guid);
+            cmd.Parameters.AddWithValue("@FirstName",      (object?)firstName      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LastName",       (object?)lastName       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Email",          (object?)email          ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PhoneNumber",    (object?)phoneNumber    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CnicOrPassport", (object?)cnicOrPassport ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Address",        (object?)address        ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CityId",         (object?)cityId         ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Notes",          (object?)notes          ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@IsActive",       isActive.HasValue ? (object)(isActive.Value ? 1 : 0) : DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task DeleteCustomerAsync(string guid)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Customers_Delete", conn);
+            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         // ── Branch / Company / City ───────────────────────────────────────────

@@ -50,9 +50,27 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request)
         {
+            // Resolve WN_Users GUID from customer email (customers are separate from users)
+            var email = request.CustomerEmail;
+            if (string.IsNullOrWhiteSpace(email))
+                return ApiResponse.Fail("CustomerEmail is required to create a booking.");
+
+            // SyncUserAsync gets existing user or creates one in WN_Users
+            var nameParts = (request.CustomerName ?? email).Split(' ', 2);
+            var (_, userId) = await _db.SyncUserAsync(
+                email,
+                nameParts[0],
+                nameParts.Length > 1 ? nameParts[1] : "",
+                request.Phone);
+
+            if (userId is null)
+                return ApiResponse.Fail("Failed to resolve user for booking.");
+
             // Fetch space to get its type name for security deposit lookup
             var spaceRow = await _db.GetSpaceSummaryAsync(request.SpaceId);
-            var spaceTypeName = spaceRow?.TryGetValue("spaceTypeName", out var stn) == true ? stn?.ToString() : null;
+            var spaceTypeName = spaceRow?.TryGetValue("SpaceTypeName", out var stn) == true ? stn?.ToString()
+                              : spaceRow?.TryGetValue("spaceTypeName", out var stn2) == true ? stn2?.ToString()
+                              : null;
             var securityDeposit = spaceTypeName is not null
                 ? await _db.GetSecurityDepositAsync(spaceTypeName)
                 : 0;
@@ -60,14 +78,15 @@ namespace WorkNest.Application.Services
             var totalAmount = (request.TotalAmount ?? 0) + securityDeposit;
 
             var booking = await _db.CreateBookingAsync(
-                request.UserId,
+                userId,
                 request.SpaceId,
                 request.StartDateTime,
                 request.EndDateTime,
                 request.Notes ?? "Admin Booking",
                 totalAmount,
                 "Cash",
-                null);
+                null,
+                request.CustomerCode);
 
             return ApiResponse.Ok(new
             {

@@ -87,8 +87,10 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = "admin,super_admin,receptionist")]
         public async Task<IActionResult> AdminCreate([FromBody] AdminBookingRequest request)
         {
-            if (string.IsNullOrWhiteSpace(request.UserId))
-                return BadRequest(new { isSuccessful = false, message = "UserId is required" });
+            if (string.IsNullOrWhiteSpace(request.SpaceId) || string.IsNullOrWhiteSpace(request.StartDateTime) || string.IsNullOrWhiteSpace(request.EndDateTime))
+                return BadRequest(new { isSuccessful = false, message = "SpaceId, StartDateTime and EndDateTime are required" });
+            if (string.IsNullOrWhiteSpace(request.UserId) && string.IsNullOrWhiteSpace(request.CustomerEmail))
+                return BadRequest(new { isSuccessful = false, message = "UserId or CustomerEmail is required" });
             return StatusCode(201, await _bookings.CreateAdminBookingAsync(request));
         }
 

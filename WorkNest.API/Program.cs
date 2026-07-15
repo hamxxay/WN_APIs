@@ -103,6 +103,7 @@ try
     builder.Services.AddScoped<IBranchService, BranchService>();
     builder.Services.AddScoped<IFloorService, FloorService>();
     builder.Services.AddScoped<IAmenityService, AmenityService>();
+    builder.Services.AddScoped<ICustomerService, CustomerService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();

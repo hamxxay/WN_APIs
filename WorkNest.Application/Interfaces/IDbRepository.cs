@@ -39,7 +39,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid);
         Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid);
         Task<IDictionary<string, object?>> CreateBookingAsync(string userGuid, string spaceGuid, string start,
-            string end, string notes, double amount, string? paymentMethod, string? paymentRef);
+            string end, string notes, double amount, string? paymentMethod, string? paymentRef, string? customerCode = null);
         Task<IDictionary<string, object?>> CreateBookingWithAutoAssignmentAsync(string userEmail,
             string spaceType, string start, string end, string notes, double amount,
             string? paymentMethod, string? paymentRef);
@@ -116,6 +116,16 @@ namespace WorkNest.Application.Interfaces
             string? openingTime, string? closingTime, string? adminEmail, double? securityDeposit);
         Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(string spaceCategory,
             string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth);
+
+        // ── Customer ──────────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string search);
+        Task<IEnumerable<IDictionary<string, object?>>> SearchCustomersAsync(string query);
+        Task<IDictionary<string, object?>?> GetCustomerByGuidAsync(string guid);
+        Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email,
+            string? phoneNumber, string? cnicOrPassport, string? address, int? cityId, string? notes, string? createdBy);
+        Task UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email,
+            string? phoneNumber, string? cnicOrPassport, string? address, int? cityId, string? notes, bool? isActive);
+        Task DeleteCustomerAsync(string guid);
 
         // ── Branch / Company / City ───────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllBranchesAsync();
