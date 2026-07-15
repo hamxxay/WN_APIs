@@ -16,6 +16,24 @@ namespace WorkNest.Application.DTOs.Booking
         public string? ReferenceNumber { get; set; }
     }
 
+    public class AdminBookingRequest
+    {
+        public string UserId { get; set; } = string.Empty;  // user GUID
+        public string SpaceId { get; set; } = string.Empty;
+        public string StartDateTime { get; set; } = string.Empty;
+        public string EndDateTime { get; set; } = string.Empty;
+        public double? TotalAmount { get; set; }
+        public string? Notes { get; set; }
+        // Customer detail fields (for patching user record if empty)
+        public string? CustomerName { get; set; }
+        public string? CustomerEmail { get; set; }
+        public string? CustomerCode { get; set; }
+        public string? Phone { get; set; }
+        public string? CnicOrPassport { get; set; }
+        public string? Address { get; set; }
+        public int? CityId { get; set; }
+    }
+
     public class BookingRequest
     {
         public object? SpaceId { get; set; }

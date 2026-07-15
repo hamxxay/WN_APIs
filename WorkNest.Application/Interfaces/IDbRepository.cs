@@ -19,11 +19,11 @@ namespace WorkNest.Application.Interfaces
         // ── Space ─────────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpacesAsync();
         Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
-            string? description, int? floorId, double? pricePerDay, double? pricePerHour,
+            string? description, int? floorId, double? pricePerDay, double? pricePerHour, double? pricePerMonth,
             string? imageUrl, string? amenities);
         Task UpdateSpaceAsync(string spaceGuid, string? name, string? locationGuid, string? spaceTypeGuid,
             string? code, string? description, int? floorId, double? pricePerDay,
-            double? pricePerHour, string? imageUrl, string? amenities);
+            double? pricePerHour, double? pricePerMonth, string? imageUrl, string? amenities);
         Task SoftDeleteSpaceAsync(string guid);
         Task<int?> GetSpaceNumericIdByGuidAsync(string guid);
         Task<IDictionary<string, object?>?> GetSpaceSummaryAsync(string guid);
@@ -115,7 +115,7 @@ namespace WorkNest.Application.Interfaces
         Task UpdateSpaceConfigAsync(string category, int totalSpaces, string? defaultCapacities,
             string? openingTime, string? closingTime, string? adminEmail, double? securityDeposit);
         Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(string spaceCategory,
-            int spaceTypeId, int locationId, double pricePerHour, double pricePerDay);
+            string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth);
 
         // ── Branch / Company / City ───────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllBranchesAsync();

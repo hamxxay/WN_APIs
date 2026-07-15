@@ -11,6 +11,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail);
         Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month);
         Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail);
+        Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request);
         Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail);
         Task<ApiResponse> CancelBookingAsync(string id, string userEmail);
         Task<ApiResponse> UpdateBookingStatusAsync(string id, string status);

@@ -10,6 +10,7 @@ namespace WorkNest.Application.DTOs.Space
         public int? FloorId { get; set; }
         public double? PricePerDay { get; set; }
         public double? PricePerHour { get; set; }
+        public double? PricePerMonth { get; set; }
         public string? ImageUrl { get; set; }
         public string? Amenities { get; set; }
     }
@@ -24,6 +25,7 @@ namespace WorkNest.Application.DTOs.Space
         public int? FloorId { get; set; }
         public double? PricePerDay { get; set; }
         public double? PricePerHour { get; set; }
+        public double? PricePerMonth { get; set; }
         public string? ImageUrl { get; set; }
         public string? Amenities { get; set; }
     }
@@ -45,6 +47,7 @@ namespace WorkNest.Application.DTOs.Space
         public int? Capacity { get; set; }
         public double PricePerDay { get; set; }
         public double PricePerHour { get; set; }
+        public double PricePerMonth { get; set; }
         public string? Amenities { get; set; }
         public string? AmenityIds { get; set; }
         public string? ImageUrl { get; set; }

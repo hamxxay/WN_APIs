@@ -119,9 +119,10 @@ try
     });
 
     if (!app.Environment.IsDevelopment())
+    {
         app.UseHsts();
-
-    app.UseHttpsRedirection();
+        app.UseHttpsRedirection();
+    }
     app.UseCorsWithConfig();
     app.UseAuthentication();
     app.UseAuthorization();

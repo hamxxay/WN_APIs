@@ -73,14 +73,23 @@ namespace WorkNest.API.Controllers
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
-        [HttpGet("api/booking/{id}")]
-        public async Task<IActionResult> Get(string id, [FromHeader(Name = "x-user-email")] string? userEmail)
+        [HttpGet("api/booking/{id:int}")]
+        public async Task<IActionResult> Get(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
         {
             if (string.IsNullOrWhiteSpace(userEmail))
                 return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            var result = await _bookings.GetBookingByIdAsync(id, userEmail);
+            var result = await _bookings.GetBookingByIdAsync(id.ToString(), userEmail);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
+        }
+
+        [HttpPost("api/booking/create-admin")]
+        [Authorize(Roles = "admin,super_admin,receptionist")]
+        public async Task<IActionResult> AdminCreate([FromBody] AdminBookingRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+                return BadRequest(new { isSuccessful = false, message = "UserId is required" });
+            return StatusCode(201, await _bookings.CreateAdminBookingAsync(request));
         }
 
         [HttpPost("api/booking")]
@@ -103,35 +112,35 @@ namespace WorkNest.API.Controllers
             return StatusCode(201, await _bookings.CreateSmartBookingAsync(request, userEmail));
         }
 
-        [HttpPatch("api/booking/{id}/cancel")]
-        public async Task<IActionResult> Cancel(string id, [FromHeader(Name = "x-user-email")] string? userEmail)
+        [HttpPatch("api/booking/{id:int}/cancel")]
+        public async Task<IActionResult> Cancel(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
         {
             if (string.IsNullOrWhiteSpace(userEmail))
                 return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            var result = await _bookings.CancelBookingAsync(id, userEmail);
+            var result = await _bookings.CancelBookingAsync(id.ToString(), userEmail);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
 
-        [HttpPatch("api/booking/{id}/status")]
-        public async Task<IActionResult> UpdateStatus(string id, [FromQuery] string status) =>
-            Ok(await _bookings.UpdateBookingStatusAsync(id, status));
+        [HttpPatch("api/booking/{id:int}/status")]
+        public async Task<IActionResult> UpdateStatus(int id, [FromQuery] string status) =>
+            Ok(await _bookings.UpdateBookingStatusAsync(id.ToString(), status));
 
-        [HttpPatch("api/booking/{id}/reassign")]
+        [HttpPatch("api/booking/{id:int}/reassign")]
         public async Task<IActionResult> Reassign(
-            string id,
+            int id,
             [FromBody] ReassignBookingRequest request,
             [FromHeader(Name = "x-user-email")] string? userEmail)
         {
             if (string.IsNullOrWhiteSpace(userEmail))
                 return Unauthorized(new { isSuccessful = false, message = "Admin email header required" });
-            var result = await _bookings.ReassignBookingAsync(id, request, userEmail);
+            var result = await _bookings.ReassignBookingAsync(id.ToString(), request, userEmail);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
 
-        [HttpPut("api/booking/{id}")]
-        public async Task<IActionResult> Update(string id, [FromBody] BookingRequest request) =>
-            Ok(await _bookings.UpdateBookingAsync(id, request));
+        [HttpPut("api/booking/{id:int}")]
+        public async Task<IActionResult> Update(int id, [FromBody] BookingRequest request) =>
+            Ok(await _bookings.UpdateBookingAsync(id.ToString(), request));
     }
 }

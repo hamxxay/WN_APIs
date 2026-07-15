@@ -48,6 +48,37 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new { bookedDates, bookings = result });
         }
 
+        public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request)
+        {
+            // Fetch space to get its type name for security deposit lookup
+            var spaceRow = await _db.GetSpaceSummaryAsync(request.SpaceId);
+            var spaceTypeName = spaceRow?.TryGetValue("spaceTypeName", out var stn) == true ? stn?.ToString() : null;
+            var securityDeposit = spaceTypeName is not null
+                ? await _db.GetSecurityDepositAsync(spaceTypeName)
+                : 0;
+
+            var totalAmount = (request.TotalAmount ?? 0) + securityDeposit;
+
+            var booking = await _db.CreateBookingAsync(
+                request.UserId,
+                request.SpaceId,
+                request.StartDateTime,
+                request.EndDateTime,
+                request.Notes ?? "Admin Booking",
+                totalAmount,
+                "Cash",
+                null);
+
+            return ApiResponse.Ok(new
+            {
+                id              = booking.TryGetValue("idGUID", out var g) ? g : booking.TryGetValue("id", out var i) ? i : null,
+                spaceId         = request.SpaceId,
+                bookingAmount   = request.TotalAmount ?? 0,
+                securityDeposit = securityDeposit,
+                totalAmount     = totalAmount,
+            }, "Admin booking created successfully.");
+        }
+
         public async Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail)
         {
             var spaceIdStr = request.SpaceId?.ToString();

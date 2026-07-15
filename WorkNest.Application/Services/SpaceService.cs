@@ -27,6 +27,7 @@ namespace WorkNest.Application.Services
                 floorName     = r.TryGetValue("floorName",     out var fn)  ? fn?.ToString() : null,
                 pricePerDay   = r.TryGetValue("pricePerDay",   out var ppd) ? ppd : null,
                 pricePerHour  = r.TryGetValue("pricePerHour",  out var pph) ? pph : null,
+                pricePerMonth = r.TryGetValue("pricePerMonth", out var ppm) ? ppm : null,
                 imageUrl      = r.TryGetValue("imageUrl",      out var img) ? img?.ToString() : null,
                 amenities     = r.TryGetValue("amenities",     out var am)  ? am?.ToString()  : null,
                 status        = r.TryGetValue("status",        out var st)  ? st  : null,
@@ -98,7 +99,7 @@ namespace WorkNest.Application.Services
         {
             var newId = await _db.InsertSpaceAsync(request.Name, request.LocationId, request.SpaceTypeId,
                 request.Code, request.Description, request.FloorId,
-                request.PricePerDay, request.PricePerHour, request.ImageUrl, request.Amenities);
+                request.PricePerDay, request.PricePerHour, request.PricePerMonth, request.ImageUrl, request.Amenities);
             return ApiResponse.Ok(new { id = newId }, "Space created.");
         }
 
@@ -106,7 +107,7 @@ namespace WorkNest.Application.Services
         {
             await _db.UpdateSpaceAsync(id, request.Name, request.LocationId,
                 request.SpaceTypeId, request.Code, request.Description, request.FloorId,
-                request.PricePerDay, request.PricePerHour, request.ImageUrl, request.Amenities);
+                request.PricePerDay, request.PricePerHour, request.PricePerMonth, request.ImageUrl, request.Amenities);
             return ApiResponse.Ok("Space updated.");
         }
 

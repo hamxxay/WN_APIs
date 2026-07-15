@@ -20,7 +20,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         private static object? Normalize(object? v) => v is DBNull ? null : v;
 
-        private static IDictionary<string, object?> RowToDictionary(SqlDataReader r)
+        private static IDictionary<                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             string, object?> RowToDictionary(SqlDataReader r)
         {
             var d = new Dictionary<string, object?>(r.FieldCount, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < r.FieldCount; i++)
@@ -159,11 +159,19 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
+            // Resolve numeric Id from GUID first
+            await using var getCmd = SP("dbo.WN_Users_GetByGuid", conn);
+            getCmd.Parameters.AddWithValue("@IdGUID", guid);
+            await using var gr = await getCmd.ExecuteReaderAsync();
+            if (!await gr.ReadAsync()) return;
+            var numericId = Convert.ToInt32(gr["Id"]);
+            await gr.CloseAsync();
+
             await using var cmd = SP("dbo.WN_Users_Update", conn);
             cmd.Parameters.AddWithValue("@FirstName", name);
             cmd.Parameters.AddWithValue("@LastName", "");
             cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            cmd.Parameters.AddWithValue("@Id", numericId);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -223,7 +231,7 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         public async Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
-            string? description, int? floorId, double? pricePerDay, double? pricePerHour,
+            string? description, int? floorId, double? pricePerDay, double? pricePerHour, double? pricePerMonth,
             string? imageUrl, string? amenities)
         {
             await using var conn = new SqlConnection(_connectionString);
@@ -237,6 +245,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@FloorId", (object?)floorId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PricePerDay", (object?)pricePerDay ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PricePerHour", (object?)pricePerHour ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerMonth", (object?)pricePerMonth ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
@@ -250,7 +259,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task UpdateSpaceAsync(string spaceGuid, string? name, string? locationGuid, string? spaceTypeGuid,
             string? code, string? description, int? floorId, double? pricePerDay,
-            double? pricePerHour, string? imageUrl, string? amenities)
+            double? pricePerHour, double? pricePerMonth, string? imageUrl, string? amenities)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
@@ -264,6 +273,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@FloorId", (object?)floorId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PricePerDay", (object?)pricePerDay ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PricePerHour", (object?)pricePerHour ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerMonth", (object?)pricePerMonth ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
@@ -355,8 +365,8 @@ namespace WorkNest.Infrastructure.Repositories
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Booking_GetAvailableSpaces", conn);
             cmd.Parameters.AddWithValue("@SpaceCategory", spaceCategory);
-            cmd.Parameters.AddWithValue("@Start", start);
-            cmd.Parameters.AddWithValue("@End", end);
+            cmd.Parameters.AddWithValue("@StartDT", start);
+            cmd.Parameters.AddWithValue("@EndDT", end);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
@@ -418,16 +428,33 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
+
+            // Resolve numeric user ID from GUID
+            await using var getUser = SP("dbo.WN_Users_GetByGuid", conn);
+            getUser.Parameters.AddWithValue("@IdGUID", userGuid);
+            await using var ur = await getUser.ExecuteReaderAsync();
+            if (!await ur.ReadAsync()) throw new InvalidOperationException("User not found.");
+            var numericUserId = Convert.ToInt32(ur["Id"]);
+            await ur.CloseAsync();
+
+            // Resolve numeric space ID from GUID
+            await using var getSpace = SP("dbo.WN_Spaces_GetByGuid", conn);
+            getSpace.Parameters.AddWithValue("@IdGUID", spaceGuid);
+            await using var sr = await getSpace.ExecuteReaderAsync();
+            if (!await sr.ReadAsync()) throw new InvalidOperationException("Space not found.");
+            var numericSpaceId = Convert.ToInt32(sr["Id"]);
+            await sr.CloseAsync();
+
             await using var tx = conn.BeginTransaction();
             try
             {
                 await using var bCmd = SP("dbo.WN_Bookings_Insert", conn, tx);
-                bCmd.Parameters.AddWithValue("@UserGuid", userGuid);
-                bCmd.Parameters.AddWithValue("@SpaceGuid", spaceGuid);
-                bCmd.Parameters.AddWithValue("@StartDateTime", start);
-                bCmd.Parameters.AddWithValue("@EndDateTime", end);
+                bCmd.Parameters.AddWithValue("@UserId", numericUserId);
+                bCmd.Parameters.AddWithValue("@SpaceId", numericSpaceId);
+                bCmd.Parameters.AddWithValue("@StartDateTime", DateTime.Parse(start));
+                bCmd.Parameters.AddWithValue("@EndDateTime", DateTime.Parse(end));
                 bCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
-                bCmd.Parameters.AddWithValue("@Amount", amount);
+                bCmd.Parameters.AddWithValue("@TotalAmount", amount);
 
                 IDictionary<string, object?> bookingRow;
                 await using (var br = await bCmd.ExecuteReaderAsync())
@@ -439,7 +466,7 @@ namespace WorkNest.Infrastructure.Repositories
                 var bookingGuid = bookingRow.TryGetValue("IdGUID", out var bg) ? bg?.ToString() : null;
 
                 await using var pCmd = SP("dbo.WN_Payments_Insert", conn, tx);
-                pCmd.Parameters.AddWithValue("@UserId", userGuid);
+                pCmd.Parameters.AddWithValue("@UserId", numericUserId);
                 pCmd.Parameters.AddWithValue("@BookingId", (object?)bookingGuid ?? DBNull.Value);
                 pCmd.Parameters.AddWithValue("@Amount", amount);
                 pCmd.Parameters.AddWithValue("@PaymentMethod", (object?)paymentMethod ?? DBNull.Value);
@@ -1052,10 +1079,17 @@ namespace WorkNest.Infrastructure.Repositories
             while (await r.ReadAsync())
             {
                 var row = RowToDictionary(r);
-                if (row.TryGetValue("SpaceCategory", out var cat) && cat?.ToString() == category)
+                if (row.TryGetValue("SpaceCategory", out var cat) && cat is not null)
                 {
-                    return row.TryGetValue("SecurityDeposit", out var dep) && dep is not null
-                        ? Convert.ToDouble(dep) : 0;
+                    var dbCat = cat.ToString()!.Trim();
+                    var input = category.Trim();
+                    // Match if equal OR if the space type name contains the category keyword
+                    if (string.Equals(dbCat, input, StringComparison.OrdinalIgnoreCase) ||
+                        input.StartsWith(dbCat, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return row.TryGetValue("SecurityDeposit", out var dep) && dep is not null
+                            ? Convert.ToDouble(dep) : 0;
+                    }
                 }
             }
             return 0;
@@ -1078,16 +1112,17 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         public async Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(string spaceCategory,
-            int spaceTypeId, int locationId, double pricePerHour, double pricePerDay)
+            string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Spaces_GenerateInventory", conn);
             cmd.Parameters.AddWithValue("@SpaceCategory", spaceCategory);
-            cmd.Parameters.AddWithValue("@SpaceTypeId", spaceTypeId);
-            cmd.Parameters.AddWithValue("@LocationId", locationId);
-            cmd.Parameters.AddWithValue("@PricePerHour", pricePerHour);
-            cmd.Parameters.AddWithValue("@PricePerDay", pricePerDay);
+            cmd.Parameters.AddWithValue("@SpaceTypeId",   spaceTypeId);
+            cmd.Parameters.AddWithValue("@LocationId",    locationId);
+            cmd.Parameters.AddWithValue("@PricePerHour",  pricePerHour);
+            cmd.Parameters.AddWithValue("@PricePerDay",   pricePerDay);
+            cmd.Parameters.AddWithValue("@PricePerMonth", pricePerMonth);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return RowToDictionary(r);
             return new Dictionary<string, object?>();

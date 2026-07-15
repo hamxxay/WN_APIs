@@ -12,10 +12,11 @@ namespace WorkNest.Application.DTOs.SpaceConfig
     public class SpaceInventoryRequest
     {
         public string SpaceCategory { get; set; } = string.Empty;
-        public int SpaceTypeId { get; set; }
-        public int LocationId { get; set; }
+        public string SpaceTypeId { get; set; } = string.Empty;
+        public string LocationId { get; set; } = string.Empty;
         public double? PricePerHour { get; set; } = 0.0;
         public double? PricePerDay { get; set; } = 0.0;
+        public double? PricePerMonth { get; set; } = 0.0;
     }
 
     public class SpaceConfigDto

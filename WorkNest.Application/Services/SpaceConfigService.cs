@@ -34,7 +34,7 @@ namespace WorkNest.Application.Services
         {
             var result = await _db.GenerateSpaceInventoryAsync(request.SpaceCategory,
                 request.SpaceTypeId, request.LocationId,
-                request.PricePerHour ?? 0, request.PricePerDay ?? 0);
+                request.PricePerHour ?? 0, request.PricePerDay ?? 0, request.PricePerMonth ?? 0);
             return ApiResponse.Ok(result, "Inventory generated/synced.");
         }
     }
