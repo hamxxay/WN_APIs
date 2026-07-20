@@ -75,6 +75,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync();
         Task<int?> CreateSpaceTypeAsync(string name, int capacity, bool hourlyAllowed);
         Task UpdateSpaceTypeAsync(string guid, string name, int capacity, bool hourlyAllowed);
+        Task BulkUpdateSpaceRentAccountAsync(string spaceTypeGuid, int rentAccountId);
         Task SoftDeleteSpaceTypeAsync(string guid);
 
         // ── PricingPlan ───────────────────────────────────────────────────────

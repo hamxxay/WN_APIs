@@ -169,7 +169,6 @@ namespace WorkNest.Application.Services
                 assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
                 assignedSpaceId   = result.TryGetValue("assignedSpaceId",   out var asi) ? asi : null,
                 spaceCategory     = result.TryGetValue("spaceCategory",     out var sc)  ? sc  : null,
-                accountId         = request.AccountId,
                 totalAmount       = request.TotalAmount,
             }, "Booking created with auto-assigned space.");
         }

@@ -6,6 +6,7 @@ namespace WorkNest.Application.DTOs.SpaceType
         public int? Capacity { get; set; }
         public bool? HourlyAllowed { get; set; } = false;
         public bool? IsActive { get; set; } = true;
+        public int? RentAccountId { get; set; }
     }
 
     public class SpaceTypeDto

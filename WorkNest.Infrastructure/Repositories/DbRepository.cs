@@ -797,6 +797,26 @@ namespace WorkNest.Infrastructure.Repositories
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task BulkUpdateSpaceRentAccountAsync(string spaceTypeGuid, int rentAccountId)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            // Save on the space type itself
+            await using var stCmd = new SqlCommand(
+                "UPDATE dbo.WN_SpaceTypes SET RentAccountId = @RentAccountId WHERE IdGUID = @IdGUID",
+                conn);
+            stCmd.Parameters.AddWithValue("@RentAccountId", rentAccountId);
+            stCmd.Parameters.AddWithValue("@IdGUID", spaceTypeGuid);
+            await stCmd.ExecuteNonQueryAsync();
+            // Bulk update all spaces of this type
+            await using var spCmd = new SqlCommand(
+                "UPDATE dbo.WN_Spaces SET RentAccountId = @RentAccountId WHERE SpaceTypeId = @SpaceTypeId AND IsDeleted = 0",
+                conn);
+            spCmd.Parameters.AddWithValue("@RentAccountId", rentAccountId);
+            spCmd.Parameters.Add("@SpaceTypeId", SqlDbType.UniqueIdentifier).Value = Guid.Parse(spaceTypeGuid);
+            await spCmd.ExecuteNonQueryAsync();
+        }
+
         public async Task SoftDeleteSpaceTypeAsync(string guid)
         {
             await using var conn = new SqlConnection(_connectionString);
@@ -1141,8 +1161,8 @@ namespace WorkNest.Infrastructure.Repositories
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Spaces_GenerateInventory", conn);
             cmd.Parameters.AddWithValue("@SpaceCategory", spaceCategory);
-            cmd.Parameters.AddWithValue("@SpaceTypeId",   spaceTypeId);
-            cmd.Parameters.AddWithValue("@LocationId",    locationId);
+            cmd.Parameters.Add("@SpaceTypeId", SqlDbType.UniqueIdentifier).Value = Guid.Parse(spaceTypeId);
+            cmd.Parameters.Add("@LocationId",  SqlDbType.UniqueIdentifier).Value = Guid.Parse(locationId);
             cmd.Parameters.AddWithValue("@PricePerHour",  pricePerHour);
             cmd.Parameters.AddWithValue("@PricePerDay",   pricePerDay);
             cmd.Parameters.AddWithValue("@PricePerMonth", pricePerMonth);
