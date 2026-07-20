@@ -86,17 +86,25 @@ namespace WorkNest.Application.Services
                 null,
                 request.CustomerCode);
 
+            var bookingGuid       = booking.TryGetValue("idGUID", out var g) ? g?.ToString()
+                                  : booking.TryGetValue("NewId",  out var n) ? n?.ToString()
+                                  : booking.TryGetValue("id",     out var i) ? i?.ToString() : null;
+            var depositAccountId  = booking.TryGetValue("DepositAccountId", out var da) && da is not null
+                                  ? Convert.ToInt32(da) : (int?)null;
+
+            // Create separate deposit payment if this is a Private Office
+            if (securityDeposit > 0 && depositAccountId.HasValue && bookingGuid is not null)
+                await _db.InsertDepositPaymentAsync(userId, bookingGuid, securityDeposit, depositAccountId.Value);
+
             return ApiResponse.Ok(new
             {
-                id              = booking.TryGetValue("idGUID", out var g) ? g
-                                : booking.TryGetValue("NewId",  out var n) ? n
-                                : booking.TryGetValue("id",     out var i) ? i : null,
-                spaceId         = request.SpaceId,
-                rentAccountId   = booking.TryGetValue("RentAccountId",    out var ra) ? ra : null,
-                depositAccountId= booking.TryGetValue("DepositAccountId", out var da) ? da : null,
-                bookingAmount   = request.TotalAmount ?? 0,
-                securityDeposit = securityDeposit,
-                totalAmount     = totalAmount,
+                id               = bookingGuid,
+                spaceId          = request.SpaceId,
+                rentAccountId    = booking.TryGetValue("RentAccountId",    out var ra) ? ra : null,
+                depositAccountId = depositAccountId,
+                bookingAmount    = request.TotalAmount ?? 0,
+                securityDeposit  = securityDeposit,
+                totalAmount      = totalAmount,
             }, "Admin booking created successfully.");
         }
 

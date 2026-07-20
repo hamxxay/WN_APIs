@@ -18,6 +18,7 @@ namespace WorkNest.Application.Interfaces
 
         // ── Space ─────────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpacesAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetVacantSpacesAsync();
         Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
             string? description, int? floorId, double? pricePerDay, double? pricePerHour, double? pricePerMonth,
             string? imageUrl, string? amenities, int? rentAccountId = null, int? depositAccountId = null);
@@ -59,6 +60,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(string userGuid);
         Task<IDictionary<string, object?>> CreatePaymentAsync(string userGuid, string bookingGuid, double amount,
             string method, string transactionRef);
+        Task InsertDepositPaymentAsync(string userGuid, string bookingGuid, double amount, int depositAccountId);
         Task UpdatePaymentStatusByRefAsync(string transactionRef, string status);
         Task UpdatePaymentStatusByGuidAsync(string guid, string status);
         Task SoftDeletePaymentAsync(string guid);
@@ -75,7 +77,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync();
         Task<int?> CreateSpaceTypeAsync(string name, int capacity, bool hourlyAllowed);
         Task UpdateSpaceTypeAsync(string guid, string name, int capacity, bool hourlyAllowed);
-        Task BulkUpdateSpaceRentAccountAsync(string spaceTypeGuid, int rentAccountId);
+        Task BulkUpdateSpaceRentAccountAsync(string spaceTypeGuid, int rentAccountId, int? depositAccountId = null);
         Task SoftDeleteSpaceTypeAsync(string guid);
 
         // ── PricingPlan ───────────────────────────────────────────────────────

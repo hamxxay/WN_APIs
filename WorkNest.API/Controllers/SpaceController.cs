@@ -14,6 +14,13 @@ namespace WorkNest.API.Controllers
         private readonly ISpaceService _spaces;
         public SpaceController(ISpaceService spaces) => _spaces = spaces;
 
+        [HttpGet("api/space/vacant")]
+        public async Task<IActionResult> Vacant()
+        {
+            var items = await _spaces.GetVacantSpacesAsync();
+            return Ok(new { data = items, total = items.Count() });
+        }
+
         [HttpGet("api/space/available")]
         [AllowAnonymous]
         public async Task<IActionResult> Available()

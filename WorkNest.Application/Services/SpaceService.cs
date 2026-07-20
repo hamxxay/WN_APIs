@@ -40,6 +40,21 @@ namespace WorkNest.Application.Services
                 capacity      = r.TryGetValue("capacity",      out var cap) ? cap : null,
             });
 
+        public async Task<IEnumerable<object>> GetVacantSpacesAsync() =>
+            (await _db.GetVacantSpacesAsync()).Select(r => (object)new
+            {
+                id            = r.TryGetValue("Id",           out var i)   ? i   : null,
+                idGuid        = r.TryGetValue("IdGUID",        out var g)   ? g?.ToString()  : null,
+                name          = r.TryGetValue("Name",          out var n)   ? n?.ToString()  : null,
+                code          = r.TryGetValue("Code",          out var c)   ? c?.ToString()  : null,
+                status        = r.TryGetValue("Status",        out var st)  ? st?.ToString() : null,
+                pricePerDay   = r.TryGetValue("PricePerDay",   out var ppd) ? ppd : null,
+                pricePerHour  = r.TryGetValue("PricePerHour",  out var pph) ? pph : null,
+                pricePerMonth = r.TryGetValue("PricePerMonth", out var ppm) ? ppm : null,
+                locationName  = r.TryGetValue("LocationName",  out var ln)  ? ln?.ToString()  : null,
+                spaceTypeName = r.TryGetValue("SpaceTypeName", out var stn) ? stn?.ToString() : null,
+            });
+
         public async Task<IEnumerable<object>> GetAvailableSpacesAsync()
         {
             var spaces = await _db.GetAllSpacesAsync();
