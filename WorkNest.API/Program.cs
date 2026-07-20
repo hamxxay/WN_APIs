@@ -104,6 +104,7 @@ try
     builder.Services.AddScoped<IFloorService, FloorService>();
     builder.Services.AddScoped<IAmenityService, AmenityService>();
     builder.Services.AddScoped<ICustomerService, CustomerService>();
+    builder.Services.AddScoped<IAccountCoaService, AccountCoaService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();

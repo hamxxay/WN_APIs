@@ -232,7 +232,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
             string? description, int? floorId, double? pricePerDay, double? pricePerHour, double? pricePerMonth,
-            string? imageUrl, string? amenities)
+            string? imageUrl, string? amenities, int? rentAccountId = null, int? depositAccountId = null)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
@@ -248,6 +248,8 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@PricePerMonth", (object?)pricePerMonth ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -259,7 +261,8 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task UpdateSpaceAsync(string spaceGuid, string? name, string? locationGuid, string? spaceTypeGuid,
             string? code, string? description, int? floorId, double? pricePerDay,
-            double? pricePerHour, double? pricePerMonth, string? imageUrl, string? amenities)
+            double? pricePerHour, double? pricePerMonth, string? imageUrl, string? amenities,
+            int? rentAccountId = null, int? depositAccountId = null)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
@@ -276,6 +279,8 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@PricePerMonth", (object?)pricePerMonth ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -424,7 +429,8 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<IDictionary<string, object?>> CreateBookingAsync(
             string userGuid, string spaceGuid, string start, string end, string notes,
-            double amount, string? paymentMethod, string? paymentRef, string? customerCode = null)
+            double amount, string? paymentMethod, string? paymentRef,
+            string? customerCode = null)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
@@ -465,9 +471,10 @@ namespace WorkNest.Infrastructure.Repositories
                 bCmd.Parameters.AddWithValue("@SpaceId", numericSpaceId);
                 bCmd.Parameters.AddWithValue("@StartDateTime", DateTime.Parse(start));
                 bCmd.Parameters.AddWithValue("@EndDateTime", DateTime.Parse(end));
-                bCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
                 bCmd.Parameters.AddWithValue("@TotalAmount", amount);
+                bCmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
                 bCmd.Parameters.AddWithValue("@CustomerCode", (object?)customerCode ?? DBNull.Value);
+                // AccountId is now read from the space inside the SP — no longer passed from here
 
                 IDictionary<string, object?> bookingRow;
                 await using (var br = await bCmd.ExecuteReaderAsync())
@@ -476,14 +483,16 @@ namespace WorkNest.Infrastructure.Repositories
                     bookingRow = RowToDictionary(br);
                 }
 
-                var bookingGuid = bookingRow.TryGetValue("IdGUID", out var bg) ? bg?.ToString() : null;
+                var bookingGuid    = bookingRow.TryGetValue("IdGUID", out var bg)  ? bg?.ToString()        : null;
+                var bookingNumericId = bookingRow.TryGetValue("NewId", out var nid) && nid is not null
+                                      ? Convert.ToInt32(nid) : (int?)null;
 
                 await using var pCmd = SP("dbo.WN_Payments_Insert", conn, tx);
-                pCmd.Parameters.AddWithValue("@UserId", numericUserId);
-                pCmd.Parameters.AddWithValue("@BookingId", (object?)bookingGuid ?? DBNull.Value);
-                pCmd.Parameters.AddWithValue("@Amount", amount);
+                pCmd.Parameters.AddWithValue("@UserId",        numericUserId);
+                pCmd.Parameters.AddWithValue("@BookingId",     (object?)bookingNumericId ?? DBNull.Value);
+                pCmd.Parameters.AddWithValue("@Amount",        amount);
                 pCmd.Parameters.AddWithValue("@PaymentMethod", (object?)paymentMethod ?? DBNull.Value);
-                pCmd.Parameters.AddWithValue("@TransactionRef", (object?)paymentRef ?? DBNull.Value);
+                pCmd.Parameters.AddWithValue("@TransactionRef",(object?)paymentRef    ?? DBNull.Value);
                 await pCmd.ExecuteNonQueryAsync();
 
                 await tx.CommitAsync();
@@ -542,6 +551,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@PaymentMethod", (object?)paymentMethod ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PaymentRef", (object?)paymentRef ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
+            // AccountId no longer passed — SP reads it from the assigned space
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return RowToDictionary(r);
             return new Dictionary<string, object?>();
@@ -1301,6 +1311,27 @@ namespace WorkNest.Infrastructure.Repositories
             await using var cmd = SP("dbo.WN_PlanFeatures_Delete", conn);
             cmd.Parameters.AddWithValue("@Id", id);
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        // ── AccountCOA ───────────────────────────────────────────────────────
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAllAccountsCoaAsync()
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_AccountsCOA_GetList", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetAccountCoaByIdAsync(int accountId)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_AccountsCOA_GetById", conn);
+            cmd.Parameters.AddWithValue("@AccountId", accountId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? RowToDictionary(r) : null;
         }
     }
 }

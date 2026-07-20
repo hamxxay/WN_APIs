@@ -2,6 +2,7 @@ using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
 using WorkNest.Common.Responses;
+using WorkNest.Application.DTOs.AccountCoa;
 
 namespace WorkNest.Application.Services
 {
@@ -50,12 +51,10 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request)
         {
-            // Resolve WN_Users GUID from customer email (customers are separate from users)
             var email = request.CustomerEmail;
             if (string.IsNullOrWhiteSpace(email))
                 return ApiResponse.Fail("CustomerEmail is required to create a booking.");
 
-            // SyncUserAsync gets existing user or creates one in WN_Users
             var nameParts = (request.CustomerName ?? email).Split(' ', 2);
             var (_, userId) = await _db.SyncUserAsync(
                 email,
@@ -66,7 +65,6 @@ namespace WorkNest.Application.Services
             if (userId is null)
                 return ApiResponse.Fail("Failed to resolve user for booking.");
 
-            // Fetch space to get its type name for security deposit lookup
             var spaceRow = await _db.GetSpaceSummaryAsync(request.SpaceId);
             var spaceTypeName = spaceRow?.TryGetValue("SpaceTypeName", out var stn) == true ? stn?.ToString()
                               : spaceRow?.TryGetValue("spaceTypeName", out var stn2) == true ? stn2?.ToString()
@@ -90,8 +88,12 @@ namespace WorkNest.Application.Services
 
             return ApiResponse.Ok(new
             {
-                id              = booking.TryGetValue("idGUID", out var g) ? g : booking.TryGetValue("id", out var i) ? i : null,
+                id              = booking.TryGetValue("idGUID", out var g) ? g
+                                : booking.TryGetValue("NewId",  out var n) ? n
+                                : booking.TryGetValue("id",     out var i) ? i : null,
                 spaceId         = request.SpaceId,
+                rentAccountId   = booking.TryGetValue("RentAccountId",    out var ra) ? ra : null,
+                depositAccountId= booking.TryGetValue("DepositAccountId", out var da) ? da : null,
                 bookingAmount   = request.TotalAmount ?? 0,
                 securityDeposit = securityDeposit,
                 totalAmount     = totalAmount,
@@ -161,14 +163,34 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new
             {
                 success           = true,
-                id                = result.TryGetValue("id",              out var id)  ? id  : null,
-                bookingId         = result.TryGetValue("idGUID",          out var g)   ? g   : result.TryGetValue("id", out var i) ? i : null,
+                id                = result.TryGetValue("id",               out var id)  ? id  : null,
+                bookingId         = result.TryGetValue("idGUID",           out var g)   ? g   : result.TryGetValue("id", out var i) ? i : null,
                 assignedSpace     = result.TryGetValue("assignedSpaceCode", out var asc) ? asc : null,
                 assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
                 assignedSpaceId   = result.TryGetValue("assignedSpaceId",   out var asi) ? asi : null,
                 spaceCategory     = result.TryGetValue("spaceCategory",     out var sc)  ? sc  : null,
+                accountId         = request.AccountId,
                 totalAmount       = request.TotalAmount,
             }, "Booking created with auto-assigned space.");
+        }
+
+        public async Task<ApiResponse> GetBookingAccountAsync(string bookingGuid)
+        {
+            var booking = await _db.GetBookingByGuidAsync(bookingGuid);
+            if (booking is null) return ApiResponse.Fail("Booking not found.");
+
+            if (!booking.TryGetValue("AccountId", out var rawId) || rawId is null)
+                return ApiResponse.Fail("No bank account linked to this booking.");
+
+            var accountId = Convert.ToInt32(rawId);
+            var account   = await _db.GetAccountCoaByIdAsync(accountId);
+            if (account is null) return ApiResponse.Fail("Linked bank account not found.");
+
+            return ApiResponse.Ok(new AccountCoaDto
+            {
+                AccountId   = accountId,
+                Description = account.TryGetValue("Description", out var d) && d is not null ? d.ToString()! : string.Empty,
+            });
         }
 
         public async Task<ApiResponse> CancelBookingAsync(string id, string userEmail)

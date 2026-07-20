@@ -14,6 +14,14 @@ namespace WorkNest.API.Controllers
         private readonly IBookingService _bookings;
         public BookingController(IBookingService bookings) => _bookings = bookings;
 
+        [HttpGet("api/booking/{id:int}/account")]
+        public async Task<IActionResult> GetBookingAccount(int id)
+        {
+            var result = await _bookings.GetBookingAccountAsync(id.ToString());
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
+        }
+
         [HttpGet("api/booking/available-spaces")]
         [AllowAnonymous]
         public async Task<IActionResult> AvailableSpaces(

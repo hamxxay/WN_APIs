@@ -13,6 +13,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail);
         Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request);
         Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail);
+        Task<ApiResponse> GetBookingAccountAsync(string bookingGuid);
         Task<ApiResponse> CancelBookingAsync(string id, string userEmail);
         Task<ApiResponse> UpdateBookingStatusAsync(string id, string status);
         Task<ApiResponse> UpdateBookingAsync(string id, BookingRequest request);

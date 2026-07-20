@@ -20,10 +20,11 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpacesAsync();
         Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
             string? description, int? floorId, double? pricePerDay, double? pricePerHour, double? pricePerMonth,
-            string? imageUrl, string? amenities);
+            string? imageUrl, string? amenities, int? rentAccountId = null, int? depositAccountId = null);
         Task UpdateSpaceAsync(string spaceGuid, string? name, string? locationGuid, string? spaceTypeGuid,
             string? code, string? description, int? floorId, double? pricePerDay,
-            double? pricePerHour, double? pricePerMonth, string? imageUrl, string? amenities);
+            double? pricePerHour, double? pricePerMonth, string? imageUrl, string? amenities,
+            int? rentAccountId = null, int? depositAccountId = null);
         Task SoftDeleteSpaceAsync(string guid);
         Task<int?> GetSpaceNumericIdByGuidAsync(string guid);
         Task<IDictionary<string, object?>?> GetSpaceSummaryAsync(string guid);
@@ -39,7 +40,8 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid);
         Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid);
         Task<IDictionary<string, object?>> CreateBookingAsync(string userGuid, string spaceGuid, string start,
-            string end, string notes, double amount, string? paymentMethod, string? paymentRef, string? customerCode = null);
+            string end, string notes, double amount, string? paymentMethod, string? paymentRef,
+            string? customerCode = null);
         Task<IDictionary<string, object?>> CreateBookingWithAutoAssignmentAsync(string userEmail,
             string spaceType, string start, string end, string notes, double amount,
             string? paymentMethod, string? paymentRef);
@@ -137,5 +139,9 @@ namespace WorkNest.Application.Interfaces
         Task<int?> CreatePlanFeatureAsync(int planId, string featureName);
         Task UpdatePlanFeatureAsync(int id, string featureName);
         Task SoftDeletePlanFeatureAsync(int id);
+
+        // ── AccountCOA ────────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllAccountsCoaAsync();
+        Task<IDictionary<string, object?>?> GetAccountCoaByIdAsync(int accountId);
     }
 }

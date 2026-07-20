@@ -99,7 +99,9 @@ namespace WorkNest.Application.Services
         {
             var newId = await _db.InsertSpaceAsync(request.Name, request.LocationId, request.SpaceTypeId,
                 request.Code, request.Description, request.FloorId,
-                request.PricePerDay, request.PricePerHour, request.PricePerMonth, request.ImageUrl, request.Amenities);
+                request.PricePerDay, request.PricePerHour, request.PricePerMonth,
+                request.ImageUrl, request.Amenities,
+                request.RentAccountId, request.DepositAccountId);
             return ApiResponse.Ok(new { id = newId }, "Space created.");
         }
 
@@ -107,7 +109,9 @@ namespace WorkNest.Application.Services
         {
             await _db.UpdateSpaceAsync(id, request.Name, request.LocationId,
                 request.SpaceTypeId, request.Code, request.Description, request.FloorId,
-                request.PricePerDay, request.PricePerHour, request.PricePerMonth, request.ImageUrl, request.Amenities);
+                request.PricePerDay, request.PricePerHour, request.PricePerMonth,
+                request.ImageUrl, request.Amenities,
+                request.RentAccountId, request.DepositAccountId);
             return ApiResponse.Ok("Space updated.");
         }
 

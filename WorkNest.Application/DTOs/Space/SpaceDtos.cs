@@ -13,6 +13,8 @@ namespace WorkNest.Application.DTOs.Space
         public double? PricePerMonth { get; set; }
         public string? ImageUrl { get; set; }
         public string? Amenities { get; set; }
+        public int? RentAccountId { get; set; }
+        public int? DepositAccountId { get; set; }
     }
 
     public class SpaceUpdateRequest
@@ -28,6 +30,8 @@ namespace WorkNest.Application.DTOs.Space
         public double? PricePerMonth { get; set; }
         public string? ImageUrl { get; set; }
         public string? Amenities { get; set; }
+        public int? RentAccountId { get; set; }
+        public int? DepositAccountId { get; set; }
     }
 
     public class SpaceDto
