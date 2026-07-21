@@ -81,6 +81,15 @@ namespace WorkNest.API.Controllers
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
+        [HttpGet("api/booking/challan/{challanNumber}")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetByChallan(string challanNumber)
+        {
+            var result = await _bookings.GetBookingByChallanAsync(challanNumber);
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
+        }
+
         [HttpGet("api/booking/{id:int}")]
         public async Task<IActionResult> Get(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
         {

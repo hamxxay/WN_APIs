@@ -17,6 +17,7 @@ namespace WorkNest.Application.DTOs.SpaceConfig
         public double? PricePerHour { get; set; } = 0.0;
         public double? PricePerDay { get; set; } = 0.0;
         public double? PricePerMonth { get; set; } = 0.0;
+        public string? Amenities { get; set; }
     }
 
     public class SpaceConfigDto

@@ -29,6 +29,13 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(data);
         }
 
+        public async Task<ApiResponse> GetBookingByChallanAsync(string challanNumber)
+        {
+            var data = await _db.GetBookingByChallanAsync(challanNumber);
+            if (data is null) return ApiResponse.Fail("Challan not found");
+            return ApiResponse.Ok(data);
+        }
+
         public async Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month)
         {
             var result = await _db.GetBookingCalendarAsync(spaceId, year, month);
@@ -105,6 +112,8 @@ namespace WorkNest.Application.Services
                 bookingAmount    = request.TotalAmount ?? 0,
                 securityDeposit  = securityDeposit,
                 totalAmount      = totalAmount,
+                challanNumber    = booking.TryGetValue("ChallanNumber", out var cn) ? cn?.ToString() : null,
+                validity         = booking.TryGetValue("Validity",      out var vl) ? vl : null,
             }, "Admin booking created successfully.");
         }
 
@@ -178,6 +187,9 @@ namespace WorkNest.Application.Services
                 assignedSpaceId   = result.TryGetValue("assignedSpaceId",   out var asi) ? asi : null,
                 spaceCategory     = result.TryGetValue("spaceCategory",     out var sc)  ? sc  : null,
                 totalAmount       = request.TotalAmount,
+                challanNumber     = result.TryGetValue("challanNumber",     out var cn)  ? cn?.ToString()  : null,
+                validity          = result.TryGetValue("validity",          out var vl)  ? vl  : null,
+                securityDeposit   = result.TryGetValue("securityDeposit",   out var sd)  ? sd  : null,
             }, "Booking created with auto-assigned space.");
         }
 

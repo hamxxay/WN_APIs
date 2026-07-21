@@ -90,7 +90,8 @@ CREATE OR ALTER PROCEDURE dbo.WN_Spaces_GenerateInventory
     @LocationId    UNIQUEIDENTIFIER,
     @PricePerHour  DECIMAL(18,2),
     @PricePerDay   DECIMAL(18,2),
-    @PricePerMonth DECIMAL(18,2)
+    @PricePerMonth DECIMAL(18,2),
+    @Amenities     NVARCHAR(MAX) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -98,7 +99,8 @@ BEGIN
     UPDATE dbo.WN_Spaces SET
         PricePerHour  = @PricePerHour,
         PricePerDay   = @PricePerDay,
-        PricePerMonth = @PricePerMonth
+        PricePerMonth = @PricePerMonth,
+        Amenities     = CASE WHEN @Amenities IS NOT NULL THEN @Amenities ELSE Amenities END
     WHERE SpaceTypeId = @SpaceTypeId
       AND LocationId  = @LocationId
       AND Status      = 1;

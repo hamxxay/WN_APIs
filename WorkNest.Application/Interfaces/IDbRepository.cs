@@ -40,6 +40,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAllBookingsAsync();
         Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid);
         Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid);
+        Task<IDictionary<string, object?>?> GetBookingByChallanAsync(string challanNumber);
         Task<IDictionary<string, object?>> CreateBookingAsync(string userGuid, string spaceGuid, string start,
             string end, string notes, double amount, string? paymentMethod, string? paymentRef,
             string? customerCode = null);
@@ -120,7 +121,8 @@ namespace WorkNest.Application.Interfaces
         Task UpdateSpaceConfigAsync(string category, int totalSpaces, string? defaultCapacities,
             string? openingTime, string? closingTime, string? adminEmail, double? securityDeposit);
         Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(string spaceCategory,
-            string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth);
+            string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth,
+            string? amenities = null);
 
         // ── Customer ──────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string search);
@@ -146,5 +148,8 @@ namespace WorkNest.Application.Interfaces
         // ── AccountCOA ────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAccountsCoaAsync();
         Task<IDictionary<string, object?>?> GetAccountCoaByIdAsync(int accountId);
+
+        // ── AmountFields ──────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllAmountFieldsAsync();
     }
 }

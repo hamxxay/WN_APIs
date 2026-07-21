@@ -436,6 +436,16 @@ namespace WorkNest.Infrastructure.Repositories
             return await r.ReadAsync() ? RowToDictionary(r) : null;
         }
 
+        public async Task<IDictionary<string, object?>?> GetBookingByChallanAsync(string challanNumber)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Bookings_GetByChallan", conn);
+            cmd.Parameters.AddWithValue("@ChallanNumber", challanNumber);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? RowToDictionary(r) : null;
+        }
+
         public async Task<IDictionary<string, object?>> CreateBookingAsync(
             string userGuid, string spaceGuid, string start, string end, string notes,
             double amount, string? paymentMethod, string? paymentRef,
@@ -1181,7 +1191,8 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         public async Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(string spaceCategory,
-            string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth)
+            string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth,
+            string? amenities = null)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
@@ -1192,6 +1203,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@PricePerHour",  pricePerHour);
             cmd.Parameters.AddWithValue("@PricePerDay",   pricePerDay);
             cmd.Parameters.AddWithValue("@PricePerMonth", pricePerMonth);
+            cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return RowToDictionary(r);
             return new Dictionary<string, object?>();
@@ -1378,6 +1390,17 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@AccountId", accountId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? RowToDictionary(r) : null;
+        }
+
+        // ── AmountFields ──────────────────────────────────────────────────────
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAllAmountFieldsAsync()
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_AmountFields_GetList", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
         }
     }
 }
