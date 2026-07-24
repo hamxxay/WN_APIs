@@ -258,7 +258,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityDepositAccountId", (object?)depositAccountId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -289,7 +289,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityDepositAccountId", (object?)depositAccountId ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -444,6 +444,16 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@ChallanNumber", challanNumber);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? RowToDictionary(r) : null;
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetBookingDetailsAsync(string bookingGuid)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_BookingDetails_GetByBooking", conn);
+            cmd.Parameters.AddWithValue("@BookingGuid", bookingGuid);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
         }
 
         public async Task<IDictionary<string, object?>> CreateBookingAsync(
@@ -673,7 +683,7 @@ namespace WorkNest.Infrastructure.Repositories
             return new Dictionary<string, object?>();
         }
 
-        public async Task InsertDepositPaymentAsync(string userGuid, string bookingGuid, double amount, int depositAccountId)
+        public async Task InsertDepositPaymentAsync(string userGuid, string bookingGuid, double amount, int securityDepositAccountId)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
@@ -684,7 +694,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@UserGuid",   userGuid);
             cmd.Parameters.AddWithValue("@BookingGuid", bookingGuid);
             cmd.Parameters.AddWithValue("@Amount",      amount);
-            cmd.Parameters.AddWithValue("@AccountId",   depositAccountId);
+            cmd.Parameters.AddWithValue("@AccountId",   securityDepositAccountId);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -837,18 +847,18 @@ namespace WorkNest.Infrastructure.Repositories
             await conn.OpenAsync();
             // Save on the space type itself
             await using var stCmd = new SqlCommand(
-                "UPDATE dbo.WN_SpaceTypes SET RentAccountId = @RentAccountId, DepositAccountId = @DepositAccountId WHERE IdGUID = @IdGUID",
+                "UPDATE dbo.WN_SpaceTypes SET RentAccountId = @RentAccountId, SecurityDepositAccountId = @SecurityDepositAccountId WHERE IdGUID = @IdGUID",
                 conn);
             stCmd.Parameters.AddWithValue("@RentAccountId", rentAccountId);
-            stCmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
+            stCmd.Parameters.AddWithValue("@SecurityDepositAccountId", (object?)depositAccountId ?? DBNull.Value);
             stCmd.Parameters.AddWithValue("@IdGUID", spaceTypeGuid);
             await stCmd.ExecuteNonQueryAsync();
             // Bulk update all spaces of this type
             await using var spCmd = new SqlCommand(
-                "UPDATE dbo.WN_Spaces SET RentAccountId = @RentAccountId, DepositAccountId = @DepositAccountId WHERE SpaceTypeId = @SpaceTypeId",
+                "UPDATE dbo.WN_Spaces SET RentAccountId = @RentAccountId, SecurityDepositAccountId = @SecurityDepositAccountId WHERE SpaceTypeId = @SpaceTypeId",
                 conn);
             spCmd.Parameters.AddWithValue("@RentAccountId", rentAccountId);
-            spCmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
+            spCmd.Parameters.AddWithValue("@SecurityDepositAccountId", (object?)depositAccountId ?? DBNull.Value);
             spCmd.Parameters.Add("@SpaceTypeId", SqlDbType.UniqueIdentifier).Value = Guid.Parse(spaceTypeGuid);
             await spCmd.ExecuteNonQueryAsync();
         }

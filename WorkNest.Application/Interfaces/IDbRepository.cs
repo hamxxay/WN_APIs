@@ -41,6 +41,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid);
         Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid);
         Task<IDictionary<string, object?>?> GetBookingByChallanAsync(string challanNumber);
+        Task<IEnumerable<IDictionary<string, object?>>> GetBookingDetailsAsync(string bookingGuid);
         Task<IDictionary<string, object?>> CreateBookingAsync(string userGuid, string spaceGuid, string start,
             string end, string notes, double amount, string? paymentMethod, string? paymentRef,
             string? customerCode = null);
@@ -61,7 +62,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(string userGuid);
         Task<IDictionary<string, object?>> CreatePaymentAsync(string userGuid, string bookingGuid, double amount,
             string method, string transactionRef);
-        Task InsertDepositPaymentAsync(string userGuid, string bookingGuid, double amount, int depositAccountId);
+        Task InsertDepositPaymentAsync(string userGuid, string bookingGuid, double amount, int securityDepositAccountId);
         Task UpdatePaymentStatusByRefAsync(string transactionRef, string status);
         Task UpdatePaymentStatusByGuidAsync(string guid, string status);
         Task SoftDeletePaymentAsync(string guid);

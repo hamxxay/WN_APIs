@@ -22,6 +22,15 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("api/booking/{id}/details")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetDetails(string id)
+        {
+            var result = await _bookings.GetBookingByIdAsync(id, string.Empty);
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
+        }
+
         [HttpGet("api/booking/available-spaces")]
         [AllowAnonymous]
         public async Task<IActionResult> AvailableSpaces(

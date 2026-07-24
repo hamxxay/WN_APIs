@@ -26,14 +26,18 @@ namespace WorkNest.Application.Services
         {
             var data = await _db.GetBookingByGuidAsync(id);
             if (data is null) return ApiResponse.Fail("Booking not found");
-            return ApiResponse.Ok(data);
+            var bookingGuid = data.TryGetValue("idGuid", out var g) ? g?.ToString() : id;
+            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
+            return ApiResponse.Ok(new { booking = data, bookingDetails = details });
         }
 
         public async Task<ApiResponse> GetBookingByChallanAsync(string challanNumber)
         {
             var data = await _db.GetBookingByChallanAsync(challanNumber);
             if (data is null) return ApiResponse.Fail("Challan not found");
-            return ApiResponse.Ok(data);
+            var bookingGuid = data.TryGetValue("idGuid", out var g) ? g?.ToString() : null;
+            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
+            return ApiResponse.Ok(new { booking = data, bookingDetails = details });
         }
 
         public async Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month)
@@ -96,24 +100,27 @@ namespace WorkNest.Application.Services
             var bookingGuid       = booking.TryGetValue("idGUID", out var g) ? g?.ToString()
                                   : booking.TryGetValue("NewId",  out var n) ? n?.ToString()
                                   : booking.TryGetValue("id",     out var i) ? i?.ToString() : null;
-            var depositAccountId  = booking.TryGetValue("DepositAccountId", out var da) && da is not null
+            var depositAccountId  = booking.TryGetValue("SecurityDepositAccountId", out var da) && da is not null
                                   ? Convert.ToInt32(da) : (int?)null;
 
             // Create separate deposit payment if this is a Private Office
             if (securityDeposit > 0 && depositAccountId.HasValue && bookingGuid is not null)
                 await _db.InsertDepositPaymentAsync(userId, bookingGuid, securityDeposit, depositAccountId.Value);
 
+            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
+
             return ApiResponse.Ok(new
             {
                 id               = bookingGuid,
                 spaceId          = request.SpaceId,
-                rentAccountId    = booking.TryGetValue("RentAccountId",    out var ra) ? ra : null,
-                depositAccountId = depositAccountId,
+                rentAccountId    = booking.TryGetValue("RentAccountId", out var ra) ? ra : null,
+                securityDepositAccountId = depositAccountId,
                 bookingAmount    = request.TotalAmount ?? 0,
                 securityDeposit  = securityDeposit,
                 totalAmount      = totalAmount,
                 challanNumber    = booking.TryGetValue("ChallanNumber", out var cn) ? cn?.ToString() : null,
                 validity         = booking.TryGetValue("Validity",      out var vl) ? vl : null,
+                bookingDetails   = details,
             }, "Admin booking created successfully.");
         }
 
@@ -177,6 +184,9 @@ namespace WorkNest.Application.Services
                 request.Notes ?? "", request.TotalAmount ?? 0,
                 request.PaymentMethod, request.PaymentRef, request.Capacity);
 
+            var bookingGuid = result.TryGetValue("bookingGuid", out var bg) ? bg?.ToString() : null;
+            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
+
             return ApiResponse.Ok(new
             {
                 success           = true,
@@ -190,6 +200,7 @@ namespace WorkNest.Application.Services
                 challanNumber     = result.TryGetValue("challanNumber",     out var cn)  ? cn?.ToString()  : null,
                 validity          = result.TryGetValue("validity",          out var vl)  ? vl  : null,
                 securityDeposit   = result.TryGetValue("securityDeposit",   out var sd)  ? sd  : null,
+                bookingDetails    = details,
             }, "Booking created with auto-assigned space.");
         }
 
@@ -198,7 +209,7 @@ namespace WorkNest.Application.Services
             var booking = await _db.GetBookingByGuidAsync(bookingGuid);
             if (booking is null) return ApiResponse.Fail("Booking not found.");
 
-            if (!booking.TryGetValue("AccountId", out var rawId) || rawId is null)
+            if (!booking.TryGetValue("BankAccountId", out var rawId) || rawId is null)
                 return ApiResponse.Fail("No bank account linked to this booking.");
 
             var accountId = Convert.ToInt32(rawId);

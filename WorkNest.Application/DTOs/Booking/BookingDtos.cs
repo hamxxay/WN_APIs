@@ -1,5 +1,14 @@
 namespace WorkNest.Application.DTOs.Booking
 {
+    public class BookingDetailDto
+    {
+        public string? IdGuid { get; set; }
+        public string? FeeType { get; set; }
+        public decimal Amount { get; set; }
+        public int? AccountId { get; set; }
+        public string? AccountName { get; set; }
+    }
+
     public class GuestDetails
     {
         public string Name { get; set; } = string.Empty;

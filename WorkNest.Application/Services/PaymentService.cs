@@ -42,6 +42,11 @@ namespace WorkNest.Application.Services
                 paymentStatus  = r.TryGetValue("PaymentStatus",  out var ps) ? ps?.ToString() : null,
                 transactionRef = r.TryGetValue("TransactionRef", out var tr) ? tr?.ToString() : null,
                 paidAt         = r.TryGetValue("PaidAt",         out var pa) ? pa?.ToString() : null,
+                challanNumber  = r.TryGetValue("ChallanNumber",  out var cn) ? cn?.ToString() : null,
+                validity       = r.TryGetValue("Validity",       out var v)  ? v?.ToString()  : null,
+                spaceName      = r.TryGetValue("SpaceName",      out var sn) ? sn?.ToString() : null,
+                startDateTime  = r.TryGetValue("StartDateTime",  out var sd) ? sd?.ToString() : null,
+                endDateTime    = r.TryGetValue("EndDateTime",    out var ed) ? ed?.ToString() : null,
             });
         }
 
