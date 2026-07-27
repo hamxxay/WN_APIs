@@ -71,6 +71,13 @@ namespace WorkNest.Application.DTOs.Booking
         public string SpaceId { get; set; } = string.Empty;
     }
 
+    public class ExtendChallanValidityRequest
+    {
+        public int BookingId { get; set; }
+        public string NewExpiryDate { get; set; } = string.Empty;
+        public string? Remarks { get; set; }
+    }
+
     public class BookingDto
     {
         public string? IdGuid { get; set; }

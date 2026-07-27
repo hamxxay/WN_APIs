@@ -40,6 +40,19 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new { booking = data, bookingDetails = details });
         }
 
+        public async Task<ApiResponse> SearchChallanAsync(string query)
+        {
+            var data = await _db.SearchChallanAsync(query);
+            if (data is null) return ApiResponse.Fail("No challan found for the given search term.");
+            return ApiResponse.Ok(data);
+        }
+
+        public async Task<ApiResponse> ExtendChallanValidityAsync(int bookingId, string newExpiryDate, string updatedBy, string? remarks)
+        {
+            await _db.ExtendChallanValidityAsync(bookingId, newExpiryDate, updatedBy, remarks);
+            return ApiResponse.Ok("Challan validity extended successfully.");
+        }
+
         public async Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month)
         {
             var result = await _db.GetBookingCalendarAsync(spaceId, year, month);

@@ -446,6 +446,28 @@ namespace WorkNest.Infrastructure.Repositories
             return await r.ReadAsync() ? RowToDictionary(r) : null;
         }
 
+        public async Task<IDictionary<string, object?>?> SearchChallanAsync(string query)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Challan_Search", conn);
+            cmd.Parameters.AddWithValue("@Query", query);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? RowToDictionary(r) : null;
+        }
+
+        public async Task ExtendChallanValidityAsync(int bookingId, string newExpiryDate, string updatedBy, string? remarks)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Challan_ExtendValidity", conn);
+            cmd.Parameters.AddWithValue("@BookingId", bookingId);
+            cmd.Parameters.AddWithValue("@NewExpiryDate", newExpiryDate);
+            cmd.Parameters.AddWithValue("@UpdatedBy", updatedBy);
+            cmd.Parameters.AddWithValue("@Remarks", (object?)remarks ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         public async Task<IEnumerable<IDictionary<string, object?>>> GetBookingDetailsAsync(string bookingGuid)
         {
             await using var conn = new SqlConnection(_connectionString);

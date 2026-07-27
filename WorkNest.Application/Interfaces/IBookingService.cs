@@ -9,6 +9,8 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<object>> GetAllBookingsAsync();
         Task<ApiResponse> GetBookingByIdAsync(string id, string userEmail);
         Task<ApiResponse> GetBookingByChallanAsync(string challanNumber);
+        Task<ApiResponse> SearchChallanAsync(string query);
+        Task<ApiResponse> ExtendChallanValidityAsync(int bookingId, string newExpiryDate, string updatedBy, string? remarks);
         Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail);
         Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month);
         Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail);

@@ -99,6 +99,38 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("api/challan/search")]
+        [Authorize(Roles = "admin,super_admin")]
+        public async Task<IActionResult> SearchChallan([FromQuery] string q)
+        {
+            if (string.IsNullOrWhiteSpace(q))
+                return BadRequest(new { isSuccessful = false, message = "Search query is required." });
+            var result = await _bookings.SearchChallanAsync(q.Trim());
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
+        }
+
+        [HttpPost("api/challan/extend-validity")]
+        [Authorize(Roles = "super_admin,superadmin")]
+        public async Task<IActionResult> ExtendChallanValidity(
+            [FromBody] ExtendChallanValidityRequest request,
+            [FromHeader(Name = "x-user-email")] string? userEmail)
+        {
+            if (request.BookingId <= 0 || string.IsNullOrWhiteSpace(request.NewExpiryDate))
+                return BadRequest(new { isSuccessful = false, message = "BookingId and NewExpiryDate are required." });
+            try
+            {
+                var result = await _bookings.ExtendChallanValidityAsync(
+                    request.BookingId, request.NewExpiryDate,
+                    userEmail ?? "system", request.Remarks);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
         [HttpGet("api/booking/{id:int}")]
         public async Task<IActionResult> Get(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
         {

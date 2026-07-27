@@ -41,6 +41,8 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid);
         Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid);
         Task<IDictionary<string, object?>?> GetBookingByChallanAsync(string challanNumber);
+        Task<IDictionary<string, object?>?> SearchChallanAsync(string query);
+        Task ExtendChallanValidityAsync(int bookingId, string newExpiryDate, string updatedBy, string? remarks);
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingDetailsAsync(string bookingGuid);
         Task<IDictionary<string, object?>> CreateBookingAsync(string userGuid, string spaceGuid, string start,
             string end, string notes, double amount, string? paymentMethod, string? paymentRef,
