@@ -3,6 +3,7 @@ appsettings.Development.json
 appsettings.*.json
 !appsettings.json
 
+publish/appsettings.json
 # .NET build output
 bin/
 obj/
@@ -16,3 +17,6 @@ Logs/
 # Rider / VS Code
 .idea/
 .vscode/
+
+schema.sql
+
