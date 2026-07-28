@@ -20,6 +20,12 @@
             Swagger/OpenAPI configuration with JWT bearer authentication support.
             </summary>
         </member>
+        <member name="M:WorkNest.API.Controllers.AccountCoaController.GetAll">
+            <summary>Returns all active bank accounts sorted alphabetically.</summary>
+        </member>
+        <member name="M:WorkNest.API.Controllers.AccountCoaController.GetById(System.Int32)">
+            <summary>Returns a single bank account by its primary key.</summary>
+        </member>
         <member name="T:WorkNest.API.Middleware.ExceptionMiddleware">
             <summary>
             Global exception middleware.

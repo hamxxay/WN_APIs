@@ -127,13 +127,20 @@ namespace WorkNest.Application.Services
                 ? await _db.GetUserByGuidAsync(guid) ?? emailRow
                 : emailRow;
 
+            // Look up customer code by email
+            var customers = await _db.SearchCustomersAsync(email);
+            var customerRow = customers.FirstOrDefault();
+            var customerCode = customerRow is not null && customerRow.TryGetValue("Code", out var cc)
+                ? cc?.ToString() : null;
+
             return ApiResponse.Ok(new
             {
-                id    = row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : guid,
-                email = row.TryGetValue("Email",       out var e) ? e?.ToString() ?? email : email,
-                name  = row.TryGetValue("Name",        out var n) ? n?.ToString() ?? "" : "",
-                phone = row.TryGetValue("PhoneNumber",  out var p) ? p?.ToString() ?? "" : "",
-                role  = Roles.FromRow(row),
+                id           = row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : guid,
+                email        = row.TryGetValue("Email",       out var e) ? e?.ToString() ?? email : email,
+                name         = row.TryGetValue("Name",        out var n) ? n?.ToString() ?? "" : "",
+                phone        = row.TryGetValue("PhoneNumber",  out var p) ? p?.ToString() ?? "" : "",
+                role         = Roles.FromRow(row),
+                customerCode,
             });
         }
 
