@@ -14,6 +14,7 @@ namespace WorkNest.Application.DTOs.SpaceConfig
         public string SpaceCategory { get; set; } = string.Empty;
         public string SpaceTypeId { get; set; } = string.Empty;
         public string LocationId { get; set; } = string.Empty;
+        public string? CodePrefix { get; set; }
         public double? PricePerHour { get; set; } = 0.0;
         public double? PricePerDay { get; set; } = 0.0;
         public double? PricePerMonth { get; set; } = 0.0;

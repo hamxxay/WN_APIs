@@ -40,8 +40,8 @@ namespace WorkNest.Application.Services
                 capacity      = r.TryGetValue("capacity",      out var cap) ? cap : null,
             });
 
-        public async Task<IEnumerable<object>> GetVacantSpacesAsync() =>
-            (await _db.GetVacantSpacesAsync()).Select(r => (object)new
+        public async Task<IEnumerable<object>> GetVacantSpacesAsync(int? branchId = null) =>
+            (await _db.GetVacantSpacesAsync(branchId)).Select(r => (object)new
             {
                 id            = r.TryGetValue("Id",           out var i)   ? i   : null,
                 idGuid        = r.TryGetValue("IdGUID",        out var g)   ? g?.ToString()  : null,

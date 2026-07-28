@@ -18,7 +18,7 @@ namespace WorkNest.Application.Interfaces
 
         // ── Space ─────────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpacesAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetVacantSpacesAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetVacantSpacesAsync(int? branchId = null);
         Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
             string? description, int? floorId, double? pricePerDay, double? pricePerHour, double? pricePerMonth,
             string? imageUrl, string? amenities, int? rentAccountId = null, int? depositAccountId = null);

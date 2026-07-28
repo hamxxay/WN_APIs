@@ -230,11 +230,12 @@ namespace WorkNest.Infrastructure.Repositories
             return await ReadAllRowsAsync(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetVacantSpacesAsync()
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetVacantSpacesAsync(int? branchId = null)
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
             await using var cmd = SP("dbo.WN_Spaces_GetVacant", conn);
+            cmd.Parameters.AddWithValue("@BranchId", (object?)branchId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }

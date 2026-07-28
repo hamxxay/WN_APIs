@@ -7,7 +7,7 @@ namespace WorkNest.Application.Interfaces
     public interface ISpaceService
     {
         Task<IEnumerable<object>> GetAllSpacesAsync();
-        Task<IEnumerable<object>> GetVacantSpacesAsync();
+        Task<IEnumerable<object>> GetVacantSpacesAsync(int? branchId = null);
         Task<ApiResponse> GetSpaceSummaryAsync(string id);
         Task<ApiResponse> CreateSpaceAsync(SpaceInsertRequest request);
         Task<ApiResponse> UpdateSpaceAsync(string id, SpaceUpdateRequest request);
