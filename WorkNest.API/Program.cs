@@ -1,8 +1,12 @@
 using System.Text;
+using System.Net;
+using System.Threading.RateLimiting;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Http;
 using Serilog;
 using WorkNest.API.Configurations;
 using WorkNest.API.Middleware;
@@ -73,6 +77,40 @@ try
         });
 
     builder.Services.AddAuthorization();
+
+    // ── Rate limiting (prevent abuse/DDoS) ─────────────────────────────────────
+    // Global per-IP token bucket limiter. Adjust TokenLimit / TokensPerPeriod to suit expected traffic.
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+        {
+            var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            return RateLimitPartition.GetTokenBucketLimiter(clientIp, _ => new TokenBucketRateLimiterOptions
+            {
+                // Allow short bursts up to TokenLimit, refill at TokensPerPeriod every ReplenishmentPeriod
+                TokenLimit = 120, // burst capacity
+                TokensPerPeriod = 60, // steady rate: 60 requests per minute
+                ReplenishmentPeriod = TimeSpan.FromMinutes(1),
+                AutoReplenishment = true,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            });
+        });
+
+        // Return 429 on rejection and add Retry-After when available
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.OnRejected = (context, ct) =>
+        {
+            if (context.Lease.TryGetMetadata("RetryAfter", out var retryAfter))
+            {
+                if (retryAfter is TimeSpan ts)
+                {
+                    context.HttpContext.Response.Headers.RetryAfter = ((int)ts.TotalSeconds).ToString();
+                }
+            }
+            return ValueTask.CompletedTask;
+        };
+    });
 
     // ── Database Settings ─────────────────────────────────────────────────────
     builder.Services.Configure<DatabaseSettings>(
