@@ -258,8 +258,6 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@PricePerMonth", (object?)pricePerMonth ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ImageUrl", (object?)imageUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)amenities ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SecurityDepositAccountId", (object?)depositAccountId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -1195,7 +1193,6 @@ namespace WorkNest.Infrastructure.Repositories
                 {
                     var dbCat = cat.ToString()!.Trim();
                     var input = category.Trim();
-                    // Match if equal OR if the space type name contains the category keyword
                     if (string.Equals(dbCat, input, StringComparison.OrdinalIgnoreCase) ||
                         input.StartsWith(dbCat, StringComparison.OrdinalIgnoreCase))
                     {
@@ -1240,6 +1237,129 @@ namespace WorkNest.Infrastructure.Repositories
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return RowToDictionary(r);
             return new Dictionary<string, object?>();
+        }
+
+        // Multi-location config methods
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigsV2Async(
+            int? companyId, int? branchId, int? locationId)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_SpaceConfig_GetListV2", conn);
+            cmd.Parameters.AddWithValue("@CompanyId",  (object?)companyId  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@BranchId",   (object?)branchId   ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<int?> CreateSpaceConfigAsync(
+            string spaceCategory, int totalSpaces, string codePrefix, int minCode,
+            string? openingTime, string? closingTime, double? securityDeposit,
+            int? rentAccountId, int? depositAccountId, int? floorId,
+            double? pricePerHour, double? pricePerDay, double? pricePerMonth,
+            string? amenities, int? locationId, int? branchId, int? companyId,
+            int? spaceTypeId, string? createdBy)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_SpaceConfig_Insert", conn);
+            cmd.Parameters.AddWithValue("@SpaceCategory",    spaceCategory);
+            cmd.Parameters.AddWithValue("@TotalSpaces",      totalSpaces);
+            cmd.Parameters.AddWithValue("@CodePrefix",       codePrefix);
+            cmd.Parameters.AddWithValue("@MinCode",          minCode);
+            cmd.Parameters.AddWithValue("@OpeningTime",      (object?)openingTime      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ClosingTime",      (object?)closingTime      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityDeposit",  (object?)securityDeposit  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId",    (object?)rentAccountId    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@FloorId",          (object?)floorId          ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerHour",     (object?)pricePerHour     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerDay",      (object?)pricePerDay      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerMonth",    (object?)pricePerMonth    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Amenities",        (object?)amenities        ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId",       (object?)locationId       ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@BranchId",         (object?)branchId         ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CompanyId",        (object?)companyId        ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceTypeId",      (object?)spaceTypeId      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedBy",        (object?)createdBy        ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return row.TryGetValue("NewId", out var id) ? Convert.ToInt32(id) : (int?)null;
+            }
+            return null;
+        }
+
+        public async Task UpdateSpaceConfigV2Async(
+            int id, int totalSpaces, string codePrefix, int minCode,
+            string? openingTime, string? closingTime, double? securityDeposit,
+            int? rentAccountId, int? depositAccountId, int? floorId,
+            double? pricePerHour, double? pricePerDay, double? pricePerMonth,
+            string? amenities, string? updatedBy)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_SpaceConfig_Update", conn);
+            cmd.Parameters.AddWithValue("@Id",               id);
+            cmd.Parameters.AddWithValue("@TotalSpaces",      totalSpaces);
+            cmd.Parameters.AddWithValue("@CodePrefix",       codePrefix);
+            cmd.Parameters.AddWithValue("@MinCode",          minCode);
+            cmd.Parameters.AddWithValue("@OpeningTime",      (object?)openingTime      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ClosingTime",      (object?)closingTime      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityDeposit",  (object?)securityDeposit  ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId",    (object?)rentAccountId    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)depositAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@FloorId",          (object?)floorId          ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerHour",     (object?)pricePerHour     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerDay",      (object?)pricePerDay      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerMonth",    (object?)pricePerMonth    ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Amenities",        (object?)amenities        ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UpdatedBy",        (object?)updatedBy        ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task DeleteSpaceConfigAsync(int id)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_SpaceConfig_Delete", conn);
+            cmd.Parameters.AddWithValue("@Id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<IDictionary<string, object?>> GenerateSpacesFromConfigAsync(int configId)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_SpaceConfig_GenerateSpaces", conn);
+            cmd.Parameters.AddWithValue("@ConfigId", configId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync()) return RowToDictionary(r);
+            return new Dictionary<string, object?>();
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_SpaceConfig_GetSpaceStatus", conn);
+            cmd.Parameters.AddWithValue("@ConfigId", configId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> DeleteSpacesFromConfigAsync(
+            int configId, string? spaceGuids)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_SpaceConfig_DeleteSpaces", conn);
+            cmd.Parameters.AddWithValue("@ConfigId",   configId);
+            cmd.Parameters.AddWithValue("@SpaceGuids", (object?)spaceGuids ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
         }
 
         // ── Customer ──────────────────────────────────────────────────────────

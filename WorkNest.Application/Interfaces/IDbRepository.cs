@@ -126,6 +126,19 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(string spaceCategory,
             string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth,
             string? amenities = null);
+        // Multi-location config
+        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigsV2Async(int? companyId, int? branchId, int? locationId);
+        Task<int?> CreateSpaceConfigAsync(string spaceCategory, int totalSpaces, string codePrefix, int minCode,
+            string? openingTime, string? closingTime, double? securityDeposit, int? rentAccountId, int? depositAccountId,
+            int? floorId, double? pricePerHour, double? pricePerDay, double? pricePerMonth, string? amenities,
+            int? locationId, int? branchId, int? companyId, int? spaceTypeId, string? createdBy);
+        Task UpdateSpaceConfigV2Async(int id, int totalSpaces, string codePrefix, int minCode,
+            string? openingTime, string? closingTime, double? securityDeposit, int? rentAccountId, int? depositAccountId,
+            int? floorId, double? pricePerHour, double? pricePerDay, double? pricePerMonth, string? amenities, string? updatedBy);
+        Task DeleteSpaceConfigAsync(int id);
+        Task<IDictionary<string, object?>> GenerateSpacesFromConfigAsync(int configId);
+        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId);
+        Task<IEnumerable<IDictionary<string, object?>>> DeleteSpacesFromConfigAsync(int configId, string? spaceGuids);
 
         // ── Customer ──────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string search);

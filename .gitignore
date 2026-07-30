@@ -19,7 +19,7 @@ Logs/
 
 .idea/
 .vscode/
-
+SQL/
 schema.sql
 
 publish/appsettings.json
