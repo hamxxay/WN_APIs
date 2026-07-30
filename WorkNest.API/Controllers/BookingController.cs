@@ -23,7 +23,6 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/booking/{id}/details")]
-        [AllowAnonymous]
         public async Task<IActionResult> GetDetails(string id)
         {
             var result = await _bookings.GetBookingByIdAsync(id, string.Empty);
@@ -91,7 +90,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/booking/challan/{challanNumber}")]
-        [AllowAnonymous]
+        [Authorize(Roles = "admin,super_admin,receptionist")]
         public async Task<IActionResult> GetByChallan(string challanNumber)
         {
             var result = await _bookings.GetBookingByChallanAsync(challanNumber);

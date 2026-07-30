@@ -16,7 +16,6 @@ namespace WorkNest.API.Configurations
                     // Origins resolved at runtime via IConfiguration in middleware pipeline.
                     // The actual origins are injected via the named policy resolver below.
                     policy
-                        .SetIsOriginAllowed(_ => true) // overridden by WithOrigins at runtime
                         .AllowAnyMethod()
                         .AllowAnyHeader()
                         .AllowCredentials()

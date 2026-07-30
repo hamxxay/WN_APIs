@@ -14,7 +14,6 @@ namespace WorkNest.API.Controllers
 
         // ── Legacy ────────────────────────────────────────────
         [HttpGet("api/space-config")]
-        [AllowAnonymous]
         public async Task<IActionResult> Get() =>
             Ok(await _config.GetSpaceConfigAsync());
 
