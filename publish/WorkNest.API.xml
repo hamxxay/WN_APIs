@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>WorkNest.API</name>
+    </assembly>
+    <members>
+        <member name="T:WorkNest.API.Configurations.CorsConfig">
+            <summary>
+            CORS configuration — reads allowed origins from appsettings.json Cors:AllowedOrigins.
+            </summary>
+        </member>
+        <member name="T:WorkNest.API.Configurations.SwaggerConfig">
+            <summary>
+            Swagger/OpenAPI configuration with JWT bearer authentication support.
+            </summary>
+        </member>
+        <member name="M:WorkNest.API.Controllers.AccountCoaController.GetAll">
+            <summary>Returns all active bank accounts sorted alphabetically.</summary>
+        </member>
+        <member name="M:WorkNest.API.Controllers.AccountCoaController.GetById(System.Int32)">
+            <summary>Returns a single bank account by its primary key.</summary>
+        </member>
+        <member name="T:WorkNest.API.Middleware.ExceptionMiddleware">
+            <summary>
+            Global exception middleware.
+            Catches all unhandled exceptions, logs them via Serilog,
+            and returns a standardized ApiResponse JSON — never exposes stack traces.
+            </summary>
+        </member>
+        <member name="T:WorkNest.API.Middleware.RequestLoggingMiddleware">
+            <summary>
+            Logs every incoming request and outgoing response using Serilog.
+            </summary>
+        </member>
+        <member name="T:Program">
+            <summary>
+            Auto-generated public partial Program class for top-level statement apps.
+            </summary>
+        </member>
+    </members>
+</doc>

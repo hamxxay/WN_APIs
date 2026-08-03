@@ -42,7 +42,7 @@ try
     builder.Services.AddValidatorsFromAssemblyContaining<UserSyncRequestValidator>();
 
     // ── CORS ──────────────────────────────────────────────────────────────────
-    builder.Services.AddCorsConfiguration();
+    builder.Services.AddCorsConfiguration(builder.Configuration);
 
     // ── Swagger ───────────────────────────────────────────────────────────────
     builder.Services.AddSwaggerConfiguration();
@@ -115,6 +115,7 @@ try
     app.UseRouting();
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
+    app.UseCorsWithConfig();
     app.UseMiddleware<ExceptionMiddleware>();
     app.UseMiddleware<RequestLoggingMiddleware>();
 
@@ -130,7 +131,6 @@ try
         app.UseHsts();
         app.UseHttpsRedirection();
     }
-    app.UseCorsWithConfig();
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();

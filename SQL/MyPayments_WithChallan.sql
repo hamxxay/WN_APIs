@@ -1,2 +1,0 @@
--- Superseded by Challan_Migration.sql — run that file instead.
--- This file is kept for reference only.
