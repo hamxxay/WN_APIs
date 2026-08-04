@@ -5,6 +5,8 @@ namespace WorkNest.Application.Interfaces
         // ── User ──────────────────────────────────────────────────────────────
         Task<(int? NumericId, string? Guid)> SyncUserAsync(string email, string firstName, string lastName, string? phone);
         Task<(int? NumericId, string? Guid)> GetUserIdByEmailAsync(string email);
+        Task<(int? NumericId, string? Guid)> CreateUserAdminAsync(string email, string firstName, string? lastName,
+            string? phone, string? password, int? roleId, string? createdBy);
         Task<IEnumerable<IDictionary<string, object?>>> GetAllUsersAsync();
         Task<IDictionary<string, object?>?> GetUserByIdAsync(string id);
         Task<IDictionary<string, object?>?> GetUserByGuidAsync(string guid);

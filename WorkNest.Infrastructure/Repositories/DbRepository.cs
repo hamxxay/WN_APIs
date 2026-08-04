@@ -1,5 +1,5 @@
 using Microsoft.Data.SqlClient;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Configuration;
 using System.Data;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Helpers;
@@ -11,9 +11,10 @@ namespace WorkNest.Infrastructure.Repositories
     {
         private readonly string _connectionString;
 
-        public DbRepository(IOptions<DatabaseSettings> settings)
+        public DbRepository(IConfiguration configuration)
         {
-            _connectionString = settings.Value.ToConnectionString();
+            _connectionString = configuration.GetConnectionString("DefaultConnection")
+                ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found in configuration.");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
@@ -102,6 +103,32 @@ namespace WorkNest.Infrastructure.Repositories
                 return (
                     row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null,
                     row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null
+                );
+            }
+            return (null, null);
+        }
+
+        public async Task<(int? NumericId, string? Guid)> CreateUserAdminAsync(
+            string email, string firstName, string? lastName,
+            string? phone, string? password, int? roleId, string? createdBy)
+        {
+            await using var conn = new SqlConnection(_connectionString);
+            await conn.OpenAsync();
+            await using var cmd = SP("dbo.WN_Users_Insert", conn);
+            cmd.Parameters.AddWithValue("@FirstName",   firstName);
+            cmd.Parameters.AddWithValue("@LastName",    (object?)lastName   ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UserName",    email);
+            cmd.Parameters.AddWithValue("@Email",       email);
+            cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone      ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RoleId",      (object?)roleId     ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedBy",   (object?)createdBy  ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var row = RowToDictionary(r);
+                return (
+                    row.TryGetValue("NewId", out var id) ? Convert.ToInt32(id) : (int?)null,
+                    row.TryGetValue("NewIdGuid", out var g) ? g?.ToString() : null
                 );
             }
             return (null, null);

@@ -6,6 +6,12 @@ namespace WorkNest.Application.DTOs.User
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public string? Password { get; set; }
+        public string? Phone { get; set; }
+        public string? Code { get; set; }
+        public string? CnicOrPassport { get; set; }
+        public string? Address { get; set; }
+        public string? Role { get; set; }
+        public string? CreatedBy { get; set; }
     }
 
     public class UserUpdateRequest

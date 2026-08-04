@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.User;
 using WorkNest.Application.Interfaces;
@@ -7,19 +8,17 @@ using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
 {
-    /// <summary>
-    /// User management service.
-    /// Mirrors all Python user endpoints in main.py exactly.
-    /// </summary>
     public class UserService : IUserService
     {
         private readonly IDbRepository _db;
         private readonly ILogger<UserService> _logger;
+        private readonly IHttpContextAccessor _httpContext;
 
-        public UserService(IDbRepository db, ILogger<UserService> logger)
+        public UserService(IDbRepository db, ILogger<UserService> logger, IHttpContextAccessor httpContext)
         {
-            _db     = db;
-            _logger = logger;
+            _db          = db;
+            _logger      = logger;
+            _httpContext = httpContext;
         }
 
         public async Task<IEnumerable<object>> GetAllUsersAsync()
@@ -97,8 +96,24 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateUserAsync(UserCreateRequest request)
         {
-            var (id, guid) = await _db.SyncUserAsync(
-                request.Email, request.FirstName ?? "", request.LastName ?? "", null);
+            var roleId = string.IsNullOrEmpty(request.Role)
+                ? Roles.GeneralId
+                : Roles.ReverseMap.TryGetValue(request.Role.ToLower(), out var r) ? r : Roles.GeneralId;
+
+            var createdBy = _httpContext.HttpContext?.User
+                .FindFirst("sub")?.Value
+                ?? _httpContext.HttpContext?.User
+                .FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+            var (id, guid) = await _db.CreateUserAdminAsync(
+                request.Email,
+                request.FirstName ?? "",
+                request.LastName,
+                request.Phone,
+                request.Password,
+                roleId,
+                createdBy);
+
             return ApiResponse.Ok(new { id = guid ?? id?.ToString(), email = request.Email },
                 "User created successfully.");
         }

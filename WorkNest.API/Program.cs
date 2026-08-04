@@ -9,7 +9,6 @@ using WorkNest.API.Middleware;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
 using WorkNest.Application.Validators;
-using WorkNest.Infrastructure.Database;
 using WorkNest.Infrastructure.ExternalServices.Email;
 using WorkNest.Infrastructure.ExternalServices.PayFast;
 using WorkNest.Infrastructure.Repositories;
@@ -74,11 +73,8 @@ try
 
     builder.Services.AddAuthorization();
 
-    // ── Database Settings ─────────────────────────────────────────────────────
-    builder.Services.Configure<DatabaseSettings>(
-        builder.Configuration.GetSection("DatabaseSettings"));
-
     // ── Infrastructure Services ───────────────────────────────────────────────
+    builder.Services.AddHttpContextAccessor();
     builder.Services.AddScoped<IDbRepository, DbRepository>();
     builder.Services.AddScoped<IJwtService, JwtService>();
     builder.Services.AddScoped<IEncryptionService, EncryptionService>();
