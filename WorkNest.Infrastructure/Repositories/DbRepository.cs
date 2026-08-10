@@ -1360,11 +1360,53 @@ namespace WorkNest.Infrastructure.Repositories
         {
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
+
+            Guid? locationGuid = null;
+            Guid? spaceTypeGuid = null;
+
+            await using (var configCmd = new SqlCommand(
+                "SELECT l.IdGUID AS LocationGuid, st.IdGUID AS SpaceTypeGuid " +
+                "FROM dbo.WN_SpaceConfig sc " +
+                "JOIN dbo.WN_Locations l ON l.Id = sc.LocationId " +
+                "JOIN dbo.WN_SpaceTypes st ON st.Id = sc.SpaceTypeId " +
+                "WHERE sc.Id = @ConfigId AND sc.Status = 1", conn))
+            {
+                configCmd.Parameters.AddWithValue("@ConfigId", configId);
+                await using var configReader = await configCmd.ExecuteReaderAsync();
+                if (await configReader.ReadAsync())
+                {
+                    locationGuid = configReader["LocationGuid"] is Guid lg ? lg : null;
+                    spaceTypeGuid = configReader["SpaceTypeGuid"] is Guid stg ? stg : null;
+                }
+            }
+
             await using var cmd = SP("dbo.WN_SpaceConfig_GenerateSpaces", conn);
             cmd.Parameters.AddWithValue("@ConfigId", configId);
-            await using var r = await cmd.ExecuteReaderAsync();
-            if (await r.ReadAsync()) return RowToDictionary(r);
-            return new Dictionary<string, object?>();
+            IDictionary<string, object?>? result;
+            await using (var r = await cmd.ExecuteReaderAsync())
+            {
+                result = await r.ReadAsync() ? RowToDictionary(r) : null;
+            }
+
+            if (locationGuid.HasValue && spaceTypeGuid.HasValue)
+            {
+                await using var fix = new SqlCommand(
+                    "UPDATE s SET " +
+                    "    LocationIdInt  = COALESCE(s.LocationIdInt, l.Id), " +
+                    "    SpaceTypeIdInt = COALESCE(s.SpaceTypeIdInt, st.Id), " +
+                    "    IsActive       = COALESCE(s.IsActive, 1), " +
+                    "    Status         = COALESCE(s.Status, 1) " +
+                    "FROM dbo.WN_Spaces s " +
+                    "LEFT JOIN dbo.WN_Locations l ON l.IdGUID = s.LocationId " +
+                    "LEFT JOIN dbo.WN_SpaceTypes st ON st.IdGUID = s.SpaceTypeId " +
+                    "WHERE s.LocationId = @LocationGuid " +
+                    "  AND s.SpaceTypeId = @SpaceTypeGuid ", conn);
+                fix.Parameters.AddWithValue("@LocationGuid", locationGuid.Value);
+                fix.Parameters.AddWithValue("@SpaceTypeGuid", spaceTypeGuid.Value);
+                await fix.ExecuteNonQueryAsync();
+            }
+
+            return result ?? new Dictionary<string, object?>();
         }
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId)
