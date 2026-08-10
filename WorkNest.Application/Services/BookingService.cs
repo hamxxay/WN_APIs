@@ -1,287 +1,188 @@
 using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.Interfaces;
-using WorkNest.Common.Constants;
 using WorkNest.Common.Responses;
-using WorkNest.Application.DTOs.AccountCoa;
 
 namespace WorkNest.Application.Services
 {
     public class BookingService : IBookingService
     {
         private readonly IDbRepository _db;
-
         public BookingService(IDbRepository db) => _db = db;
 
-        public async Task<IEnumerable<object>> GetAllBookingsAsync() =>
-            (await _db.GetAllBookingsAsync()).Cast<object>();
-
-        public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail)
+        public async Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search)
         {
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return [];
-            return (await _db.GetMyBookingsAsync(userGuid)).Cast<object>();
+            var (rows, total) = await _db.GetBookingsAsync(page, limit, search);
+            return (rows.Cast<object>(), total);
         }
 
-        public async Task<ApiResponse> GetBookingByIdAsync(string id, string userEmail)
+        public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail) =>
+            (await _db.GetMyBookingsAsync(userEmail)).Cast<object>();
+
+        public async Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10) =>
+            (await _db.GetRecentBookingsAsync(top)).Cast<object>();
+
+        public async Task<ApiResponse> GetBookingByIdAsync(Guid publicId, string? userEmail)
         {
-            var data = await _db.GetBookingByGuidAsync(id);
+            var data = await _db.GetBookingByPublicIdAsync(publicId, userEmail);
             if (data is null) return ApiResponse.Fail("Booking not found");
-            var bookingGuid = data.TryGetValue("idGuid", out var g) ? g?.ToString() : id;
-            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
-            return ApiResponse.Ok(new { booking = data, bookingDetails = details });
-        }
-
-        public async Task<ApiResponse> GetBookingByChallanAsync(string challanNumber)
-        {
-            var data = await _db.GetBookingByChallanAsync(challanNumber);
-            if (data is null) return ApiResponse.Fail("Challan not found");
-            var bookingGuid = data.TryGetValue("idGuid", out var g) ? g?.ToString() : null;
-            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
-            return ApiResponse.Ok(new { booking = data, bookingDetails = details });
-        }
-
-        public async Task<ApiResponse> SearchChallanAsync(string query)
-        {
-            var data = await _db.SearchChallanAsync(query);
-            if (data is null) return ApiResponse.Fail("No challan found for the given search term.");
             return ApiResponse.Ok(data);
-        }
-
-        public async Task<ApiResponse> ExtendChallanValidityAsync(int bookingId, string newExpiryDate, string updatedBy, string? remarks)
-        {
-            await _db.ExtendChallanValidityAsync(bookingId, newExpiryDate, updatedBy, remarks);
-            return ApiResponse.Ok("Challan validity extended successfully.");
         }
 
         public async Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month)
         {
             var result = await _db.GetBookingCalendarAsync(spaceId, year, month);
             var bookedDates = new HashSet<string>();
-
-            foreach (var booking in result)
+            foreach (var b in result)
             {
-                var startStr = booking.TryGetValue("startDate", out var s) ? s?.ToString() : null;
-                var endStr   = booking.TryGetValue("endDate",   out var e) ? e?.ToString() : null;
-                if (startStr is null || endStr is null) continue;
-
-                var start = DateTime.Parse(startStr);
-                var end   = DateTime.Parse(endStr);
-                for (var d = start; d <= end; d = d.AddDays(1))
+                var s = b.TryGetValue("StartOn", out var sv) ? sv as DateTime? : null;
+                var e = b.TryGetValue("EndOn",   out var ev) ? ev as DateTime? : null;
+                if (s is null || e is null) continue;
+                for (var d = s.Value.Date; d <= e.Value.Date; d = d.AddDays(1))
                     bookedDates.Add(d.ToString("yyyy-MM-dd"));
             }
-
             return ApiResponse.Ok(new { bookedDates, bookings = result });
         }
 
-        public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request)
+        public async Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity)
         {
-            var email = request.CustomerEmail;
-            if (string.IsNullOrWhiteSpace(email))
-                return ApiResponse.Fail("CustomerEmail is required to create a booking.");
+            var result = await _db.GetAvailableSpacesForBookingAsync(spaceTypeId, startOn, endOn, capacity);
+            return ApiResponse.Ok(result);
+        }
 
-            var nameParts = (request.CustomerName ?? email).Split(' ', 2);
-            var (_, userId) = await _db.SyncUserAsync(
-                email,
-                nameParts[0],
-                nameParts.Length > 1 ? nameParts[1] : "",
-                request.Phone);
+        public async Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId)
+        {
+            var result = await _db.GetAvailableSpacesForReassignmentAsync(spaceTypeId, startOn, endOn, excludeBookingId);
+            return ApiResponse.Ok(result);
+        }
 
-            if (userId is null)
-                return ApiResponse.Fail("Failed to resolve user for booking.");
-
-            var spaceRow = await _db.GetSpaceSummaryAsync(request.SpaceId);
-            var spaceTypeName = spaceRow?.TryGetValue("SpaceTypeName", out var stn) == true ? stn?.ToString()
-                              : spaceRow?.TryGetValue("spaceTypeName", out var stn2) == true ? stn2?.ToString()
-                              : null;
-            var securityDeposit = spaceTypeName is not null
-                ? await _db.GetSecurityDepositAsync(spaceTypeName)
-                : 0;
-
-            var totalAmount = (request.TotalAmount ?? 0) + securityDeposit;
-
-            var booking = await _db.CreateBookingAsync(
-                userId,
-                request.SpaceId,
-                request.StartDateTime,
-                request.EndDateTime,
-                request.Notes ?? "Admin Booking",
-                totalAmount,
-                "Cash",
-                null,
-                request.CustomerCode);
-
-            var bookingGuid       = booking.TryGetValue("idGUID", out var g) ? g?.ToString()
-                                  : booking.TryGetValue("NewId",  out var n) ? n?.ToString()
-                                  : booking.TryGetValue("id",     out var i) ? i?.ToString() : null;
-            var depositAccountId  = booking.TryGetValue("SecurityDepositAccountId", out var da) && da is not null
-                                  ? Convert.ToInt32(da) : (int?)null;
-
-            // Create separate deposit payment if this is a Private Office
-            if (securityDeposit > 0 && depositAccountId.HasValue && bookingGuid is not null)
-                await _db.InsertDepositPaymentAsync(userId, bookingGuid, securityDeposit, depositAccountId.Value);
-
-            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
-
-            return ApiResponse.Ok(new
-            {
-                id               = bookingGuid,
-                spaceId          = request.SpaceId,
-                rentAccountId    = booking.TryGetValue("RentAccountId", out var ra) ? ra : null,
-                securityDepositAccountId = depositAccountId,
-                bookingAmount    = request.TotalAmount ?? 0,
-                securityDeposit  = securityDeposit,
-                totalAmount      = totalAmount,
-                challanNumber    = booking.TryGetValue("ChallanNumber", out var cn) ? cn?.ToString() : null,
-                validity         = booking.TryGetValue("Validity",      out var vl) ? vl : null,
-                bookingDetails   = details,
-            }, "Admin booking created successfully.");
+        public async Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity)
+        {
+            var result = await _db.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity);
+            return ApiResponse.Ok(result);
         }
 
         public async Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail)
         {
-            var spaceIdStr = request.SpaceId?.ToString();
-            var isAuto     = string.IsNullOrWhiteSpace(spaceIdStr)
-                          || spaceIdStr == "auto"
-                          || (request.SpaceType is not null && string.IsNullOrWhiteSpace(spaceIdStr));
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            if (userRow is null) return ApiResponse.Fail("User not found");
+            var userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : (int?)null;
+            if (userId is null) return ApiResponse.Fail("User ID not resolved");
 
-            double amount  = request.TotalAmount ?? 0;
-            string? method = null, refNum = null;
-            if (request.Payment is not null)
-            {
-                amount = request.Payment.Amount;
-                method = request.Payment.Method;
-                refNum = request.Payment.ReferenceNumber ?? request.Payment.BankDepositId ?? "";
-            }
+            var pricingId = await ResolvePricingIdAsync(request.SpaceId);
+            if (pricingId == 0) return ApiResponse.Fail("No active pricing found for this space.");
 
-            if (isAuto)
-            {
-                var spaceType = request.SpaceType
-                    ?? (request.SpaceId is string s ? s : "Private Office");
-
-                var result = await _db.CreateBookingWithAutoAssignmentAsync(
-                    userEmail, spaceType, request.StartDateTime, request.EndDateTime,
-                    request.Notes ?? "", amount, method, refNum);
-
-                return ApiResponse.Ok(new
-                {
-                    id                = result.TryGetValue("idGUID", out var g) ? g : result.TryGetValue("id", out var i) ? i : null,
-                    assignedSpaceId   = result.TryGetValue("assignedSpaceId",   out var asi) ? asi : null,
-                    assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
-                    spaceType         = result.TryGetValue("spaceType",         out var st)  ? st  : null,
-                    totalAmount       = amount,
-                    isAutoAssigned    = true,
-                }, "Booking successful with auto-assigned space.");
-            }
-
-            // Manual booking — resolve user GUID then book by space GUID
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return ApiResponse.Fail("User not found");
-
-            var spaceGuid = spaceIdStr!;
-            var booking = await _db.CreateBookingAsync(userGuid, spaceGuid,
+            var result = await _db.InsertBookingAsync(
+                userId.Value, request.SpaceId, pricingId,
                 request.StartDateTime, request.EndDateTime,
-                request.Notes ?? "", amount, method, refNum);
+                request.Notes, userId, userEmail);
 
-            return ApiResponse.Ok(new
+            return ApiResponse.Ok(result, "Booking created.");
+        }
+
+        public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request, string? actorEmail)
+        {
+            int userId = request.UserId;
+
+            // Resolve userId from GUID if int not provided
+            if (userId == 0 && !string.IsNullOrWhiteSpace(request.UserIdGuid)
+                && Guid.TryParse(request.UserIdGuid, out var userGuid))
             {
-                id          = booking.TryGetValue("idGUID", out var bg) ? bg : booking.TryGetValue("id", out var bi) ? bi : null,
-                spaceId     = request.SpaceId,
-                totalAmount = amount,
-            }, "Booking successful.");
+                var userRow = await _db.GetUserByPublicIdAsync(userGuid);
+                if (userRow is not null)
+                    userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : 0;
+            }
+
+            if (userId == 0 && !string.IsNullOrWhiteSpace(request.CustomerEmail))
+            {
+                var (id, _) = await _db.SyncUserAsync(request.CustomerEmail, request.CustomerName, request.Phone);
+                if (id is null) return ApiResponse.Fail("Failed to resolve user.");
+                userId = id.Value;
+            }
+
+            int spaceId = request.SpaceId;
+
+            // Resolve spaceId from GUID if int not provided
+            if (spaceId == 0 && !string.IsNullOrWhiteSpace(request.SpaceIdGuid))
+            {
+                var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
+                var match = rows.FirstOrDefault(r =>
+                    r.TryGetValue("PublicId", out var g) &&
+                    string.Equals(g?.ToString(), request.SpaceIdGuid, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                    spaceId = match.TryGetValue("Id", out var sid) ? Convert.ToInt32(sid) : 0;
+            }
+
+            if (spaceId == 0)
+                return ApiResponse.Fail("SpaceId is required.");
+
+            int? actorId = null;
+            if (!string.IsNullOrWhiteSpace(actorEmail))
+            {
+                var actorRow = await _db.GetUserByEmailAsync(actorEmail);
+                actorId = actorRow?.TryGetValue("Id", out var aid) == true ? Convert.ToInt32(aid) : (int?)null;
+            }
+
+            var pricingId = await ResolvePricingIdAsync(spaceId);
+            if (pricingId == 0) return ApiResponse.Fail("No active pricing found for this space.");
+
+            var result = await _db.InsertBookingAsync(
+                userId, spaceId, pricingId,
+                request.StartDateTime, request.EndDateTime,
+                request.Notes, actorId, request.CustomerEmail);
+
+            return ApiResponse.Ok(result, "Admin booking created.");
         }
 
         public async Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail)
         {
-            var result = await _db.CreateSmartBookingAsync(
-                userEmail, request.SpaceCategory, request.StartDateTime, request.EndDateTime,
-                request.Notes ?? "", request.TotalAmount ?? 0,
-                request.PaymentMethod, request.PaymentRef, request.Capacity);
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            if (userRow is null) return ApiResponse.Fail("User not found");
+            var actorId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : (int?)null;
 
-            var bookingGuid = result.TryGetValue("bookingGuid", out var bg) ? bg?.ToString() : null;
-            var details = bookingGuid is not null ? await _db.GetBookingDetailsAsync(bookingGuid) : [];
+            var result = await _db.InsertSmartBookingAsync(
+                userEmail, request.CategoryCode,
+                request.StartDateTime, request.EndDateTime,
+                request.Capacity, request.Notes, actorId);
 
-            return ApiResponse.Ok(new
-            {
-                success           = true,
-                id                = result.TryGetValue("id",               out var id)  ? id  : null,
-                bookingId         = result.TryGetValue("idGUID",           out var g)   ? g   : result.TryGetValue("id", out var i) ? i : null,
-                assignedSpace     = result.TryGetValue("assignedSpaceCode", out var asc) ? asc : null,
-                assignedSpaceName = result.TryGetValue("assignedSpaceName", out var asn) ? asn : null,
-                assignedSpaceId   = result.TryGetValue("assignedSpaceId",   out var asi) ? asi : null,
-                spaceCategory     = result.TryGetValue("spaceCategory",     out var sc)  ? sc  : null,
-                totalAmount       = request.TotalAmount,
-                challanNumber     = result.TryGetValue("challanNumber",     out var cn)  ? cn?.ToString()  : null,
-                validity          = result.TryGetValue("validity",          out var vl)  ? vl  : null,
-                securityDeposit   = result.TryGetValue("securityDeposit",   out var sd)  ? sd  : null,
-                bookingDetails    = details,
-            }, "Booking created with auto-assigned space.");
+            return ApiResponse.Ok(result, "Smart booking created.");
         }
 
-        public async Task<ApiResponse> GetBookingAccountAsync(string bookingGuid)
+        public async Task<ApiResponse> UpdateBookingAsync(int id, BookingUpdateRequest request, int? actorId)
         {
-            var booking = await _db.GetBookingByGuidAsync(bookingGuid);
-            if (booking is null) return ApiResponse.Fail("Booking not found.");
-
-            if (!booking.TryGetValue("BankAccountId", out var rawId) || rawId is null)
-                return ApiResponse.Fail("No bank account linked to this booking.");
-
-            var accountId = Convert.ToInt32(rawId);
-            var account   = await _db.GetAccountCoaByIdAsync(accountId);
-            if (account is null) return ApiResponse.Fail("Linked bank account not found.");
-
-            return ApiResponse.Ok(new AccountCoaDto
-            {
-                AccountId   = accountId,
-                Description = account.TryGetValue("Description", out var d) && d is not null ? d.ToString()! : string.Empty,
-            });
-        }
-
-        public async Task<ApiResponse> CancelBookingAsync(string id, string userEmail)
-        {
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return ApiResponse.Fail("User not found");
-
-            await _db.CancelBookingAsync(userGuid, id);
-            return ApiResponse.Ok("Booking cancelled.");
-        }
-
-        public async Task<ApiResponse> UpdateBookingStatusAsync(string id, string status)
-        {
-            var statusVal = AppConstants.BookingStatus.Map.TryGetValue(status, out var v) ? v : 1;
-            await _db.UpdateBookingStatusAsync(id, statusVal);
-            return ApiResponse.Ok("Booking status updated.");
-        }
-
-        public async Task<ApiResponse> UpdateBookingAsync(string id, BookingRequest request)
-        {
-            await _db.UpdateBookingDatesAsync(id, request.StartDateTime, request.EndDateTime);
+            await _db.UpdateBookingAsync(id, request.StartDateTime, request.EndDateTime, request.Notes, actorId);
             return ApiResponse.Ok("Booking updated.");
         }
 
-        public async Task<ApiResponse> ReassignBookingAsync(string id, ReassignBookingRequest request, string adminEmail)
+        public async Task<ApiResponse> UpdateBookingStatusAsync(int id, byte statusId, int? actorId)
         {
-            var result = await _db.ReassignBookingAsync(id, request.SpaceId, adminEmail);
-            return ApiResponse.Ok(result, "Booking reassigned successfully.");
+            await _db.UpdateBookingStatusAsync(id, statusId, actorId);
+            return ApiResponse.Ok("Booking status updated.");
         }
 
-        public async Task<ApiResponse> GetAvailableSpacesAsync(string spaceType, string start, string end)
+        public async Task<ApiResponse> CancelBookingAsync(int id, string userEmail, string? cancelReason)
         {
-            var result = await _db.GetAvailableSpacesAsync(spaceType, start, end);
-            return ApiResponse.Ok(result);
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            var actorId = userRow?.TryGetValue("Id", out var uid) == true ? Convert.ToInt32(uid) : (int?)null;
+            await _db.CancelBookingAsync(id, userEmail, cancelReason, actorId);
+            return ApiResponse.Ok("Booking cancelled.");
         }
 
-        public async Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(
-            string spaceType, string start, string end, int? excludeBookingId)
+        public async Task<ApiResponse> ReassignBookingAsync(int id, ReassignBookingRequest request, string userEmail)
         {
-            var result = await _db.GetAvailableSpacesForReassignmentAsync(spaceType, start, end, excludeBookingId);
-            return ApiResponse.Ok(result);
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            var actorId = userRow?.TryGetValue("Id", out var uid) == true ? Convert.ToInt32(uid) : (int?)null;
+            var newPricingId = await ResolvePricingIdAsync(request.NewSpaceId);
+            await _db.ReassignBookingAsync(id, request.NewSpaceId, newPricingId, userEmail, actorId);
+            return ApiResponse.Ok("Booking reassigned.");
         }
 
-        public async Task<ApiResponse> GetSmartAvailableSpacesAsync(
-            string spaceCategory, string start, string end, int? capacity)
+        // ── Helpers ───────────────────────────────────────────────────────────
+
+        private async Task<int> ResolvePricingIdAsync(int spaceId)
         {
-            var result = await _db.GetAvailableSpacesV2Async(spaceCategory, start, end, capacity);
-            return ApiResponse.Ok(result);
+            var pricing = await _db.GetActivePricingForSpaceAsync(spaceId);
+            return pricing?.TryGetValue("PricingId", out var pid) == true && pid is not null
+                ? Convert.ToInt32(pid) : 0;
         }
     }
 }

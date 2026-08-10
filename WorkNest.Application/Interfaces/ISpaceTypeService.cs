@@ -6,8 +6,9 @@ namespace WorkNest.Application.Interfaces
     public interface ISpaceTypeService
     {
         Task<IEnumerable<object>> GetAllSpaceTypesAsync();
-        Task<ApiResponse> CreateSpaceTypeAsync(SpaceTypeUpsertRequest request);
-        Task<ApiResponse> UpdateSpaceTypeAsync(string id, SpaceTypeUpsertRequest request);
-        Task<ApiResponse> DeleteSpaceTypeAsync(string id);
+        Task<(IEnumerable<object> Items, int Total)> GetSpaceTypesAsync(int page, int limit);
+        Task<ApiResponse> CreateSpaceTypeAsync(SpaceTypeUpsertRequest request, int? actorId);
+        Task<ApiResponse> UpdateSpaceTypeAsync(int id, SpaceTypeUpsertRequest request, int? actorId);
+        Task<ApiResponse> DeleteSpaceTypeAsync(int id);
     }
 }

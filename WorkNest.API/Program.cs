@@ -90,7 +90,6 @@ try
     builder.Services.AddScoped<ILocationService, LocationService>();
     builder.Services.AddScoped<ISpaceTypeService, SpaceTypeService>();
     builder.Services.AddScoped<IPricingPlanService, PricingPlanService>();
-    builder.Services.AddScoped<IMembershipService, MembershipService>();
     builder.Services.AddScoped<IContactService, ContactService>();
     builder.Services.AddScoped<IGalleryService, GalleryService>();
     builder.Services.AddScoped<ISpaceConfigService, SpaceConfigService>();
@@ -100,14 +99,16 @@ try
     builder.Services.AddScoped<IFloorService, FloorService>();
     builder.Services.AddScoped<IAmenityService, AmenityService>();
     builder.Services.AddScoped<ICustomerService, CustomerService>();
+    builder.Services.AddScoped<IMembershipService, MembershipService>();
     builder.Services.AddScoped<IAccountCoaService, AccountCoaService>();
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
 
-    // ── Path base for IIS sub-application ──────────────────────────────────────
-    app.UsePathBase("/WorkNest");
+    // ── Path base for IIS sub-application (production only) ──────────────────
+    if (!app.Environment.IsDevelopment())
+        app.UsePathBase("/WorkNest");
     app.UseRouting();
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
@@ -118,7 +119,10 @@ try
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
-        c.SwaggerEndpoint("/WorkNest/swagger/v1/swagger.json", "WorkNest API v1");
+        var swaggerPath = app.Environment.IsDevelopment()
+            ? "/swagger/v1/swagger.json"
+            : "/WorkNest/swagger/v1/swagger.json";
+        c.SwaggerEndpoint(swaggerPath, "WorkNest API v1");
         c.RoutePrefix = "swagger";
     });
 

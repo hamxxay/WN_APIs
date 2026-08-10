@@ -17,7 +17,7 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateAmenityAsync(AmenityUpsertRequest request)
         {
-            var id = await _db.CreateAmenityAsync(request.Name);
+            var id = await _db.InsertAmenityAsync(request.Name, request.Icon);
             return ApiResponse.Ok(new { id }, "Amenity created.");
         }
     }

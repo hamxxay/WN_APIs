@@ -12,19 +12,19 @@ namespace WorkNest.API.Controllers
         private readonly IPlanFeatureService _features;
         public PlanFeatureController(IPlanFeatureService features) => _features = features;
 
-        [HttpGet("api/planfeature/by-plan/{planId}")]
+        [HttpGet("api/planfeature/by-plan/{planId:int}")]
         public async Task<IActionResult> GetByPlan(int planId) =>
             Ok(await _features.GetByPlanAsync(planId));
 
         [HttpPost("api/planfeature")]
         public async Task<IActionResult> Create([FromBody] PlanFeatureRequest request) =>
-            StatusCode(201, await _features.CreateAsync(request));
+            StatusCode(201, await _features.CreateAsync(request, null));
 
-        [HttpPut("api/planfeature/{id}")]
-        public async Task<IActionResult> Update(int id, [FromBody] PlanFeatureRequest request) =>
+        [HttpPut("api/planfeature/{id:int}")]
+        public async Task<IActionResult> Update(int id, [FromBody] PlanFeatureUpdateRequest request) =>
             Ok(await _features.UpdateAsync(id, request));
 
-        [HttpDelete("api/planfeature/{id}")]
+        [HttpDelete("api/planfeature/{id:int}")]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _features.DeleteAsync(id));
     }

@@ -11,40 +11,49 @@ namespace WorkNest.Application.Services
 
         public ContactService(IDbRepository db, IEmailService email)
         {
-            _db    = db;
+            _db = db;
             _email = email;
         }
 
-        public async Task<IEnumerable<object>> GetAllContactsAsync() =>
-            (await _db.GetAllContactsAsync()).Cast<object>();
-
-        public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string? userEmail)
+        public async Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search)
         {
-            var emailToResolve = userEmail ?? request.Email;
-            var (userId, _)    = await _db.GetUserIdByEmailAsync(emailToResolve);
-            var newId          = await _db.BookTourAsync(request.FullName, request.Email,
-                request.Message, request.Phone, userId);
-
-            // Fire-and-forget email notification — mirrors Python try/except pattern
-            _ = Task.Run(async () =>
-            {
-                try { await _email.SendTourNotificationAsync(request.FullName, request.Email, request.Phone, request.Message); }
-                catch { /* swallow — notification is non-critical */ }
-            });
-
-            return ApiResponse.Ok(new { id = newId, fullName = request.FullName, email = request.Email },
-                "Contact recorded.");
+            var (rows, total) = await _db.GetContactsAsync(page, limit, search);
+            return (rows.Cast<object>(), total);
         }
 
-        public async Task<ApiResponse> UpdateContactStatusAsync(string id, string status)
+        public async Task<IEnumerable<object>> GetRecentContactsAsync(int top) =>
+            (await _db.GetRecentContactsAsync(top)).Cast<object>();
+
+        public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail)
         {
-            await _db.UpdateContactStatusAsync(id, status);
+            int? userId = null;
+            if (!string.IsNullOrWhiteSpace(userEmail))
+            {
+                var (id, _) = await _db.GetUserIdByEmailAsync(userEmail);
+                userId = id;
+            }
+
+            var (newId, publicId) = await _db.InsertContactAsync(
+                contactType, userId, request.FullName, request.Email, request.Phone, request.Message);
+
+            _ = Task.Run(async () =>
+            {
+                try { await _email.SendTourNotificationAsync(request.FullName, request.Email, request.Phone ?? "", request.Message ?? ""); }
+                catch { }
+            });
+
+            return ApiResponse.Ok(new { id = newId, publicId }, "Contact recorded.");
+        }
+
+        public async Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId)
+        {
+            await _db.UpdateContactStatusAsync(id, statusId, actorId);
             return ApiResponse.Ok("Contact status updated.");
         }
 
-        public async Task<ApiResponse> DeleteContactAsync(string id)
+        public async Task<ApiResponse> DeleteContactAsync(int id)
         {
-            await _db.SoftDeleteContactAsync(id);
+            await _db.DeleteContactAsync(id);
             return ApiResponse.Ok("Contact deleted.");
         }
     }

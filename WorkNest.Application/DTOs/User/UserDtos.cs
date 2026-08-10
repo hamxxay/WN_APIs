@@ -3,23 +3,28 @@ namespace WorkNest.Application.DTOs.User
     public class UserCreateRequest
     {
         public string Email { get; set; } = string.Empty;
-        public string? FirstName { get; set; }
-        public string? LastName { get; set; }
+        public string? Name { get; set; }
         public string? Password { get; set; }
         public string? Phone { get; set; }
-        public string? Code { get; set; }
         public string? CnicOrPassport { get; set; }
         public string? Address { get; set; }
+        public string? AvatarUrl { get; set; }
+        public string? Notes { get; set; }
         public string? Role { get; set; }
-        public string? CreatedBy { get; set; }
+        public int? CompanyId { get; set; }
+        public int? CityId { get; set; }
     }
 
     public class UserUpdateRequest
     {
-        public string Email { get; set; } = string.Empty;
-        public string? FirstName { get; set; }
-        public string? LastName { get; set; }
+        public string? Name { get; set; }
         public string? Phone { get; set; }
+        public int? CompanyId { get; set; }
+        public int? CityId { get; set; }
+        public string? Address { get; set; }
+        public string? CnicOrPassport { get; set; }
+        public string? AvatarUrl { get; set; }
+        public string? Notes { get; set; }
     }
 
     public class UserRoleUpdateRequest
@@ -29,12 +34,13 @@ namespace WorkNest.Application.DTOs.User
 
     public class UserDto
     {
-        public string? Id { get; set; }
+        public int? Id { get; set; }
+        public string? PublicId { get; set; }
         public string? Email { get; set; }
-        public string? FirstName { get; set; }
+        public string? Name { get; set; }
         public string? Phone { get; set; }
         public bool IsActive { get; set; }
-        public string? CreatedAt { get; set; }
+        public string? CreatedOn { get; set; }
         public string? Role { get; set; }
     }
 

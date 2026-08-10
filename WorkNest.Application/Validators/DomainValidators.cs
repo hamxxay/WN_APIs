@@ -16,8 +16,8 @@ namespace WorkNest.Application.Validators
         {
             RuleFor(x => x.FullName).NotEmpty().MaximumLength(255);
             RuleFor(x => x.Email).NotEmpty().EmailAddress();
-            RuleFor(x => x.Message).NotEmpty().MaximumLength(100);
-            RuleFor(x => x.Phone).NotEmpty().MaximumLength(20);
+            RuleFor(x => x.Message).MaximumLength(1000);
+            RuleFor(x => x.Phone).MaximumLength(20);
         }
     }
 
@@ -52,7 +52,7 @@ namespace WorkNest.Application.Validators
     {
         public SmartBookingRequestValidator()
         {
-            RuleFor(x => x.SpaceCategory).NotEmpty();
+            RuleFor(x => x.CategoryCode).NotEmpty();
             RuleFor(x => x.StartDateTime).NotEmpty();
             RuleFor(x => x.EndDateTime).NotEmpty();
         }
@@ -62,7 +62,7 @@ namespace WorkNest.Application.Validators
     {
         public PayFastInitiateRequestValidator()
         {
-            RuleFor(x => x.BookingId).NotEmpty();
+            RuleFor(x => x.BookingId).GreaterThan(0);
             RuleFor(x => x.CustomerEmail).NotEmpty().EmailAddress();
             RuleFor(x => x.CustomerName).NotEmpty();
         }
@@ -73,6 +73,8 @@ namespace WorkNest.Application.Validators
         public LocationUpsertRequestValidator()
         {
             RuleFor(x => x.Name).NotEmpty();
+            RuleFor(x => x.BranchId).GreaterThan(0);
+            RuleFor(x => x.CityId).GreaterThan(0);
         }
     }
 
@@ -80,7 +82,7 @@ namespace WorkNest.Application.Validators
     {
         public SpaceConfigUpdateRequestValidator()
         {
-            RuleFor(x => x.TotalSpaces).GreaterThanOrEqualTo(1);
+            // No required fields — updatedBy is optional
         }
     }
 

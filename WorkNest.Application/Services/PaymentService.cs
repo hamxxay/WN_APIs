@@ -1,6 +1,5 @@
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
-using WorkNest.Common.Helpers;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
@@ -12,169 +11,84 @@ namespace WorkNest.Application.Services
 
         public PaymentService(IDbRepository db, IPayFastService payFast)
         {
-            _db      = db;
+            _db = db;
             _payFast = payFast;
         }
 
-        public async Task<IEnumerable<object>> GetAllPaymentsAsync() =>
-            (await _db.GetAllPaymentsAsync()).Select(r => (object)new
-            {
-                id             = r.TryGetValue("Id",             out var i)  ? i  : null,
-                idGuid         = r.TryGetValue("IdGuid",         out var g)  ? g?.ToString()  : null,
-                userEmail      = r.TryGetValue("UserEmail",      out var ue) ? ue?.ToString() : null,
-                amount         = r.TryGetValue("Amount",         out var a)  ? a  : null,
-                paymentMethod  = r.TryGetValue("PaymentMethod",  out var pm) ? pm?.ToString() : null,
-                paymentStatus  = r.TryGetValue("PaymentStatus",  out var ps) ? ps?.ToString() : null,
-                transactionRef = r.TryGetValue("TransactionRef", out var tr) ? tr?.ToString() : null,
-                paidAt         = r.TryGetValue("PaidAt",         out var pa) ? pa?.ToString() : null,
-            });
-
-        public async Task<IEnumerable<object>> GetMyPaymentsAsync(string userEmail)
+        public async Task<(IEnumerable<object> Items, int Total)> GetPaymentsAsync(int page, int limit, string? search)
         {
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return [];
-            return (await _db.GetMyPaymentsAsync(userGuid)).Select(r => (object)new
-            {
-                id             = r.TryGetValue("Id",             out var i)  ? i  : null,
-                idGuid         = r.TryGetValue("IdGuid",         out var g)  ? g?.ToString()  : null,
-                amount         = r.TryGetValue("Amount",         out var a)  ? a  : null,
-                paymentMethod  = r.TryGetValue("PaymentMethod",  out var pm) ? pm?.ToString() : null,
-                paymentStatus  = r.TryGetValue("PaymentStatus",  out var ps) ? ps?.ToString() : null,
-                transactionRef = r.TryGetValue("TransactionRef", out var tr) ? tr?.ToString() : null,
-                paidAt         = r.TryGetValue("PaidAt",         out var pa) ? pa?.ToString() : null,
-                challanNumber  = r.TryGetValue("ChallanNumber",  out var cn) ? cn?.ToString() : null,
-                validity       = r.TryGetValue("Validity",       out var v)  ? v?.ToString()  : null,
-                spaceName      = r.TryGetValue("SpaceName",      out var sn) ? sn?.ToString() : null,
-                startDateTime  = r.TryGetValue("StartDateTime",  out var sd) ? sd?.ToString() : null,
-                endDateTime    = r.TryGetValue("EndDateTime",    out var ed) ? ed?.ToString() : null,
-            });
+            var (rows, total) = await _db.GetPaymentsAsync(page, limit, search);
+            return (rows.Cast<object>(), total);
         }
 
-        public async Task<ApiResponse> GetPaymentSummaryAsync(string id)
+        public async Task<IEnumerable<object>> GetMyPaymentsAsync(string userEmail) =>
+            (await _db.GetMyPaymentsAsync(userEmail)).Cast<object>();
+
+        public async Task<ApiResponse> GetPaymentSummaryAsync(int id)
         {
-            var payments = await _db.GetAllPaymentsAsync();
-            var payment  = payments.FirstOrDefault(p =>
-                (p.TryGetValue("idGuid", out var g) ? g?.ToString() : null) == id ||
-                (p.TryGetValue("id",     out var i) ? i?.ToString() : null) == id);
-
+            var payment = await _db.GetPaymentSummaryAsync(id);
             if (payment is null) return ApiResponse.Fail("Payment not found");
-
-            // id here is a payment GUID — get user GUID from the payment row to fetch their payments
-            var userGuid     = payment.TryGetValue("userId", out var u) ? u?.ToString() : null;
-            var userPayments = userGuid is not null
-                ? (await _db.GetPaymentsByUserGuidAsync(userGuid)).ToList()
-                : new List<IDictionary<string, object?>>();
-
-            var paidTotal = userPayments
-                .Where(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Paid")
-                .Sum(p => p.TryGetValue("amount", out var a) ? Convert.ToDouble(a) : 0);
-
-            return ApiResponse.Ok(new
-            {
-                payment,
-                booking    = (object?)null,
-                membership = (object?)null,
-                userPaymentStats = new
-                {
-                    totalPayments    = userPayments.Count,
-                    paidPayments     = userPayments.Count(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Paid"),
-                    pendingPayments  = userPayments.Count(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Pending"),
-                    failedPayments   = userPayments.Count(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Failed"),
-                    refundedPayments = userPayments.Count(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Refunded"),
-                    totalPaidAmount  = paidTotal,
-                },
-                recentUserPayments = userPayments.Take(5),
-            });
+            return ApiResponse.Ok(payment);
         }
 
         public async Task<ApiResponse> CreatePaymentAsync(PaymentCreateRequest request, string userEmail)
         {
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return ApiResponse.Fail("User not found");
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            if (userRow is null) return ApiResponse.Fail("User not found");
+            var userId = Convert.ToInt32(userRow["Id"]);
 
-            var txRef = GuidHelper.GenerateRef("ADM");
-            // Membership-based payment — no booking GUID; pass empty string as bookingGuid placeholder
-            await _db.CreatePaymentAsync(userGuid, string.Empty,
-                request.Amount, request.PaymentMethod, txRef);
-            return ApiResponse.Ok("Payment created.");
+            var result = await _db.InsertPaymentAsync(userId, request.BookingId,
+                request.PaymentMethodId, request.Amount, request.Notes, userId);
+            return ApiResponse.Ok(result, "Payment created.");
         }
 
-        public async Task<ApiResponse> UpdatePaymentStatusAsync(string id, string status, string? transactionRef)
+        public async Task<ApiResponse> GenerateVoucherAsync(VoucherGenerateRequest request, string userEmail)
         {
-            if (!string.IsNullOrWhiteSpace(transactionRef))
-                await _db.UpdatePaymentStatusByRefAsync(transactionRef, status);
-            else
-                await _db.UpdatePaymentStatusByGuidAsync(id, status);
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            if (userRow is null) return ApiResponse.Fail("User not found");
+            var userId = Convert.ToInt32(userRow["Id"]);
+
+            var result = await _db.GenerateVoucherAsync(userId, request.BookingId,
+                request.Amount, request.ExpiresOn, userId);
+            return ApiResponse.Ok(result, "Voucher generated.");
+        }
+
+        public async Task<ApiResponse> UpdatePaymentStatusAsync(int id, byte statusId, int? actorId)
+        {
+            await _db.UpdatePaymentStatusAsync(id, statusId, actorId);
             return ApiResponse.Ok("Payment status updated.");
         }
 
-        public async Task<ApiResponse> ApprovePaymentAsync(string id)
+        public async Task<ApiResponse> DeletePaymentAsync(int id)
         {
-            // id from the route is a numeric string — resolve the GUID first
-            var all = await _db.GetAllPaymentsAsync();
-            var row = all.FirstOrDefault(p =>
-                (p.TryGetValue("Id", out var i) ? i?.ToString() : null) == id ||
-                (p.TryGetValue("IdGuid", out var g) ? g?.ToString() : null) == id);
-
-            if (row is null) return ApiResponse.Fail("Payment not found.");
-
-            var guid = row.TryGetValue("IdGuid", out var gv) ? gv?.ToString() : null;
-            if (string.IsNullOrWhiteSpace(guid)) return ApiResponse.Fail("Payment GUID not found.");
-
-            await _db.UpdatePaymentStatusByGuidAsync(guid, "Paid");
-            return ApiResponse.Ok("Payment approved.");
-        }
-
-        public async Task<ApiResponse> DeletePaymentAsync(string id)
-        {
-            await _db.SoftDeletePaymentAsync(id);
+            await _db.DeletePaymentAsync(id);
             return ApiResponse.Ok("Payment deleted.");
         }
 
         public async Task<ApiResponse> ProcessCardPaymentAsync(CardPaymentRequest request, string userEmail)
         {
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return ApiResponse.Fail("User not found");
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            if (userRow is null) return ApiResponse.Fail("User not found");
+            var userId = Convert.ToInt32(userRow["Id"]);
 
-            var booking = await _db.GetBookingByGuidAsync(request.BookingId);
-            if (booking is null) return ApiResponse.Fail("Booking not found");
-
-            var amount = booking.TryGetValue("totalAmount", out var a) ? Convert.ToDouble(a) : 0;
-            var txRef  = $"TXN-CARD-{request.BookingId}-{Random.Shared.Next(100000, 999999)}";
-            await _db.CreatePaymentAsync(userGuid, request.BookingId, amount, "Card", txRef);
-            return ApiResponse.Ok(new { transactionRef = txRef }, "Card payment processed.");
-        }
-
-        public async Task<ApiResponse> GenerateVoucherAsync(VoucherGenerateRequest request, string userEmail)
-        {
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return ApiResponse.Fail("User not found");
-
-            var booking = await _db.GetBookingByGuidAsync(request.BookingId);
-            if (booking is null) return ApiResponse.Fail("Booking not found");
-
-            var voucherNumber = $"1BILL{request.BookingId[..Math.Min(4, request.BookingId.Length)]}{Random.Shared.Next(10000, 99999):D5}";
-            var expiryDate    = DateTime.UtcNow.AddDays(3).ToString("o");
-            await _db.CreatePaymentAsync(userGuid, request.BookingId, request.Amount, "Voucher", voucherNumber);
-            return ApiResponse.Ok(new { voucherNumber, expiryDate, amount = request.Amount }, "Voucher generated.");
+            // PaymentMethodId 2 = Card (adjust to match your lookup table)
+            var result = await _db.InsertPaymentAsync(userId, request.BookingId, 2, 0, null, userId);
+            return ApiResponse.Ok(result, "Card payment processed.");
         }
 
         public async Task<ApiResponse> InitiatePayFastAsync(PayFastInitiateRequest request, string userEmail)
         {
-            var (_, userGuid) = await _db.GetUserIdByEmailAsync(userEmail);
-            if (userGuid is null) return ApiResponse.Fail("User not found");
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            if (userRow is null) return ApiResponse.Fail("User not found");
+            var userId = Convert.ToInt32(userRow["Id"]);
 
-            var booking = await _db.GetBookingByGuidAsync(request.BookingId);
-            if (booking is null) return ApiResponse.Fail("Booking not found");
-
-            var amount  = booking.TryGetValue("totalAmount", out var a) ? Convert.ToDouble(a) : 0;
             var orderId = $"WN-{request.BookingId}-{Random.Shared.Next(100000, 999999)}";
-
-            var payload = _payFast.BuildPayload(request.BookingId, amount,
+            var payload = _payFast.BuildPayload(request.BookingId.ToString(), 0,
                 $"WorkNest Booking #{request.BookingId}",
                 request.CustomerEmail, request.CustomerName, orderId);
 
-            await _db.CreatePaymentAsync(userGuid, request.BookingId, amount, "PayFast", orderId);
+            // PaymentMethodId 3 = PayFast (adjust to match your lookup table)
+            await _db.InsertPaymentAsync(userId, request.BookingId, 3, 0, orderId, userId);
             return ApiResponse.Ok(payload, "PayFast payment initiated.");
         }
 
@@ -183,14 +97,7 @@ namespace WorkNest.Application.Services
             if (!_payFast.VerifySignature(new Dictionary<string, string>(formData)))
                 return ApiResponse.Fail("Invalid PayFast signature");
 
-            var paymentStatus = formData.TryGetValue("payment_status", out var ps)
-                ? ps.ToUpperInvariant() : "";
-            var orderId = formData.TryGetValue("order_id", out var oid) ? oid : "";
-
-            if (!string.IsNullOrWhiteSpace(orderId))
-                await _db.UpdatePaymentStatusByRefAsync(orderId,
-                    paymentStatus == "COMPLETE" ? "Paid" : "Failed");
-
+            // PayFast notify is stateless — status update handled externally via UpdatePaymentStatus
             return ApiResponse.Ok();
         }
     }

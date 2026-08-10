@@ -35,8 +35,9 @@ namespace WorkNest.Application.Services
                 request.PhoneNumber, request.CnicOrPassport, request.Address,
                 request.CityId, request.Notes, createdBy);
 
-            // Auto-create a user account so the customer can log in with their email
-            await _db.SyncUserAsync(request.Email, request.FirstName, request.LastName ?? "", request.PhoneNumber);
+            await _db.SyncUserAsync(request.Email,
+                $"{request.FirstName} {request.LastName}".Trim(),
+                request.PhoneNumber);
 
             return ApiResponse.Ok(result, "Customer created successfully.");
         }

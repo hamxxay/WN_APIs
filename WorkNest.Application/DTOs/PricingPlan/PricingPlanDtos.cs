@@ -3,22 +3,23 @@ namespace WorkNest.Application.DTOs.PricingPlan
     public class PricingPlanUpsertRequest
     {
         public string Name { get; set; } = string.Empty;
-        public double Price { get; set; }
-        public string? BillingCycle { get; set; }
+        public string? Description { get; set; }
+        public byte BillingPeriodId { get; set; }
+        public decimal Price { get; set; }
         public int? IncludesHours { get; set; }
-        public bool? IsActive { get; set; } = true;
+        public string CurrencyCode { get; set; } = "PKR";
     }
 
     public class PricingPlanDto
     {
         public int? Id { get; set; }
-        public string? IdGuid { get; set; }
+        public string? PublicId { get; set; }
         public string? Name { get; set; }
-        public double Price { get; set; }
         public string? Description { get; set; }
-        public string? BillingCycle { get; set; }
-        public int IncludesHours { get; set; }
-        public bool IsActive { get; set; }
+        public decimal Price { get; set; }
+        public byte BillingPeriodId { get; set; }
+        public int? IncludesHours { get; set; }
+        public string CurrencyCode { get; set; } = "PKR";
         public List<object> Features { get; set; } = [];
     }
 }

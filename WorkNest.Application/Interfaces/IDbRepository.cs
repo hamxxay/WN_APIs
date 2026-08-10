@@ -3,165 +3,124 @@ namespace WorkNest.Application.Interfaces
     public interface IDbRepository
     {
         // ── User ──────────────────────────────────────────────────────────────
-        Task<(int? NumericId, string? Guid)> SyncUserAsync(string email, string firstName, string lastName, string? phone);
-        Task<(int? NumericId, string? Guid)> GetUserIdByEmailAsync(string email);
-        Task<(int? NumericId, string? Guid)> CreateUserAdminAsync(string email, string firstName, string? lastName,
-            string? phone, string? password, int? roleId, string? createdBy);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllUsersAsync();
-        Task<IDictionary<string, object?>?> GetUserByIdAsync(string id);
-        Task<IDictionary<string, object?>?> GetUserByGuidAsync(string guid);
+        Task<(int? Id, string? PublicId)> SyncUserAsync(string email, string? name, string? phone, string? passwordHash = null);
+        Task<(int? Id, string? PublicId)> GetUserIdByEmailAsync(string email);
         Task<IDictionary<string, object?>?> GetUserByEmailAsync(string email);
-        Task UpdateUserAsync(string guid, string name, string? phone);
-        Task SoftDeleteUserAsync(string guid);
-        Task SetUserStatusAsync(string guid, int status);
-        Task SetUserRoleAsync(string guid, int roleId);
-        Task<IEnumerable<IDictionary<string, object?>>> GetBookingsByUserGuidAsync(string userGuid);
-        Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByUserGuidAsync(string userGuid);
+        Task<IDictionary<string, object?>?> GetUserByIdAsync(int id);
+        Task<IDictionary<string, object?>?> GetUserByPublicIdAsync(Guid publicId);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetUsersAsync(int page, int limit, string? search);
+        Task<IEnumerable<IDictionary<string, object?>>> GetUserHistoryAsync(int userId);
+        Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById);
+        Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes);
+        Task DeleteUserAsync(int id);
+        Task SetUserStatusAsync(int id, bool isActive);
+        Task SetUserRoleAsync(int id, int roleId);
 
         // ── Space ─────────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllSpacesAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetVacantSpacesAsync(int? branchId = null);
-        Task<int?> InsertSpaceAsync(string name, string locationGuid, string spaceTypeGuid, string? code,
-            string? description, int? floorId, double? pricePerDay, double? pricePerHour, double? pricePerMonth,
-            string? imageUrl, string? amenities, int? rentAccountId = null, int? depositAccountId = null);
-        Task UpdateSpaceAsync(string spaceGuid, string? name, string? locationGuid, string? spaceTypeGuid,
-            string? code, string? description, int? floorId, double? pricePerDay,
-            double? pricePerHour, double? pricePerMonth, string? imageUrl, string? amenities,
-            int? rentAccountId = null, int? depositAccountId = null);
-        Task SoftDeleteSpaceAsync(string guid);
-        Task<int?> GetSpaceNumericIdByGuidAsync(string guid);
-        Task<IDictionary<string, object?>?> GetSpaceSummaryAsync(string guid);
-        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceReservationsAsync(string guid);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string spaceType, string start, string end);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesByTypeAsync(string spaceType, string? start, string? end);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpacesAsync(int page, int limit, string? search);
+        Task<IDictionary<string, object?>?> GetSpaceSummaryAsync(int id);
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn);
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailabilityCountsAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesV2Async(string spaceCategory, string start, string end, int? capacity);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(string spaceType, string start, string end, int? excludeBookingId);
+        Task<(int? Id, string? PublicId)> InsertSpaceAsync(string name, int locationId, int spaceTypeId, string? code, string? description, int? floorId, string? imageUrl, int capacity, int? createdById);
+        Task UpdateSpaceAsync(int id, string? name, int? locationId, int? spaceTypeId, string? code, string? description, int? floorId, string? imageUrl, int? capacity, int? updatedById);
+        Task DeleteSpaceAsync(int id);
 
         // ── Booking ───────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllBookingsAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userGuid);
-        Task<IDictionary<string, object?>?> GetBookingByGuidAsync(string bookingGuid);
-        Task<IDictionary<string, object?>?> GetBookingByChallanAsync(string challanNumber);
-        Task<IDictionary<string, object?>?> SearchChallanAsync(string query);
-        Task ExtendChallanValidityAsync(int bookingId, string newExpiryDate, string updatedBy, string? remarks);
-        Task<IEnumerable<IDictionary<string, object?>>> GetBookingDetailsAsync(string bookingGuid);
-        Task<IDictionary<string, object?>> CreateBookingAsync(string userGuid, string spaceGuid, string start,
-            string end, string notes, double amount, string? paymentMethod, string? paymentRef,
-            string? customerCode = null);
-        Task<IDictionary<string, object?>> CreateBookingWithAutoAssignmentAsync(string userEmail,
-            string spaceType, string start, string end, string notes, double amount,
-            string? paymentMethod, string? paymentRef);
-        Task<IDictionary<string, object?>> CreateSmartBookingAsync(string userEmail, string spaceCategory,
-            string start, string end, string notes, double amount, string? paymentMethod,
-            string? paymentRef, int? capacity);
-        Task CancelBookingAsync(string userGuid, string bookingGuid);
-        Task UpdateBookingStatusAsync(string guid, int statusVal);
-        Task UpdateBookingDatesAsync(string guid, string start, string end);
-        Task<IDictionary<string, object?>> ReassignBookingAsync(string bookingGuid, string newSpaceGuid, string adminEmail);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetBookingsAsync(int page, int limit, string? search);
+        Task<IDictionary<string, object?>?> GetBookingByPublicIdAsync(Guid publicId, string? userEmail = null);
+        Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userEmail);
+        Task<IEnumerable<IDictionary<string, object?>>> GetRecentBookingsAsync(int top = 10);
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingCalendarAsync(int spaceId, int year, int month);
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null);
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId);
+        Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null);
+        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail);
+        Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById);
+        Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
+        Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
+        Task CancelBookingAsync(int id, string? userEmail, string? cancelReason, int? updatedById);
+        Task ReassignBookingAsync(int id, int newSpaceId, int newPricingId, string? userEmail, int? updatedById);
 
         // ── Payment ───────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllPaymentsAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(string userGuid);
-        Task<IDictionary<string, object?>> CreatePaymentAsync(string userGuid, string bookingGuid, double amount,
-            string method, string transactionRef);
-        Task InsertDepositPaymentAsync(string userGuid, string bookingGuid, double amount, int securityDepositAccountId);
-        Task UpdatePaymentStatusByRefAsync(string transactionRef, string status);
-        Task UpdatePaymentStatusByGuidAsync(string guid, string status);
-        Task SoftDeletePaymentAsync(string guid);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetPaymentsAsync(int page, int limit, string? search);
+        Task<IDictionary<string, object?>?> GetPaymentSummaryAsync(int id);
+        Task<IEnumerable<IDictionary<string, object?>>> GetMyPaymentsAsync(string userEmail);
+        Task<IDictionary<string, object?>> InsertPaymentAsync(int userId, int? bookingId, byte paymentMethodId, decimal amount, string? notes, int? createdById);
+        Task<IDictionary<string, object?>> GenerateVoucherAsync(int userId, int? bookingId, decimal amount, DateTime expiresOn, int? createdById);
+        Task UpdatePaymentStatusAsync(int id, byte statusId, int? updatedById);
+        Task DeletePaymentAsync(int id);
+
+        // ── Membership ────────────────────────────────────────────────────────
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetMembershipsAsync(int page, int limit, string? search);
+        Task<IDictionary<string, object?>?> GetMembershipSummaryAsync(int id);
+        Task<IDictionary<string, object?>> InsertMembershipAsync(int userId, int planId, DateTime startOn, DateTime? endOn, bool autoRenew, string? notes, int? createdById);
+        Task UpdateMembershipStatusAsync(int id, byte statusId, int? updatedById);
+        Task DeleteMembershipAsync(int id);
+
+        // ── PricingPlan (WN_PricingPlans — old membership plans) ─────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllPricingPlansAsync();
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetPricingPlansAsync(int page, int limit);
+        Task<IDictionary<string, object?>?> GetPricingPlanSummaryAsync(int id);
+        Task<(int? Id, string? PublicId)> InsertPricingPlanAsync(string name, string? description, byte billingPeriodId, decimal price, int? includesHours, string currencyCode, int? createdById);
+        Task UpdatePricingPlanAsync(int id, string? name, string? description, byte? billingPeriodId, decimal? price, int? includesHours, string? currencyCode);
+        Task DeletePricingPlanAsync(int id);
+
+        // ── PlanFeature ───────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetPlanFeaturesByPlanIdAsync(int planId);
+        Task<(int? Id, string? PublicId)> InsertPlanFeatureAsync(int planId, string featureName, string? featureValue, short sortOrder);
+        Task UpdatePlanFeatureAsync(int id, string? featureName, string? featureValue, short? sortOrder);
+        Task DeletePlanFeatureAsync(int id);
 
         // ── Location ──────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllLocationsAsync();
-        Task<int?> CreateLocationAsync(string name, string? address, int? cityId, string? openingTime,
-            string? closingTime, bool isActive, int? branchId);
-        Task UpdateLocationAsync(string guid, string name, string? address, int? cityId,
-            string? openingTime, string? closingTime, bool isActive, int? branchId);
-        Task SoftDeleteLocationAsync(string guid);
-
-        // ── SpaceType ─────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync();
-        Task<int?> CreateSpaceTypeAsync(string name, int capacity, bool hourlyAllowed);
-        Task UpdateSpaceTypeAsync(string guid, string name, int capacity, bool hourlyAllowed);
-        Task BulkUpdateSpaceRentAccountAsync(string spaceTypeGuid, int rentAccountId, int? depositAccountId = null);
-        Task SoftDeleteSpaceTypeAsync(string guid);
-
-        // ── PricingPlan ───────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllPricingPlansAsync();
-        Task<int?> CreatePricingPlanAsync(string name, double price, string? billingCycle, int includesHours, bool isActive);
-        Task UpdatePricingPlanAsync(int id, string name, double price, string? billingCycle, int includesHours, bool isActive);
-        Task SoftDeletePricingPlanAsync(int id);
-        Task<IEnumerable<IDictionary<string, object?>>> GetMembershipsByPlanIdAsync(int planId);
-
-        // ── Membership ────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllMembershipsAsync();
-        Task<int?> CreateMembershipAsync(string? userId, int planId, string startDate);
-        Task UpdateMembershipStatusAsync(int id, string status);
-        Task SoftDeleteMembershipAsync(int id);
-        Task<IEnumerable<IDictionary<string, object?>>> GetPaymentsByMembershipIdAsync(int membershipId);
-
-        // ── Contact ───────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllContactsAsync();
-        Task<int?> BookTourAsync(string name, string email, string message, string phone, int? userId);
-        Task UpdateContactStatusAsync(string guid, string status);
-        Task SoftDeleteContactAsync(string guid);
-
-        // ── Gallery ───────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllGalleryImagesAsync();
-        Task<int?> CreateGalleryImageAsync(string? title, string imageUrl, int sortOrder, bool isActive);
-        Task UpdateGalleryImageAsync(string id, string? title, string imageUrl, int sortOrder, bool isActive);
-        Task SoftDeleteGalleryImageAsync(string id);
-
-        // ── Floor ─────────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllFloorsAsync(int? locationId);
-        Task<int?> CreateFloorAsync(int locationId, string floorName);
-
-        // ── Amenity ───────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllAmenitiesAsync();
-        Task<int?> CreateAmenityAsync(string name);
-
-        // ── SpaceConfig ───────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigAsync();
-        Task<double> GetSecurityDepositAsync(string category);
-        Task UpdateSpaceConfigAsync(string category, int totalSpaces, string? defaultCapacities,
-            string? openingTime, string? closingTime, string? adminEmail, double? securityDeposit);
-        Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(string spaceCategory,
-            string spaceTypeId, string locationId, double pricePerHour, double pricePerDay, double pricePerMonth,
-            string? amenities = null);
-        // Multi-location config
-        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigsV2Async(int? companyId, int? branchId, int? locationId);
-        Task<int?> CreateSpaceConfigAsync(string spaceCategory, int totalSpaces, string codePrefix, int minCode,
-            string? openingTime, string? closingTime, double? securityDeposit, int? rentAccountId, int? depositAccountId,
-            int? floorId, double? pricePerHour, double? pricePerDay, double? pricePerMonth, string? amenities,
-            int? locationId, int? branchId, int? companyId, int? spaceTypeId, string? createdBy);
-        Task UpdateSpaceConfigV2Async(int id, int totalSpaces, string codePrefix, int minCode,
-            string? openingTime, string? closingTime, double? securityDeposit, int? rentAccountId, int? depositAccountId,
-            int? floorId, double? pricePerHour, double? pricePerDay, double? pricePerMonth, string? amenities, string? updatedBy);
-        Task DeleteSpaceConfigAsync(int id);
-        Task<IDictionary<string, object?>> GenerateSpacesFromConfigAsync(int configId);
-        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId);
-        Task<IEnumerable<IDictionary<string, object?>>> DeleteSpacesFromConfigAsync(int configId, string? spaceGuids);
-
-        // ── Customer ──────────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string search);
-        Task<IEnumerable<IDictionary<string, object?>>> SearchCustomersAsync(string query);
-        Task<IDictionary<string, object?>?> GetCustomerByGuidAsync(string guid);
-        Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email,
-            string? phoneNumber, string? cnicOrPassport, string? address, int? cityId, string? notes, string? createdBy);
-        Task UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email,
-            string? phoneNumber, string? cnicOrPassport, string? address, int? cityId, string? notes, bool? isActive);
-        Task DeleteCustomerAsync(string guid);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetLocationsAsync(int page, int limit, string? search);
+        Task<(int? Id, string? PublicId)> InsertLocationAsync(int branchId, string name, string? address, int cityId, string? openingTime, string? closingTime, decimal? latitude, decimal? longitude, int? createdById);
+        Task UpdateLocationAsync(int id, string? name, string? address, int? cityId, string? openingTime, string? closingTime, decimal? latitude, decimal? longitude);
+        Task DeleteLocationAsync(int id);
 
         // ── Branch / Company / City ───────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllBranchesAsync();
         Task<IEnumerable<IDictionary<string, object?>>> GetAllCompaniesAsync();
         Task<IEnumerable<IDictionary<string, object?>>> GetAllCitiesAsync();
 
-        // ── PlanFeature ───────────────────────────────────────────────────────
-        Task<IEnumerable<IDictionary<string, object?>>> GetPlanFeaturesByPlanIdAsync(int planId);
-        Task<int?> CreatePlanFeatureAsync(int planId, string featureName);
-        Task UpdatePlanFeatureAsync(int id, string featureName);
-        Task SoftDeletePlanFeatureAsync(int id);
+        // ── Floor ─────────────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetFloorsAsync(int? locationId);
+        Task<int?> InsertFloorAsync(int locationId, string name, short floorNumber, int? createdById);
+
+        // ── SpaceType ─────────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync();
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit);
+        Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, bool hourlyAllowed, int? createdById);
+        Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, bool? hourlyAllowed, int? updatedById);
+        Task DeleteSpaceTypeAsync(int id);
+
+        // ── SpaceConfig ───────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigAsync();
+        Task<decimal> GetSecurityDepositAsync(string category);
+        Task UpdateSpaceConfigAsync(string category, string? updatedBy, int? totalSpaces, string? defaultCapacities, string? openingTime, string? closingTime, decimal? securityDeposit, decimal? pricePerHour, decimal? pricePerDay, decimal? pricePerMonth);
+        Task<IDictionary<string, object?>> GenerateSpaceInventoryAsync(int locationId, int spaceTypeId, string codePrefix, int minCode, int totalSpaces);
+        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId);
+        Task<IDictionary<string, object?>?> GetActivePricingForSpaceAsync(int spaceId);        // ── Amenity ───────────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllAmenitiesAsync();
+        Task<int?> InsertAmenityAsync(string name, string? icon);
+
+        // ── Gallery ───────────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllGalleryImagesAsync(int? locationId);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetGalleryImagesAsync(int page, int limit, int? locationId);
+        Task<(int? Id, string? PublicId)> InsertGalleryImageAsync(int? locationId, int? spaceId, string? title, string? description, string imageUrl, int sortOrder, int? createdById);
+        Task UpdateGalleryImageAsync(int id, string? title, string? description, string? imageUrl, int? sortOrder);
+        Task DeleteGalleryImageAsync(int id);
+
+        // ── Contact ───────────────────────────────────────────────────────────
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search);
+        Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top);
+        Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message);
+        Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById);
+        Task DeleteContactAsync(int id);
+
+        // ── Dashboard ─────────────────────────────────────────────────────────
+        Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
 
         // ── AccountCOA ────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAccountsCoaAsync();
@@ -169,5 +128,13 @@ namespace WorkNest.Application.Interfaces
 
         // ── AmountFields ──────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAmountFieldsAsync();
+
+        // ── Customer ──────────────────────────────────────────────────────────
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string? search);
+        Task<IEnumerable<IDictionary<string, object?>>> SearchCustomersAsync(string query);
+        Task<IDictionary<string, object?>?> GetCustomerByGuidAsync(string guid);
+        Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy);
+        Task UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive);
+        Task DeleteCustomerAsync(string guid);
     }
 }

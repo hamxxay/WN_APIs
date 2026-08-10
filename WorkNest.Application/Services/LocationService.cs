@@ -12,23 +12,31 @@ namespace WorkNest.Application.Services
         public async Task<IEnumerable<object>> GetAllLocationsAsync() =>
             (await _db.GetAllLocationsAsync()).Cast<object>();
 
-        public async Task<ApiResponse> CreateLocationAsync(LocationUpsertRequest request)
+        public async Task<(IEnumerable<object> Items, int Total)> GetLocationsAsync(int page, int limit, string? search)
         {
-            var id = await _db.CreateLocationAsync(request.Name, request.Address, request.CityId,
-                request.OpeningTime, request.ClosingTime, request.IsActive ?? true, request.BranchId);
-            return ApiResponse.Ok(new { id }, "Location created.");
+            var (rows, total) = await _db.GetLocationsAsync(page, limit, search);
+            return (rows.Cast<object>(), total);
         }
 
-        public async Task<ApiResponse> UpdateLocationAsync(string id, LocationUpsertRequest request)
+        public async Task<ApiResponse> CreateLocationAsync(LocationUpsertRequest request, int? actorId)
+        {
+            var (id, publicId) = await _db.InsertLocationAsync(
+                request.BranchId, request.Name, request.Address, request.CityId,
+                request.OpeningTime, request.ClosingTime,
+                request.Latitude, request.Longitude, actorId);
+            return ApiResponse.Ok(new { id, publicId }, "Location created.");
+        }
+
+        public async Task<ApiResponse> UpdateLocationAsync(int id, LocationUpdateRequest request)
         {
             await _db.UpdateLocationAsync(id, request.Name, request.Address, request.CityId,
-                request.OpeningTime, request.ClosingTime, request.IsActive ?? true, request.BranchId);
+                request.OpeningTime, request.ClosingTime, request.Latitude, request.Longitude);
             return ApiResponse.Ok("Location updated.");
         }
 
-        public async Task<ApiResponse> DeleteLocationAsync(string id)
+        public async Task<ApiResponse> DeleteLocationAsync(int id)
         {
-            await _db.SoftDeleteLocationAsync(id);
+            await _db.DeleteLocationAsync(id);
             return ApiResponse.Ok("Location deleted.");
         }
     }

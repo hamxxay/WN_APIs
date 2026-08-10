@@ -5,9 +5,10 @@ namespace WorkNest.Application.Interfaces
 {
     public interface IContactService
     {
-        Task<IEnumerable<object>> GetAllContactsAsync();
-        Task<ApiResponse> CreateContactAsync(ContactRequest request, string? userEmail);
-        Task<ApiResponse> UpdateContactStatusAsync(string id, string status);
-        Task<ApiResponse> DeleteContactAsync(string id);
+        Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search);
+        Task<IEnumerable<object>> GetRecentContactsAsync(int top);
+        Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail);
+        Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId);
+        Task<ApiResponse> DeleteContactAsync(int id);
     }
 }

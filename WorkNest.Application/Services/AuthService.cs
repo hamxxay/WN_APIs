@@ -6,11 +6,6 @@ using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
 {
-    /// <summary>
-    /// Handles all authentication operations.
-    /// Mirrors Python auth endpoints in main.py exactly.
-    /// Issues JWT tokens on login/register/google-login.
-    /// </summary>
     public class AuthService : IAuthService
     {
         private readonly IDbRepository _db;
@@ -19,94 +14,67 @@ namespace WorkNest.Application.Services
 
         public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger)
         {
-            _db     = db;
-            _jwt    = jwt;
+            _db = db;
+            _jwt = jwt;
             _logger = logger;
         }
 
-        /// <summary>Syncs a user record — creates if not exists, updates if exists.</summary>
         public async Task<ApiResponse> SyncUserAsync(UserSyncRequest request)
         {
-            var (id, guid) = await _db.SyncUserAsync(
-                request.Email, request.FirstName ?? "", request.LastName ?? "", request.Phone);
-            return ApiResponse.Ok(new { id = guid ?? id?.ToString(), email = request.Email },
-                "User synchronized successfully.");
+            var (id, publicId) = await _db.SyncUserAsync(request.Email, request.Name, request.Phone, request.PasswordHash);
+            return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User synchronized successfully.");
         }
 
-        /// <summary>Registers a new user (delegates to sync).</summary>
         public async Task<ApiResponse> RegisterAsync(UserRegisterRequest request)
         {
-            var (id, guid) = await _db.SyncUserAsync(
-                request.Email, request.FirstName ?? "", request.LastName ?? "", request.Phone);
-            return ApiResponse.Ok(new { id = guid ?? id?.ToString(), email = request.Email },
-                "User registered successfully.");
+            var (id, publicId) = await _db.SyncUserAsync(request.Email, request.Name, request.Phone, request.Password);
+            return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User registered successfully.");
         }
 
-        /// <summary>
-        /// Logs in a user. Creates the user if not found.
-        /// Returns a JWT token along with id, email, roles.
-        /// </summary>
         public async Task<ApiResponse> LoginAsync(UserLoginRequest request)
         {
             var row = await _db.GetUserByEmailAsync(request.Email);
-            string? guid;
+            string? publicId;
             string role;
 
             if (row is null)
             {
-                var (id, newGuid) = await _db.SyncUserAsync(request.Email, "", "", null);
-                guid = newGuid ?? id?.ToString();
+                var (_, pid) = await _db.SyncUserAsync(request.Email, null, null, request.Password);
+                publicId = pid;
                 role = Roles.General;
             }
             else
             {
-                guid = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
+                publicId = row.TryGetValue("PublicId", out var g) ? g?.ToString() : null;
                 role = Roles.FromRow(row);
             }
 
-            var token = _jwt.GenerateToken(guid ?? "", request.Email, role);
-            return ApiResponse.Ok(new
-            {
-                id    = guid,
-                email = request.Email,
-                roles = new[] { role },
-                token
-            }, "Login successful.");
+            var token = _jwt.GenerateToken(publicId ?? "", request.Email, role);
+            return ApiResponse.Ok(new { id = publicId, email = request.Email, roles = new[] { role }, token }, "Login successful.");
         }
 
-        /// <summary>
-        /// Google OAuth login — finds or creates user, returns JWT.
-        /// Mirrors Python google_login_user() — returns 200 even on error to preserve CORS headers.
-        /// </summary>
         public async Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request)
         {
             try
             {
                 var row = await _db.GetUserByEmailAsync(request.Email);
-                string? guid;
+                string? publicId;
                 string role;
 
                 if (row is not null)
                 {
-                    guid = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
+                    publicId = row.TryGetValue("PublicId", out var g) ? g?.ToString() : null;
                     role = Roles.FromRow(row);
                 }
                 else
                 {
-                    var (id, newGuid) = await _db.SyncUserAsync(
-                        request.Email, request.FirstName ?? "", request.LastName ?? "", null);
-                    guid = newGuid ?? id?.ToString();
+                    var (_, pid) = await _db.SyncUserAsync(request.Email, request.Name, null);
+                    publicId = pid;
                     role = Roles.General;
                 }
 
-                var token = _jwt.GenerateToken(guid ?? "", request.Email, role);
-                return ApiResponse.Ok(new
-                {
-                    id    = guid,
-                    email = request.Email,
-                    roles = new[] { role },
-                    token
-                }, "Google login successful.");
+                var token = _jwt.GenerateToken(publicId ?? "", request.Email, role);
+                return ApiResponse.Ok(new { id = publicId, email = request.Email, roles = new[] { role }, token }, "Google login successful.");
             }
             catch (Exception ex)
             {
@@ -115,37 +83,21 @@ namespace WorkNest.Application.Services
             }
         }
 
-        /// <summary>Returns the current user profile from the x-user-email header.</summary>
         public async Task<ApiResponse> GetMeAsync(string email)
         {
-            var emailRow = await _db.GetUserByEmailAsync(email);
-            if (emailRow is null)
-                return ApiResponse.Fail("User not found");
-
-            var guid = emailRow.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
-            var row  = guid is not null
-                ? await _db.GetUserByGuidAsync(guid) ?? emailRow
-                : emailRow;
-
-            // Look up customer code by email
-            var customers = await _db.SearchCustomersAsync(email);
-            var customerRow = customers.FirstOrDefault();
-            var customerCode = customerRow is not null && customerRow.TryGetValue("Code", out var cc)
-                ? cc?.ToString() : null;
+            var row = await _db.GetUserByEmailAsync(email);
+            if (row is null) return ApiResponse.Fail("User not found");
 
             return ApiResponse.Ok(new
             {
-                id           = row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : guid,
-                email        = row.TryGetValue("Email",       out var e) ? e?.ToString() ?? email : email,
-                name         = row.TryGetValue("Name",        out var n) ? n?.ToString() ?? "" : "",
-                phone        = row.TryGetValue("PhoneNumber",  out var p) ? p?.ToString() ?? "" : "",
-                role         = Roles.FromRow(row),
-                customerCode,
+                id       = row.TryGetValue("PublicId",    out var g) ? g?.ToString() : null,
+                email    = row.TryGetValue("Email",       out var e) ? e?.ToString() : email,
+                name     = row.TryGetValue("Name",        out var n) ? n?.ToString() : null,
+                phone    = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null,
+                role     = Roles.FromRow(row),
             });
         }
 
-        /// <summary>Stateless logout — JWT is discarded client-side.</summary>
-        public ApiResponse Logout() =>
-            ApiResponse.Ok("Logged out successfully.");
+        public ApiResponse Logout() => ApiResponse.Ok("Logged out successfully.");
     }
 }

@@ -6,8 +6,8 @@ namespace WorkNest.Application.Interfaces
     public interface IPlanFeatureService
     {
         Task<ApiResponse> GetByPlanAsync(int planId);
-        Task<ApiResponse> CreateAsync(PlanFeatureRequest request);
-        Task<ApiResponse> UpdateAsync(int id, PlanFeatureRequest request);
+        Task<ApiResponse> CreateAsync(PlanFeatureRequest request, int? actorId);
+        Task<ApiResponse> UpdateAsync(int id, PlanFeatureUpdateRequest request);
         Task<ApiResponse> DeleteAsync(int id);
     }
 }

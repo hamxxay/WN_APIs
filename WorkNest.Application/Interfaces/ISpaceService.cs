@@ -3,17 +3,15 @@ using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Interfaces
 {
-    /// <summary>Space management and availability operations.</summary>
     public interface ISpaceService
     {
-        Task<IEnumerable<object>> GetAllSpacesAsync();
-        Task<IEnumerable<object>> GetVacantSpacesAsync(int? branchId = null);
-        Task<ApiResponse> GetSpaceSummaryAsync(string id);
-        Task<ApiResponse> CreateSpaceAsync(SpaceInsertRequest request);
-        Task<ApiResponse> UpdateSpaceAsync(string id, SpaceUpdateRequest request);
-        Task<ApiResponse> DeleteSpaceAsync(string id);
+        Task<(IEnumerable<object> Items, int Total)> GetSpacesAsync(int page, int limit, string? search);
+        Task<ApiResponse> GetSpaceSummaryAsync(int id);
         Task<IEnumerable<object>> GetAvailableSpacesAsync();
-        Task<ApiResponse> GetAvailableSpacesByTypeAsync(string spaceType, string? start, string? end);
+        Task<ApiResponse> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn);
         Task<ApiResponse> GetAvailabilityCountsAsync();
+        Task<ApiResponse> CreateSpaceAsync(SpaceInsertRequest request, int? actorId);
+        Task<ApiResponse> UpdateSpaceAsync(int id, SpaceUpdateRequest request, int? actorId);
+        Task<ApiResponse> DeleteSpaceAsync(int id);
     }
 }

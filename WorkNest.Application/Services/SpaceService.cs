@@ -1,72 +1,26 @@
 using WorkNest.Application.DTOs.Space;
 using WorkNest.Application.Interfaces;
-using WorkNest.Common.Helpers;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
 {
-    /// <summary>
-    /// Space management service.
-    /// Mirrors all Python space endpoints in main.py exactly.
-    /// </summary>
     public class SpaceService : ISpaceService
     {
         private readonly IDbRepository _db;
-
         public SpaceService(IDbRepository db) => _db = db;
 
-        public async Task<IEnumerable<object>> GetAllSpacesAsync() =>
-            (await _db.GetAllSpacesAsync()).Select(r => (object)new
-            {
-                id            = r.TryGetValue("id",            out var i)   ? i   : null,
-                idGuid        = r.TryGetValue("idGuid",        out var g)   ? g?.ToString()  : null,
-                name          = r.TryGetValue("name",          out var n)   ? n?.ToString()  : null,
-                code          = r.TryGetValue("code",          out var c)   ? c?.ToString()  : null,
-                description   = r.TryGetValue("description",   out var d)   ? d?.ToString()  : null,
-                floorId       = r.TryGetValue("floorId",       out var fi)  ? fi  : null,
-                floorName     = r.TryGetValue("floorName",     out var fn)  ? fn?.ToString() : null,
-                pricePerDay   = r.TryGetValue("pricePerDay",   out var ppd) ? ppd : null,
-                pricePerHour  = r.TryGetValue("pricePerHour",  out var pph) ? pph : null,
-                pricePerMonth = r.TryGetValue("pricePerMonth", out var ppm) ? ppm : null,
-                imageUrl      = r.TryGetValue("imageUrl",      out var img) ? img?.ToString() : null,
-                amenities     = r.TryGetValue("amenities",     out var am)  ? am?.ToString()  : null,
-                status        = r.TryGetValue("status",        out var st)  ? st  : null,
-                locationId    = r.TryGetValue("locationId",    out var li)  ? li  : null,
-                locationIdGuid= r.TryGetValue("locationIdGuid",out var lig) ? lig?.ToString() : null,
-                locationName  = r.TryGetValue("locationName",  out var ln)  ? ln?.ToString()  : null,
-                spaceTypeId   = r.TryGetValue("spaceTypeId",   out var sti) ? sti : null,
-                spaceTypeIdGuid=r.TryGetValue("spaceTypeIdGuid",out var stg)? stg?.ToString() : null,
-                spaceTypeName = r.TryGetValue("spaceTypeName", out var stn) ? stn?.ToString() : null,
-                capacity      = r.TryGetValue("capacity",      out var cap) ? cap : null,
-            });
-
-        public async Task<IEnumerable<object>> GetVacantSpacesAsync(int? branchId = null) =>
-            (await _db.GetVacantSpacesAsync(branchId)).Select(r => (object)new
-            {
-                id            = r.TryGetValue("Id",           out var i)   ? i   : null,
-                idGuid        = r.TryGetValue("IdGUID",        out var g)   ? g?.ToString()  : null,
-                name          = r.TryGetValue("Name",          out var n)   ? n?.ToString()  : null,
-                code          = r.TryGetValue("Code",          out var c)   ? c?.ToString()  : null,
-                status        = r.TryGetValue("Status",        out var st)  ? st?.ToString() : null,
-                pricePerDay   = r.TryGetValue("PricePerDay",   out var ppd) ? ppd : null,
-                pricePerHour  = r.TryGetValue("PricePerHour",  out var pph) ? pph : null,
-                pricePerMonth = r.TryGetValue("PricePerMonth", out var ppm) ? ppm : null,
-                locationName  = r.TryGetValue("LocationName",  out var ln)  ? ln?.ToString()  : null,
-                spaceTypeName = r.TryGetValue("SpaceTypeName", out var stn) ? stn?.ToString() : null,
-            });
-
-        public async Task<IEnumerable<object>> GetAvailableSpacesAsync()
+        public async Task<(IEnumerable<object> Items, int Total)> GetSpacesAsync(int page, int limit, string? search)
         {
-            var spaces = await _db.GetAllSpacesAsync();
-            return spaces.Where(s =>
-                (s.TryGetValue("spaceStatus", out var st) && st?.ToString() == "Available") ||
-                (s.TryGetValue("status", out var s2) && Convert.ToString(s2) == "1"))
-                .Cast<object>();
+            var (rows, total) = await _db.GetSpacesAsync(page, limit, search);
+            return (rows.Cast<object>(), total);
         }
 
-        public async Task<ApiResponse> GetAvailableSpacesByTypeAsync(string spaceType, string? start, string? end)
+        public async Task<IEnumerable<object>> GetAvailableSpacesAsync() =>
+            (await _db.GetAvailableSpacesAsync()).Cast<object>();
+
+        public async Task<ApiResponse> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn)
         {
-            var result = await _db.GetAvailableSpacesByTypeAsync(spaceType, start, end);
+            var result = await _db.GetAvailableSpacesByTypeAsync(spaceTypeId, startOn, endOn);
             return ApiResponse.Ok(result);
         }
 
@@ -76,63 +30,33 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(result);
         }
 
-        public async Task<ApiResponse> GetSpaceSummaryAsync(string id)
+        public async Task<ApiResponse> GetSpaceSummaryAsync(int id)
         {
-            var space        = await _db.GetSpaceSummaryAsync(id);
+            var space = await _db.GetSpaceSummaryAsync(id);
             if (space is null) return ApiResponse.Fail("Space not found");
-            var reservations = (await _db.GetSpaceReservationsAsync(id)).ToList();
-
-            var confirmed = reservations.Where(r =>
-                r.TryGetValue("bookingStatus", out var s) && s?.ToString() == "Confirmed").ToList();
-            var cancelled = reservations.Where(r =>
-                r.TryGetValue("bookingStatus", out var s) && s?.ToString() == "Cancelled").ToList();
-
-            return ApiResponse.Ok(new
-            {
-                space = new
-                {
-                    id            = space.TryGetValue("idGUID", out var g) ? g?.ToString() : null,
-                    name          = space.TryGetValue("name", out var n) ? n?.ToString() : null,
-                    code          = space.TryGetValue("code", out var c) ? c?.ToString() : null,
-                    locationName  = space.TryGetValue("locationName", out var l) ? l?.ToString() : null,
-                    spaceTypeName = space.TryGetValue("spaceTypeName", out var t) ? t?.ToString() : null,
-                    status        = space.TryGetValue("status", out var st) ? st?.ToString() : null,
-                },
-                stats = new
-                {
-                    totalBookings     = reservations.Count,
-                    totalReservedDays = reservations.Sum(r => r.TryGetValue("reservedDays", out var d) ? Convert.ToInt32(d) : 0),
-                    confirmedBookings = confirmed.Count,
-                    cancelledBookings = cancelled.Count,
-                    collectedRevenue  = confirmed.Sum(r => r.TryGetValue("totalAmount", out var a) ? Convert.ToDouble(a) : 0),
-                },
-                recentReservations = reservations.Take(10),
-            });
+            return ApiResponse.Ok(space);
         }
 
-        public async Task<ApiResponse> CreateSpaceAsync(SpaceInsertRequest request)
+        public async Task<ApiResponse> CreateSpaceAsync(SpaceInsertRequest request, int? actorId)
         {
-            var newId = await _db.InsertSpaceAsync(request.Name, request.LocationId, request.SpaceTypeId,
+            var (id, publicId) = await _db.InsertSpaceAsync(
+                request.Name, request.LocationId, request.SpaceTypeId,
                 request.Code, request.Description, request.FloorId,
-                request.PricePerDay, request.PricePerHour, request.PricePerMonth,
-                request.ImageUrl, request.Amenities,
-                request.RentAccountId, request.DepositAccountId);
-            return ApiResponse.Ok(new { id = newId }, "Space created.");
+                request.ImageUrl, request.Capacity, actorId);
+            return ApiResponse.Ok(new { id, publicId }, "Space created.");
         }
 
-        public async Task<ApiResponse> UpdateSpaceAsync(string id, SpaceUpdateRequest request)
+        public async Task<ApiResponse> UpdateSpaceAsync(int id, SpaceUpdateRequest request, int? actorId)
         {
-            await _db.UpdateSpaceAsync(id, request.Name, request.LocationId,
-                request.SpaceTypeId, request.Code, request.Description, request.FloorId,
-                request.PricePerDay, request.PricePerHour, request.PricePerMonth,
-                request.ImageUrl, request.Amenities,
-                request.RentAccountId, request.DepositAccountId);
+            await _db.UpdateSpaceAsync(id, request.Name, request.LocationId, request.SpaceTypeId,
+                request.Code, request.Description, request.FloorId,
+                request.ImageUrl, request.Capacity, actorId);
             return ApiResponse.Ok("Space updated.");
         }
 
-        public async Task<ApiResponse> DeleteSpaceAsync(string id)
+        public async Task<ApiResponse> DeleteSpaceAsync(int id)
         {
-            await _db.SoftDeleteSpaceAsync(id);
+            await _db.DeleteSpaceAsync(id);
             return ApiResponse.Ok("Space deleted.");
         }
     }

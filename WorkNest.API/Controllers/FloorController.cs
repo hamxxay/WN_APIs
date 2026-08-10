@@ -14,10 +14,10 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("api/floor")]
         public async Task<IActionResult> List([FromQuery] int? locationId) =>
-            Ok(await _floors.GetAllFloorsAsync(locationId));
+            Ok(await _floors.GetFloorsAsync(locationId));
 
         [HttpPost("api/floor")]
         public async Task<IActionResult> Create([FromBody] FloorUpsertRequest request) =>
-            StatusCode(201, await _floors.CreateFloorAsync(request));
+            StatusCode(201, await _floors.CreateFloorAsync(request, null));
     }
 }

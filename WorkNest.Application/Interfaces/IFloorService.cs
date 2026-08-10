@@ -5,7 +5,7 @@ namespace WorkNest.Application.Interfaces
 {
     public interface IFloorService
     {
-        Task<ApiResponse> GetAllFloorsAsync(int? locationId);
-        Task<ApiResponse> CreateFloorAsync(FloorUpsertRequest request);
+        Task<ApiResponse> GetFloorsAsync(int? locationId);
+        Task<ApiResponse> CreateFloorAsync(FloorUpsertRequest request, int? actorId);
     }
 }

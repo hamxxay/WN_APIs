@@ -2,7 +2,7 @@ namespace WorkNest.Application.DTOs.Payment
 {
     public class CardPaymentRequest
     {
-        public string BookingId { get; set; } = string.Empty;
+        public int BookingId { get; set; }
         public string CardHolderName { get; set; } = string.Empty;
         public string CardNumber { get; set; } = string.Empty;
         public string ExpiryMonth { get; set; } = string.Empty;
@@ -12,45 +12,40 @@ namespace WorkNest.Application.DTOs.Payment
 
     public class PayFastInitiateRequest
     {
-        public string BookingId { get; set; } = string.Empty;
+        public int BookingId { get; set; }
         public string CustomerName { get; set; } = string.Empty;
         public string CustomerEmail { get; set; } = string.Empty;
     }
 
     public class VoucherGenerateRequest
     {
-        public string BookingId { get; set; } = string.Empty;
-        public double Amount { get; set; }
-    }
-
-    public class CounterPaymentRequest
-    {
-        public string BookingId { get; set; } = string.Empty;
-        public double Amount { get; set; }
+        public int BookingId { get; set; }
+        public decimal Amount { get; set; }
+        public DateTime ExpiresOn { get; set; }
     }
 
     public class PaymentCreateRequest
     {
-        public int? MembershipId { get; set; }
-        public double Amount { get; set; }
-        public string PaymentMethod { get; set; } = string.Empty;
+        public int? BookingId { get; set; }
+        public byte PaymentMethodId { get; set; }
+        public decimal Amount { get; set; }
+        public string? Notes { get; set; }
     }
 
     public class PaymentStatusUpdateRequest
     {
-        public string Status { get; set; } = string.Empty;
-        public string? TransactionRef { get; set; }
+        public byte StatusId { get; set; }
     }
 
     public class PaymentDto
     {
-        public string? Id { get; set; }
-        public string? IdGuid { get; set; }
+        public int? Id { get; set; }
+        public string? PublicId { get; set; }
         public string? UserEmail { get; set; }
-        public double Amount { get; set; }
+        public decimal Amount { get; set; }
         public string? PaymentMethod { get; set; }
         public string? PaymentStatus { get; set; }
-        public string? TransactionRef { get; set; }
-        public string? PaidAt { get; set; }
+        public string? Notes { get; set; }
+        public string? CreatedOn { get; set; }
     }
 }

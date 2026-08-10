@@ -15,21 +15,22 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(rows);
         }
 
-        public async Task<ApiResponse> CreateAsync(PlanFeatureRequest request)
+        public async Task<ApiResponse> CreateAsync(PlanFeatureRequest request, int? actorId)
         {
-            var id = await _db.CreatePlanFeatureAsync(request.PlanId, request.FeatureName);
-            return ApiResponse.Ok(new { id }, "Feature created.");
+            var (id, publicId) = await _db.InsertPlanFeatureAsync(
+                request.PlanId, request.FeatureName, request.FeatureValue, request.SortOrder);
+            return ApiResponse.Ok(new { id, publicId }, "Feature created.");
         }
 
-        public async Task<ApiResponse> UpdateAsync(int id, PlanFeatureRequest request)
+        public async Task<ApiResponse> UpdateAsync(int id, PlanFeatureUpdateRequest request)
         {
-            await _db.UpdatePlanFeatureAsync(id, request.FeatureName);
+            await _db.UpdatePlanFeatureAsync(id, request.FeatureName, request.FeatureValue, request.SortOrder);
             return ApiResponse.Ok("Feature updated.");
         }
 
         public async Task<ApiResponse> DeleteAsync(int id)
         {
-            await _db.SoftDeletePlanFeatureAsync(id);
+            await _db.DeletePlanFeatureAsync(id);
             return ApiResponse.Ok("Feature deleted.");
         }
     }

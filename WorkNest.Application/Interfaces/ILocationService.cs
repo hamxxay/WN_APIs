@@ -6,8 +6,9 @@ namespace WorkNest.Application.Interfaces
     public interface ILocationService
     {
         Task<IEnumerable<object>> GetAllLocationsAsync();
-        Task<ApiResponse> CreateLocationAsync(LocationUpsertRequest request);
-        Task<ApiResponse> UpdateLocationAsync(string id, LocationUpsertRequest request);
-        Task<ApiResponse> DeleteLocationAsync(string id);
+        Task<(IEnumerable<object> Items, int Total)> GetLocationsAsync(int page, int limit, string? search);
+        Task<ApiResponse> CreateLocationAsync(LocationUpsertRequest request, int? actorId);
+        Task<ApiResponse> UpdateLocationAsync(int id, LocationUpdateRequest request);
+        Task<ApiResponse> DeleteLocationAsync(int id);
     }
 }

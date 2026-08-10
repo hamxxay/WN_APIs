@@ -3,26 +3,22 @@ using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Interfaces
 {
-    /// <summary>Booking lifecycle and smart-assignment operations.</summary>
     public interface IBookingService
     {
-        Task<IEnumerable<object>> GetAllBookingsAsync();
-        Task<ApiResponse> GetBookingByIdAsync(string id, string userEmail);
-        Task<ApiResponse> GetBookingByChallanAsync(string challanNumber);
-        Task<ApiResponse> SearchChallanAsync(string query);
-        Task<ApiResponse> ExtendChallanValidityAsync(int bookingId, string newExpiryDate, string updatedBy, string? remarks);
+        Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search);
+        Task<ApiResponse> GetBookingByIdAsync(Guid publicId, string? userEmail);
         Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail);
+        Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10);
         Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month);
         Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail);
-        Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request);
+        Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request, string? actorEmail);
         Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail);
-        Task<ApiResponse> GetBookingAccountAsync(string bookingGuid);
-        Task<ApiResponse> CancelBookingAsync(string id, string userEmail);
-        Task<ApiResponse> UpdateBookingStatusAsync(string id, string status);
-        Task<ApiResponse> UpdateBookingAsync(string id, BookingRequest request);
-        Task<ApiResponse> ReassignBookingAsync(string id, ReassignBookingRequest request, string adminEmail);
-        Task<ApiResponse> GetAvailableSpacesAsync(string spaceType, string start, string end);
-        Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(string spaceType, string start, string end, int? excludeBookingId);
-        Task<ApiResponse> GetSmartAvailableSpacesAsync(string spaceCategory, string start, string end, int? capacity);
+        Task<ApiResponse> UpdateBookingAsync(int id, BookingUpdateRequest request, int? actorId);
+        Task<ApiResponse> UpdateBookingStatusAsync(int id, byte statusId, int? actorId);
+        Task<ApiResponse> CancelBookingAsync(int id, string userEmail, string? cancelReason);
+        Task<ApiResponse> ReassignBookingAsync(int id, ReassignBookingRequest request, string userEmail);
+        Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity);
+        Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId);
+        Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity);
     }
 }

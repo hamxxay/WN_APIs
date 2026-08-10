@@ -1,9 +1,6 @@
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.User;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
-using WorkNest.Common.Helpers;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
@@ -11,143 +8,93 @@ namespace WorkNest.Application.Services
     public class UserService : IUserService
     {
         private readonly IDbRepository _db;
-        private readonly ILogger<UserService> _logger;
-        private readonly IHttpContextAccessor _httpContext;
+        public UserService(IDbRepository db) => _db = db;
 
-        public UserService(IDbRepository db, ILogger<UserService> logger, IHttpContextAccessor httpContext)
+        public async Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search)
         {
-            _db          = db;
-            _logger      = logger;
-            _httpContext = httpContext;
-        }
-
-        public async Task<IEnumerable<object>> GetAllUsersAsync()
-        {
-            var rows = await _db.GetAllUsersAsync();
-            var list  = rows.ToList();
-            return list.Select(row => (object)new
+            var (rows, total) = await _db.GetUsersAsync(page, limit, search);
+            var items = rows.Select(r => (object)new
             {
-                id        = row.TryGetValue("IdGuid", out var g)  ? g?.ToString()  : row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : null,
-                idGuid    = row.TryGetValue("IdGuid", out var g3) ? g3?.ToString() : row.TryGetValue("IdGUID", out var g4) ? g4?.ToString() : null,
-                email     = row.TryGetValue("Email",  out var e)  ? e?.ToString() ?? "" : "",
-                name      = row.TryGetValue("Name",   out var n)  ? n?.ToString() ?? "" : "",
-                phone     = row.TryGetValue("Phone",  out var p)  ? p?.ToString() ?? "" :
-                            row.TryGetValue("PhoneNumber", out var p2) ? p2?.ToString() ?? "" : "",
-                createdAt = row.TryGetValue("CreatedAt", out var c)  ? DateHelper.ToIso(c as DateTime?) :
-                            row.TryGetValue("CreatedOn",  out var c2) ? DateHelper.ToIso(c2 as DateTime?) : null,
-                isActive  = row.TryGetValue("Status", out var a) ? Convert.ToInt32(a) == 1 : true,
-                role      = Roles.FromRow(row),
+                id        = r.TryGetValue("Id",        out var i)  ? i  : null,
+                publicId  = r.TryGetValue("PublicId",  out var g)  ? g?.ToString() : null,
+                email     = r.TryGetValue("Email",     out var e)  ? e?.ToString() : null,
+                name      = r.TryGetValue("Name",      out var n)  ? n?.ToString() : null,
+                phone     = r.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null,
+                isActive  = r.TryGetValue("IsActive",  out var a)  ? Convert.ToBoolean(a) : true,
+                createdOn = r.TryGetValue("CreatedOn", out var c)  ? c  : null,
+                role      = Roles.FromRow(r),
             });
+            return (items, total);
         }
 
-        /// <summary>
-        /// Gets a user by GUID, email, or numeric ID.
-        /// Mirrors Python get_user() identifier resolution logic exactly.
-        /// </summary>
-        public async Task<ApiResponse> GetUserByIdAsync(string id)
+        public async Task<ApiResponse> GetUserByIdAsync(int id)
         {
             var row = await _db.GetUserByIdAsync(id);
             if (row is null) return ApiResponse.Fail("User not found");
-
             return ApiResponse.Ok(new
             {
-                id        = row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null,
-                idGuid    = row.TryGetValue("IdGUID", out var g2) ? g2?.ToString() : null,
-                email     = row.TryGetValue("Email", out var e) ? e?.ToString() ?? "" : "",
-                name      = row.TryGetValue("Name", out var n) ? n?.ToString() ?? "" : "",
-                phone     = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() ?? "" : "",
-                isActive  = row.TryGetValue("Status", out var a2) && Convert.ToInt32(a2) == 1,
-                createdAt = DateHelper.ToIso(row.TryGetValue("CreatedOn", out var c) ? c as DateTime? : null),
+                id        = row.TryGetValue("Id",          out var i)  ? i  : null,
+                publicId  = row.TryGetValue("PublicId",    out var g)  ? g?.ToString() : null,
+                email     = row.TryGetValue("Email",       out var e)  ? e?.ToString() : null,
+                name      = row.TryGetValue("Name",        out var n)  ? n?.ToString() : null,
+                phone     = row.TryGetValue("PhoneNumber", out var p)  ? p?.ToString() : null,
+                isActive  = row.TryGetValue("IsActive",    out var a)  ? Convert.ToBoolean(a) : true,
+                createdOn = row.TryGetValue("CreatedOn",   out var c)  ? c  : null,
                 role      = Roles.FromRow(row),
             });
         }
 
-        /// <summary>Returns booking and payment history for a user.</summary>
-        public async Task<ApiResponse> GetUserHistoryAsync(string id)
+        public async Task<ApiResponse> GetUserHistoryAsync(int id)
         {
-            var userRow = await _db.GetUserByIdAsync(id);
-            if (userRow is null) return ApiResponse.Fail("User not found");
-
-            if (!userRow.TryGetValue("IdGUID", out var rawGuid) || rawGuid is null)
-                return ApiResponse.Fail("User record missing GUID");
-
-            var userGuid = rawGuid.ToString()!;
-            var bookings = (await _db.GetBookingsByUserGuidAsync(userGuid)).ToList();
-            var payments = (await _db.GetPaymentsByUserGuidAsync(userGuid)).ToList();
-
-            var totalPaid = payments
-                .Where(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Paid")
-                .Sum(p => p.TryGetValue("amount", out var a) ? Convert.ToDouble(a) : 0);
-
-            return ApiResponse.Ok(new
-            {
-                stats = new
-                {
-                    totalBookings     = bookings.Count,
-                    totalPayments     = payments.Count,
-                    totalPaidAmount   = totalPaid,
-                    failedPayments    = payments.Count(p => p.TryGetValue("paymentStatus", out var s) && s?.ToString() == "Failed"),
-                    cancelledBookings = bookings.Count(b => b.TryGetValue("bookingStatus", out var s) && s?.ToString() == "Cancelled"),
-                },
-                recentBookings = bookings,
-                recentPayments = payments,
-            });
+            var rows = (await _db.GetUserHistoryAsync(id)).ToList();
+            return ApiResponse.Ok(new { history = rows, total = rows.Count });
         }
 
-        public async Task<ApiResponse> CreateUserAsync(UserCreateRequest request)
+        public async Task<ApiResponse> CreateUserAsync(UserCreateRequest request, int? actorId)
         {
             var roleId = string.IsNullOrEmpty(request.Role)
                 ? Roles.GeneralId
                 : Roles.ReverseMap.TryGetValue(request.Role.ToLower(), out var r) ? r : Roles.GeneralId;
 
-            var createdBy = _httpContext.HttpContext?.User
-                .FindFirst("sub")?.Value
-                ?? _httpContext.HttpContext?.User
-                .FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var (id, publicId) = await _db.CreateUserAsync(
+                request.Email, request.Password, request.Name, request.Phone,
+                roleId, request.CompanyId, request.CityId,
+                request.Address, request.CnicOrPassport, request.AvatarUrl,
+                request.Notes, actorId);
 
-            var (id, guid) = await _db.CreateUserAdminAsync(
-                request.Email,
-                request.FirstName ?? "",
-                request.LastName,
-                request.Phone,
-                request.Password,
-                roleId,
-                createdBy);
-
-            return ApiResponse.Ok(new { id = guid ?? id?.ToString(), email = request.Email },
-                "User created successfully.");
+            return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User created successfully.");
         }
 
-        public async Task<ApiResponse> UpdateUserAsync(string id, UserUpdateRequest request)
+        public async Task<ApiResponse> UpdateUserAsync(int id, UserUpdateRequest request)
         {
-            var name = $"{request.FirstName ?? ""} {request.LastName ?? ""}".Trim();
-            await _db.UpdateUserAsync(id, name, request.Phone);
+            await _db.UpdateUserAsync(id, request.Name, request.Phone,
+                request.CompanyId, request.CityId, request.Address,
+                request.CnicOrPassport, request.AvatarUrl, request.Notes);
             return ApiResponse.Ok("User updated.");
         }
 
-        public async Task<ApiResponse> DeleteUserAsync(string id)
+        public async Task<ApiResponse> DeleteUserAsync(int id)
         {
-            await _db.SoftDeleteUserAsync(id);
+            await _db.DeleteUserAsync(id);
             return ApiResponse.Ok("User deleted.");
         }
 
-        public async Task<ApiResponse> ActivateUserAsync(string id)
+        public async Task<ApiResponse> ActivateUserAsync(int id)
         {
-            await _db.SetUserStatusAsync(id, 1);
+            await _db.SetUserStatusAsync(id, true);
             return ApiResponse.Ok("User activated.");
         }
 
-        public async Task<ApiResponse> DeactivateUserAsync(string id)
+        public async Task<ApiResponse> DeactivateUserAsync(int id)
         {
-            await _db.SetUserStatusAsync(id, 0);
+            await _db.SetUserStatusAsync(id, false);
             return ApiResponse.Ok("User deactivated.");
         }
 
-        public async Task<ApiResponse> UpdateUserRoleAsync(string id, UserRoleUpdateRequest request)
+        public async Task<ApiResponse> UpdateUserRoleAsync(int id, UserRoleUpdateRequest request)
         {
-            var roleInt = Roles.ReverseMap.TryGetValue(request.Role.ToLower(), out var r)
-                ? r : Roles.GeneralId;
-            await _db.SetUserRoleAsync(id, roleInt);
+            var roleId = Roles.ReverseMap.TryGetValue(request.Role.ToLower(), out var r) ? r : Roles.GeneralId;
+            await _db.SetUserRoleAsync(id, roleId);
             return ApiResponse.Ok("Role updated.");
         }
     }

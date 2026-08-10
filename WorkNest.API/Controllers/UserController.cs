@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.User;
 using WorkNest.Application.Interfaces;
-using WorkNest.Common.Helpers;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.API.Controllers
@@ -12,60 +11,123 @@ namespace WorkNest.API.Controllers
     public class UserController : ControllerBase
     {
         private readonly IUserService _users;
-        public UserController(IUserService users) => _users = users;
+        private readonly IDbRepository _db;
+        public UserController(IUserService users, IDbRepository db) { _users = users; _db = db; }
 
         [HttpGet("api/user")]
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
-            [FromQuery] string search = "")
+            [FromQuery] string? search = null)
         {
-            var all = await _users.GetAllUsersAsync();
-            var (items, total) = PaginationHelper.Paginate(all, page, limit, search);
+            var (items, total) = await _users.GetUsersAsync(page, limit, search);
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
-        [HttpGet("api/user/{id}")]
-        public async Task<IActionResult> Get(string id)
+        [HttpGet("api/user/{id:int}")]
+        public async Task<IActionResult> Get(int id)
         {
             var result = await _users.GetUserByIdAsync(id);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
 
-        [HttpGet("api/user/{id}/history")]
-        public async Task<IActionResult> History(string id)
+        [HttpGet("api/user/{publicId:guid}")]
+        public async Task<IActionResult> GetByGuid(Guid publicId)
+        {
+            var row = await _db.GetUserByPublicIdAsync(publicId);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return await Get(id);
+        }
+
+        [HttpGet("api/user/{id:int}/history")]
+        public async Task<IActionResult> History(int id)
         {
             var result = await _users.GetUserHistoryAsync(id);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
 
+        [HttpGet("api/user/{publicId:guid}/history")]
+        public async Task<IActionResult> HistoryByGuid(Guid publicId)
+        {
+            var row = await _db.GetUserByPublicIdAsync(publicId);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return await History(id);
+        }
+
         [HttpPost("api/user")]
         public async Task<IActionResult> Create([FromBody] UserCreateRequest request)
         {
-            var result = await _users.CreateUserAsync(request);
+            var result = await _users.CreateUserAsync(request, null);
             return StatusCode(201, result);
         }
 
-        [HttpPut("api/user/{id}")]
-        public async Task<IActionResult> Update(string id, [FromBody] UserUpdateRequest request) =>
+        [HttpPut("api/user/{id:int}")]
+        public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest request) =>
             Ok(await _users.UpdateUserAsync(id, request));
 
-        [HttpDelete("api/user/{id}")]
-        public async Task<IActionResult> Delete(string id) =>
+        [HttpPut("api/user/{publicId:guid}")]
+        public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] UserUpdateRequest request)
+        {
+            var row = await _db.GetUserByPublicIdAsync(publicId);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return Ok(await _users.UpdateUserAsync(id, request));
+        }
+
+        [HttpDelete("api/user/{id:int}")]
+        public async Task<IActionResult> Delete(int id) =>
             Ok(await _users.DeleteUserAsync(id));
 
-        [HttpPatch("api/user/{id}/activate")]
-        public async Task<IActionResult> Activate(string id) =>
+        [HttpDelete("api/user/{publicId:guid}")]
+        public async Task<IActionResult> DeleteByGuid(Guid publicId)
+        {
+            var row = await _db.GetUserByPublicIdAsync(publicId);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return Ok(await _users.DeleteUserAsync(id));
+        }
+
+        [HttpPatch("api/user/{id:int}/activate")]
+        public async Task<IActionResult> Activate(int id) =>
             Ok(await _users.ActivateUserAsync(id));
 
-        [HttpPatch("api/user/{id}/deactivate")]
-        public async Task<IActionResult> Deactivate(string id) =>
+        [HttpPatch("api/user/{publicId:guid}/activate")]
+        public async Task<IActionResult> ActivateByGuid(Guid publicId)
+        {
+            var row = await _db.GetUserByPublicIdAsync(publicId);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return Ok(await _users.ActivateUserAsync(id));
+        }
+
+        [HttpPatch("api/user/{id:int}/deactivate")]
+        public async Task<IActionResult> Deactivate(int id) =>
             Ok(await _users.DeactivateUserAsync(id));
 
-        [HttpPatch("api/user/{id}/role")]
-        public async Task<IActionResult> UpdateRole(string id, [FromBody] UserRoleUpdateRequest request) =>
+        [HttpPatch("api/user/{publicId:guid}/deactivate")]
+        public async Task<IActionResult> DeactivateByGuid(Guid publicId)
+        {
+            var row = await _db.GetUserByPublicIdAsync(publicId);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return Ok(await _users.DeactivateUserAsync(id));
+        }
+
+        [HttpPatch("api/user/{id:int}/role")]
+        public async Task<IActionResult> UpdateRole(int id, [FromBody] UserRoleUpdateRequest request) =>
             Ok(await _users.UpdateUserRoleAsync(id, request));
+
+        [HttpPatch("api/user/{publicId:guid}/role")]
+        public async Task<IActionResult> UpdateRoleByGuid(Guid publicId, [FromBody] UserRoleUpdateRequest request)
+        {
+            var row = await _db.GetUserByPublicIdAsync(publicId);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return Ok(await _users.UpdateUserRoleAsync(id, request));
+        }
     }
 }
