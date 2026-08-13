@@ -56,8 +56,15 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> DeleteSpaceAsync(int id)
         {
-            await _db.DeleteSpaceAsync(id);
-            return ApiResponse.Ok("Space deleted.");
+            try
+            {
+                await _db.DeleteSpaceAsync(id);
+                return ApiResponse.Ok("Space deleted.");
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse.Fail(ex.Message);
+            }
         }
     }
 }

@@ -20,6 +20,13 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
         public string? Notes { get; set; }
+        // Optional customer details for self-booking
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public string? PhoneNumber { get; set; }
+        public string? CnicOrPassport { get; set; }
+        public string? Address { get; set; }
+        public int? CityId { get; set; }
     }
 
     public class SmartBookingRequest
@@ -29,6 +36,13 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime EndDateTime { get; set; }
         public int? Capacity { get; set; }
         public string? Notes { get; set; }
+        // Optional customer details for self-booking
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
+        public string? PhoneNumber { get; set; }
+        public string? CnicOrPassport { get; set; }
+        public string? Address { get; set; }
+        public int? CityId { get; set; }
     }
 
     public class ReassignBookingRequest

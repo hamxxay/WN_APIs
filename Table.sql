@@ -435,9 +435,9 @@ AS
         l.Id                      AS LocationId,
         l.Name                    AS LocationName,
         br.Id                     AS BranchId,
-        br.Name                   AS BranchName,
+        br.[Description]          AS BranchName,
         co.Id                     AS CompanyId,
-        co.Name                   AS CompanyName,
+        co.CompanyName            AS CompanyName,
         sp.SeatPrice,
         sp.SeatPrice * s.Capacity AS RoomPrice,
         sp.SecurityDeposit,
@@ -451,8 +451,8 @@ AS
     JOIN       [dbo].[WN_Spaces]          s  ON s.Id  = b.SpaceId
     JOIN       [dbo].[WN_SpaceTypes]      st ON st.Id = s.SpaceTypeIdInt
     JOIN       [dbo].[WN_Locations]       l  ON l.Id  = s.LocationIdInt
-    JOIN       [dbo].[WN_Branches]        br ON br.Id = l.BranchId
-    JOIN       [dbo].[WN_Companies]       co ON co.Id = br.CompanyId
+    JOIN       [dbo].[Branches]           br ON br.Id = l.BranchId
+    JOIN       [dbo].[Company]            co ON co.Id = br.CompanyId
     JOIN       [dbo].[WN_SpacePricing]    sp ON sp.Id = b.PricingId
     JOIN       [dbo].[WN_BillingPeriods]  bp ON bp.Id = sp.BillingPeriodId
     JOIN       [dbo].[WN_BookingStatuses] bs ON bs.Id = b.BookingStatusId

@@ -12,6 +12,13 @@ namespace WorkNest.API.Controllers
         private readonly ICustomerService _customers;
         public CustomerController(ICustomerService customers) => _customers = customers;
 
+        private string? ResolveUserEmail(string? headerEmail)
+        {
+            var claimEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value 
+                             ?? User.FindFirst("email")?.Value;
+            return !string.IsNullOrWhiteSpace(claimEmail) ? claimEmail : headerEmail;
+        }
+
         [HttpGet("api/customer")]
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
@@ -31,7 +38,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Create(
             [FromBody] CustomerRequest request,
             [FromHeader(Name = "x-user-email")] string? userEmail) =>
-            StatusCode(201, await _customers.CreateCustomerAsync(request, userEmail));
+            StatusCode(201, await _customers.CreateCustomerAsync(request, ResolveUserEmail(userEmail)));
 
         [HttpPut("api/customer/{id}")]
         public async Task<IActionResult> Update(string id, [FromBody] CustomerRequest request) =>

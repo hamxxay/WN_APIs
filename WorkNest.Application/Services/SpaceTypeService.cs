@@ -20,16 +20,20 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateSpaceTypeAsync(SpaceTypeUpsertRequest request, int? actorId)
         {
+            var name = !string.IsNullOrWhiteSpace(request.Name) ? request.Name : request.Description ?? string.Empty;
+            var desc = !string.IsNullOrWhiteSpace(request.Description) ? request.Description : name;
             var (id, publicId) = await _db.InsertSpaceTypeAsync(
-                request.Name, request.Description, request.CategoryId, request.HourlyAllowed, actorId);
+                name, desc, request.CategoryId, request.Capacity, request.HourlyAllowed, actorId);
             return ApiResponse.Ok(new { id, publicId }, "Space type created.");
         }
 
         public async Task<ApiResponse> UpdateSpaceTypeAsync(int id, SpaceTypeUpsertRequest request, int? actorId)
         {
-            await _db.UpdateSpaceTypeAsync(id, request.Name, request.Description,
-                request.CategoryId, request.HourlyAllowed, actorId);
-            return ApiResponse.Ok("Space type updated.");
+            var name = !string.IsNullOrWhiteSpace(request.Name) ? request.Name : request.Description;
+            var desc = !string.IsNullOrWhiteSpace(request.Description) ? request.Description : name;
+            await _db.UpdateSpaceTypeAsync(id, name, desc,
+                request.CategoryId, request.Capacity, request.HourlyAllowed, actorId);
+            return ApiResponse.Ok($"Space type #{id} updated.");
         }
 
         public async Task<ApiResponse> DeleteSpaceTypeAsync(int id)

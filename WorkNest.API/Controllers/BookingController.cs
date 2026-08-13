@@ -18,6 +18,13 @@ namespace WorkNest.API.Controllers
             _db = db;
         }
 
+        private string? ResolveUserEmail(string? headerEmail)
+        {
+            var claimEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value 
+                             ?? User.FindFirst("email")?.Value;
+            return !string.IsNullOrWhiteSpace(claimEmail) ? claimEmail : headerEmail;
+        }
+
         [HttpGet("api/booking/available-spaces")]
         [AllowAnonymous]
         public async Task<IActionResult> AvailableSpaces(
@@ -48,22 +55,24 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/booking/my")]
         public async Task<IActionResult> MyBookings([FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            return Ok(await _bookings.GetMyBookingsAsync(userEmail));
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+            return Ok(await _bookings.GetMyBookingsAsync(email));
         }
 
         [HttpGet("api/booking/recent")]
+        [Authorize(Roles = "admin,super_admin,receptionist")]
         public async Task<IActionResult> Recent([FromQuery] int top = 10) =>
-            Ok(ApiResponse.Ok(await _bookings.GetRecentBookingsAsync(top)));
+            Ok(await _bookings.GetRecentBookingsAsync(top));
 
         [HttpGet("api/booking/calendar")]
+        [AllowAnonymous]
         public async Task<IActionResult> Calendar(
             [FromQuery] string spaceId,
             [FromQuery] int year,
             [FromQuery] int month)
         {
-            // Accept both int and GUID for spaceId
             if (int.TryParse(spaceId, out var intId))
                 return Ok(await _bookings.GetBookingCalendarAsync(intId, year, month));
 
@@ -92,9 +101,76 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/booking/{publicId:guid}")]
         public async Task<IActionResult> Get(Guid publicId, [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            var result = await _bookings.GetBookingByIdAsync(publicId, userEmail);
+            bool isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("receptionist");
+            var email = isAdmin ? null : ResolveUserEmail(userEmail);
+            var result = await _bookings.GetBookingByIdAsync(publicId, email);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
+        }
+
+        [HttpGet("api/booking/{id:int}")]
+        public async Task<IActionResult> GetDetails(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
+        {
+            bool isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("receptionist");
+            var email = isAdmin ? null : ResolveUserEmail(userEmail);
+            var result = await _bookings.GetBookingDetailsAsync(id.ToString(), email);
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
+        }
+
+        [HttpGet("api/booking/{id:int}/challan")]
+        public async Task<IActionResult> GetChallan(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
+        {
+            bool isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("receptionist");
+            var email = isAdmin ? null : ResolveUserEmail(userEmail);
+            var result = await _bookings.GetChallanAsync(id);
+            if (!result.IsSuccessful) return NotFound(result);
+            
+            if (email != null)
+            {
+                var dto = result.Data as WorkNest.Application.DTOs.Booking.ChallanResponseDto;
+                if (dto != null && !string.Equals(dto.CustomerEmail, email, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Forbid();
+                }
+            }
+            return Ok(result);
+        }
+
+        [HttpGet("api/booking/migrate-db")]
+        [AllowAnonymous]
+        public async Task<IActionResult> MigrateDb()
+        {
+            try
+            {
+                string sqlPath = @"F:\WN_APIs\SQL\WN_Challans_GetFullByBooking.sql";
+                if (!System.IO.File.Exists(sqlPath))
+                {
+                    return NotFound(new { isSuccessful = false, message = $"SQL file not found at {sqlPath}" });
+                }
+                string sql = await System.IO.File.ReadAllTextAsync(sqlPath);
+                
+                // Split by GO statements
+                var parts = System.Text.RegularExpressions.Regex.Split(
+                    sql, 
+                    @"^\s*GO\s*$", 
+                    System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                );
+                
+                foreach (var part in parts)
+                {
+                    if (!string.IsNullOrWhiteSpace(part))
+                    {
+                        await _db.ExecuteRawSqlAsync(part);
+                    }
+                }
+                
+                return Ok(new { isSuccessful = true, message = "Stored procedure migrated successfully." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, error = ex.Message });
+            }
         }
 
         [HttpPost("api/booking/create-admin")]
@@ -107,7 +183,8 @@ namespace WorkNest.API.Controllers
                 return BadRequest(new { isSuccessful = false, message = "SpaceId is required" });
             if (request.UserId == 0 && string.IsNullOrWhiteSpace(request.CustomerEmail))
                 return BadRequest(new { isSuccessful = false, message = "UserId or CustomerEmail is required" });
-            return StatusCode(201, await _bookings.CreateAdminBookingAsync(request, actorEmail));
+            var actor = ResolveUserEmail(actorEmail);
+            return StatusCode(201, await _bookings.CreateAdminBookingAsync(request, actor));
         }
 
         [HttpPost("api/booking")]
@@ -115,9 +192,16 @@ namespace WorkNest.API.Controllers
             [FromBody] BookingRequest request,
             [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            return StatusCode(201, await _bookings.CreateBookingAsync(request, userEmail));
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+            
+            var result = await _bookings.CreateBookingAsync(request, email);
+            if (!result.IsSuccessful && result.Message == "CustomerProfileRequired")
+            {
+                return BadRequest(result);
+            }
+            return StatusCode(201, result);
         }
 
         [HttpPost("api/booking/smart")]
@@ -125,9 +209,16 @@ namespace WorkNest.API.Controllers
             [FromBody] SmartBookingRequest request,
             [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            return StatusCode(201, await _bookings.CreateSmartBookingAsync(request, userEmail));
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+            
+            var result = await _bookings.CreateSmartBookingAsync(request, email);
+            if (!result.IsSuccessful && result.Message == "CustomerProfileRequired")
+            {
+                return BadRequest(result);
+            }
+            return StatusCode(201, result);
         }
 
         [HttpPut("api/booking/{id:int}")]
@@ -149,9 +240,10 @@ namespace WorkNest.API.Controllers
             [FromBody] CancelBookingRequest? request,
             [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            var result = await _bookings.CancelBookingAsync(id, userEmail, request?.CancelReason);
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+            var result = await _bookings.CancelBookingAsync(id, email, request?.CancelReason);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
@@ -162,12 +254,13 @@ namespace WorkNest.API.Controllers
             [FromBody] CancelBookingRequest? request,
             [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            var booking = await _db.GetBookingByPublicIdAsync(publicId, userEmail);
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+            var booking = await _db.GetBookingByPublicIdAsync(publicId, email);
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
-            var result = await _bookings.CancelBookingAsync(id, userEmail, request?.CancelReason);
+            var result = await _bookings.CancelBookingAsync(id, email, request?.CancelReason);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
@@ -191,9 +284,10 @@ namespace WorkNest.API.Controllers
             [FromBody] ReassignBookingRequest request,
             [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "Admin email header required" });
-            var result = await _bookings.ReassignBookingAsync(id, request, userEmail);
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+            var result = await _bookings.ReassignBookingAsync(id, request, email);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
@@ -204,12 +298,13 @@ namespace WorkNest.API.Controllers
             [FromBody] ReassignBookingRequest request,
             [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "Admin email header required" });
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
             var booking = await _db.GetBookingByPublicIdAsync(publicId, null);
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
-            var result = await _bookings.ReassignBookingAsync(id, request, userEmail);
+            var result = await _bookings.ReassignBookingAsync(id, request, email);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }

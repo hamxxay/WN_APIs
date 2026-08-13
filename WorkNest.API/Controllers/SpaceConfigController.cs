@@ -43,22 +43,24 @@ namespace WorkNest.API.Controllers
             [FromQuery] int? companyId,
             [FromQuery] int? branchId,
             [FromQuery] int? locationId) =>
-            Ok(await _config.GetSpaceConfigAsync());
+            Ok(await _config.GetSpaceConfigV2Async(companyId, branchId, locationId));
 
         [HttpPost("api/space-config/v2")]
-        public async Task<IActionResult> CreateV2([FromBody] SpaceConfigUpdateRequest? body) =>
-            StatusCode(201, new { isSuccessful = true, message = "Config created." });
+        public async Task<IActionResult> CreateV2(
+            [FromBody] SpaceConfigV2Request? body,
+            [FromHeader(Name = "x-user-email")] string? userEmail) =>
+            StatusCode(201, await _config.CreateSpaceConfigV2Async(body ?? new SpaceConfigV2Request(), userEmail));
 
         [HttpPut("api/space-config/v2/{id:int}")]
         public async Task<IActionResult> UpdateV2(
             int id,
-            [FromBody] SpaceConfigUpdateRequest? body,
+            [FromBody] SpaceConfigV2Request? body,
             [FromHeader(Name = "x-user-email")] string? userEmail) =>
-            Ok(new { isSuccessful = true, message = "Config updated." });
+            Ok(await _config.UpdateSpaceConfigV2Async(id, body ?? new SpaceConfigV2Request(), userEmail));
 
         [HttpDelete("api/space-config/v2/{id:int}")]
         public async Task<IActionResult> DeleteV2(int id) =>
-            Ok(new { isSuccessful = true, message = "Config deleted." });
+            Ok(await _config.DeleteSpaceConfigV2Async(id));
 
         [HttpPost("api/space-config/v2/{id:int}/generate")]
         public async Task<IActionResult> GenerateV2(int id)
@@ -75,7 +77,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/space-config/v2/delete-spaces")]
-        public async Task<IActionResult> DeleteSpacesV2([FromBody] object body) =>
-            Ok(new { isSuccessful = true, message = "Spaces deleted." });
+        public async Task<IActionResult> DeleteSpacesV2([FromBody] DeleteSpacesFromConfigRequest? request) =>
+            Ok(await _config.DeleteSpacesFromConfigAsync(request ?? new DeleteSpacesFromConfigRequest()));
     }
 }

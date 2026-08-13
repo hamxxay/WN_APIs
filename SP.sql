@@ -477,7 +477,8 @@ GO
 -- BookingDetail → Booking → Space → Location
 -- ------------------------------------------------------------
 CREATE   PROCEDURE [dbo].[WN_BookingDetails_GetByBooking]
-    @BookingGuid NVARCHAR(50)
+    @BookingIdentifier NVARCHAR(50),
+    @UserEmail         NVARCHAR(256) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -497,7 +498,12 @@ BEGIN
     LEFT JOIN dbo.WN_Bookings   b  WITH (NOLOCK) ON b.IdGUID    = bd.BookingGuid
     LEFT JOIN dbo.WN_Spaces     s  WITH (NOLOCK) ON s.IdGUID    = b.SpaceGuid
     LEFT JOIN dbo.WN_Locations  l  WITH (NOLOCK) ON l.IdGUID    = s.LocationId
-    WHERE CAST(bd.BookingGuid AS NVARCHAR(36)) = @BookingGuid
+    LEFT JOIN dbo.WN_Users      u  WITH (NOLOCK) ON u.Id        = b.UserId
+    WHERE (
+        TRY_CAST(@BookingIdentifier AS UNIQUEIDENTIFIER) IS NOT NULL AND b.IdGUID = TRY_CAST(@BookingIdentifier AS UNIQUEIDENTIFIER)
+        OR TRY_CAST(@BookingIdentifier AS INT) IS NOT NULL AND b.Id = TRY_CAST(@BookingIdentifier AS INT)
+    )
+      AND (@UserEmail IS NULL OR u.Email = @UserEmail)
       AND bd.IsDeleted = 0
     ORDER BY bd.Id;
 END
@@ -949,7 +955,7 @@ BEGIN
         st.Description      AS spaceTypeName,
         l.Name              AS locationName,
         l.CompanyId         AS companyId,
-        co.CompanyName          AS companyName,
+        co.CompanyName      AS companyName,
         l.BranchId          AS branchId,
         br.[Description]    AS branchName,
         u.Name              AS customerName,
@@ -958,8 +964,8 @@ BEGIN
     LEFT JOIN dbo.WN_Spaces       s  WITH (NOLOCK) ON s.IdGUID    = b.SpaceGuid
     LEFT JOIN dbo.WN_SpaceTypes   st WITH (NOLOCK) ON st.IdGUID   = s.SpaceTypeId
     LEFT JOIN dbo.WN_Locations    l  WITH (NOLOCK) ON l.IdGUID    = s.LocationId
-    LEFT JOIN SAC400.dbo.Company  co WITH (NOLOCK) ON l.CompanyId = co.Id
-    LEFT JOIN SAC400.dbo.Branches br WITH (NOLOCK) ON l.BranchId  = br.Id
+    LEFT JOIN dbo.Company         co WITH (NOLOCK) ON l.CompanyId = co.Id
+    LEFT JOIN dbo.Branches        br WITH (NOLOCK) ON l.BranchId  = br.Id
     LEFT JOIN dbo.WN_Users        u  WITH (NOLOCK) ON u.IdGUID    = b.UserGuid
     WHERE b.ChallanNumber = @ChallanNumber;
 END
@@ -995,7 +1001,7 @@ BEGIN
         st.Description      AS spaceTypeName,
         l.Name              AS locationName,
         l.CompanyId         AS companyId,
-        co.CompanyName           AS companyName,
+        co.CompanyName      AS companyName,
         l.BranchId          AS branchId,
         br.[Description]    AS branchName,
         u.Name              AS customerName,
@@ -1004,8 +1010,8 @@ BEGIN
     LEFT JOIN dbo.WN_Spaces       s  WITH (NOLOCK) ON s.IdGUID    = b.SpaceGuid
     LEFT JOIN dbo.WN_SpaceTypes   st WITH (NOLOCK) ON st.IdGUID   = s.SpaceTypeId
     LEFT JOIN dbo.WN_Locations    l  WITH (NOLOCK) ON l.IdGUID    = s.LocationId
-    LEFT JOIN SAC400.dbo.Company  co WITH (NOLOCK) ON l.CompanyId = co.Id
-    LEFT JOIN SAC400.dbo.Branches br WITH (NOLOCK) ON l.BranchId  = br.Id
+    LEFT JOIN dbo.Company         co WITH (NOLOCK) ON l.CompanyId = co.Id
+    LEFT JOIN dbo.Branches        br WITH (NOLOCK) ON l.BranchId  = br.Id
     LEFT JOIN dbo.WN_Users        u  WITH (NOLOCK) ON u.IdGUID    = b.UserGuid
     WHERE CAST(b.IdGUID AS NVARCHAR(36)) = @IdGUID;
 END
@@ -1296,19 +1302,92 @@ SET QUOTED_IDENTIFIER ON
 GO
 
 CREATE   PROCEDURE [dbo].[WN_Bookings_Insert]
-    @UserId      INT,
-    @SpaceId     INT,
-    @PricingId   INT,
-    @StartOn     DATETIME2,
-    @EndOn       DATETIME2,
-    @Notes       NVARCHAR(MAX) = NULL,
-    @CreatedById INT           = NULL,
-    @UserEmail   NVARCHAR(256) = NULL
+    @UserId            INT,
+    @SpaceId           INT,
+    @PricingId         INT,           -- Resolved internally for security
+    @StartOn           DATETIME2,
+    @EndOn             DATETIME2,
+    @Notes             NVARCHAR(MAX) = NULL,
+    @CreatedById       INT           = NULL,
+    @UserEmail         NVARCHAR(256) = NULL,
+    @CustomerEmail     NVARCHAR(255) = NULL,
+    @CustomerFirstName NVARCHAR(100) = NULL,
+    @CustomerLastName  NVARCHAR(100) = NULL,
+    @CustomerPhone     NVARCHAR(50)  = NULL,
+    @CustomerCnic      NVARCHAR(50)  = NULL,
+    @CustomerAddress   NVARCHAR(500) = NULL,
+    @CustomerCityId    INT           = NULL,
+    @CustomerNotes     NVARCHAR(1000) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     BEGIN TRANSACTION;
     BEGIN TRY
+        -- Validate space & capacity
+        DECLARE @Capacity SMALLINT;
+        DECLARE @CategoryCode NVARCHAR(50);
+        DECLARE @SpaceGuid UNIQUEIDENTIFIER;
+        DECLARE @SpaceCode NVARCHAR(50);
+        DECLARE @SpaceName NVARCHAR(255);
+
+        SELECT 
+            @Capacity = s.Capacity,
+            @CategoryCode = sc.Code,
+            @SpaceGuid = s.PublicId,
+            @SpaceCode = s.Code,
+            @SpaceName = s.Name
+        FROM dbo.WN_Spaces s
+        JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeIdInt
+        JOIN dbo.WN_SpaceCategories sc ON sc.Id = st.CategoryId
+        WHERE s.Id = @SpaceId AND s.IsActive = 1;
+
+        IF @Capacity IS NULL
+        BEGIN
+            ROLLBACK TRANSACTION;
+            SELECT NULL AS BookingId, NULL AS BookingPublicId,
+                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
+                   'Space not found or inactive.' AS ErrorMessage;
+            RETURN;
+        END
+
+        IF @Capacity <= 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+            SELECT NULL AS BookingId, NULL AS BookingPublicId,
+                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
+                   'Space capacity must be greater than 0.' AS ErrorMessage;
+            RETURN;
+        END
+
+        -- Determine intended billing period code based on space category
+        DECLARE @BillingPeriodCode NVARCHAR(20);
+        IF @CategoryCode = 'PrivateOffice' OR @CategoryCode = 'SharedSpace'
+            SET @BillingPeriodCode = 'Monthly';
+        ELSE
+            SET @BillingPeriodCode = 'Hourly';
+
+        -- Resolve the active pricing row internally based on space category and dates
+        DECLARE @ResolvedPricingId INT;
+        SELECT TOP 1 @ResolvedPricingId = sp.Id
+        FROM dbo.WN_SpacePricing   sp
+        JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
+        WHERE sp.SpaceId       = @SpaceId
+          AND sp.IsActive      = 1
+          AND bp.Code          = @BillingPeriodCode
+          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+        ORDER BY sp.EffectiveFrom DESC;
+
+        IF @ResolvedPricingId IS NULL
+        BEGIN
+            ROLLBACK TRANSACTION;
+            SELECT NULL AS BookingId, NULL AS BookingPublicId,
+                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
+                   'No active ' + @BillingPeriodCode + ' pricing found for this space. Please configure pricing first.' AS ErrorMessage;
+            RETURN;
+        END
+
+        -- Check for overlapping bookings
         IF EXISTS (
             SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK)
             WHERE SpaceId         = @SpaceId
@@ -1320,19 +1399,112 @@ BEGIN
         BEGIN
             ROLLBACK TRANSACTION;
             SELECT NULL AS BookingId, NULL AS BookingPublicId,
+                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
                    'Space is not available for the requested period.' AS ErrorMessage;
             RETURN;
         END
 
-        INSERT INTO dbo.WN_Bookings
-            (UserId, SpaceId, PricingId, StartOn, EndOn,
-             BookingStatusId, Notes, IsDeleted, CreatedById)
-        VALUES
-            (@UserId, @SpaceId, @PricingId, @StartOn, @EndOn,
-             1, @Notes, 0, @CreatedById);
+        -- Resolve/Create Customer linked to @UserId
+        DECLARE @CustomerCode NVARCHAR(20) = NULL;
 
-        DECLARE @BookingId INT = SCOPE_IDENTITY();
+        SELECT TOP 1 @CustomerCode = Code
+        FROM dbo.WN_Customers WITH (UPDLOCK)
+        WHERE UserId = @UserId;
 
+        IF @CustomerCode IS NULL AND (@CustomerEmail IS NOT NULL OR @UserEmail IS NOT NULL)
+        BEGIN
+            DECLARE @EmailToFind NVARCHAR(255) = ISNULL(@CustomerEmail, @UserEmail);
+            
+            SELECT TOP 1 @CustomerCode = Code
+            FROM dbo.WN_Customers WITH (UPDLOCK)
+            WHERE Email = @EmailToFind;
+
+            IF @CustomerCode IS NOT NULL
+            BEGIN
+                UPDATE dbo.WN_Customers
+                SET UserId = @UserId
+                WHERE Code = @CustomerCode;
+            END
+        END
+
+        IF @CustomerCode IS NULL
+        BEGIN
+            DECLARE @FName NVARCHAR(100) = ISNULL(@CustomerFirstName, 'Customer');
+            DECLARE @LName NVARCHAR(100) = @CustomerLastName;
+            DECLARE @Email NVARCHAR(255) = ISNULL(@CustomerEmail, @UserEmail);
+            DECLARE @Phone NVARCHAR(50)  = @CustomerPhone;
+
+            IF @Email IS NULL
+            BEGIN
+                SELECT @Email = Email, @FName = ISNULL(@FName, Name)
+                FROM dbo.WN_Users WITH (NOLOCK)
+                WHERE Id = @UserId;
+            END
+
+            DECLARE @NewCustId INT;
+            
+            INSERT INTO dbo.WN_Customers (
+                UserId, FirstName, LastName, Email, PhoneNumber, CNIC, Address, CityId, IsActive, CreatedAt, Notes
+            )
+            VALUES (
+                @UserId, @FName, @LName, @Email, @Phone, @CustomerCnic, @CustomerAddress, @CustomerCityId, 1, SYSUTCDATETIME(), @CustomerNotes
+            );
+
+            SET @NewCustId = SCOPE_IDENTITY();
+            SELECT @CustomerCode = Code FROM dbo.WN_Customers WHERE Id = @NewCustId;
+        END
+
+        -- Read pricing values from resolved pricing row
+        DECLARE @SeatPrice        DECIMAL(18,4);
+        DECLARE @SecurityDeposit  DECIMAL(18,4);
+        DECLARE @RentAccountId    INT;
+        DECLARE @DepositAccountId INT;
+
+        SELECT
+            @SeatPrice        = sp.SeatPrice,
+            @SecurityDeposit  = sp.SecurityDeposit,
+            @RentAccountId    = sp.RentAccountId,
+            @DepositAccountId = sp.DepositAccountId
+        FROM dbo.WN_SpacePricing sp
+        WHERE sp.Id = @ResolvedPricingId;
+
+        -- Validate SeatPrice
+        IF @SeatPrice IS NULL OR @SeatPrice < 0
+        BEGIN
+            ROLLBACK TRANSACTION;
+            SELECT NULL AS BookingId, NULL AS BookingPublicId,
+                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
+                   'Pricing configuration has invalid SeatPrice.' AS ErrorMessage;
+            RETURN;
+        END
+
+        -- Calculate Duration and Rent Amount
+        DECLARE @Duration DECIMAL(18,2) = 1.0;
+        DECLARE @RentAmount DECIMAL(18,2) = 0.0;
+        
+        IF @BillingPeriodCode = 'Monthly'
+        BEGIN
+            DECLARE @Months INT = DATEDIFF(month, @StartOn, @EndOn);
+            IF @Months <= 0 SET @Months = 1;
+            SET @Duration = CAST(@Months AS DECIMAL(18,2));
+            
+            IF @CategoryCode = 'PrivateOffice'
+                SET @RentAmount = @SeatPrice * @Capacity * @Duration;
+            ELSE
+                SET @RentAmount = @SeatPrice * @Duration;
+        END
+        ELSE
+        BEGIN
+            DECLARE @Minutes INT = DATEDIFF(minute, @StartOn, @EndOn);
+            DECLARE @Hours DECIMAL(18,2) = CEILING(CAST(@Minutes AS DECIMAL(18,2)) / 60.0);
+            IF @Hours <= 0 SET @Hours = 1.0;
+            SET @Duration = @Hours;
+            SET @RentAmount = @SeatPrice * @Duration;
+        END
+
+        DECLARE @TotalAmount DECIMAL(18,2) = @RentAmount + ISNULL(@SecurityDeposit, 0);
+
+        -- Generate challan number
         DECLARE @Today      DATE = CAST(SYSUTCDATETIME() AS DATE);
         DECLARE @SeqNum     INT;
         DECLARE @ChallanNum NVARCHAR(50);
@@ -1356,41 +1528,90 @@ BEGIN
         SET @ChallanNum = 'WN-' + CONVERT(NVARCHAR(8), @Today, 112) + '-'
                         + RIGHT('000000' + CAST(@SeqNum AS NVARCHAR(6)), 6);
 
+        DECLARE @ChallanValidUntil DATETIME = DATEADD(DAY, 5, @Today);
+        DECLARE @UserGuid UNIQUEIDENTIFIER;
+        SELECT @UserGuid = PublicId FROM dbo.WN_Users WHERE Id = @UserId;
+        DECLARE @CreatedByGuid UNIQUEIDENTIFIER = NULL;
+        IF @CreatedById IS NOT NULL
+            SELECT @CreatedByGuid = PublicId FROM dbo.WN_Users WHERE Id = @CreatedById;
+
+        -- Insert booking record
+        INSERT INTO dbo.WN_Bookings (
+            IdGUID, BookingDate, UserGuid, CustomerCode, SpaceGuid,
+            StartDateTime, EndDateTime, TotalAmount, BookingStatus,
+            BankAccountId, SecurityDepositAccountId, Status, Notes, RejectReason,
+            CreatedOn, UpdatedOn, CreatedBy, UpdatedBy, TransactionDate,
+            ChallanNumber, ValidityDate, UserId, SpaceId, PricingId,
+            StartOn, EndOn, BookingStatusId, CancelReason, IsDeleted, CreatedById, UpdatedById
+        )
+        VALUES (
+            NEWID(), SYSUTCDATETIME(), @UserGuid, @CustomerCode, @SpaceGuid,
+            @StartOn, @EndOn, @TotalAmount, 1,
+            @RentAccountId, @DepositAccountId, 1, @Notes, NULL,
+            SYSUTCDATETIME(), NULL, @CreatedByGuid, NULL, SYSUTCDATETIME(),
+            @ChallanNum, @ChallanValidUntil, @UserId, @SpaceId, @ResolvedPricingId,
+            @StartOn, @EndOn, 1, NULL, 0, @CreatedById, NULL
+        );
+
+        DECLARE @BookingId INT = SCOPE_IDENTITY();
+
+        -- Insert Challan
         INSERT INTO dbo.WN_Challans
             (BookingId, ChallanNumber, ValidUntil, StatusId, CreatedById)
         VALUES
-            (@BookingId, @ChallanNum, DATEADD(DAY, 5, @Today), 1, @CreatedById);
+            (@BookingId, @ChallanNum, @ChallanValidUntil, 1, @CreatedById);
 
-        DECLARE @SeatPrice        DECIMAL(18,4);
-        DECLARE @Capacity         SMALLINT;
-        DECLARE @SecurityDeposit  DECIMAL(18,4);
-        DECLARE @RentAccountId    INT;
-        DECLARE @DepositAccountId INT;
-
-        SELECT
-            @SeatPrice        = sp.SeatPrice,
-            @Capacity         = s.Capacity,
-            @SecurityDeposit  = sp.SecurityDeposit,
-            @RentAccountId    = sp.RentAccountId,
-            @DepositAccountId = sp.DepositAccountId
-        FROM dbo.WN_SpacePricing sp
-        JOIN dbo.WN_Spaces       s ON s.Id = sp.SpaceId
-        WHERE sp.Id = @PricingId;
+        -- Insert Rent BookingLine
+        -- For private rooms, UnitPrice is SeatPrice × Capacity. For others, it is SeatPrice.
+        DECLARE @UnitPrice DECIMAL(18,2);
+        IF @CategoryCode = 'PrivateOffice'
+            SET @UnitPrice = @SeatPrice * @Capacity;
+        ELSE
+            SET @UnitPrice = @SeatPrice;
 
         INSERT INTO dbo.WN_BookingLines
             (BookingId, ChargeTypeId, Description, Quantity, UnitPrice,
              DiscountAmount, TaxRate, AccountId, CreatedById)
         VALUES
-            (@BookingId, 1, 'Room Rent', 1, @SeatPrice * @Capacity,
+            (@BookingId, 1, 'Room Rent', @Duration, @UnitPrice,
              0, 0, @RentAccountId, @CreatedById);
 
+        -- Insert Security Deposit BookingLine
         IF @SecurityDeposit > 0
             INSERT INTO dbo.WN_BookingLines
                 (BookingId, ChargeTypeId, Description, Quantity, UnitPrice,
                  DiscountAmount, TaxRate, AccountId, CreatedById)
+            -- Quantity 1 is correct for SecurityDeposit
             VALUES
                 (@BookingId, 2, 'Security Deposit', 1, @SecurityDeposit,
                  0, 0, @DepositAccountId, @CreatedById);
+
+        -- Insert BookingDetails (RoomRent and SecurityDeposit lines)
+        DECLARE @BookingGuid UNIQUEIDENTIFIER;
+        SELECT @BookingGuid = PublicId FROM dbo.WN_Bookings WHERE Id = @BookingId;
+
+        DECLARE @CreatedByEmail NVARCHAR(100);
+        SELECT @CreatedByEmail = Email FROM dbo.WN_Users WHERE Id = @UserId;
+        DECLARE @Creator NVARCHAR(100) = ISNULL(@UserEmail, @CreatedByEmail);
+
+        INSERT INTO dbo.WN_BookingDetails
+            (IdGUID, BookingGuid, FeeType, Amount, AccountId, CreatedOn, CreatedBy, IsDeleted, CustomerCode,
+             CustomerName, CustomerEmail, SpaceName, SpaceCode, SpaceCategory, StartDateTime, EndDateTime,
+             RentAmount, SecurityDeposit, TotalAmount, RentAccountId, DepositAccountId, Notes)
+        VALUES
+            (NEWID(), @BookingGuid, 'RoomRent', @RentAmount, @RentAccountId, SYSUTCDATETIME(), @Creator, 0, @CustomerCode,
+             ISNULL(@CustomerFirstName + ' ' + @CustomerLastName, 'Customer'), @Creator, @SpaceName, @SpaceCode, @CategoryCode, @StartOn, @EndOn,
+             @RentAmount, @SecurityDeposit, @TotalAmount, @RentAccountId, @DepositAccountId, @Notes);
+
+        IF @SecurityDeposit > 0
+            INSERT INTO dbo.WN_BookingDetails
+                (IdGUID, BookingGuid, FeeType, Amount, AccountId, CreatedOn, CreatedBy, IsDeleted, CustomerCode,
+                 CustomerName, CustomerEmail, SpaceName, SpaceCode, SpaceCategory, StartDateTime, EndDateTime,
+                 RentAmount, SecurityDeposit, TotalAmount, RentAccountId, DepositAccountId, Notes)
+            VALUES
+                (NEWID(), @BookingGuid, 'SecurityDeposit', @SecurityDeposit, @DepositAccountId, SYSUTCDATETIME(), @Creator, 0, @CustomerCode,
+                 ISNULL(@CustomerFirstName + ' ' + @CustomerLastName, 'Customer'), @Creator, @SpaceName, @SpaceCode, @CategoryCode, @StartOn, @EndOn,
+                 @RentAmount, @SecurityDeposit, @TotalAmount, @RentAccountId, @DepositAccountId, @Notes);
 
         COMMIT TRANSACTION;
 
@@ -1398,7 +1619,7 @@ BEGIN
             @BookingId  AS BookingId,
             b.PublicId  AS BookingPublicId,
             @ChallanNum AS ChallanNumber,
-            DATEADD(DAY, 5, @Today) AS ChallanValidUntil,
+            @ChallanValidUntil AS ChallanValidUntil,
             NULL        AS ErrorMessage
         FROM dbo.WN_Bookings b WHERE b.Id = @BookingId;
 
@@ -1419,13 +1640,21 @@ SET QUOTED_IDENTIFIER ON
 GO
 
 CREATE   PROCEDURE [dbo].[WN_Bookings_InsertSmart]
-    @UserEmail    NVARCHAR(256),
-    @CategoryCode NVARCHAR(30),
-    @StartOn      DATETIME2,
-    @EndOn        DATETIME2,
-    @Capacity     INT           = NULL,
-    @Notes        NVARCHAR(MAX) = NULL,
-    @CreatedById  INT           = NULL
+    @UserEmail         NVARCHAR(256),
+    @CategoryCode      NVARCHAR(30),
+    @StartOn           DATETIME2,
+    @EndOn             DATETIME2,
+    @Capacity          INT           = NULL,
+    @Notes             NVARCHAR(MAX) = NULL,
+    @CreatedById       INT           = NULL,
+    @CustomerEmail     NVARCHAR(255) = NULL,
+    @CustomerFirstName NVARCHAR(100) = NULL,
+    @CustomerLastName  NVARCHAR(100) = NULL,
+    @CustomerPhone     NVARCHAR(50)  = NULL,
+    @CustomerCnic      NVARCHAR(50)  = NULL,
+    @CustomerAddress   NVARCHAR(500) = NULL,
+    @CustomerCityId    INT           = NULL,
+    @CustomerNotes     NVARCHAR(1000) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -1495,14 +1724,22 @@ BEGIN
         COMMIT TRANSACTION;
 
         EXEC dbo.WN_Bookings_Insert
-            @UserId      = @UserId,
-            @SpaceId     = @SpaceId,
-            @PricingId   = @PricingId,
-            @StartOn     = @StartOn,
-            @EndOn       = @EndOn,
-            @Notes       = @Notes,
-            @CreatedById = @CreatedById,
-            @UserEmail   = @UserEmail;
+            @UserId            = @UserId,
+            @SpaceId           = @SpaceId,
+            @PricingId         = @PricingId,
+            @StartOn           = @StartOn,
+            @EndOn             = @EndOn,
+            @Notes             = @Notes,
+            @CreatedById       = @CreatedById,
+            @UserEmail         = @UserEmail,
+            @CustomerEmail     = @CustomerEmail,
+            @CustomerFirstName = @CustomerFirstName,
+            @CustomerLastName  = @CustomerLastName,
+            @CustomerPhone     = @CustomerPhone,
+            @CustomerCnic      = @CustomerCnic,
+            @CustomerAddress   = @CustomerAddress,
+            @CustomerCityId    = @CustomerCityId,
+            @CustomerNotes     = @CustomerNotes;
 
     END TRY
     BEGIN CATCH
@@ -1655,14 +1892,14 @@ CREATE   PROCEDURE [dbo].[WN_Branches_GetList]
 AS
 BEGIN
     SET NOCOUNT ON;
-    SELECT b.Id, b.PublicId, b.Name, b.Code, b.CompanyId,
-           co.Name AS CompanyName, b.CityId, ci.Name AS CityName, b.IsActive
-    FROM dbo.WN_Branches  b  WITH (NOLOCK)
-    JOIN dbo.WN_Companies co WITH (NOLOCK) ON co.Id = b.CompanyId
+    SELECT b.Id, b.PublicId, b.[Description] AS Name, b.Code, b.CompanyId,
+           co.CompanyName AS CompanyName, b.CityId, ci.Name AS CityName, b.IsActive
+    FROM dbo.Branches  b  WITH (NOLOCK)
+    JOIN dbo.Company co WITH (NOLOCK) ON co.Id = b.CompanyId
     LEFT JOIN dbo.WN_Cities ci WITH (NOLOCK) ON ci.Id = b.CityId
     WHERE b.IsActive = 1
       AND (@CompanyId IS NULL OR b.CompanyId = @CompanyId)
-    ORDER BY b.Name ASC;
+    ORDER BY b.[Description] ASC;
 END
 GO
 /****** Object:  StoredProcedure [dbo].[WN_Challan_ExtendValidity]    Script Date: 10/08/2026 10:45:43 am ******/
@@ -1874,10 +2111,10 @@ CREATE   PROCEDURE [dbo].[WN_Companies_GetList]
 AS
 BEGIN
     SET NOCOUNT ON;
-    SELECT Id, PublicId, Name, LegalName, Email, Phone, IsActive
-    FROM dbo.WN_Companies WITH (NOLOCK)
+    SELECT Id, PublicId, CompanyName AS Name, LegalName, Email, Phone, IsActive
+    FROM dbo.Company WITH (NOLOCK)
     WHERE IsActive = 1
-    ORDER BY Name ASC;
+    ORDER BY CompanyName ASC;
 END
 GO
 /****** Object:  StoredProcedure [dbo].[WN_Contacts_Delete]    Script Date: 10/08/2026 10:45:43 am ******/
@@ -2840,12 +3077,12 @@ BEGIN
     SELECT
         l.Id, l.PublicId, l.Name, l.Address,
         l.CityId, ci.Name AS CityName,
-        l.BranchId, br.Name AS BranchName,
-        br.CompanyId, co.Name AS CompanyName,
+        l.BranchId, br.[Description] AS BranchName,
+        br.CompanyId, co.CompanyName AS CompanyName,
         l.OpeningTime, l.ClosingTime, l.IsActive
     FROM dbo.WN_Locations l  WITH (NOLOCK)
-    JOIN dbo.WN_Branches  br WITH (NOLOCK) ON br.Id = l.BranchId
-    JOIN dbo.WN_Companies co WITH (NOLOCK) ON co.Id = br.CompanyId
+    JOIN dbo.Branches     br WITH (NOLOCK) ON br.Id = l.BranchId
+    JOIN dbo.Company      co WITH (NOLOCK) ON co.Id = br.CompanyId
     JOIN dbo.WN_Cities    ci WITH (NOLOCK) ON ci.Id = l.CityId
     WHERE l.IsActive = 1
     ORDER BY l.Name ASC;
@@ -2874,14 +3111,14 @@ BEGIN
     SELECT
         l.Id, l.PublicId, l.Name, l.Address,
         l.CityId, ci.Name AS CityName,
-        l.BranchId, br.Name AS BranchName,
-        br.CompanyId, co.Name AS CompanyName,
+        l.BranchId, br.[Description] AS BranchName,
+        br.CompanyId, co.CompanyName AS CompanyName,
         l.OpeningTime, l.ClosingTime,
         l.Latitude, l.Longitude, l.IsActive,
         COUNT(*) OVER () AS TotalCount
     FROM dbo.WN_Locations l  WITH (NOLOCK)
-    JOIN dbo.WN_Branches  br WITH (NOLOCK) ON br.Id = l.BranchId
-    JOIN dbo.WN_Companies co WITH (NOLOCK) ON co.Id = br.CompanyId
+    JOIN dbo.Branches     br WITH (NOLOCK) ON br.Id = l.BranchId
+    JOIN dbo.Company      co WITH (NOLOCK) ON co.Id = br.CompanyId
     JOIN dbo.WN_Cities    ci WITH (NOLOCK) ON ci.Id = l.CityId
     WHERE l.IsActive = 1
       AND (@BranchId  IS NULL OR l.BranchId   = @BranchId)
@@ -3391,17 +3628,22 @@ BEGIN
     SET @VoucherRef = 'VCH-' + CONVERT(NVARCHAR(8), @Today, 112) + '-'
                     + RIGHT('000000' + CAST(@SeqNum AS NVARCHAR(6)), 6);
 
+    DECLARE @PaymentId INT;
+    DECLARE @PaymentGuid UNIQUEIDENTIFIER;
     DECLARE @sql NVARCHAR(MAX);
+
     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Payments') AND name = 'UserId' AND system_type_id = 56)
     BEGIN
         SET @sql = N'INSERT INTO dbo.WN_Payments
             (UserId, BookingId, PaymentMethodId, Amount, CurrencyCode,
              TransactionRef, StatusId, ExpiresOn, CreatedById)
         VALUES (@UserId,@BookingId,5,@Amt,''PKR'',@Ref,1,@Exp,@CBy);
-        SELECT Id, PublicId FROM dbo.WN_Payments WHERE Id = SCOPE_IDENTITY();';
+        SET @OutId = SCOPE_IDENTITY();
+        SELECT @OutGuid = PublicId FROM dbo.WN_Payments WHERE Id = @OutId;';
+        
         EXEC sp_executesql @sql,
-            N'@UserId INT,@BookingId INT,@Amt DECIMAL(18,4),@Ref NVARCHAR(50),@Exp DATETIME2,@CBy INT',
-            @UserId,@BookingId,@Amount,@VoucherRef,@ExpiresOn,@CreatedById;
+            N'@UserId INT,@BookingId INT,@Amt DECIMAL(18,4),@Ref NVARCHAR(50),@Exp DATETIME2,@CBy INT, @OutId INT OUTPUT, @OutGuid UNIQUEIDENTIFIER OUTPUT',
+            @UserId,@BookingId,@Amount,@VoucherRef,@ExpiresOn,@CreatedById, @PaymentId OUTPUT, @PaymentGuid OUTPUT;
     END
     ELSE
     BEGIN
@@ -3413,13 +3655,24 @@ BEGIN
             (UserId, BookingId, PaymentMethodId, Amount, CurrencyCode,
              TransactionRef, StatusId, ExpiresOn, CreatedAt)
         VALUES (@UG,@BG,5,@Amt,''PKR'',@Ref,1,@Exp,SYSUTCDATETIME());
-        SELECT Id, PublicId FROM dbo.WN_Payments WHERE Id = SCOPE_IDENTITY();';
+        SET @OutId = SCOPE_IDENTITY();
+        SELECT @OutGuid = PublicId FROM dbo.WN_Payments WHERE Id = @OutId;';
+        
         EXEC sp_executesql @sql2,
-            N'@UG UNIQUEIDENTIFIER,@BG UNIQUEIDENTIFIER,@Amt DECIMAL(18,4),@Ref NVARCHAR(50),@Exp DATETIME2',
-            @UG,@BG,@Amount,@VoucherRef,@ExpiresOn;
+            N'@UG UNIQUEIDENTIFIER,@BG UNIQUEIDENTIFIER,@Amt DECIMAL(18,4),@Ref NVARCHAR(50),@Exp DATETIME2, @OutId INT OUTPUT, @OutGuid UNIQUEIDENTIFIER OUTPUT',
+            @UG,@BG,@Amount,@VoucherRef,@ExpiresOn, @PaymentId OUTPUT, @PaymentGuid OUTPUT;
     END
 
-    SELECT @VoucherRef AS VoucherRef;
+    -- Return a single SELECT containing all voucher information
+    SELECT 
+        @PaymentId AS Id, 
+        @PaymentGuid AS PublicId, 
+        @VoucherRef AS VoucherRef,
+        @VoucherRef AS VoucherNumber,
+        @ExpiresOn AS ExpiryDate,
+        @Amount AS Amount,
+        1 AS IsSuccessful,
+        N'Voucher generated successfully' AS Message;
 END
 GO
 /****** Object:  StoredProcedure [dbo].[WN_Payments_GetByMembershipId]    Script Date: 10/08/2026 10:45:43 am ******/
@@ -4307,9 +4560,27 @@ BEGIN
         SET @Code = CAST(@MinCode + @i AS NVARCHAR(20));
         SET @Name = @NamePrefix + ' ' + @Code;
 
-        IF NOT EXISTS (
+        IF EXISTS (
             SELECT 1 FROM dbo.WN_Spaces
-            WHERE Code = @Code AND LocationId = @LocationGuid AND Status IN (0, 1)
+            WHERE (LocationIdInt = @LocationId OR LocationId = @LocationGuid)
+              AND (SpaceTypeIdInt = @SpaceTypeId OR SpaceTypeId = @SpaceTypeGuid)
+              AND Code = @Code
+              AND (IsActive = 0 OR Status = 0)
+        )
+        BEGIN
+            UPDATE dbo.WN_Spaces 
+            SET IsActive = 1, Status = 1, Name = @Name
+            WHERE (LocationIdInt = @LocationId OR LocationId = @LocationGuid)
+              AND (SpaceTypeIdInt = @SpaceTypeId OR SpaceTypeId = @SpaceTypeGuid)
+              AND Code = @Code;
+
+            SET @Created = @Created + 1;
+        END
+        ELSE IF NOT EXISTS (
+            SELECT 1 FROM dbo.WN_Spaces
+            WHERE (LocationIdInt = @LocationId OR LocationId = @LocationGuid)
+              AND (SpaceTypeIdInt = @SpaceTypeId OR SpaceTypeId = @SpaceTypeGuid)
+              AND Code = @Code
         )
         BEGIN
             INSERT INTO dbo.WN_Spaces
@@ -4453,31 +4724,44 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @MinCode      INT;
-    DECLARE @TotalSpaces  INT;
-    DECLARE @LocationGuid UNIQUEIDENTIFIER;
-    DECLARE @LocationId   INT;
+    DECLARE @MinCode       INT;
+    DECLARE @TotalSpaces   INT;
+    DECLARE @LocationId    INT;
+    DECLARE @SpaceTypeId   INT;
+    DECLARE @LocationGuid  UNIQUEIDENTIFIER;
+    DECLARE @SpaceTypeGuid UNIQUEIDENTIFIER;
 
-    SELECT @MinCode = MinCode, @TotalSpaces = TotalSpaces, @LocationId = LocationId
+    SELECT 
+        @MinCode     = MinCode, 
+        @TotalSpaces = TotalSpaces, 
+        @LocationId  = LocationId,
+        @SpaceTypeId = SpaceTypeId
     FROM dbo.WN_SpaceConfig WHERE Id = @ConfigId AND Status = 1;
 
-    SELECT @LocationGuid = IdGUID FROM dbo.WN_Locations WHERE Id = @LocationId;
+    SELECT @LocationGuid  = IdGUID FROM dbo.WN_Locations  WHERE Id = @LocationId;
+    SELECT @SpaceTypeGuid = IdGUID FROM dbo.WN_SpaceTypes WHERE Id = @SpaceTypeId;
 
-    -- Return all spaces in the code range for this location
     SELECT
         s.Id,
         CAST(s.IdGUID AS NVARCHAR(36)) AS IdGuid,
+        CAST(s.PublicId AS NVARCHAR(36)) AS PublicId,
         s.Code,
         s.Name,
         s.Status,
+        s.IsActive,
         CASE WHEN EXISTS (
             SELECT 1 FROM dbo.WN_Bookings b
-            WHERE b.SpaceGuid = s.IdGUID AND b.BookingStatus IN (1,4)
+            WHERE (b.SpaceGuid = s.IdGUID OR b.SpaceId = s.Id)
+              AND b.IsDeleted = 0 
+              AND b.BookingStatusId IN (1, 2)
+              AND b.EndOn > SYSUTCDATETIME()
         ) THEN 1 ELSE 0 END AS HasBookings
     FROM dbo.WN_Spaces s
-    WHERE s.LocationId = @LocationGuid
+    WHERE s.IsActive = 1
+      AND (s.LocationIdInt = @LocationId OR s.LocationId = @LocationGuid)
+      AND (s.SpaceTypeIdInt = @SpaceTypeId OR s.SpaceTypeId = @SpaceTypeGuid)
       AND TRY_CAST(s.Code AS INT) BETWEEN @MinCode AND (@MinCode + @TotalSpaces - 1)
-    ORDER BY TRY_CAST(s.Code AS INT);
+    ORDER BY TRY_CAST(s.Code AS INT), s.Code;
 END
 GO
 /****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Insert]    Script Date: 10/08/2026 10:45:43 am ******/
@@ -4804,7 +5088,7 @@ BEGIN
         RAISERROR('Cannot delete space with active bookings.', 16, 1);
         RETURN;
     END
-    UPDATE dbo.WN_Spaces SET IsActive = 0 WHERE Id = @Id;
+    UPDATE dbo.WN_Spaces SET IsActive = 0, Status = 0 WHERE Id = @Id;
 END
 GO
 /****** Object:  StoredProcedure [dbo].[WN_Spaces_GenerateInventory]    Script Date: 10/08/2026 10:45:43 am ******/
@@ -5318,7 +5602,7 @@ BEGIN
         st.CategoryId, sc.Code AS CategoryCode, sc.Label AS CategoryLabel,
         st.HourlyAllowed, st.IsActive
     FROM dbo.WN_SpaceTypes      st WITH (NOLOCK)
-    JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
+    LEFT JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
     WHERE st.IsActive = 1
       AND (@CategoryId IS NULL OR st.CategoryId = @CategoryId)
     ORDER BY sc.Label, st.Name;
@@ -5422,12 +5706,12 @@ BEGIN
     SET NOCOUNT ON;
     SELECT
         u.Id, u.PublicId, u.Email, u.Name, u.PhoneNumber,
-        u.RoleId, u.CompanyId, co.Name AS CompanyName,
+        u.RoleId, u.CompanyId, co.CompanyName AS CompanyName,
         u.CityId, ci.Name AS CityName,
         u.Address, u.CnicOrPassport, u.AvatarUrl,
         u.IsActive, u.Notes, u.CreatedOn
     FROM dbo.WN_Users u WITH (NOLOCK)
-    LEFT JOIN dbo.WN_Companies co WITH (NOLOCK) ON co.Id = u.CompanyId
+    LEFT JOIN dbo.Company co WITH (NOLOCK) ON co.Id = u.CompanyId
     LEFT JOIN dbo.WN_Cities    ci WITH (NOLOCK) ON ci.Id = u.CityId
     WHERE u.Id = @Id;
 END
@@ -5445,12 +5729,12 @@ BEGIN
     SET NOCOUNT ON;
     SELECT
         u.Id, u.PublicId, u.Email, u.Name, u.PhoneNumber,
-        u.RoleId, u.CompanyId, co.Name AS CompanyName,
+        u.RoleId, u.CompanyId, co.CompanyName AS CompanyName,
         u.CityId, ci.Name AS CityName,
         u.Address, u.CnicOrPassport, u.AvatarUrl,
         u.IsActive, u.Notes, u.CreatedOn
     FROM dbo.WN_Users u WITH (NOLOCK)
-    LEFT JOIN dbo.WN_Companies co WITH (NOLOCK) ON co.Id = u.CompanyId
+    LEFT JOIN dbo.Company co WITH (NOLOCK) ON co.Id = u.CompanyId
     LEFT JOIN dbo.WN_Cities    ci WITH (NOLOCK) ON ci.Id = u.CityId
     WHERE u.PublicId = @PublicId;
 END
@@ -5516,7 +5800,7 @@ BEGIN
         u.PhoneNumber,
         u.RoleId,
         u.CompanyId,
-        co.Name         AS CompanyName,
+        co.CompanyName  AS CompanyName,
         u.CityId,
         ci.Name         AS CityName,
         u.Address,
@@ -5527,7 +5811,7 @@ BEGIN
         u.CreatedOn,
         COUNT(*) OVER () AS TotalCount
     FROM dbo.WN_Users u WITH (NOLOCK)
-    LEFT JOIN dbo.WN_Companies co WITH (NOLOCK) ON co.Id = u.CompanyId
+    LEFT JOIN dbo.Company co WITH (NOLOCK) ON co.Id = u.CompanyId
     LEFT JOIN dbo.WN_Cities    ci WITH (NOLOCK) ON ci.Id = u.CityId
     WHERE u.IsActive = 1
       AND (@Search IS NULL OR @Search = ''
@@ -5634,5 +5918,27 @@ BEGIN
         Notes          = ISNULL(@Notes,           Notes)
     WHERE Id = @Id;
     SELECT @@ROWCOUNT AS AffectedRows;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [dbo].[WN_Customers_GetByUserId]
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, IdGUID, Code, FirstName, LastName, Email, PhoneNumber, CNIC, Address, CityId, IsActive, CreatedAt, Notes, UserId
+    FROM dbo.WN_Customers WITH (NOLOCK)
+    WHERE UserId = @UserId;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [dbo].[WN_Customers_GetByEmail]
+    @Email NVARCHAR(256)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, IdGUID, Code, FirstName, LastName, Email, PhoneNumber, CNIC, Address, CityId, IsActive, CreatedAt, Notes, UserId
+    FROM dbo.WN_Customers WITH (NOLOCK)
+    WHERE Email = @Email;
 END
 GO

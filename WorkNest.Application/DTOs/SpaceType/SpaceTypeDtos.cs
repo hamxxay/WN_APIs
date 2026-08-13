@@ -5,6 +5,7 @@ namespace WorkNest.Application.DTOs.SpaceType
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public byte? CategoryId { get; set; }
+        public short? Capacity { get; set; }
         public bool HourlyAllowed { get; set; }
     }
 
@@ -15,6 +16,7 @@ namespace WorkNest.Application.DTOs.SpaceType
         public string? Name { get; set; }
         public string? Description { get; set; }
         public byte? CategoryId { get; set; }
+        public short? Capacity { get; set; }
         public bool HourlyAllowed { get; set; }
     }
 }

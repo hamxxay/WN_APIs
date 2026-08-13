@@ -68,13 +68,38 @@ namespace WorkNest.Application.Services
             var userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : (int?)null;
             if (userId is null) return ApiResponse.Fail("User ID not resolved");
 
+            // Check if customer already exists for this user
+            var customerRow = await _db.GetCustomerByUserIdAsync(userId.Value);
+            if (customerRow is null)
+            {
+                // If details are not provided, return a validation fail prompting frontend
+                if (string.IsNullOrWhiteSpace(request.FirstName))
+                {
+                    return new ApiResponse
+                    {
+                        IsSuccessful = false,
+                        Message = "CustomerProfileRequired",
+                        Errors = new List<string> { "Please complete your customer profile details to book a space." }
+                    };
+                }
+            }
+
             var pricingId = await ResolvePricingIdAsync(request.SpaceId);
             if (pricingId == 0) return ApiResponse.Fail("No active pricing found for this space.");
 
             var result = await _db.InsertBookingAsync(
                 userId.Value, request.SpaceId, pricingId,
                 request.StartDateTime, request.EndDateTime,
-                request.Notes, userId, userEmail);
+                request.Notes, userId, userEmail,
+                request.FirstName != null ? userEmail : null,
+                request.FirstName, request.LastName, request.PhoneNumber,
+                request.CnicOrPassport, request.Address, request.CityId,
+                "Created during self-booking");
+
+            if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
+            {
+                return ApiResponse.Fail(err.ToString());
+            }
 
             return ApiResponse.Ok(result, "Booking created.");
         }
@@ -125,10 +150,27 @@ namespace WorkNest.Application.Services
             var pricingId = await ResolvePricingIdAsync(spaceId);
             if (pricingId == 0) return ApiResponse.Fail("No active pricing found for this space.");
 
+            // Split customer name into first/last for the database record
+            string? firstName = request.CustomerName;
+            string? lastName = null;
+            if (!string.IsNullOrWhiteSpace(request.CustomerName))
+            {
+                var parts = request.CustomerName.Split(' ', 2);
+                firstName = parts[0];
+                if (parts.Length > 1) lastName = parts[1];
+            }
+
             var result = await _db.InsertBookingAsync(
                 userId, spaceId, pricingId,
                 request.StartDateTime, request.EndDateTime,
-                request.Notes, actorId, request.CustomerEmail);
+                request.Notes, actorId, request.CustomerEmail,
+                request.CustomerEmail, firstName, lastName, request.Phone,
+                null, null, null, "Created by administrator");
+
+            if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
+            {
+                return ApiResponse.Fail(err.ToString());
+            }
 
             return ApiResponse.Ok(result, "Admin booking created.");
         }
@@ -137,12 +179,38 @@ namespace WorkNest.Application.Services
         {
             var userRow = await _db.GetUserByEmailAsync(userEmail);
             if (userRow is null) return ApiResponse.Fail("User not found");
-            var actorId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : (int?)null;
+            var userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : (int?)null;
+            if (userId is null) return ApiResponse.Fail("User ID not resolved");
+
+            // Check if customer already exists for this user
+            var customerRow = await _db.GetCustomerByUserIdAsync(userId.Value);
+            if (customerRow is null)
+            {
+                // If details are not provided, return a validation fail prompting frontend
+                if (string.IsNullOrWhiteSpace(request.FirstName))
+                {
+                    return new ApiResponse
+                    {
+                        IsSuccessful = false,
+                        Message = "CustomerProfileRequired",
+                        Errors = new List<string> { "Please complete your customer profile details to book a space." }
+                    };
+                }
+            }
 
             var result = await _db.InsertSmartBookingAsync(
                 userEmail, request.CategoryCode,
                 request.StartDateTime, request.EndDateTime,
-                request.Capacity, request.Notes, actorId);
+                request.Capacity, request.Notes, userId,
+                request.FirstName != null ? userEmail : null,
+                request.FirstName, request.LastName, request.PhoneNumber,
+                request.CnicOrPassport, request.Address, request.CityId,
+                "Created during self-booking");
+
+            if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
+            {
+                return ApiResponse.Fail(err.ToString());
+            }
 
             return ApiResponse.Ok(result, "Smart booking created.");
         }
@@ -174,6 +242,92 @@ namespace WorkNest.Application.Services
             var newPricingId = await ResolvePricingIdAsync(request.NewSpaceId);
             await _db.ReassignBookingAsync(id, request.NewSpaceId, newPricingId, userEmail, actorId);
             return ApiResponse.Ok("Booking reassigned.");
+        }
+
+        public async Task<ApiResponse> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail)
+        {
+            var data = await _db.GetBookingDetailsAsync(bookingIdentifier, userEmail);
+            return ApiResponse.Ok(data);
+        }
+
+        private static DateTime? ParseDateSafely(object? value)
+        {
+            if (value == null) return null;
+            if (value is DateTime dt) return dt;
+            if (value is DateOnly dOnly) return dOnly.ToDateTime(TimeOnly.MinValue);
+            if (DateTime.TryParse(value.ToString(), out var parsed)) return parsed;
+            return null;
+        }
+
+        public async Task<ApiResponse> GetChallanAsync(int bookingId)
+        {
+            var (header, lines) = await _db.GetChallanWithDetailsAsync(bookingId);
+            if (header == null)
+                return ApiResponse.Fail("Challan not found");
+
+            var dto = new ChallanResponseDto
+            {
+                ChallanId = Convert.ToInt32(header["ChallanId"]),
+                ChallanPublicId = header["ChallanPublicId"]?.ToString(),
+                ChallanNumber = header["ChallanNumber"]?.ToString() ?? "",
+                IssuedOn = ParseDateSafely(header["IssuedOn"]),
+                ValidUntil = ParseDateSafely(header["ValidUntil"]),
+                ChallanStatusId = Convert.ToInt32(header["ChallanStatusId"]),
+                ChallanNotes = header["ChallanNotes"]?.ToString(),
+
+                BookingId = Convert.ToInt32(header["BookingId"]),
+                BookingPublicId = header["BookingPublicId"]?.ToString(),
+                StartOn = ParseDateSafely(header["StartOn"]),
+                EndOn = ParseDateSafely(header["EndOn"]),
+                BookingStatusCode = header["BookingStatusCode"]?.ToString(),
+                BookingStatusLabel = header["BookingStatusLabel"]?.ToString(),
+                BookedOn = ParseDateSafely(header["BookedOn"]),
+
+                CustomerName = header["CustomerName"]?.ToString(),
+                CustomerEmail = header["CustomerEmail"]?.ToString(),
+
+                SpaceCode = header["SpaceCode"]?.ToString(),
+                SpaceName = header["SpaceName"]?.ToString(),
+                SpaceCapacity = Convert.ToInt32(header["SpaceCapacity"]),
+                SpaceTypeName = header["SpaceTypeName"]?.ToString(),
+
+                LocationName = header["LocationName"]?.ToString(),
+                BranchName = header["BranchName"]?.ToString(),
+                CompanyName = header["CompanyName"]?.ToString(),
+
+                BillingPeriodCode = header["BillingPeriodCode"]?.ToString(),
+                BillingPeriodLabel = header["BillingPeriodLabel"]?.ToString(),
+                SeatPrice = Convert.ToDecimal(header["SeatPrice"]),
+                RoomPrice = Convert.ToDecimal(header["RoomPrice"]),
+                SecurityDeposit = Convert.ToDecimal(header["SecurityDeposit"])
+            };
+
+            decimal total = 0;
+            foreach (var line in lines)
+            {
+                var lineTotal = Convert.ToDecimal(line["LineTotal"]);
+                total += lineTotal;
+
+                dto.Details.Add(new ChallanLineDto
+                {
+                    LineId = Convert.ToInt32(line["LineId"]),
+                    ChargeTypeCode = line["ChargeTypeCode"]?.ToString() ?? "",
+                    ChargeTypeLabel = line["ChargeTypeLabel"]?.ToString() ?? "",
+                    Description = line["Description"]?.ToString(),
+                    Quantity = Convert.ToDecimal(line["Quantity"]),
+                    UnitPrice = Convert.ToDecimal(line["UnitPrice"]),
+                    DiscountAmount = Convert.ToDecimal(line["DiscountAmount"]),
+                    TaxRate = Convert.ToDecimal(line["TaxRate"]),
+                    TaxAmount = Convert.ToDecimal(line["TaxAmount"]),
+                    LineTotal = lineTotal,
+                    AccountId = line["AccountId"] != null ? Convert.ToInt32(line["AccountId"]) : (int?)null,
+                    AccountName = line["AccountName"]?.ToString()
+                });
+            }
+
+            dto.TotalPayable = total;
+
+            return ApiResponse.Ok(dto);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────
