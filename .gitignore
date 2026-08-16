@@ -25,3 +25,6 @@ schema.sql
 publish/appsettings.json
 WorkNest.API/appsettings.json
 
+appsettings.json
+**/appsettings.json
+appsettings.*.json
