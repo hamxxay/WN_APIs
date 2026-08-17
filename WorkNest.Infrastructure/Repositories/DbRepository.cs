@@ -101,6 +101,107 @@ namespace WorkNest.Infrastructure.Repositories
             }
             return (null, null);
         }
+        public async Task<IDictionary<string, object?>> InsertQuotationAsync(
+            string quotationNumber,
+            DateTime validUntil,
+            int? customerId,
+            int? spaceId,
+            DateTime startDateTime,
+            DateTime endDateTime,
+            decimal subtotalAmount,
+            decimal discountPercentage,
+            string? remarks = null,
+            int? createdById = null)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Quotations_Insert", c);
+
+            cmd.Parameters.AddWithValue("@QuotationNumber", quotationNumber);
+            cmd.Parameters.AddWithValue("@ValidUntil", validUntil);
+            cmd.Parameters.AddWithValue("@CustomerId", (object?)customerId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceId", (object?)spaceId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@StartDateTime", startDateTime);
+            cmd.Parameters.AddWithValue("@EndDateTime", endDateTime);
+            cmd.Parameters.AddWithValue("@SubtotalAmount", subtotalAmount);
+            cmd.Parameters.AddWithValue("@DiscountPercentage", discountPercentage);
+            cmd.Parameters.AddWithValue("@Remarks", (object?)remarks ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+
+            if (await r.ReadAsync())
+                return ToDict(r);
+
+            return new Dictionary<string, object?>();
+        }
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationHistoryAsync(
+            int quotationId,
+            string? userEmail = null)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Quotations_GetHistory", c);
+            cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetQuotationByIdAsync(
+            int quotationId,
+            string? userEmail = null)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Quotations_GetById", c);
+            cmd.Parameters.AddWithValue("@Id", quotationId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationDetailsAsync(
+            int quotationId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_QuotationDetails_GetByQuotation", c);
+            cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationsAsync(
+            int page,
+            int limit,
+            string? search)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Quotations_GetList", c);
+
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+
+            var rows = await ReadAll(r);
+            int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
+            return (rows, total);
+        }
+
+        public async Task<IDictionary<string, object?>> ConvertQuotationToBookingAsync(
+            int quotationId,
+            int? createdById)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Quotations_ConvertToBooking", c);
+
+            cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+            cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+
+            if (await r.ReadAsync())
+                return ToDict(r);
+
+            return new Dictionary<string, object?>();
+        }
 
         public async Task<(int? Id, string? PublicId)> GetUserIdByEmailAsync(string email)
         {
@@ -432,7 +533,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<IDictionary<string, object?>> InsertBookingAsync(
             int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail,
             string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null,
-            string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null)
+            string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_Insert", c);
@@ -452,6 +553,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@CustomerAddress", (object?)customerAddress ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CustomerCityId", (object?)customerCityId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CustomerNotes", (object?)customerNotes ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DiscountPercentage", discountPercentage);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return ToDict(r);
             return new Dictionary<string, object?>();
@@ -1011,8 +1113,6 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@OpeningTime", (object?)req.OpeningTime ?? "08:00");
             cmd.Parameters.AddWithValue("@ClosingTime", (object?)req.ClosingTime ?? "20:00");
             cmd.Parameters.AddWithValue("@SecurityDeposit", req.SecurityDeposit);
-            cmd.Parameters.AddWithValue("@RentAccountId", (object?)req.RentAccountId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)req.DepositAccountId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@FloorId", (object?)req.FloorId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PricePerHour", req.PricePerHour);
             cmd.Parameters.AddWithValue("@PricePerDay", req.PricePerDay);
@@ -1041,8 +1141,6 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@OpeningTime", (object?)req.OpeningTime ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ClosingTime", (object?)req.ClosingTime ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SecurityDeposit", req.SecurityDeposit);
-            cmd.Parameters.AddWithValue("@RentAccountId", (object?)req.RentAccountId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@DepositAccountId", (object?)req.DepositAccountId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@FloorId", (object?)req.FloorId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PricePerHour", req.PricePerHour);
             cmd.Parameters.AddWithValue("@PricePerDay", req.PricePerDay);
@@ -1390,11 +1488,11 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@Message", (object?)message ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
-                    {
+            {
                 var row = ToDict(r);
                 return (row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null,
                                 row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
-                    }
+            }
             return (null, null);
         }
 
@@ -1416,7 +1514,7 @@ namespace WorkNest.Infrastructure.Repositories
             await cmd.ExecuteNonQueryAsync();
         }
 
-                // ── Dashboard ─────────────────────────────────────────────────────────
+        // ── Dashboard ─────────────────────────────────────────────────────────
 
         public async Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync()
         {
@@ -1428,7 +1526,7 @@ namespace WorkNest.Infrastructure.Repositories
             return results;
         }
 
-                // ── AccountCOA ────────────────────────────────────────────────────────
+        // ── AccountCOA ────────────────────────────────────────────────────────
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetAllAccountsCoaAsync()
         {
@@ -1447,7 +1545,7 @@ namespace WorkNest.Infrastructure.Repositories
             return await r.ReadAsync() ? ToDict(r) : null;
         }
 
-                // ── AmountFields ──────────────────────────────────────────────────────
+        // ── AmountFields ──────────────────────────────────────────────────────
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetAllAmountFieldsAsync()
         {
@@ -1457,7 +1555,16 @@ namespace WorkNest.Infrastructure.Repositories
             return await ReadAll(r);
         }
 
-                // ── Customer ──────────────────────────────────────────────────────────
+        public async Task UpdateAmountFieldAccountAsync(int id, int? accountId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_AmountFields_UpdateAccount", c);
+            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@AccountId", (object?)accountId ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // ── Customer ──────────────────────────────────────────────────────────
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string? search)
         {

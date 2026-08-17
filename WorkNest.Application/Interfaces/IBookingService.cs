@@ -22,5 +22,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity);
         Task<ApiResponse> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail);
         Task<ApiResponse> GetChallanAsync(int bookingId);
+        Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null);
+        Task<ApiResponse> SendBookingConfirmationEmailAsync(int bookingId);
     }
 }

@@ -6,6 +6,10 @@ using WorkNest.Common.Responses;
 
 namespace WorkNest.API.Controllers
 {
+    public class SendChallanEmailRequest
+    {
+        public string? PdfBase64 { get; set; }
+    }
     [ApiController]
     [Authorize]
     public class BookingController : ControllerBase
@@ -276,6 +280,30 @@ namespace WorkNest.API.Controllers
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
             return Ok(await _bookings.UpdateBookingStatusAsync(id, request.StatusId, null));
+        }
+
+        [HttpPost("api/booking/{id:int}/send-challan-email")]
+        [Authorize(Roles = "admin,super_admin,receptionist")]
+        public async Task<IActionResult> SendChallanEmail(int id, [FromBody] SendChallanEmailRequest? request)
+        {
+            byte[]? pdfBytes = null;
+            if (!string.IsNullOrWhiteSpace(request?.PdfBase64))
+            {
+                try { pdfBytes = Convert.FromBase64String(request.PdfBase64); }
+                catch { return BadRequest(new { isSuccessful = false, message = "Invalid base64 PDF data." }); }
+            }
+            var result = await _bookings.SendChallanEmailAsync(id, pdfBytes);
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
+        }
+
+        [HttpPost("api/booking/{id:int}/send-confirmation-email")]
+        [Authorize(Roles = "admin,super_admin,receptionist")]
+        public async Task<IActionResult> SendConfirmationEmail(int id)
+        {
+            var result = await _bookings.SendBookingConfirmationEmailAsync(id);
+            if (!result.IsSuccessful) return NotFound(result);
+            return Ok(result);
         }
 
         [HttpPatch("api/booking/{id:int}/reassign")]

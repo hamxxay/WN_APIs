@@ -7,7 +7,9 @@ namespace WorkNest.Application.Services
     public class BookingService : IBookingService
     {
         private readonly IDbRepository _db;
-        public BookingService(IDbRepository db) => _db = db;
+        private readonly IEmailService _email;
+        private readonly IPdfService _pdf;
+        public BookingService(IDbRepository db, IEmailService email, IPdfService pdf) { _db = db; _email = email; _pdf = pdf; }
 
         public async Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search)
         {
@@ -98,7 +100,7 @@ namespace WorkNest.Application.Services
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
             {
-                return ApiResponse.Fail(err.ToString());
+                return ApiResponse.Fail(err.ToString() ?? "An error occurred");
             }
 
             return ApiResponse.Ok(result, "Booking created.");
@@ -165,11 +167,12 @@ namespace WorkNest.Application.Services
                 request.StartDateTime, request.EndDateTime,
                 request.Notes, actorId, request.CustomerEmail,
                 request.CustomerEmail, firstName, lastName, request.Phone,
-                null, null, null, "Created by administrator");
+                null, null, null, "Created by administrator",
+                request.DiscountPercentage);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
             {
-                return ApiResponse.Fail(err.ToString());
+                return ApiResponse.Fail(err.ToString() ?? "An error occurred");
             }
 
             return ApiResponse.Ok(result, "Admin booking created.");
@@ -209,7 +212,7 @@ namespace WorkNest.Application.Services
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
             {
-                return ApiResponse.Fail(err.ToString());
+                return ApiResponse.Fail(err.ToString() ?? "An error occurred");
             }
 
             return ApiResponse.Ok(result, "Smart booking created.");
@@ -299,7 +302,10 @@ namespace WorkNest.Application.Services
                 BillingPeriodLabel = header["BillingPeriodLabel"]?.ToString(),
                 SeatPrice = Convert.ToDecimal(header["SeatPrice"]),
                 RoomPrice = Convert.ToDecimal(header["RoomPrice"]),
-                SecurityDeposit = Convert.ToDecimal(header["SecurityDeposit"])
+                SecurityDeposit = Convert.ToDecimal(header["SecurityDeposit"]),
+                DiscountPercentage = header.TryGetValue("DiscountPercentage", out var dp) && dp is not null ? Convert.ToDecimal(dp) : 0,
+                DiscountAmount = header.TryGetValue("DiscountAmount", out var da) && da is not null ? Convert.ToDecimal(da) : 0,
+                SubtotalAmount = header.TryGetValue("SubtotalAmount", out var sa) && sa is not null ? Convert.ToDecimal(sa) : 0
             };
 
             decimal total = 0;
@@ -325,9 +331,59 @@ namespace WorkNest.Application.Services
                 });
             }
 
-            dto.TotalPayable = total;
+            dto.TotalPayable = dto.SubtotalAmount - dto.DiscountAmount + dto.SecurityDeposit;
 
             return ApiResponse.Ok(dto);
+        }
+
+        public async Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null)
+        {
+            var challanResult = await GetChallanAsync(bookingId);
+            if (!challanResult.IsSuccessful) return challanResult;
+
+            var dto = (ChallanResponseDto)challanResult.Data!;
+
+            if (string.IsNullOrWhiteSpace(dto.CustomerEmail))
+                return ApiResponse.Fail("Customer email not found on challan.");
+
+            var pdf = _pdf.GenerateBookingConfirmationPdf(dto);
+
+            await _email.SendChallanEmailAsync(
+                dto.CustomerEmail,
+                dto.CustomerName ?? "Customer",
+                dto.ChallanNumber,
+                dto.SpaceName ?? dto.SpaceCode ?? "",
+                dto.BillingPeriodLabel ?? dto.BillingPeriodCode ?? "",
+                dto.TotalPayable,
+                dto.StartOn,
+                dto.EndOn,
+                pdf);
+
+            return ApiResponse.Ok("Challan email sent successfully.");
+        }
+
+        public async Task<ApiResponse> SendBookingConfirmationEmailAsync(int bookingId)
+        {
+            var challanResult = await GetChallanAsync(bookingId);
+            if (!challanResult.IsSuccessful) return challanResult;
+
+            var dto = (ChallanResponseDto)challanResult.Data!;
+
+            if (string.IsNullOrWhiteSpace(dto.CustomerEmail))
+                return ApiResponse.Fail("Customer email not found on booking.");
+
+            var pdf = _pdf.GenerateBookingConfirmationPdf(dto);
+
+            await _email.SendBookingConfirmationAsync(
+                dto.CustomerEmail,
+                dto.CustomerName ?? "Customer",
+                dto.ChallanNumber,
+                dto.SpaceName ?? dto.SpaceCode ?? "",
+                dto.StartOn,
+                dto.EndOn,
+                pdf);
+
+            return ApiResponse.Ok("Booking confirmation email sent successfully.");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────

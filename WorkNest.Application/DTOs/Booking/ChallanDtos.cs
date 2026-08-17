@@ -64,6 +64,9 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal SeatPrice { get; set; }
         public decimal RoomPrice { get; set; }
         public decimal SecurityDeposit { get; set; }
+        public decimal DiscountPercentage { get; set; }
+        public decimal DiscountAmount { get; set; }
+        public decimal SubtotalAmount { get; set; }
 
         // ── Financial breakdown (from WN_BookingLines) ──
         public List<ChallanLineDto> Details { get; set; } = new();

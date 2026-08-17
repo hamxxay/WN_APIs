@@ -12,6 +12,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? CustomerEmail { get; set; }
         public string? CustomerName { get; set; }
         public string? Phone { get; set; }
+        public decimal DiscountPercentage { get; set; } = 0;
     }
 
     public class BookingRequest

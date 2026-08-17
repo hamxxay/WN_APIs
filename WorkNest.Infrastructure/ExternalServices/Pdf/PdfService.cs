@@ -1,0 +1,327 @@
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
+using System.IO;
+using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.Quotation;
+using WorkNest.Application.Interfaces;
+
+namespace WorkNest.Infrastructure.ExternalServices.Pdf
+{
+    public class PdfService : IPdfService
+    {
+        static PdfService()
+        {
+            QuestPDF.Settings.License = LicenseType.Community;
+        }
+
+        public byte[] GenerateQuotationPdf(QuotationResponse q)
+        {
+            return Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(40);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
+
+                    page.Header().Element(ComposeHeader);
+
+                    page.Content().Column(col =>
+                    {
+                        col.Spacing(12);
+
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("QUOTATION").FontSize(20).Bold().FontColor("#1a1a2e");
+                                c.Item().Text($"# {q.QuotationNumber}").FontSize(11).FontColor("#555555");
+                            });
+                            row.ConstantItem(160).Column(c =>
+                            {
+                                c.Item().AlignRight().Text($"Date: {q.QuotationDate:dd MMM yyyy}").FontColor("#555555");
+                                c.Item().AlignRight().Text($"Valid Until: {q.ValidUntil:dd MMM yyyy}").FontColor("#555555");
+                                c.Item().AlignRight().Text($"Status: {q.Status ?? "Pending"}").Bold();
+                            });
+                        });
+
+                        col.Item().LineHorizontal(1).LineColor("#e0e0e0");
+
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("BILL TO").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text(q.CustomerName ?? "-").Bold();
+                                c.Item().Text(q.CustomerEmail ?? "-").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("SPACE").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text(q.SpaceName ?? q.SpaceCode ?? "-").Bold();
+                                c.Item().Text(q.SpaceTypeName ?? "-").FontColor("#555555");
+                                c.Item().Text(q.LocationName ?? "-").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("PERIOD").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text($"From: {q.StartDateTime:dd MMM yyyy}");
+                                c.Item().Text($"To:   {q.EndDateTime:dd MMM yyyy}");
+                            });
+                        });
+
+                        col.Item().LineHorizontal(1).LineColor("#e0e0e0");
+
+                        col.Item().Table(table =>
+                        {
+                            table.ColumnsDefinition(cols =>
+                            {
+                                cols.RelativeColumn(4);
+                                cols.RelativeColumn(1);
+                                cols.RelativeColumn(2);
+                                cols.RelativeColumn(2);
+                            });
+
+                            table.Header(header =>
+                            {
+                                foreach (var h in new[] { "Description", "Qty", "Unit Price", "Amount" })
+                                    header.Cell().Background("#1a1a2e").Padding(6)
+                                        .Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                            });
+
+                            bool alt = false;
+                            foreach (var d in q.Details)
+                            {
+                                var bg = alt ? "#f9f9f9" : "#ffffff";
+                                table.Cell().Background(bg).Padding(6).Text(d.Description);
+                                // table.Cell().Background(bg).Padding(6).AlignRight().Text(d.Quantity.ToString("N0"));
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {d.UnitPrice:N2}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {d.Amount:N2}");
+                                alt = !alt;
+                            }
+                        });
+
+                        col.Item().AlignRight().Column(c =>
+                        {
+                            c.Spacing(3);
+                            c.Item().Row(r =>
+                            {
+                                r.ConstantItem(140).AlignRight().Text("Subtotal:");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {q.SubtotalAmount:N2}");
+                            });
+                            if (q.DiscountPercentage > 0)
+                            {
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(140).AlignRight().Text($"Discount ({q.DiscountPercentage}%):").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"- PKR {q.DiscountAmount:N2}").FontColor("#e74c3c");
+                                });
+                            }
+                            c.Item().LineHorizontal(1).LineColor("#1a1a2e");
+                            c.Item().Row(r =>
+                            {
+                                r.ConstantItem(140).AlignRight().Text("Total:").Bold().FontSize(12);
+                                r.ConstantItem(120).AlignRight().Text($"PKR {q.TotalAmount:N2}").Bold().FontSize(12).FontColor("#1a1a2e");
+                            });
+                        });
+
+                        if (!string.IsNullOrWhiteSpace(q.Remarks))
+                        {
+                            col.Item().Background("#f5f5f5").Padding(10).Column(c =>
+                            {
+                                c.Item().Text("Remarks").Bold().FontSize(9).FontColor("#888888");
+                                c.Item().Text(q.Remarks);
+                            });
+                        }
+                    });
+
+                    page.Footer().Element(ComposeFooter);
+                });
+            }).GeneratePdf();
+        }
+
+        public byte[] GenerateBookingConfirmationPdf(ChallanResponseDto c)
+        {
+            return Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(40);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
+
+                    page.Header().Element(ComposeHeader);
+
+                    page.Content().Column(col =>
+                    {
+                        col.Spacing(12);
+
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(inner =>
+                            {
+                                inner.Item().Text("BOOKING CONFIRMATION").FontSize(20).Bold().FontColor("#1a1a2e");
+                                inner.Item().Text($"Challan # {c.ChallanNumber}").FontSize(11).FontColor("#555555");
+                            });
+                            row.ConstantItem(160).Column(inner =>
+                            {
+                                inner.Item().AlignRight().Text($"Issued: {c.IssuedOn:dd MMM yyyy}").FontColor("#555555");
+                                inner.Item().AlignRight().Text($"Valid Until: {c.ValidUntil:dd MMM yyyy}").FontColor("#555555");
+                                inner.Item().AlignRight().Text($"Status: {c.BookingStatusLabel ?? c.BookingStatusCode ?? "-"}").Bold();
+                            });
+                        });
+
+                        col.Item().LineHorizontal(1).LineColor("#e0e0e0");
+
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(inner =>
+                            {
+                                inner.Item().Text("CUSTOMER").FontSize(9).Bold().FontColor("#888888");
+                                inner.Item().Text(c.CustomerName ?? "-").Bold();
+                                inner.Item().Text(c.CustomerEmail ?? "-").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(inner =>
+                            {
+                                inner.Item().Text("SPACE").FontSize(9).Bold().FontColor("#888888");
+                                inner.Item().Text(c.SpaceName ?? c.SpaceCode ?? "-").Bold();
+                                inner.Item().Text(c.SpaceTypeName ?? "-").FontColor("#555555");
+                                inner.Item().Text(c.LocationName ?? "-").FontColor("#555555");
+                                inner.Item().Text(c.BranchName ?? "-").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(inner =>
+                            {
+                                inner.Item().Text("BOOKING PERIOD").FontSize(9).Bold().FontColor("#888888");
+                                inner.Item().Text($"From: {c.StartOn:dd MMM yyyy}");
+                                inner.Item().Text($"To:   {c.EndOn:dd MMM yyyy}");
+                                inner.Item().Text($"Billing: {c.BillingPeriodLabel ?? c.BillingPeriodCode ?? "-"}").FontColor("#555555");
+                            });
+                        });
+
+                        col.Item().LineHorizontal(1).LineColor("#e0e0e0");
+
+                        col.Item().Table(table =>
+                        {
+                            table.ColumnsDefinition(cols =>
+                            {
+                                cols.RelativeColumn(4);
+                                cols.RelativeColumn(1);
+                                cols.RelativeColumn(2);
+                                cols.RelativeColumn(2);
+                                cols.RelativeColumn(2);
+                            });
+
+                            table.Header(header =>
+                            {
+                                foreach (var h in new[] { "Description", "Qty", "Unit Price", "Discount", "Total" })
+                                    header.Cell().Background("#1a1a2e").Padding(6)
+                                        .Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                            });
+
+                            bool alt = false;
+                            foreach (var line in c.Details)
+                            {
+                                var bg = alt ? "#f9f9f9" : "#ffffff";
+                                var desc = string.IsNullOrWhiteSpace(line.Description) ? line.ChargeTypeLabel : line.Description;
+                                table.Cell().Background(bg).Padding(6).Text(desc);
+                                // table.Cell().Background(bg).Padding(6).AlignRight().Text(line.Quantity.ToString("N0"));
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.UnitPrice:N2}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text(line.DiscountAmount > 0 ? $"PKR {line.DiscountAmount:N2}" : "-");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.LineTotal:N2}");
+                                alt = !alt;
+                            }
+                        });
+
+                        col.Item().AlignRight().Column(inner =>
+                        {
+                            inner.Spacing(3);
+                            inner.Item().Row(r =>
+                            {
+                                r.ConstantItem(160).AlignRight().Text("Subtotal:");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {c.SubtotalAmount:N2}");
+                            });
+                            if (c.DiscountAmount > 0)
+                            {
+                                inner.Item().Row(r =>
+                                {
+                                    r.ConstantItem(160).AlignRight().Text($"Discount ({c.DiscountPercentage}%):").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"- PKR {c.DiscountAmount:N2}").FontColor("#e74c3c");
+                                });
+                            }
+                            if (c.SecurityDeposit > 0)
+                            {
+                                inner.Item().Row(r =>
+                                {
+                                    r.ConstantItem(160).AlignRight().Text("Security Deposit:");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.SecurityDeposit:N2}");
+                                });
+                            }
+                            inner.Item().LineHorizontal(1).LineColor("#1a1a2e");
+                            inner.Item().Row(r =>
+                            {
+                                r.ConstantItem(160).AlignRight().Text("Total Payable:").Bold().FontSize(12);
+                                r.ConstantItem(120).AlignRight().Text($"PKR {c.TotalPayable:N2}").Bold().FontSize(12).FontColor("#1a1a2e");
+                            });
+                        });
+
+                        if (!string.IsNullOrWhiteSpace(c.ChallanNotes))
+                        {
+                            col.Item().Background("#f5f5f5").Padding(10).Column(inner =>
+                            {
+                                inner.Item().Text("Notes").Bold().FontSize(9).FontColor("#888888");
+                                inner.Item().Text(c.ChallanNotes);
+                            });
+                        }
+                    });
+
+                    page.Footer().Element(ComposeFooter);
+                });
+            }).GeneratePdf();
+        }
+
+        private static readonly string LogoPath = @"F:\WorkNest_FE\public\images\Logo.png";
+
+        private static void ComposeHeader(IContainer container)
+        {
+            container.Column(col =>
+            {
+                col.Item().Row(row =>
+                {
+                    row.RelativeItem().AlignMiddle().Column(c =>
+                    {
+                        if (File.Exists(LogoPath))
+                        {
+                            c.Item().Height(48).Image(LogoPath).FitHeight();
+                        }
+                        else
+                        {
+                            c.Item().Text("WorkNest").FontSize(22).Bold().FontColor("#1a1a2e");
+                            c.Item().Text("Coworking Space Management").FontSize(9).FontColor("#888888");
+                        }
+                    });
+                });
+                col.Item().PaddingTop(6).LineHorizontal(2).LineColor("#1a1a2e");
+            });
+        }
+
+        private static void ComposeFooter(IContainer container)
+        {
+            container.Column(c =>
+            {
+                c.Item().LineHorizontal(1).LineColor("#e0e0e0");
+                c.Item().PaddingTop(4).Row(row =>
+                {
+                    row.RelativeItem().Text($"Generated on {DateTime.UtcNow:dd MMM yyyy HH:mm} UTC").FontSize(8).FontColor("#aaaaaa");
+                    row.RelativeItem().AlignRight().Text(x =>
+                    {
+                        x.Span("Page ").FontSize(8).FontColor("#aaaaaa");
+                        x.CurrentPageNumber().FontSize(8).FontColor("#aaaaaa");
+                        x.Span(" of ").FontSize(8).FontColor("#aaaaaa");
+                        x.TotalPages().FontSize(8).FontColor("#aaaaaa");
+                    });
+                });
+            });
+        }
+    }
+}

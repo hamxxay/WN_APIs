@@ -58,6 +58,15 @@ namespace WorkNest.API.Controllers
             return await History(id);
         }
 
+        [HttpGet("api/user/{email}/history")]
+        public async Task<IActionResult> HistoryByEmail(string email)
+        {
+            var row = await _db.GetUserByEmailAsync(email);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return await History(id);
+        }
+
         [HttpPost("api/user")]
         public async Task<IActionResult> Create([FromBody] UserCreateRequest request)
         {

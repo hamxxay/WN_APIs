@@ -31,8 +31,6 @@ namespace WorkNest.Application.DTOs.SpaceConfig
         public string? OpeningTime { get; set; } = "08:00";
         public string? ClosingTime { get; set; } = "20:00";
         public decimal SecurityDeposit { get; set; }
-        public int? RentAccountId { get; set; }
-        public int? DepositAccountId { get; set; }
         public int? FloorId { get; set; }
         public decimal PricePerHour { get; set; }
         public decimal PricePerDay { get; set; }

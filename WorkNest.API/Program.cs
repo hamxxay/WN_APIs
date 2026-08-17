@@ -10,6 +10,7 @@ using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
 using WorkNest.Application.Validators;
 using WorkNest.Infrastructure.ExternalServices.Email;
+using WorkNest.Infrastructure.ExternalServices.Pdf;
 using WorkNest.Infrastructure.ExternalServices.PayFast;
 using WorkNest.Infrastructure.Repositories;
 using WorkNest.Infrastructure.Security.Encryption;
@@ -23,7 +24,7 @@ Log.Logger = new LoggerConfiguration()
 try
 {
     var builder = WebApplication.CreateBuilder(args);
-
+    
     // ── Serilog full configuration ────────────────────────────────────────────
     builder.Host.UseSerilog((ctx, lc) =>
         lc.ReadFrom.Configuration(ctx.Configuration));
@@ -79,6 +80,7 @@ try
     builder.Services.AddScoped<IJwtService, JwtService>();
     builder.Services.AddScoped<IEncryptionService, EncryptionService>();
     builder.Services.AddScoped<IEmailService, EmailService>();
+    builder.Services.AddScoped<IPdfService, PdfService>();
     builder.Services.AddScoped<IPayFastService, PayFastService>();
 
     // ── Application Services ──────────────────────────────────────────────────
@@ -102,6 +104,7 @@ try
     builder.Services.AddScoped<IMembershipService, MembershipService>();
     builder.Services.AddScoped<IAccountCoaService, AccountCoaService>();
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
+    builder.Services.AddScoped<IQuotationService, QuotationService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
@@ -109,10 +112,12 @@ try
     // ── Path base for IIS sub-application (production only) ──────────────────
     if (!app.Environment.IsDevelopment())
         app.UsePathBase("/WorkNest");
-    app.UseRouting();
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
+    // CORS must come before routing, authentication, and authorization
     app.UseCorsWithConfig();
+    
+    app.UseRouting();
     app.UseMiddleware<ExceptionMiddleware>();
     app.UseMiddleware<RequestLoggingMiddleware>();
 
@@ -136,7 +141,7 @@ try
     app.MapControllers();
 
     Log.Information("WorkNest API starting on {Env}", app.Environment.EnvironmentName);
-    app.Run();
+    await app.RunAsync();
 }
 catch (Exception ex)
 {

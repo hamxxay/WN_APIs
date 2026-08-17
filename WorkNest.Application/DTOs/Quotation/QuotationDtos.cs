@@ -55,5 +55,6 @@ namespace WorkNest.Application.DTOs.Quotation
     {
         public string? Email { get; set; }
         public string? PdfBase64 { get; set; }
+        public string? QuotationLink { get; set; }
     }
 }

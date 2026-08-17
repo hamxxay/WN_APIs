@@ -10,10 +10,14 @@ namespace WorkNest.Application.Services
     public class QuotationService : IQuotationService
     {
         private readonly IDbRepository _db;
+        private readonly IEmailService _email;
+        private readonly IPdfService _pdf;
 
-        public QuotationService(IDbRepository db)
+        public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf)
         {
             _db = db;
+            _email = email;
+            _pdf = pdf;
         }
 
         private static DateTime? ParseDateSafely(object? value)
@@ -152,6 +156,10 @@ namespace WorkNest.Application.Services
             string randomStr = Guid.NewGuid().ToString().Substring(0, 6).ToUpper();
             string quotationNumber = $"WN-QT-{todayStr}-{randomStr}";
 
+            // Calculate discount and total amounts
+            decimal discountAmount = subtotal * (request.DiscountPercentage / 100m);
+            decimal totalAmount = subtotal - discountAmount;
+
             // Insert quotation into DB
             var result = await _db.InsertQuotationAsync(
                 quotationNumber,
@@ -273,10 +281,16 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
 
         public async Task<IEnumerable<QuotationResponse>> GetQuotationHistoryAsync(int customerId, int spaceId)
         {
-            var rows = await _db.GetQuotationHistoryAsync(customerId, spaceId);
+            // Get all quotations and filter by customerId and spaceId
+            var (rows, _) = await _db.GetQuotationsAsync(1, 10000, null);
+            var filteredRows = rows.Where(r => 
+                Convert.ToInt32(r["CustomerId"]) == customerId &&
+                Convert.ToInt32(r["SpaceId"]) == spaceId
+            ).ToList();
+            var filteredRowsCollection = (IEnumerable<IDictionary<string, object?>>)filteredRows;
             var list = new List<QuotationResponse>();
 
-            foreach (var r in rows)
+            foreach (var r in filteredRowsCollection)
             {
                 list.Add(new QuotationResponse
                 {
@@ -303,8 +317,21 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             return list;
         }
 
+        public async Task SendQuotationEmailAsync(int quotationId, string? overrideEmail)
+        {
+            var q = await GetQuotationByIdAsync(quotationId)
+                ?? throw new InvalidOperationException("Quotation not found.");
+
+            var targetEmail = overrideEmail ?? q.CustomerEmail
+                ?? throw new InvalidOperationException("Recipient email address is required.");
+
+            var pdf = _pdf.GenerateQuotationPdf(q);
+            await _email.SendQuotationEmailAsync(targetEmail, q.CustomerName ?? "Valued Customer", q.QuotationNumber ?? $"QTN-{quotationId}", pdf);
+        }
+
         public async Task<IDictionary<string, object?>> ConvertQuotationToBookingAsync(int quotationId, int? createdById)
         {
+
             var result = await _db.ConvertQuotationToBookingAsync(quotationId, createdById);
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 throw new InvalidOperationException(err.ToString());

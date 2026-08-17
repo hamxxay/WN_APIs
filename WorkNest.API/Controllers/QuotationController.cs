@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -13,13 +11,11 @@ namespace WorkNest.API.Controllers
     public class QuotationController : ControllerBase
     {
         private readonly IQuotationService _quotations;
-        private readonly IEmailService _email;
         private readonly IDbRepository _db;
 
-        public QuotationController(IQuotationService quotations, IEmailService email, IDbRepository db)
+        public QuotationController(IQuotationService quotations, IDbRepository db)
         {
             _quotations = quotations;
-            _email = email;
             _db = db;
         }
 
@@ -81,22 +77,15 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = "admin,super_admin,receptionist")]
         public async Task<IActionResult> SendEmail(int id, [FromBody] SendQuotationEmailRequest request)
         {
-            var q = await _quotations.GetQuotationByIdAsync(id);
-            if (q == null) return NotFound(ApiResponse.Fail("Quotation not found."));
-
-            var targetEmail = request.Email ?? q.CustomerEmail;
-            if (string.IsNullOrWhiteSpace(targetEmail))
-                return BadRequest(ApiResponse.Fail("Recipient email address is required."));
-
-            byte[] pdfBytes = Array.Empty<byte>();
-            if (!string.IsNullOrWhiteSpace(request.PdfBase64))
+            try
             {
-                try { pdfBytes = System.Convert.FromBase64String(request.PdfBase64); }
-                catch { return BadRequest(ApiResponse.Fail("Invalid base64 PDF data.")); }
+                await _quotations.SendQuotationEmailAsync(id, request.Email);
+                return Ok(ApiResponse.Ok("Quotation emailed successfully."));
             }
-
-            await _email.SendQuotationEmailAsync(targetEmail, q.CustomerName ?? "Valued Customer", q.QuotationNumber ?? $"QTN-{id}", pdfBytes);
-            return Ok(ApiResponse.Ok("Quotation emailed successfully."));
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ApiResponse.Fail(ex.Message));
+            }
         }
 
         [HttpPost("api/quotation/{id:int}/convert")]

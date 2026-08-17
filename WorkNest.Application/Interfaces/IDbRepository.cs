@@ -37,13 +37,49 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId);
         Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null);
-        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null);
+        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0);
         Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null);
         Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
         Task CancelBookingAsync(int id, string? userEmail, string? cancelReason, int? updatedById);
         Task ReassignBookingAsync(int id, int newSpaceId, int newPricingId, string? userEmail, int? updatedById);
 
+        // ── Quotation ─────────────────────────────────────────────────────────
+        Task<IDictionary<string, object?>> InsertQuotationAsync(
+            string quotationNumber,
+            DateTime validUntil,
+            int? customerId,
+            int? spaceId,
+            DateTime startDateTime,
+            DateTime endDateTime,
+            decimal subtotalAmount,
+            decimal discountPercentage,
+            string? remarks = null,
+            int? createdById = null
+        );
+        Task<IDictionary<string, object?>?> GetQuotationByIdAsync(
+            int quotationId,
+            string? userEmail = null
+        );
+
+        Task<IEnumerable<IDictionary<string, object?>>> GetQuotationDetailsAsync(
+            int quotationId
+        );
+
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationsAsync(
+            int page,
+            int limit,
+            string? search
+        );
+
+        Task<IEnumerable<IDictionary<string, object?>>> GetQuotationHistoryAsync(
+            int quotationId,
+            string? userEmail = null
+        );
+        Task<IDictionary<string, object?>> ConvertQuotationToBookingAsync(
+    int quotationId,
+    int? createdById
+);
         // ── Payment ───────────────────────────────────────────────────────────
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetPaymentsAsync(int page, int limit, string? search);
         Task<IDictionary<string, object?>?> GetPaymentSummaryAsync(int id);
@@ -137,6 +173,7 @@ namespace WorkNest.Application.Interfaces
 
         // ── AmountFields ──────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAmountFieldsAsync();
+        Task UpdateAmountFieldAccountAsync(int id, int? accountId);
 
         // ── Customer ──────────────────────────────────────────────────────────
         Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string? search);
