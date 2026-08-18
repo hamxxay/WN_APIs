@@ -110,11 +110,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 r.ConstantItem(140).AlignRight().Text("Subtotal:");
                                 r.ConstantItem(120).AlignRight().Text($"PKR {q.SubtotalAmount:N2}");
                             });
-                            if (q.DiscountPercentage > 0)
+                            if (q.DiscountPercentage > 0 || q.DiscountAmount > 0)
                             {
+                                var discLabel = q.DiscountType == "Amount"
+                                    ? "Discount:"
+                                    : $"Discount ({q.DiscountPercentage}%):";
                                 c.Item().Row(r =>
                                 {
-                                    r.ConstantItem(140).AlignRight().Text($"Discount ({q.DiscountPercentage}%):").FontColor("#e74c3c");
+                                    r.ConstantItem(140).AlignRight().Text(discLabel).FontColor("#e74c3c");
                                     r.ConstantItem(120).AlignRight().Text($"- PKR {q.DiscountAmount:N2}").FontColor("#e74c3c");
                                 });
                             }
@@ -134,6 +137,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Text(q.Remarks);
                             });
                         }
+
+                        col.Item().PaddingTop(8).Border(1).BorderColor("#dee2e6").Background("#f8f9fa").Padding(10).Column(tc =>
+                        {
+                            tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
+                            tc.Spacing(2);
+                            tc.Item().Text("1. All prices are exclusive of applicable taxes. Any applicable taxes will be charged separately.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("2. This quotation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("3. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("4. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("5. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                        });
                     });
 
                     page.Footer().Element(ComposeFooter);
@@ -273,6 +287,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Text(c.ChallanNotes);
                             });
                         }
+
+                        col.Item().PaddingTop(8).Border(1).BorderColor("#dee2e6").Background("#f8f9fa").Padding(10).Column(tc =>
+                        {
+                            tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
+                            tc.Spacing(2);
+                            tc.Item().Text("1. All prices are exclusive of applicable taxes. Any applicable taxes will be charged separately.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("2. Payment must be made before the challan expiry date to confirm the booking.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("3. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("4. Cancellation policy applies as per the signed agreement. Early termination may forfeit the deposit.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("5. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                        });
                     });
 
                     page.Footer().Element(ComposeFooter);

@@ -152,6 +152,14 @@ namespace WorkNest.Application.Services
             var pricingId = await ResolvePricingIdAsync(spaceId);
             if (pricingId == 0) return ApiResponse.Fail("No active pricing found for this space.");
 
+            // Validate discount
+            var discountType = string.IsNullOrWhiteSpace(request.DiscountType) ? "Percentage" : request.DiscountType;
+            var discountValue = request.DiscountValue > 0 ? request.DiscountValue : request.DiscountPercentage;
+            if (discountType == "Percentage" && (discountValue < 0 || discountValue > 100))
+                return ApiResponse.Fail("Percentage discount must be between 0 and 100.");
+            if (discountValue < 0)
+                return ApiResponse.Fail("Discount value cannot be negative.");
+
             // Split customer name into first/last for the database record
             string? firstName = request.CustomerName;
             string? lastName = null;
@@ -168,7 +176,10 @@ namespace WorkNest.Application.Services
                 request.Notes, actorId, request.CustomerEmail,
                 request.CustomerEmail, firstName, lastName, request.Phone,
                 null, null, null, "Created by administrator",
-                request.DiscountPercentage);
+                discountType == "Percentage" ? discountValue : 0,
+                discountType, discountValue,
+                request.SecurityDepositOverride,
+                request.FloorId);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
             {

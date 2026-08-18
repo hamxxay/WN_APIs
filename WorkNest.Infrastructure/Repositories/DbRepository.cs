@@ -111,7 +111,11 @@ namespace WorkNest.Infrastructure.Repositories
             decimal subtotalAmount,
             decimal discountPercentage,
             string? remarks = null,
-            int? createdById = null)
+            int? createdById = null,
+            string discountType = "Percentage",
+            decimal discountValue = 0,
+            decimal? securityDepositOverride = null,
+            int? floorId = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_Insert", c);
@@ -128,11 +132,37 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
 
             await using var r = await cmd.ExecuteReaderAsync();
+            IDictionary<string, object?> result = new Dictionary<string, object?>();
+            if (await r.ReadAsync()) result = ToDict(r);
+            await r.CloseAsync();
 
-            if (await r.ReadAsync())
-                return ToDict(r);
+            // Persist new fields after insert
+            if (result.TryGetValue("Id", out var qidObj) && qidObj is not null)
+            {
+                int quotationId = Convert.ToInt32(qidObj);
 
-            return new Dictionary<string, object?>();
+                decimal discountAmount = discountType == "Amount"
+                    ? discountValue
+                    : subtotalAmount * (discountValue / 100m);
+
+                decimal secDeposit = securityDepositOverride ?? 0;
+
+                var updateParts = new List<string> { "DiscountType = @DT", "SecurityDeposit = @SD" };
+                if (floorId.HasValue) updateParts.Add("FloorId = @FID");
+
+                var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
+                await using var upd = new SqlCommand(updateSql, c);
+                upd.Parameters.AddWithValue("@DT", discountType);
+                upd.Parameters.AddWithValue("@SD", secDeposit);
+                upd.Parameters.AddWithValue("@QID", quotationId);
+                if (floorId.HasValue) upd.Parameters.AddWithValue("@FID", floorId.Value);
+                await upd.ExecuteNonQueryAsync();
+
+                result["DiscountType"] = discountType;
+                result["SecurityDeposit"] = secDeposit;
+            }
+
+            return result;
         }
         public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationHistoryAsync(
             int quotationId,
@@ -141,6 +171,24 @@ namespace WorkNest.Infrastructure.Repositories
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_GetHistory", c);
             cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationsByCustomerAsync(int customerId)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(
+                "SELECT q.*, CONCAT(cu.FirstName, ' ', ISNULL(cu.LastName, '')) AS CustomerName, cu.Email AS CustomerEmail, " +
+                "s.Name AS SpaceName, s.Code AS SpaceCode, l.Name AS LocationName, st.Name AS SpaceTypeName " +
+                "FROM dbo.WN_Quotations q " +
+                "LEFT JOIN dbo.WN_Customers cu ON cu.Id = q.CustomerId " +
+                "LEFT JOIN dbo.WN_Spaces s ON s.Id = q.SpaceId " +
+                "LEFT JOIN dbo.WN_Locations l ON l.Id = s.LocationIdInt " +
+                "LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeIdInt " +
+                "WHERE q.CustomerId = @CustomerId " +
+                "ORDER BY q.CreatedDate DESC", c);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -533,7 +581,9 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<IDictionary<string, object?>> InsertBookingAsync(
             int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail,
             string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null,
-            string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0)
+            string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
+            decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0,
+            decimal? securityDepositOverride = null, int? floorId = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_Insert", c);
@@ -555,8 +605,44 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@CustomerNotes", (object?)customerNotes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@DiscountPercentage", discountPercentage);
             await using var r = await cmd.ExecuteReaderAsync();
-            if (await r.ReadAsync()) return ToDict(r);
-            return new Dictionary<string, object?>();
+            IDictionary<string, object?> result = new Dictionary<string, object?>();
+            if (await r.ReadAsync()) result = ToDict(r);
+            await r.CloseAsync();
+
+            // Persist new fields (DiscountType, DiscountAmount, SecurityDepositOverride, FloorId) if booking was created
+            if (result.TryGetValue("BookingId", out var bidObj) && bidObj is not null)
+            {
+                int bookingId = Convert.ToInt32(bidObj);
+
+                // Calculate discount amount
+                decimal discountAmount = 0;
+                if (discountType == "Amount")
+                    discountAmount = discountValue;
+                else if (discountType == "Percentage" && discountValue > 0)
+                {
+                    // Subtotal is in the result or we use discountPercentage
+                    decimal subtotal = result.TryGetValue("SubtotalAmount", out var sa) && sa is not null ? Convert.ToDecimal(sa) : 0;
+                    discountAmount = subtotal * (discountValue / 100m);
+                }
+
+                var updateParts = new List<string> { "DiscountType = @DT", "DiscountAmount = @DA" };
+                if (securityDepositOverride.HasValue) updateParts.Add("SecurityDepositOverride = @SDO");
+                if (floorId.HasValue) updateParts.Add("FloorId = @FID");
+
+                var updateSql = $"UPDATE dbo.WN_Bookings SET {string.Join(", ", updateParts)} WHERE Id = @BID";
+                await using var upd = new SqlCommand(updateSql, c);
+                upd.Parameters.AddWithValue("@DT", discountType);
+                upd.Parameters.AddWithValue("@DA", discountAmount);
+                upd.Parameters.AddWithValue("@BID", bookingId);
+                if (securityDepositOverride.HasValue) upd.Parameters.AddWithValue("@SDO", securityDepositOverride.Value);
+                if (floorId.HasValue) upd.Parameters.AddWithValue("@FID", floorId.Value);
+                await upd.ExecuteNonQueryAsync();
+
+                result["DiscountType"] = discountType;
+                result["DiscountAmount"] = discountAmount;
+            }
+
+            return result;
         }
 
         public async Task<IDictionary<string, object?>> InsertSmartBookingAsync(

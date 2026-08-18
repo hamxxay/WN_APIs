@@ -77,8 +77,17 @@ namespace WorkNest.Application.Services
 
         public async Task<QuotationResponse> CreateQuotationAsync(QuotationRequest request, int? createdById)
         {
-            if (request.DiscountPercentage < 0 || request.DiscountPercentage > 100)
-                throw new ArgumentException("Discount percentage must be between 0% and 100%.");
+            // Validate discount
+            var discountType = string.IsNullOrWhiteSpace(request.DiscountType) ? "Percentage" : request.DiscountType;
+            var discountValue = request.DiscountValue > 0 ? request.DiscountValue : request.DiscountPercentage;
+
+            if (discountType == "Percentage" && (discountValue < 0 || discountValue > 100))
+                throw new ArgumentException("Percentage discount must be between 0% and 100%.");
+            if (discountValue < 0)
+                throw new ArgumentException("Discount value cannot be negative.");
+
+            // For backward compat: if DiscountType is Percentage, keep discountPercentage
+            decimal discountPercentage = discountType == "Percentage" ? discountValue : 0;
 
             var spaceDetails = await ResolveSpaceDetailsAsync(request.SpaceId);
 
@@ -122,8 +131,10 @@ namespace WorkNest.Application.Services
                     Amount = rentAmount
                 });
 
-                // Security deposit (usually equal to 1 month room rent)
-                decimal secDeposit = spaceDetails.SecurityDeposit > 0 ? spaceDetails.SecurityDeposit : monthlyRentOfRoom;
+                // Security deposit: use override if provided, else default to 1 month room rent
+                decimal secDeposit = request.SecurityDepositOverride.HasValue
+                    ? request.SecurityDepositOverride.Value
+                    : (spaceDetails.SecurityDeposit > 0 ? spaceDetails.SecurityDeposit : monthlyRentOfRoom);
                 details.Add(new QuotationDetailDto
                 {
                     FeeType = "SecurityDeposit",
@@ -157,7 +168,9 @@ namespace WorkNest.Application.Services
             string quotationNumber = $"WN-QT-{todayStr}-{randomStr}";
 
             // Calculate discount and total amounts
-            decimal discountAmount = subtotal * (request.DiscountPercentage / 100m);
+            decimal discountAmount = discountType == "Amount"
+                ? discountValue
+                : subtotal * (discountValue / 100m);
             decimal totalAmount = subtotal - discountAmount;
 
             // Insert quotation into DB
@@ -169,9 +182,13 @@ namespace WorkNest.Application.Services
                 request.StartDateTime,
                 request.EndDateTime,
                 subtotal,
-                request.DiscountPercentage,
+                discountPercentage,
                 request.Remarks,
-                createdById
+                createdById,
+                discountType,
+                discountValue,
+                request.SecurityDepositOverride,
+                request.FloorId
             );
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -217,8 +234,13 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 StartDateTime = Convert.ToDateTime(header["StartDateTime"]),
                 EndDateTime = Convert.ToDateTime(header["EndDateTime"]),
                 SubtotalAmount = Convert.ToDecimal(header["SubtotalAmount"]),
+                DiscountType = header.TryGetValue("DiscountType", out var dt) && dt is not null ? dt.ToString()! : "Percentage",
                 DiscountPercentage = Convert.ToDecimal(header["DiscountPercentage"]),
+                DiscountValue = header.TryGetValue("DiscountType", out var dt2) && dt2?.ToString() == "Amount"
+                    ? Convert.ToDecimal(header["DiscountAmount"])
+                    : Convert.ToDecimal(header["DiscountPercentage"]),
                 DiscountAmount = Convert.ToDecimal(header["DiscountAmount"]),
+                SecurityDeposit = header.TryGetValue("SecurityDeposit", out var sd) && sd is not null ? Convert.ToDecimal(sd) : 0,
                 TotalAmount = Convert.ToDecimal(header["TotalAmount"]),
                 Remarks = header["Remarks"]?.ToString(),
                 Status = header["Status"]?.ToString(),
@@ -315,6 +337,39 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             }
 
             return list;
+        }
+
+        public async Task<IEnumerable<QuotationResponse>> GetQuotationsByCustomerAsync(int customerId)
+        {
+            var rows = await _db.GetQuotationsByCustomerAsync(customerId);
+            return rows.Select(r => new QuotationResponse
+            {
+                Id = Convert.ToInt32(r["Id"]),
+                Guid = r["Guid"]?.ToString(),
+                QuotationNumber = r["QuotationNumber"]?.ToString() ?? "",
+                QuotationDate = Convert.ToDateTime(r["QuotationDate"]),
+                ValidUntil = Convert.ToDateTime(r["ValidUntil"]),
+                CustomerId = Convert.ToInt32(r["CustomerId"]),
+                CustomerName = r["CustomerName"]?.ToString(),
+                CustomerEmail = r["CustomerEmail"]?.ToString(),
+                SpaceId = r["SpaceId"] != null ? Convert.ToInt32(r["SpaceId"]) : 0,
+                SpaceName = r["SpaceName"]?.ToString(),
+                SpaceCode = r["SpaceCode"]?.ToString(),
+                LocationName = r["LocationName"]?.ToString(),
+                SpaceTypeName = r["SpaceTypeName"]?.ToString(),
+                StartDateTime = Convert.ToDateTime(r["StartDateTime"]),
+                EndDateTime = Convert.ToDateTime(r["EndDateTime"]),
+                SubtotalAmount = Convert.ToDecimal(r["SubtotalAmount"]),
+                DiscountType = r.TryGetValue("DiscountType", out var dt) && dt is not null ? dt.ToString()! : "Percentage",
+                DiscountPercentage = Convert.ToDecimal(r["DiscountPercentage"]),
+                DiscountAmount = Convert.ToDecimal(r["DiscountAmount"]),
+                TotalAmount = Convert.ToDecimal(r["TotalAmount"]),
+                SecurityDeposit = r.TryGetValue("SecurityDeposit", out var sd) && sd is not null ? Convert.ToDecimal(sd) : 0,
+                Remarks = r["Remarks"]?.ToString(),
+                Status = r["Status"]?.ToString(),
+                Version = Convert.ToInt32(r["Version"]),
+                IsActive = Convert.ToBoolean(r["IsActive"])
+            });
         }
 
         public async Task SendQuotationEmailAsync(int quotationId, string? overrideEmail)

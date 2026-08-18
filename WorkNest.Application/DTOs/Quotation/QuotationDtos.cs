@@ -9,7 +9,14 @@ namespace WorkNest.Application.DTOs.Quotation
         public int SpaceId { get; set; }
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
-        public decimal DiscountPercentage { get; set; }
+        // Discount: type is "Percentage" or "Amount"
+        public string DiscountType { get; set; } = "Percentage";
+        public decimal DiscountPercentage { get; set; } = 0;
+        public decimal DiscountValue { get; set; } = 0;
+        // Security deposit override (null = use calculated default)
+        public decimal? SecurityDepositOverride { get; set; }
+        // Floor (optional)
+        public int? FloorId { get; set; }
         public string? Remarks { get; set; }
         public DateTime ValidUntil { get; set; }
     }
@@ -32,8 +39,11 @@ namespace WorkNest.Application.DTOs.Quotation
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
         public decimal SubtotalAmount { get; set; }
+        public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; }
+        public decimal DiscountValue { get; set; }
         public decimal DiscountAmount { get; set; }
+        public decimal SecurityDeposit { get; set; }
         public decimal TotalAmount { get; set; }
         public string? Remarks { get; set; }
         public string? Status { get; set; }

@@ -49,6 +49,14 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [HttpGet("api/quotation/by-customer/{customerId:int}")]
+        [Authorize(Roles = "admin,super_admin,receptionist")]
+        public async Task<IActionResult> GetByCustomer(int customerId)
+        {
+            var res = await _quotations.GetQuotationsByCustomerAsync(customerId);
+            return Ok(ApiResponse.Ok(res));
+        }
+
         [HttpGet("api/quotation/{id:int}")]
         public async Task<IActionResult> GetById(int id)
         {

@@ -62,6 +62,22 @@ namespace WorkNest.Application.Services
                 request.Address, request.CnicOrPassport, request.AvatarUrl,
                 request.Notes, actorId);
 
+            var existingCustomer = await _db.GetCustomerByEmailAsync(request.Email);
+            if (existingCustomer is null)
+            {
+                var nameParts = (request.Name ?? "").Split(' ', 2);
+                await _db.CreateCustomerAsync(
+                    nameParts[0],
+                    nameParts.Length > 1 ? nameParts[1] : null,
+                    request.Email,
+                    request.Phone,
+                    request.CnicOrPassport,
+                    request.Address,
+                    request.CityId,
+                    request.Notes,
+                    null);
+            }
+
             return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User created successfully.");
         }
 

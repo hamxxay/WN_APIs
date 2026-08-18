@@ -11,6 +11,7 @@ namespace WorkNest.Application.Interfaces
         Task<QuotationResponse?> GetQuotationByIdAsync(int id);
         Task<(IEnumerable<QuotationResponse> Rows, int Total)> GetQuotationsAsync(int page, int limit, string? search);
         Task<IEnumerable<QuotationResponse>> GetQuotationHistoryAsync(int customerId, int spaceId);
+        Task<IEnumerable<QuotationResponse>> GetQuotationsByCustomerAsync(int customerId);
         Task<IDictionary<string, object?>> ConvertQuotationToBookingAsync(int quotationId, int? createdById);
         Task SendQuotationEmailAsync(int quotationId, string? overrideEmail);
     }

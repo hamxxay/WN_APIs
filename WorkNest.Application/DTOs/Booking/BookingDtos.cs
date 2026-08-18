@@ -12,7 +12,14 @@ namespace WorkNest.Application.DTOs.Booking
         public string? CustomerEmail { get; set; }
         public string? CustomerName { get; set; }
         public string? Phone { get; set; }
+        // Discount: type is "Percentage" or "Amount"
+        public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; } = 0;
+        public decimal DiscountValue { get; set; } = 0;
+        // Security deposit override (null = use pricing default)
+        public decimal? SecurityDepositOverride { get; set; }
+        // Floor (optional)
+        public int? FloorId { get; set; }
     }
 
     public class BookingRequest

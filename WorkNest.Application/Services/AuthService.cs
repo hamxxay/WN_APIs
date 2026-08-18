@@ -28,6 +28,7 @@ namespace WorkNest.Application.Services
         public async Task<ApiResponse> RegisterAsync(UserRegisterRequest request)
         {
             var (id, publicId) = await _db.SyncUserAsync(request.Email, request.Name, request.Phone, request.Password);
+            await EnsureCustomerAsync(request.Email, request.Name, request.Phone, id);
             return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User registered successfully.");
         }
 
@@ -68,9 +69,10 @@ namespace WorkNest.Application.Services
                 }
                 else
                 {
-                    var (_, pid) = await _db.SyncUserAsync(request.Email, request.Name, null);
+                    var (newId, pid) = await _db.SyncUserAsync(request.Email, request.Name, null);
                     publicId = pid;
                     role = Roles.General;
+                    await EnsureCustomerAsync(request.Email, request.Name, null, newId);
                 }
 
                 var token = _jwt.GenerateToken(publicId ?? "", request.Email, role);
@@ -99,5 +101,16 @@ namespace WorkNest.Application.Services
         }
 
         public ApiResponse Logout() => ApiResponse.Ok("Logged out successfully.");
+
+        private async Task EnsureCustomerAsync(string email, string? name, string? phone, int? userId)
+        {
+            var existing = await _db.GetCustomerByEmailAsync(email);
+            if (existing is not null) return;
+            var nameParts = (name ?? "").Split(' ', 2);
+            await _db.CreateCustomerAsync(
+                nameParts[0].Length > 0 ? nameParts[0] : email,
+                nameParts.Length > 1 ? nameParts[1] : null,
+                email, phone, null, null, null, null, null);
+        }
     }
 }
