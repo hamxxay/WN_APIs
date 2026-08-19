@@ -92,11 +92,12 @@ namespace WorkNest.Application.Services
 
             return ApiResponse.Ok(new
             {
-                id       = row.TryGetValue("PublicId",    out var g) ? g?.ToString() : null,
-                email    = row.TryGetValue("Email",       out var e) ? e?.ToString() : email,
-                name     = row.TryGetValue("Name",        out var n) ? n?.ToString() : null,
-                phone    = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null,
-                role     = Roles.FromRow(row),
+                id         = row.TryGetValue("PublicId",    out var g) ? g?.ToString() : null,
+                email      = row.TryGetValue("Email",       out var e) ? e?.ToString() : email,
+                name       = row.TryGetValue("Name",        out var n) ? n?.ToString() : null,
+                phone      = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null,
+                role       = Roles.FromRow(row),
+                customerId = row.TryGetValue("CustomerId",  out var c) ? c?.ToString() : null,
             });
         }
 
