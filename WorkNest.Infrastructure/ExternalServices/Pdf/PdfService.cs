@@ -95,7 +95,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 var bg = alt ? "#f9f9f9" : "#ffffff";
                                 table.Cell().Background(bg).Padding(6).Text(d.Description);
-                                // table.Cell().Background(bg).Padding(6).AlignRight().Text(d.Quantity.ToString("N0"));
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text(d.Quantity.ToString("N0"));
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {d.UnitPrice:N2}");
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {d.Amount:N2}");
                                 alt = !alt;
@@ -210,6 +210,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Text($"From: {c.StartOn:dd MMM yyyy}");
                                 inner.Item().Text($"To:   {c.EndOn:dd MMM yyyy}");
                                 inner.Item().Text($"Billing: {c.BillingPeriodLabel ?? c.BillingPeriodCode ?? "-"}").FontColor("#555555");
+                                inner.Item().Text($"Contract Total: PKR {c.TotalContractAmount:N2}").FontColor("#15803d").Bold();
+                                inner.Item().Text($"Next Bill Due: {c.NextBillDueDate:dd MMM yyyy}").FontColor("#0284c7");
+                                inner.Item().Text($"Balance Left: PKR {c.BalanceLeft:N2}").FontColor("#b45309");
                             });
                         });
 
@@ -239,7 +242,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 var bg = alt ? "#f9f9f9" : "#ffffff";
                                 var desc = string.IsNullOrWhiteSpace(line.Description) ? line.ChargeTypeLabel : line.Description;
                                 table.Cell().Background(bg).Padding(6).Text(desc);
-                                // table.Cell().Background(bg).Padding(6).AlignRight().Text(line.Quantity.ToString("N0"));
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text(line.Quantity.ToString("N0"));
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.UnitPrice:N2}");
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text(line.DiscountAmount > 0 ? $"PKR {line.DiscountAmount:N2}" : "-");
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.LineTotal:N2}");
@@ -250,20 +253,23 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         col.Item().AlignRight().Column(inner =>
                         {
                             inner.Spacing(3);
-                            inner.Item().Row(r =>
+                            if (!c.IsMeetingRoom && c.CurrentCycleAmount > 0)
                             {
-                                r.ConstantItem(160).AlignRight().Text("Subtotal:");
-                                r.ConstantItem(120).AlignRight().Text($"PKR {c.SubtotalAmount:N2}");
-                            });
+                                inner.Item().Row(r =>
+                                {
+                                    r.ConstantItem(160).AlignRight().Text($"Current Cycle Rent ({c.BillingPeriodLabel ?? c.BillingPeriodCode ?? "Cycle"}):");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.CurrentCycleAmount:N2}");
+                                });
+                            }
                             if (c.DiscountAmount > 0)
                             {
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(160).AlignRight().Text($"Discount ({c.DiscountPercentage}%):").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {c.DiscountAmount:N2}").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.DiscountAmount:N2}").FontColor("#e74c3c");
                                 });
                             }
-                            if (c.SecurityDeposit > 0)
+                            if (!c.IsMeetingRoom && c.SecurityDeposit > 0)
                             {
                                 inner.Item().Row(r =>
                                 {
@@ -305,6 +311,167 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             }).GeneratePdf();
         }
 
+        public byte[] GenerateAdvanceInvoicePdf(WorkNest.Application.DTOs.Payment.AdvanceInvoicePdfDto inv)
+        {
+            return Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4);
+                    page.Margin(40);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
+
+                    page.Header().Element(ComposeHeader);
+
+                    page.Content().Column(col =>
+                    {
+                        col.Spacing(12);
+
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("ADVANCE PAYMENT INVOICE").FontSize(20).Bold().FontColor("#1a1a2e");
+                                c.Item().Text($"Invoice # {inv.InvoiceNumber}").FontSize(11).FontColor("#555555");
+                            });
+                            row.ConstantItem(160).Column(c =>
+                            {
+                                c.Item().AlignRight().Text($"Issued: {inv.IssuedOn:dd MMM yyyy}").FontColor("#555555");
+                                c.Item().AlignRight().Text($"Advance Months: {inv.AdvanceRentMonths}").FontColor("#555555");
+                                if (inv.SecurityDepositMonths > 0)
+                                    c.Item().AlignRight().Text($"Security Deposit Months: {inv.SecurityDepositMonths}").FontColor("#555555");
+                            });
+                        });
+
+                        col.Item().LineHorizontal(1).LineColor("#e0e0e0");
+
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("CUSTOMER").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text(inv.CustomerName ?? "-").Bold();
+                                c.Item().Text(inv.CustomerEmail ?? "-").FontColor("#555555");
+                                if (!string.IsNullOrWhiteSpace(inv.CustomerCode))
+                                    c.Item().Text($"Code: {inv.CustomerCode}").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("SPACE").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text(inv.SpaceName ?? "-").Bold();
+                                c.Item().Text(inv.SpaceTypeName ?? "-").FontColor("#555555");
+                                c.Item().Text(inv.LocationName ?? "-").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("BOOKING PERIOD").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text($"From: {inv.StartOn:dd MMM yyyy}");
+                                c.Item().Text($"To:   {inv.EndOn:dd MMM yyyy}");
+                            });
+                        });
+
+                        col.Item().LineHorizontal(1).LineColor("#e0e0e0");
+
+                        col.Item().Table(table =>
+                        {
+                            table.ColumnsDefinition(cols =>
+                            {
+                                cols.RelativeColumn(4);
+                                cols.RelativeColumn(2);
+                            });
+
+                            table.Header(header =>
+                            {
+                                foreach (var h in new[] { "Description", "Amount (PKR)" })
+                                    header.Cell().Background("#1a1a2e").Padding(6)
+                                        .Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                            });
+
+                            bool alt = false;
+                            // Advance rent rows per month
+                            if (inv.MonthsBreakdown != null && inv.MonthsBreakdown.Count > 0)
+                            {
+                                foreach (var m in inv.MonthsBreakdown)
+                                {
+                                    var bg = alt ? "#f9f9f9" : "#ffffff";
+                                    table.Cell().Background(bg).Padding(6).Text($"Advance Rent â€“ {m.MonthName}");
+                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {m.Amount:N2}");
+                                    alt = !alt;
+                                }
+                            }
+                            else
+                            {
+                                var bg = "#ffffff";
+                                table.Cell().Background(bg).Padding(6).Text($"Advance Rent ({inv.AdvanceRentMonths} Month(s))");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N2}");
+                                alt = true;
+                            }
+
+                            if (inv.SecurityDepositTotal > 0)
+                            {
+                                var bg = alt ? "#f9f9f9" : "#ffffff";
+                                table.Cell().Background(bg).Padding(6).Text($"Security Deposit ({inv.SecurityDepositMonths} Month(s))");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N2}");
+                                alt = !alt;
+                            }
+                        });
+
+                        col.Item().AlignRight().Column(c =>
+                        {
+                            c.Spacing(3);
+                            c.Item().Row(r =>
+                            {
+                                r.ConstantItem(160).AlignRight().Text("Advance Rent:");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N2}");
+                            });
+                            if (inv.SecurityDepositTotal > 0)
+                            {
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(160).AlignRight().Text("Security Deposit:");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N2}");
+                                });
+                            }
+                            if (inv.DiscountAmount > 0)
+                            {
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(160).AlignRight().Text("Discount:").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"- PKR {inv.DiscountAmount:N2}").FontColor("#e74c3c");
+                                });
+                            }
+                            c.Item().LineHorizontal(1).LineColor("#1a1a2e");
+                            c.Item().Row(r =>
+                            {
+                                r.ConstantItem(160).AlignRight().Text("Total Payable:").Bold().FontSize(12);
+                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.TotalPayable:N2}").Bold().FontSize(12).FontColor("#1a1a2e");
+                            });
+                        });
+
+                        if (!string.IsNullOrWhiteSpace(inv.Notes))
+                        {
+                            col.Item().Background("#f5f5f5").Padding(10).Column(c =>
+                            {
+                                c.Item().Text("Notes").Bold().FontSize(9).FontColor("#888888");
+                                c.Item().Text(inv.Notes);
+                            });
+                        }
+
+                        col.Item().PaddingTop(8).Border(1).BorderColor("#dee2e6").Background("#f8f9fa").Padding(10).Column(tc =>
+                        {
+                            tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
+                            tc.Spacing(2);
+                            tc.Item().Text("1. This invoice covers advance rent payment for the specified months only.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("2. Security deposit is fully refundable upon termination, subject to lease terms.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("3. All prices are exclusive of applicable taxes.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("4. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                        });
+                    });
+
+                    page.Footer().Element(ComposeFooter);
+                });
+            }).GeneratePdf();
+        }
         private static readonly string LogoPath = @"F:\WorkNest_FE\public\images\Logo.png";
 
         private static void ComposeHeader(IContainer container)

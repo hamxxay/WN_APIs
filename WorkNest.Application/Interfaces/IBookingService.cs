@@ -1,4 +1,4 @@
-using WorkNest.Application.DTOs.Booking;
+﻿using WorkNest.Application.DTOs.Booking;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Interfaces
@@ -24,5 +24,6 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetChallanAsync(int bookingId);
         Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null);
         Task<ApiResponse> SendBookingConfirmationEmailAsync(int bookingId);
+        Task<byte[]> GenerateAdvanceInvoicePdfAsync(int bookingId, int advanceMonths, int secDepositMonths, decimal monthlyRate, decimal discountAmount);
     }
 }

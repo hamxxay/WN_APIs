@@ -16,10 +16,12 @@ namespace WorkNest.API.Controllers
     {
         private readonly IBookingService _bookings;
         private readonly IDbRepository _db;
-        public BookingController(IBookingService bookings, IDbRepository db)
+        private readonly IPdfService _pdf;
+        public BookingController(IBookingService bookings, IDbRepository db, IPdfService pdf)
         {
             _bookings = bookings;
             _db = db;
+            _pdf = pdf;
         }
 
         private string? ResolveUserEmail(string? headerEmail)
@@ -83,7 +85,7 @@ namespace WorkNest.API.Controllers
             if (Guid.TryParse(spaceId, out var guid))
             {
                 var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
-                var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == guid.ToString());
+                var match = rows.FirstOrDefault(r => (r.TryGetValue("IdGUID", out var idg) && idg?.ToString() == guid.ToString()) || (r.TryGetValue("PublicId", out var g) && g?.ToString() == guid.ToString()));
                 if (match is null) return NotFound(new { isSuccessful = false, message = "Space not found" });
                 intId = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
                 return Ok(await _bookings.GetBookingCalendarAsync(intId, year, month));
@@ -121,6 +123,10 @@ namespace WorkNest.API.Controllers
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
+
+        [HttpGet("api/booking/{id:int}/billing-summary")]
+        public async Task<IActionResult> GetBillingSummary(int id) =>
+            await GetChallan(id, null);
 
         [HttpGet("api/booking/{id:int}/challan")]
         public async Task<IActionResult> GetChallan(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
@@ -282,6 +288,21 @@ namespace WorkNest.API.Controllers
             return Ok(await _bookings.UpdateBookingStatusAsync(id, request.StatusId, null));
         }
 
+        
+        [HttpGet("api/booking/{id:int}/challan-pdf")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetChallanPdf(int id)
+        {
+            var challanResult = await _bookings.GetChallanAsync(id);
+            if (!challanResult.IsSuccessful || challanResult.Data is null)
+                return NotFound(new { isSuccessful = false, message = "Challan details not found." });
+
+            var dto = (ChallanResponseDto)challanResult.Data;
+            var pdfBytes = _pdf.GenerateBookingConfirmationPdf(dto);
+            var filename = $"Challan-{dto.ChallanNumber ?? id.ToString()}.pdf";
+            return File(pdfBytes, "application/pdf", filename);
+        }
+
         [HttpPost("api/booking/{id:int}/send-challan-email")]
         [Authorize(Roles = "admin,super_admin,receptionist")]
         public async Task<IActionResult> SendChallanEmail(int id, [FromBody] SendChallanEmailRequest? request)
@@ -336,5 +357,18 @@ namespace WorkNest.API.Controllers
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
+
+        [HttpGet("api/booking/{id:int}/advance-invoice-pdf")]
+        public async Task<IActionResult> GetAdvanceInvoicePdf(
+            int id,
+            [FromQuery] int advMonths = 3,
+            [FromQuery] int secMonths = 2,
+            [FromQuery] decimal monthlyRate = 0,
+            [FromQuery] decimal discount = 0)
+        {
+            var pdfBytes = await _bookings.GenerateAdvanceInvoicePdfAsync(id, advMonths, secMonths, monthlyRate, discount);
+            return File(pdfBytes, "application/pdf", $"AdvanceInvoice-{id}.pdf");
+        }
     }
 }
+

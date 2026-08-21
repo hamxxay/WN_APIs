@@ -41,7 +41,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] SpaceTypeUpsertRequest request)
         {
             var (rows, _) = await _db.GetSpaceTypesAsync(1, 10000);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = rows.FirstOrDefault(r => (r.TryGetValue("IdGUID", out var idg) && idg?.ToString() == publicId.ToString()) || (r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString()));
             if (match is null) return NotFound(ApiResponse.Fail("Space type not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
             return Ok(await _spaceTypes.UpdateSpaceTypeAsync(id, request, null));
@@ -55,7 +55,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetSpaceTypesAsync(1, 10000);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = rows.FirstOrDefault(r => (r.TryGetValue("IdGUID", out var idg) && idg?.ToString() == publicId.ToString()) || (r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString()));
             if (match is null) return NotFound(ApiResponse.Fail("Space type not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
             return Ok(await _spaceTypes.DeleteSpaceTypeAsync(id));

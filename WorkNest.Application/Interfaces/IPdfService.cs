@@ -1,4 +1,4 @@
-using WorkNest.Application.DTOs.Booking;
+﻿using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.DTOs.Quotation;
 
 namespace WorkNest.Application.Interfaces
@@ -7,5 +7,6 @@ namespace WorkNest.Application.Interfaces
     {
         byte[] GenerateQuotationPdf(QuotationResponse quotation);
         byte[] GenerateBookingConfirmationPdf(ChallanResponseDto challan);
+        byte[] GenerateAdvanceInvoicePdf(WorkNest.Application.DTOs.Payment.AdvanceInvoicePdfDto inv);
     }
 }

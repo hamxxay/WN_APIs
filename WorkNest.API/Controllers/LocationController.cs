@@ -42,7 +42,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] LocationUpdateRequest request)
         {
             var (rows, _) = await _db.GetLocationsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = rows.FirstOrDefault(r => (r.TryGetValue("IdGUID", out var idg) && idg?.ToString() == publicId.ToString()) || (r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString()));
             if (match is null) return NotFound(ApiResponse.Fail("Location not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
             return Ok(await _locations.UpdateLocationAsync(id, request));
@@ -56,7 +56,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetLocationsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = rows.FirstOrDefault(r => (r.TryGetValue("IdGUID", out var idg) && idg?.ToString() == publicId.ToString()) || (r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString()));
             if (match is null) return NotFound(ApiResponse.Fail("Location not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
             return Ok(await _locations.DeleteLocationAsync(id));

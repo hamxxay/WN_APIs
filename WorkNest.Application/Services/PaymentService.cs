@@ -100,5 +100,18 @@ namespace WorkNest.Application.Services
             // PayFast notify is stateless — status update handled externally via UpdatePaymentStatus
             return ApiResponse.Ok();
         }
+
+        public async Task<ApiResponse> CreateAdvanceInvoiceAsync(AdvanceInvoiceRequest request, string userEmail)
+        {
+            var userRow = await _db.GetUserByEmailAsync(userEmail);
+            if (userRow is null) return ApiResponse.Fail("User not found");
+            var userId = Convert.ToInt32(userRow["Id"]);
+
+            var result = await _db.InsertPaymentAsync(
+                userId, request.BookingId, request.PaymentMethodId,
+                request.Amount, request.Notes ?? "Advance invoice", userId);
+
+            return ApiResponse.Ok(result, "Advance invoice created.");
+        }
     }
 }

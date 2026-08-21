@@ -31,7 +31,7 @@ namespace WorkNest.Application.Services
         public async Task<ApiResponse> CreateCustomerAsync(CustomerRequest request, string? createdBy)
         {
             var existing = await _db.GetCustomerByEmailAsync(request.Email);
-            if (existing is not null)
+            if (existing is not null && existing.TryGetValue("Id", out var eid) && eid is not null)
                 return ApiResponse.Fail("A customer with this email already exists.");
 
             var (userId, _) = await _db.SyncUserAsync(request.Email,
@@ -44,16 +44,15 @@ namespace WorkNest.Application.Services
                 result = await _db.CreateCustomerAsync(
                     request.FirstName, request.LastName, request.Email,
                     request.PhoneNumber, request.CnicOrPassport, request.Address,
-                    request.CityId, request.Notes, createdBy);
+                    request.CityId, request.Notes, createdBy, userId);
             }
             catch (Exception ex) when (ex.Message.Contains("UQ_WN_Customers") || ex.Message.Contains("duplicate key"))
             {
                 return ApiResponse.Fail("A customer with this email already exists.");
             }
 
-            if (userId.HasValue && result.TryGetValue("Id", out var custIdObj) && custIdObj is not null)
-                await _db.ExecuteRawSqlAsync(
-                    $"UPDATE dbo.WN_Customers SET UserId = {userId.Value} WHERE Id = {Convert.ToInt32(custIdObj)} AND (UserId IS NULL OR UserId = 0)");
+            if (!result.TryGetValue("Id", out var custIdObj) || custIdObj is null)
+                return ApiResponse.Fail("Customer could not be created. The stored procedure returned no result.");
 
             return ApiResponse.Ok(result, "Customer created successfully.");
         }

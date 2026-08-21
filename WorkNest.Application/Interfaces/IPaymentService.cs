@@ -15,5 +15,6 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> ProcessCardPaymentAsync(CardPaymentRequest request, string userEmail);
         Task<ApiResponse> InitiatePayFastAsync(PayFastInitiateRequest request, string userEmail);
         Task<ApiResponse> HandlePayFastNotifyAsync(Dictionary<string, string> formData);
+        Task<ApiResponse> CreateAdvanceInvoiceAsync(AdvanceInvoiceRequest request, string userEmail);
     }
 }

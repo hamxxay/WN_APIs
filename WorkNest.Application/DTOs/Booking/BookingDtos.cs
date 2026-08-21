@@ -1,34 +1,71 @@
 namespace WorkNest.Application.DTOs.Booking
 {
+    public class BookingDetailsResponseDto
+    {
+        public int BookingId { get; set; }
+        public string? BookingPublicId { get; set; }
+        public string? CustomerName { get; set; }
+        public string? CustomerEmail { get; set; }
+        public string? SpaceCode { get; set; }
+        public string? SpaceName { get; set; }
+        public string? SpaceNumber { get; set; }
+        public int SpaceCapacity { get; set; }
+        public string? SpaceTypeName { get; set; }
+        public string? LocationName { get; set; }
+        public string? BranchName { get; set; }
+        public string? CompanyName { get; set; }
+        public string? BookingStatusCode { get; set; }
+        public string? BookingStatusLabel { get; set; }
+        public string? BookingStatus { get; set; }
+        public DateTime? StartOn { get; set; }
+        public DateTime? EndOn { get; set; }
+        public DateTime? ContractStartDate { get; set; }
+        public DateTime? ContractEndDate { get; set; }
+        public int NumberOfMonths { get; set; }
+        public decimal MonthlyRent { get; set; }
+        public string? BillingPeriod { get; set; }
+        public string? BillingPeriodLabel { get; set; }
+        public int BillingPeriodMonths { get; set; }
+        public decimal CurrentCycleAmount { get; set; }
+        public decimal TotalContractAmount { get; set; }
+        public DateTime? NextBillDueDate { get; set; }
+        public DateTime? NextBillingDate { get; set; }
+        public decimal BalanceLeft { get; set; }
+        public decimal SecurityDeposit { get; set; }
+        public decimal TotalPaidAmount { get; set; }
+        public DateTime? BookedOn { get; set; }
+        public ContractDetailsDto Contract { get; set; } = new();
+        public List<object> Details { get; set; } = new();
+    }
+
     public class AdminBookingRequest
     {
         public string? UserIdGuid { get; set; }
-        public int UserId { get; set; }
+        public int? UserId { get; set; }
         public string? SpaceIdGuid { get; set; }
-        public int SpaceId { get; set; }
+        public int? SpaceId { get; set; }
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
         public string? Notes { get; set; }
         public string? CustomerEmail { get; set; }
         public string? CustomerName { get; set; }
         public string? Phone { get; set; }
-        // Discount: type is "Percentage" or "Amount"
         public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; } = 0;
         public decimal DiscountValue { get; set; } = 0;
-        // Security deposit override (null = use pricing default)
         public decimal? SecurityDepositOverride { get; set; }
-        // Floor (optional)
         public int? FloorId { get; set; }
+        public int? BillingPeriodMonths { get; set; }
+        public int? SecurityDepositMonths { get; set; }
+        public int? AdvanceRentMonths { get; set; }
     }
 
     public class BookingRequest
     {
-        public int SpaceId { get; set; }
+        public int? SpaceId { get; set; }
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
         public string? Notes { get; set; }
-        // Optional customer details for self-booking
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public string? PhoneNumber { get; set; }
@@ -44,7 +81,6 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime EndDateTime { get; set; }
         public int? Capacity { get; set; }
         public string? Notes { get; set; }
-        // Optional customer details for self-booking
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public string? PhoneNumber { get; set; }
@@ -56,7 +92,6 @@ namespace WorkNest.Application.DTOs.Booking
     public class ReassignBookingRequest
     {
         public int NewSpaceId { get; set; }
-        // NewPricingId is resolved server-side; not accepted from frontend
     }
 
     public class BookingStatusUpdateRequest

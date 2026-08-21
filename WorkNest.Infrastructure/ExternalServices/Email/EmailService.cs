@@ -8,8 +8,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 {
     /// <summary>
     /// Sends email notifications via Gmail SMTP.
-    /// Mirrors the Python send_tour_notification() function exactly.
-    /// Credentials loaded from appsettings.json — never hardcoded.
+    /// Credentials loaded from appsettings.json â€” never hardcoded.
     /// </summary>
     public class EmailService : IEmailService
     {
@@ -22,10 +21,6 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             _logger = logger;
         }
 
-        /// <summary>
-        /// Sends a tour booking notification email to the configured recipient.
-        /// Mirrors Python send_tour_notification() — same subject and body format.
-        /// </summary>
         public async Task SendTourNotificationAsync(string fullName, string email, string phone, string message)
         {
             var fromEmail = _config["Email:FromEmail"];
@@ -54,7 +49,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"New Tour Request from {fullName} — WorkNest",
+                    Subject    = $"New Tour Request from {fullName} â€” WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -75,9 +70,6 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             }
         }
 
-        /// <summary>
-        /// Sends a quotation email to the customer with optional PDF attachment.
-        /// </summary>
         public async Task SendQuotationEmailAsync(string email, string customerName, string quotationNumber, byte[]? pdfBytes = null, string? quotationLink = null)
         {
             var fromEmail = _config["Email:FromEmail"];
@@ -109,13 +101,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Your WorkNest Quotation — {quotationNumber}",
+                    Subject    = $"Your WorkNest Quotation â€” {quotationNumber}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
                 mailMessage.To.Add(email);
 
-                // Add PDF attachment if provided
                 if (pdfBytes != null && pdfBytes.Length > 0)
                 {
                     var attachment = new Attachment(new MemoryStream(pdfBytes), $"{quotationNumber}.pdf", "application/pdf");
@@ -136,7 +127,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 _logger.LogError(ex, "[EMAIL] Failed to send quotation email.");
             }
         }
-        public async Task SendChallanEmailAsync(string toEmail, string customerName, string challanNumber, string spaceName, string billingPeriod, decimal totalPayable, DateTime? startOn, DateTime? endOn, byte[]? pdfBytes = null)
+
+        public async Task SendChallanEmailAsync(string toEmail, string customerName, string challanNumber, string spaceName, string billingPeriod, decimal totalPayable, DateTime? startOn, DateTime? endOn, decimal totalContractAmount = 0, DateTime? nextBillDueDate = null, decimal balanceLeft = 0, byte[]? pdfBytes = null)
         {
             var fromEmail = _config["Email:FromEmail"];
             var password  = _config["Email:GmailAppPassword"];
@@ -157,9 +149,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     Challan Number : {challanNumber}
                     Space          : {spaceName}
                     Billing Period : {billingPeriod}
-                    Start Date     : {startOn:dd MMM yyyy}
-                    End Date       : {endOn:dd MMM yyyy}
-                    Total Payable  : PKR {totalPayable:N2}
+                    Start Date              : {startOn:dd MMM yyyy}
+                    End Date                : {endOn:dd MMM yyyy}
+                    Total Contract Amount   : PKR {totalContractAmount:N2}
+                    Next Bill Due Date      : {nextBillDueDate:dd MMM yyyy}
+                    Balance Left            : PKR {balanceLeft:N2}
+                    Total Payable (Current) : PKR {totalPayable:N2}
 
                     Please present this challan at the front desk or use it as a reference for your payment.
 
@@ -172,7 +167,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Your WorkNest Challan — {challanNumber}",
+                    Subject    = $"Your WorkNest Challan â€” {challanNumber}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -200,7 +195,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             }
         }
 
-        public async Task SendBookingConfirmationAsync(string toEmail, string customerName, string bookingNumber, string spaceName, DateTime? startOn, DateTime? endOn, byte[]? pdfBytes = null)
+        public async Task SendBookingConfirmationAsync(
+            string toEmail, string customerName, string bookingNumber, string spaceName,
+            DateTime? startOn, DateTime? endOn, string? billingPeriod = null,
+            decimal totalPayable = 0, decimal currentCycleAmount = 0, decimal securityDeposit = 0,
+            decimal totalContractAmount = 0, DateTime? nextBillDueDate = null, decimal balanceLeft = 0,
+            byte[]? pdfBytes = null)
         {
             var fromEmail = _config["Email:FromEmail"];
             var password  = _config["Email:GmailAppPassword"];
@@ -218,12 +218,23 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                     Your booking has been confirmed at WorkNest.
 
-                    Booking Reference : {bookingNumber}
-                    Space             : {spaceName}
-                    Start Date        : {startOn:dd MMM yyyy}
-                    End Date          : {endOn:dd MMM yyyy}
+                    Booking Reference       : {bookingNumber}
+                    Space                   : {spaceName}
+                    Contract Start Date     : {startOn:dd MMM yyyy}
+                    Contract End Date       : {endOn:dd MMM yyyy}
+                    Billing Cycle           : {billingPeriod ?? "N/A"}
 
-                    Please find the booking confirmation attached.
+                    FINANCIAL SUMMARY:
+                    Current Cycle Rent      : PKR {currentCycleAmount:N2}
+                    Security Deposit        : PKR {securityDeposit:N2}
+                    Total Initial Payable   : PKR {totalPayable:N2}
+
+                    CONTRACT METRICS:
+                    Total Contract Amount   : PKR {totalContractAmount:N2}
+                    Next Bill Due Date      : {(nextBillDueDate.HasValue ? nextBillDueDate.Value.ToString("dd MMM yyyy") : "N/A")}
+                    Balance Left            : PKR {balanceLeft:N2}
+
+                    Please find the booking confirmation PDF attached.
 
                     Thank you for choosing WorkNest.
 
@@ -234,7 +245,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Booking Confirmation — {bookingNumber} | WorkNest",
+                    Subject    = $"Booking Confirmation â€” {bookingNumber} | WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
                 };

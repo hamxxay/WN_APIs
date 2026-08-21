@@ -106,12 +106,12 @@ namespace WorkNest.Application.Services
         private async Task EnsureCustomerAsync(string email, string? name, string? phone, int? userId)
         {
             var existing = await _db.GetCustomerByEmailAsync(email);
-            if (existing is not null) return;
+            if (existing is not null && existing.TryGetValue("Id", out var eid) && eid is not null) return;
             var nameParts = (name ?? "").Split(' ', 2);
             await _db.CreateCustomerAsync(
                 nameParts[0].Length > 0 ? nameParts[0] : email,
                 nameParts.Length > 1 ? nameParts[1] : null,
-                email, phone, null, null, null, null, null);
+                email, phone, null, null, null, null, null, userId);
         }
     }
 }

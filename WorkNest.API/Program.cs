@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using WorkNest.API.Configurations;
 using WorkNest.API.Middleware;
+using WorkNest.API.Services;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
 using WorkNest.Application.Validators;
@@ -151,3 +152,4 @@ finally
 {
     Log.CloseAndFlush();
 }
+

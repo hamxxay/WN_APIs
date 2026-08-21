@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using WorkNest.Application.DTOs.Booking;
 
 namespace WorkNest.Application.DTOs.Quotation
 {
@@ -15,6 +16,8 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal DiscountValue { get; set; } = 0;
         // Security deposit override (null = use calculated default)
         public decimal? SecurityDepositOverride { get; set; }
+        public int? BillingPeriodMonths { get; set; }
+        public int? SecurityDepositMonths { get; set; }
         // Floor (optional)
         public int? FloorId { get; set; }
         public string? Remarks { get; set; }
@@ -49,6 +52,16 @@ namespace WorkNest.Application.DTOs.Quotation
         public string? Status { get; set; }
         public int Version { get; set; }
         public bool IsActive { get; set; }
+
+        // Billing & Contract details
+        public int BillingPeriodMonths { get; set; } = 3;
+        public string? BillingPeriod { get; set; }
+        public string? BillingPeriodLabel { get; set; }
+        public decimal MonthlyRent { get; set; }
+        public decimal CurrentCycleAmount { get; set; }
+        public decimal TotalContractAmount { get; set; }
+        public ContractDetailsDto? Contract { get; set; }
+
         public List<QuotationDetailDto> Details { get; set; } = new List<QuotationDetailDto>();
     }
 

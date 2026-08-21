@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -174,6 +174,10 @@ namespace WorkNest.Application.Services
             decimal totalAmount = subtotal - discountAmount;
 
             // Insert quotation into DB
+            int billingPeriodMonths = request.BillingPeriodMonths.HasValue && request.BillingPeriodMonths.Value > 0
+                ? request.BillingPeriodMonths.Value
+                : (spaceDetails.Category == "MeetingRoom" ? 1 : 3);
+
             var result = await _db.InsertQuotationAsync(
                 quotationNumber,
                 request.ValidUntil,
@@ -188,7 +192,8 @@ namespace WorkNest.Application.Services
                 discountType,
                 discountValue,
                 request.SecurityDepositOverride,
-                request.FloorId
+                request.FloorId,
+                billingPeriodMonths
             );
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -245,7 +250,30 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 Remarks = header["Remarks"]?.ToString(),
                 Status = header["Status"]?.ToString(),
                 Version = Convert.ToInt32(header["Version"]),
-                IsActive = Convert.ToBoolean(header["IsActive"])
+                IsActive = Convert.ToBoolean(header["IsActive"]),
+                BillingPeriodMonths = header.TryGetValue("BillingPeriodMonths", out var bpm) && bpm is not null ? Convert.ToInt32(bpm) : 3,
+                BillingPeriod = header.TryGetValue("BillingPeriod", out var bp) && bp is not null ? bp.ToString() : "3 Months (Quarterly)",
+                BillingPeriodLabel = header.TryGetValue("BillingPeriodLabel", out var bpl) && bpl is not null ? bpl.ToString() : "3 Months (Quarterly)",
+                MonthlyRent = header.TryGetValue("MonthlyRent", out var mr) && mr is not null ? Convert.ToDecimal(mr) : 0,
+                CurrentCycleAmount = header.TryGetValue("CurrentCycleAmount", out var cca) && cca is not null ? Convert.ToDecimal(cca) : 0,
+                TotalContractAmount = header.TryGetValue("TotalContractAmount", out var tca) && tca is not null ? Convert.ToDecimal(tca) : Convert.ToDecimal(header["TotalAmount"])
+            };
+
+            dto.Contract = new WorkNest.Application.DTOs.Booking.ContractDetailsDto
+            {
+                SpaceNumber = dto.SpaceCode ?? dto.SpaceName,
+                BillingPeriod = dto.BillingPeriod,
+                ContractStartDate = dto.StartDateTime,
+                ContractEndDate = dto.EndDateTime,
+                NumberOfMonths = ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month > 0
+                    ? ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month
+                    : 1,
+                MonthlyRent = dto.MonthlyRent > 0 ? dto.MonthlyRent : dto.SubtotalAmount,
+                CurrentCycleAmount = dto.CurrentCycleAmount > 0 ? dto.CurrentCycleAmount : dto.TotalAmount,
+                TotalContractAmount = dto.TotalContractAmount > 0 ? dto.TotalContractAmount : dto.TotalAmount,
+                SecurityDeposit = dto.SecurityDeposit,
+                BalanceLeft = dto.TotalContractAmount > 0 ? dto.TotalContractAmount : dto.TotalAmount,
+                NextBillDueDate = dto.StartDateTime
             };
 
             foreach (var row in detailsRows)
@@ -294,7 +322,10 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                     Remarks = r["Remarks"]?.ToString(),
                     Status = r["Status"]?.ToString(),
                     Version = Convert.ToInt32(r["Version"]),
-                    IsActive = Convert.ToBoolean(r["IsActive"])
+                    IsActive = Convert.ToBoolean(r["IsActive"]),
+                    BillingPeriodMonths = r.TryGetValue("BillingPeriodMonths", out var bpm) && bpm is not null ? Convert.ToInt32(bpm) : 3,
+                    BillingPeriod = r.TryGetValue("BillingPeriod", out var bp) && bp is not null ? bp.ToString() : "3 Months (Quarterly)",
+                    BillingPeriodLabel = r.TryGetValue("BillingPeriodLabel", out var bpl) && bpl is not null ? bpl.ToString() : "3 Months (Quarterly)"
                 });
             }
 
@@ -332,7 +363,10 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                     Remarks = r["Remarks"]?.ToString(),
                     Status = r["Status"]?.ToString(),
                     Version = Convert.ToInt32(r["Version"]),
-                    IsActive = Convert.ToBoolean(r["IsActive"])
+                    IsActive = Convert.ToBoolean(r["IsActive"]),
+                    BillingPeriodMonths = r.TryGetValue("BillingPeriodMonths", out var bpm) && bpm is not null ? Convert.ToInt32(bpm) : 3,
+                    BillingPeriod = r.TryGetValue("BillingPeriod", out var bp) && bp is not null ? bp.ToString() : "3 Months (Quarterly)",
+                    BillingPeriodLabel = r.TryGetValue("BillingPeriodLabel", out var bpl) && bpl is not null ? bpl.ToString() : "3 Months (Quarterly)"
                 });
             }
 
