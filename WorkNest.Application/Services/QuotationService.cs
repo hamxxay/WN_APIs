@@ -259,6 +259,8 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 TotalContractAmount = header.TryGetValue("TotalContractAmount", out var tca) && tca is not null ? Convert.ToDecimal(tca) : Convert.ToDecimal(header["TotalAmount"])
             };
 
+            dto.CanRespond = string.Equals(dto.Status, "Sent", StringComparison.OrdinalIgnoreCase);
+
             dto.Contract = new WorkNest.Application.DTOs.Booking.ContractDetailsDto
             {
                 SpaceNumber = dto.SpaceCode ?? dto.SpaceName,
@@ -287,6 +289,31 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                     Amount = Convert.ToDecimal(row["Amount"])
                 });
             }
+
+            try
+            {
+                var actRows = await _db.GetQuotationActivitiesAsync(id, 20);
+                foreach (var a in actRows)
+                {
+                    dto.Activities.Add(new QuotationActivityDto
+                    {
+                        Id = Convert.ToInt32(a["Id"]),
+                        QuotationId = Convert.ToInt32(a["QuotationId"]),
+                        Version = Convert.ToInt32(a["Version"]),
+                        ActivityType = a["ActivityType"]?.ToString() ?? "",
+                        Message = a["Message"]?.ToString() ?? "",
+                        CustomerNote = a["CustomerNote"]?.ToString(),
+                        CreatedDate = Convert.ToDateTime(a["CreatedDate"])
+                    });
+                }
+                var lastResp = dto.Activities.FirstOrDefault(a => a.ActivityType == "Accepted" || a.ActivityType == "Declined");
+                if (lastResp != null)
+                {
+                    dto.CustomerNote = lastResp.CustomerNote;
+                    dto.ResponseDate = lastResp.CreatedDate;
+                }
+            }
+            catch { }
 
             return dto;
         }
@@ -378,31 +405,31 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             var rows = await _db.GetQuotationsByCustomerAsync(customerId);
             return rows.Select(r => new QuotationResponse
             {
-                Id = Convert.ToInt32(r["Id"]),
-                Guid = r["Guid"]?.ToString(),
-                QuotationNumber = r["QuotationNumber"]?.ToString() ?? "",
-                QuotationDate = Convert.ToDateTime(r["QuotationDate"]),
-                ValidUntil = Convert.ToDateTime(r["ValidUntil"]),
-                CustomerId = Convert.ToInt32(r["CustomerId"]),
-                CustomerName = r["CustomerName"]?.ToString(),
-                CustomerEmail = r["CustomerEmail"]?.ToString(),
-                SpaceId = r["SpaceId"] != null ? Convert.ToInt32(r["SpaceId"]) : 0,
-                SpaceName = r["SpaceName"]?.ToString(),
-                SpaceCode = r["SpaceCode"]?.ToString(),
-                LocationName = r["LocationName"]?.ToString(),
-                SpaceTypeName = r["SpaceTypeName"]?.ToString(),
-                StartDateTime = Convert.ToDateTime(r["StartDateTime"]),
-                EndDateTime = Convert.ToDateTime(r["EndDateTime"]),
-                SubtotalAmount = Convert.ToDecimal(r["SubtotalAmount"]),
+                Id = r.TryGetValue("Id", out var id) && id is not null ? Convert.ToInt32(id) : 0,
+                Guid = r.TryGetValue("Guid", out var g) && g is not null ? g.ToString() : (r.TryGetValue("IdGUID", out var idg) ? idg?.ToString() : null),
+                QuotationNumber = r.TryGetValue("QuotationNumber", out var qn) ? qn?.ToString() ?? "" : "",
+                QuotationDate = r.TryGetValue("QuotationDate", out var qd) && qd is not null ? (ParseDateSafely(qd) ?? DateTime.MinValue) : (r.TryGetValue("CreatedDate", out var cd) && cd is not null ? (ParseDateSafely(cd) ?? DateTime.MinValue) : DateTime.MinValue),
+                ValidUntil = r.TryGetValue("ValidUntil", out var vu) && vu is not null ? (ParseDateSafely(vu) ?? DateTime.MinValue) : DateTime.MinValue,
+                CustomerId = r.TryGetValue("CustomerId", out var cid) && cid is not null ? Convert.ToInt32(cid) : customerId,
+                CustomerName = r.TryGetValue("CustomerName", out var cn) ? cn?.ToString() : null,
+                CustomerEmail = r.TryGetValue("CustomerEmail", out var ce) ? ce?.ToString() : null,
+                SpaceId = r.TryGetValue("SpaceId", out var spid) && spid is not null ? Convert.ToInt32(spid) : 0,
+                SpaceName = r.TryGetValue("SpaceName", out var sn) ? sn?.ToString() : null,
+                SpaceCode = r.TryGetValue("SpaceCode", out var sc) ? sc?.ToString() : null,
+                LocationName = r.TryGetValue("LocationName", out var ln) ? ln?.ToString() : null,
+                SpaceTypeName = r.TryGetValue("SpaceTypeName", out var stn) ? stn?.ToString() : null,
+                StartDateTime = r.TryGetValue("StartDateTime", out var sdt) && sdt is not null ? (ParseDateSafely(sdt) ?? DateTime.MinValue) : DateTime.MinValue,
+                EndDateTime = r.TryGetValue("EndDateTime", out var edt) && edt is not null ? (ParseDateSafely(edt) ?? DateTime.MinValue) : DateTime.MinValue,
+                SubtotalAmount = r.TryGetValue("SubtotalAmount", out var sta) && sta is not null ? Convert.ToDecimal(sta) : 0,
                 DiscountType = r.TryGetValue("DiscountType", out var dt) && dt is not null ? dt.ToString()! : "Percentage",
-                DiscountPercentage = Convert.ToDecimal(r["DiscountPercentage"]),
-                DiscountAmount = Convert.ToDecimal(r["DiscountAmount"]),
-                TotalAmount = Convert.ToDecimal(r["TotalAmount"]),
+                DiscountPercentage = r.TryGetValue("DiscountPercentage", out var dp) && dp is not null ? Convert.ToDecimal(dp) : 0,
+                DiscountAmount = r.TryGetValue("DiscountAmount", out var da) && da is not null ? Convert.ToDecimal(da) : 0,
+                TotalAmount = r.TryGetValue("TotalAmount", out var ta) && ta is not null ? Convert.ToDecimal(ta) : 0,
                 SecurityDeposit = r.TryGetValue("SecurityDeposit", out var sd) && sd is not null ? Convert.ToDecimal(sd) : 0,
-                Remarks = r["Remarks"]?.ToString(),
-                Status = r["Status"]?.ToString(),
-                Version = Convert.ToInt32(r["Version"]),
-                IsActive = Convert.ToBoolean(r["IsActive"])
+                Remarks = r.TryGetValue("Remarks", out var rem) ? rem?.ToString() : null,
+                Status = r.TryGetValue("Status", out var st) ? st?.ToString() : null,
+                Version = r.TryGetValue("Version", out var ver) && ver is not null ? Convert.ToInt32(ver) : 1,
+                IsActive = r.TryGetValue("IsActive", out var ia) && ia is not null ? Convert.ToBoolean(ia) : true
             });
         }
 
@@ -472,6 +499,69 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             }
 
             return result;
+        }
+
+        public async Task<QuotationResponse> AcceptQuotationAsync(int quotationId, int version, int customerId, string? note, int? userId)
+        {
+            await _db.AcceptQuotationAsync(quotationId, version, customerId, note, userId);
+            var res = await GetQuotationByIdAsync(quotationId);
+            return res ?? throw new InvalidOperationException("Failed to load accepted quotation.");
+        }
+
+        public async Task<QuotationResponse> DeclineQuotationAsync(int quotationId, int version, int customerId, string note, int? userId)
+        {
+            if (string.IsNullOrWhiteSpace(note))
+                throw new ArgumentException("Decline reason note is mandatory.");
+
+            await _db.DeclineQuotationAsync(quotationId, version, customerId, note, userId);
+            var res = await GetQuotationByIdAsync(quotationId);
+            return res ?? throw new InvalidOperationException("Failed to load declined quotation.");
+        }
+
+        public async Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById)
+        {
+            var resDict = await _db.CreateQuotationNewVersionAsync(quotationId, createdById);
+            int newQuotationId = Convert.ToInt32(resDict["NewQuotationId"]);
+            var res = await GetQuotationByIdAsync(newQuotationId);
+            return res ?? throw new InvalidOperationException("Failed to load newly created quotation version.");
+        }
+
+        public async Task<IEnumerable<QuotationResponse>> GetVersionsAsync(int quotationId)
+        {
+            var rows = await _db.GetQuotationVersionsAsync(quotationId);
+            var list = new List<QuotationResponse>();
+            foreach (var r in rows)
+            {
+                int qid = Convert.ToInt32(r["Id"]);
+                var qRes = await GetQuotationByIdAsync(qid);
+                if (qRes != null) list.Add(qRes);
+            }
+            return list;
+        }
+
+        public async Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit)
+        {
+            var rows = await _db.GetQuotationActivitiesAsync(quotationId, limit);
+            var list = new List<QuotationActivityDto>();
+            foreach (var a in rows)
+            {
+                list.Add(new QuotationActivityDto
+                {
+                    Id = Convert.ToInt32(a["Id"]),
+                    QuotationId = Convert.ToInt32(a["QuotationId"]),
+                    Version = Convert.ToInt32(a["Version"]),
+                    ActivityType = a["ActivityType"]?.ToString() ?? "",
+                    Message = a["Message"]?.ToString() ?? "",
+                    CustomerNote = a["CustomerNote"]?.ToString(),
+                    CreatedDate = Convert.ToDateTime(a["CreatedDate"])
+                });
+            }
+            return list;
+        }
+
+        public async Task SendQuotationAsync(int quotationId, int? userId)
+        {
+            await _db.SendQuotationStatusAsync(quotationId, "Sent", userId);
         }
     }
 }

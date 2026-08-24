@@ -46,7 +46,9 @@ namespace WorkNest.Application.Services
             }
             else
             {
-                publicId = row.TryGetValue("PublicId", out var g) ? g?.ToString() : null;
+                publicId = (row.TryGetValue("IdGUID", out var idg) && idg is not null && !string.IsNullOrWhiteSpace(idg.ToString())) 
+                    ? idg.ToString() 
+                    : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
                 role = Roles.FromRow(row);
             }
 
@@ -64,7 +66,9 @@ namespace WorkNest.Application.Services
 
                 if (row is not null)
                 {
-                    publicId = row.TryGetValue("PublicId", out var g) ? g?.ToString() : null;
+                    publicId = (row.TryGetValue("IdGUID", out var idg) && idg is not null && !string.IsNullOrWhiteSpace(idg.ToString())) 
+                        ? idg.ToString() 
+                        : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
                     role = Roles.FromRow(row);
                 }
                 else

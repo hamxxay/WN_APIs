@@ -62,6 +62,11 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal TotalContractAmount { get; set; }
         public ContractDetailsDto? Contract { get; set; }
 
+        public bool CanRespond { get; set; }
+        public string? CustomerNote { get; set; }
+        public DateTime? ResponseDate { get; set; }
+        public List<QuotationActivityDto> Activities { get; set; } = new List<QuotationActivityDto>();
+
         public List<QuotationDetailDto> Details { get; set; } = new List<QuotationDetailDto>();
     }
 
@@ -79,5 +84,26 @@ namespace WorkNest.Application.DTOs.Quotation
         public string? Email { get; set; }
         public string? PdfBase64 { get; set; }
         public string? QuotationLink { get; set; }
+    }
+
+    public class AcceptQuotationRequest
+    {
+        public string? Note { get; set; }
+    }
+
+    public class DeclineQuotationRequest
+    {
+        public string Note { get; set; } = string.Empty;
+    }
+
+    public class QuotationActivityDto
+    {
+        public int Id { get; set; }
+        public int QuotationId { get; set; }
+        public int Version { get; set; }
+        public string ActivityType { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public string? CustomerNote { get; set; }
+        public DateTime CreatedDate { get; set; }
     }
 }

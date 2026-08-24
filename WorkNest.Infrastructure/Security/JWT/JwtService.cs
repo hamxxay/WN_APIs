@@ -23,22 +23,33 @@ namespace WorkNest.Infrastructure.Security.JWT
         /// <summary>Generates a signed JWT for the given user identity.</summary>
         public string GenerateToken(string userId, string email, string role)
         {
+            if (string.IsNullOrWhiteSpace(_settings.SecretKey))
+                throw new InvalidOperationException("JwtSettings:SecretKey is not configured.");
+
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.SecretKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
+            var now = DateTimeOffset.UtcNow;
             var claims = new[]
             {
-                new Claim(JwtRegisteredClaimNames.Sub, userId),
-                new Claim(JwtRegisteredClaimNames.Email, email),
-                new Claim(ClaimTypes.Role, role),
+                new Claim(JwtRegisteredClaimNames.Sub, userId ?? string.Empty),
+                new Claim(ClaimTypes.NameIdentifier, userId ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.Email, email ?? string.Empty),
+                new Claim(ClaimTypes.Email, email ?? string.Empty),
+                new Claim(ClaimTypes.Role, role ?? string.Empty),
+                new Claim("role", role ?? string.Empty),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
+                new Claim(JwtRegisteredClaimNames.Nbf, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
             };
 
+            var expiryMinutes = _settings.ExpiryMinutes > 0 ? _settings.ExpiryMinutes : 1440;
+
             var token = new JwtSecurityToken(
-                issuer: _settings.Issuer,
-                audience: _settings.Audience,
+                issuer: string.IsNullOrWhiteSpace(_settings.Issuer) ? null : _settings.Issuer,
+                audience: string.IsNullOrWhiteSpace(_settings.Audience) ? null : _settings.Audience,
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(_settings.ExpiryMinutes),
+                expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
                 signingCredentials: creds
             );
 
@@ -48,6 +59,9 @@ namespace WorkNest.Infrastructure.Security.JWT
         /// <summary>Validates a token and returns the email claim, or null if invalid.</summary>
         public string? ValidateToken(string token)
         {
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(_settings.SecretKey))
+                return null;
+
             try
             {
                 var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.SecretKey));
@@ -56,15 +70,16 @@ namespace WorkNest.Infrastructure.Security.JWT
                 {
                     ValidateIssuerSigningKey = true,
                     IssuerSigningKey = key,
-                    ValidateIssuer = true,
+                    ValidateIssuer = !string.IsNullOrWhiteSpace(_settings.Issuer),
                     ValidIssuer = _settings.Issuer,
-                    ValidateAudience = true,
+                    ValidateAudience = !string.IsNullOrWhiteSpace(_settings.Audience),
                     ValidAudience = _settings.Audience,
                     ValidateLifetime = true,
                     ClockSkew = TimeSpan.Zero
                 }, out _);
 
-                return result.FindFirst(JwtRegisteredClaimNames.Email)?.Value;
+                return result.FindFirst(JwtRegisteredClaimNames.Email)?.Value 
+                    ?? result.FindFirst(ClaimTypes.Email)?.Value;
             }
             catch
             {

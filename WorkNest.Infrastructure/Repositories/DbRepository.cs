@@ -185,8 +185,8 @@ namespace WorkNest.Infrastructure.Repositories
                 "FROM dbo.WN_Quotations q " +
                 "LEFT JOIN dbo.WN_Customers cu ON cu.Id = q.CustomerId " +
                 "LEFT JOIN dbo.WN_Spaces s ON s.Id = q.SpaceId " +
-                "LEFT JOIN dbo.WN_Locations l ON l.Id = s.LocationIdInt " +
-                "LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeIdInt " +
+                "LEFT JOIN dbo.WN_Locations l ON l.Id = s.LocationId " +
+                "LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeId " +
                 "WHERE q.CustomerId = @CustomerId " +
                 "ORDER BY q.CreatedDate DESC", c);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
@@ -250,6 +250,240 @@ namespace WorkNest.Infrastructure.Repositories
                 return ToDict(r);
 
             return new Dictionary<string, object?>();
+        }
+
+        private async Task EnsureQuotationTablesExistAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'WN_QuotationResponses')
+BEGIN
+    CREATE TABLE dbo.WN_QuotationResponses (
+        Id INT IDENTITY(1,1) PRIMARY KEY,
+        IdGUID UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+        QuotationId INT NOT NULL,
+        Version INT NOT NULL DEFAULT 1,
+        ResponseType NVARCHAR(20) NOT NULL,
+        Note NVARCHAR(1000) NULL,
+        RespondedByUserId INT NULL,
+        RespondedByCustomerId INT NULL,
+        RespondedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+        CreatedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+    );
+END
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'WN_QuotationActivities')
+BEGIN
+    CREATE TABLE dbo.WN_QuotationActivities (
+        Id INT IDENTITY(1,1) PRIMARY KEY,
+        IdGUID UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+        QuotationId INT NOT NULL,
+        Version INT NOT NULL DEFAULT 1,
+        ActivityType NVARCHAR(50) NOT NULL,
+        Message NVARCHAR(1000) NOT NULL,
+        CustomerNote NVARCHAR(1000) NULL,
+        CreatedByUserId INT NULL,
+        CreatedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+    );
+END";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
+        public async Task<IDictionary<string, object?>> AcceptQuotationAsync(int quotationId, int version, int customerId, string? note, int? userId)
+        {
+            await using var c = await Open();
+            await EnsureQuotationTablesExistAsync(c);
+
+            var q = await GetQuotationByIdAsync(quotationId);
+            if (q == null) throw new InvalidOperationException("Quotation not found.");
+
+            int ownerCustId = Convert.ToInt32(q["CustomerId"]);
+            if (ownerCustId != customerId)
+                throw new UnauthorizedAccessException("Unauthorized: Quotation does not belong to this customer.");
+
+            string status = q["Status"]?.ToString() ?? "";
+            if (!status.Equals("Sent", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Quotation is in '{status}' state and cannot be accepted (must be Sent).");
+
+            string qNo = q["QuotationNumber"]?.ToString() ?? "";
+            await ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = 'Accepted', UpdatedDate = GETUTCDATE() WHERE Id = {quotationId}");
+
+            string noteSql = string.IsNullOrWhiteSpace(note) ? "NULL" : $"'{note.Replace("'", "''")}'";
+            string uIdSql = userId.HasValue ? userId.Value.ToString() : "NULL";
+            await ExecuteRawSqlAsync($@"
+INSERT INTO dbo.WN_QuotationResponses (QuotationId, Version, ResponseType, Note, RespondedByUserId, RespondedByCustomerId, RespondedDate)
+VALUES ({quotationId}, {version}, 'Accepted', {noteSql}, {uIdSql}, {customerId}, GETUTCDATE())");
+
+            string msg = $"Quotation {qNo} (Version {version}) was accepted by the customer.";
+            await ExecuteRawSqlAsync($@"
+INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CustomerNote, CreatedByUserId, CreatedDate)
+VALUES ({quotationId}, {version}, 'Accepted', '{msg.Replace("'", "''")}', {noteSql}, {uIdSql}, GETUTCDATE())");
+
+            return new Dictionary<string, object?>
+            {
+                { "QuotationId", quotationId },
+                { "Version", version },
+                { "Status", "Accepted" },
+                { "Note", note }
+            };
+        }
+
+        public async Task<IDictionary<string, object?>> DeclineQuotationAsync(int quotationId, int version, int customerId, string note, int? userId)
+        {
+            if (string.IsNullOrWhiteSpace(note))
+                throw new ArgumentException("Decline reason note is mandatory.");
+
+            await using var c = await Open();
+            await EnsureQuotationTablesExistAsync(c);
+
+            var q = await GetQuotationByIdAsync(quotationId);
+            if (q == null) throw new InvalidOperationException("Quotation not found.");
+
+            int ownerCustId = Convert.ToInt32(q["CustomerId"]);
+            if (ownerCustId != customerId)
+                throw new UnauthorizedAccessException("Unauthorized: Quotation does not belong to this customer.");
+
+            string status = q["Status"]?.ToString() ?? "";
+            if (!status.Equals("Sent", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Quotation is in '{status}' state and cannot be declined (must be Sent).");
+
+            string qNo = q["QuotationNumber"]?.ToString() ?? "";
+            await ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = 'Declined', UpdatedDate = GETUTCDATE() WHERE Id = {quotationId}");
+
+            string noteSql = $"'{note.Replace("'", "''")}'";
+            string uIdSql = userId.HasValue ? userId.Value.ToString() : "NULL";
+            await ExecuteRawSqlAsync($@"
+INSERT INTO dbo.WN_QuotationResponses (QuotationId, Version, ResponseType, Note, RespondedByUserId, RespondedByCustomerId, RespondedDate)
+VALUES ({quotationId}, {version}, 'Declined', {noteSql}, {uIdSql}, {customerId}, GETUTCDATE())");
+
+            string msg = $"Quotation {qNo} (Version {version}) was declined by the customer.";
+            await ExecuteRawSqlAsync($@"
+INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CustomerNote, CreatedByUserId, CreatedDate)
+VALUES ({quotationId}, {version}, 'Declined', '{msg.Replace("'", "''")}', {noteSql}, {uIdSql}, GETUTCDATE())");
+
+            return new Dictionary<string, object?>
+            {
+                { "QuotationId", quotationId },
+                { "Version", version },
+                { "Status", "Declined" },
+                { "Note", note }
+            };
+        }
+
+        public async Task<IDictionary<string, object?>> CreateQuotationNewVersionAsync(int quotationId, int? createdById)
+        {
+            await using var c = await Open();
+            await EnsureQuotationTablesExistAsync(c);
+
+            var source = await GetQuotationByIdAsync(quotationId);
+            if (source == null) throw new InvalidOperationException("Source quotation not found.");
+
+            string qNo = source["QuotationNumber"]?.ToString() ?? "";
+            int srcVersion = Convert.ToInt32(source["Version"]);
+
+            var allRows = await GetQuotationsByCustomerAsync(Convert.ToInt32(source["CustomerId"]));
+            int maxVersion = allRows.Where(r => r["QuotationNumber"]?.ToString() == qNo)
+                                   .Select(r => Convert.ToInt32(r["Version"]))
+                                   .DefaultIfEmpty(srcVersion)
+                                   .Max();
+            int newVersion = maxVersion + 1;
+
+            string createdBySql = createdById.HasValue ? createdById.Value.ToString() : "NULL";
+            string validUntilSql = Convert.ToDateTime(source["ValidUntil"]).ToString("yyyy-MM-dd HH:mm:ss");
+            string startSql = Convert.ToDateTime(source["StartDateTime"]).ToString("yyyy-MM-dd HH:mm:ss");
+            string endSql = Convert.ToDateTime(source["EndDateTime"]).ToString("yyyy-MM-dd HH:mm:ss");
+
+            string insertSql = $@"
+INSERT INTO dbo.WN_Quotations (
+    QuotationNumber, ValidUntil, CustomerId, SpaceId, StartDateTime, EndDateTime,
+    SubtotalAmount, DiscountPercentage, DiscountAmount, TotalAmount, Remarks, Status,
+    Version, IsActive, CreatedById, DiscountType, SecurityDeposit, FloorId, BillingPeriodMonths
+)
+VALUES (
+    '{qNo}', '{validUntilSql}', {source["CustomerId"]}, {source["SpaceId"]}, '{startSql}', '{endSql}',
+    {source["SubtotalAmount"]}, {source["DiscountPercentage"]}, {source["DiscountAmount"]}, {source["TotalAmount"]},
+    {(source["Remarks"] != null ? $"'{source["Remarks"]!.ToString()!.Replace("'", "''")}'" : "NULL")}, 'Draft',
+    {newVersion}, 1, {createdBySql}, '{(source.TryGetValue("DiscountType", out var dt) ? dt : "Percentage")}',
+    {(source.TryGetValue("SecurityDeposit", out var sd) ? sd : 0)}, {(source.TryGetValue("FloorId", out var fid) && fid != null ? fid : "NULL")},
+    {(source.TryGetValue("BillingPeriodMonths", out var bpm) && bpm != null ? bpm : 3)}
+);
+SELECT SCOPE_IDENTITY() AS NewId;";
+
+            await using var cmd = new SqlCommand(insertSql, c);
+            var newIdObj = await cmd.ExecuteScalarAsync();
+            int newQuotationId = Convert.ToInt32(newIdObj);
+
+            var details = await GetQuotationDetailsAsync(quotationId);
+            foreach (var d in details)
+            {
+                string desc = d["Description"]?.ToString()?.Replace("'", "''") ?? "";
+                string detSql = $@"
+INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity, UnitPrice, Amount, CreatedById)
+VALUES ({newQuotationId}, '{d["FeeType"]}', '{desc}', {d["Quantity"]}, {d["UnitPrice"]}, {d["Amount"]}, {createdBySql})";
+                await ExecuteRawSqlAsync(detSql);
+            }
+
+            string msg = $"Version {newVersion} created from Version {srcVersion}.";
+            await ExecuteRawSqlAsync($@"
+INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CreatedByUserId, CreatedDate)
+VALUES ({newQuotationId}, {newVersion}, 'VersionCreated', '{msg.Replace("'", "''")}', {createdBySql}, GETUTCDATE())");
+
+            return new Dictionary<string, object?>
+            {
+                { "NewQuotationId", newQuotationId },
+                { "NewVersion", newVersion },
+                { "QuotationNumber", qNo },
+                { "Status", "Draft" }
+            };
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationVersionsAsync(int quotationId)
+        {
+            await using var c = await Open();
+            var q = await GetQuotationByIdAsync(quotationId);
+            if (q == null) return new List<IDictionary<string, object?>>();
+
+            string qNo = q["QuotationNumber"]?.ToString() ?? "";
+            var rows = await GetQuotationsByCustomerAsync(Convert.ToInt32(q["CustomerId"]));
+            return rows.Where(r => r["QuotationNumber"]?.ToString() == qNo)
+                       .OrderBy(r => Convert.ToInt32(r["Version"]))
+                       .ToList();
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationActivitiesAsync(int? quotationId, int limit)
+        {
+            await using var c = await Open();
+            await EnsureQuotationTablesExistAsync(c);
+
+            string whereClause = quotationId.HasValue ? $"WHERE QuotationId = {quotationId.Value}" : "";
+            string sql = $"SELECT TOP ({limit}) * FROM dbo.WN_QuotationActivities {whereClause} ORDER BY CreatedDate DESC";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task SendQuotationStatusAsync(int quotationId, string status, int? userId)
+        {
+            await using var c = await Open();
+            await EnsureQuotationTablesExistAsync(c);
+
+            var q = await GetQuotationByIdAsync(quotationId);
+            if (q == null) throw new InvalidOperationException("Quotation not found.");
+
+            string qNo = q["QuotationNumber"]?.ToString() ?? "";
+            int ver = Convert.ToInt32(q["Version"]);
+
+            await ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = '{status}', UpdatedDate = GETUTCDATE() WHERE Id = {quotationId}");
+
+            string uIdSql = userId.HasValue ? userId.Value.ToString() : "NULL";
+            string msg = $"Quotation {qNo} (Version {ver}) status changed to {status}.";
+            await ExecuteRawSqlAsync($@"
+INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CreatedByUserId, CreatedDate)
+VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETUTCDATE())");
         }
 
         public async Task<(int? Id, string? PublicId)> GetUserIdByEmailAsync(string email)
@@ -1260,9 +1494,30 @@ namespace WorkNest.Infrastructure.Repositories
 
         // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ SpaceConfig ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
+        private async Task EnsureSpaceConfigColumnsExistAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+IF EXISTS (SELECT * FROM sys.tables WHERE name = 'WN_SpaceConfig')
+BEGIN
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_SpaceConfig') AND name = 'SecurityAccountId')
+        ALTER TABLE dbo.WN_SpaceConfig ADD SecurityAccountId INT NULL;
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_SpaceConfig') AND name = 'RentAccountId')
+        ALTER TABLE dbo.WN_SpaceConfig ADD RentAccountId INT NULL;
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_SpaceConfig') AND name = 'DepositAccountId')
+        ALTER TABLE dbo.WN_SpaceConfig ADD DepositAccountId INT NULL;
+END";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigAsync()
         {
             await using var c = await Open();
+            await EnsureSpaceConfigColumnsExistAsync(c);
             await using var cmd = SP("dbo.WN_SpaceConfig_GetList", c);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
@@ -1271,6 +1526,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigV2Async(int? companyId, int? branchId, int? locationId)
         {
             await using var c = await Open();
+            await EnsureSpaceConfigColumnsExistAsync(c);
             await using var cmd = SP("dbo.WN_SpaceConfig_GetListV2", c);
             cmd.Parameters.AddWithValue("@CompanyId", (object?)companyId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@BranchId", (object?)branchId ?? DBNull.Value);
@@ -1421,33 +1677,76 @@ namespace WorkNest.Infrastructure.Repositories
                 result = await r.ReadAsync() ? ToDict(r) : null;
             }
 
-            if (locationGuid.HasValue && spaceTypeGuid.HasValue && configTotalSpaces > 0)
+            if (locationGuid.HasValue && spaceTypeGuid.HasValue)
             {
                 await using var fix = new Microsoft.Data.SqlClient.SqlCommand(
                     "UPDATE s SET " +
-                    "    LocationIdInt  = COALESCE(s.LocationIdInt, l.Id)," +
-                    "    SpaceTypeIdInt = COALESCE(s.SpaceTypeIdInt, st.Id)," +
-                    "    IsActive      = COALESCE(s.IsActive, 1)," +
-                    "    Status        = COALESCE(s.Status, 1) " +
+                    "    IsActive = ISNULL(s.IsActive, 1)," +
+                    "    Status   = ISNULL(s.Status, 1) " +
                     "FROM dbo.WN_Spaces s " +
-                    "LEFT JOIN dbo.WN_Locations l ON l.IdGUID = s.LocationId " +
-                    "LEFT JOIN dbo.WN_SpaceTypes st ON st.IdGUID = s.SpaceTypeId " +
-                    "WHERE s.LocationId = @LocationGuid " +
-                    "  AND s.SpaceTypeId = @SpaceTypeGuid " +
-                    "  AND TRY_CAST(s.Code AS INT) BETWEEN @MinCode AND (@MinCode + @TotalSpaces - 1);", c);
+                    "WHERE (s.LocationId = @LocationGuid OR s.LocationId = @LocationId) " +
+                    "  AND (s.SpaceTypeId = @SpaceTypeGuid OR s.SpaceTypeId = @SpaceTypeId);", c);
                 fix.Parameters.AddWithValue("@LocationGuid", locationGuid.Value);
                 fix.Parameters.AddWithValue("@SpaceTypeGuid", spaceTypeGuid.Value);
-                fix.Parameters.AddWithValue("@MinCode", configMinCode);
-                fix.Parameters.AddWithValue("@TotalSpaces", configTotalSpaces);
+                fix.Parameters.AddWithValue("@LocationId", locationId);
+                fix.Parameters.AddWithValue("@SpaceTypeId", spaceTypeId);
                 await fix.ExecuteNonQueryAsync();
             }
 
             return result ?? new Dictionary<string, object?>();
         }
 
+        private async Task EnsureSpaceConfigSpUpdatedAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+CREATE OR ALTER PROCEDURE dbo.WN_SpaceConfig_GetSpaceStatus
+    @ConfigId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @LocationId    INT;
+    DECLARE @SpaceTypeId   INT;
+
+    SELECT 
+        @LocationId  = LocationId,
+        @SpaceTypeId = SpaceTypeId
+    FROM dbo.WN_SpaceConfig WHERE Id = @ConfigId;
+
+    SELECT
+        s.Id,
+        COALESCE(CAST(s.IdGUID AS NVARCHAR(50)), CAST(s.Id AS NVARCHAR(50))) AS IdGuid,
+        COALESCE(CAST(s.IdGUID AS NVARCHAR(50)), CAST(s.Id AS NVARCHAR(50))) AS PublicId,
+        s.Code,
+        s.Name,
+        ISNULL(s.Status, 1) AS Status,
+        ISNULL(s.IsActive, 1) AS IsActive,
+        CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.WN_Bookings b
+            WHERE b.SpaceId = s.Id
+              AND (b.IsDeleted = 0 OR b.IsDeleted IS NULL)
+              AND b.BookingStatusId IN (1, 2)
+              AND b.StartOn <= SYSUTCDATETIME()
+              AND b.EndOn >= SYSUTCDATETIME()
+        ) THEN 1 ELSE 0 END AS HasBookings
+    FROM dbo.WN_Spaces s
+    WHERE (s.IsActive IS NULL OR s.IsActive = 1)
+      AND s.LocationId = @LocationId
+      AND s.SpaceTypeId = @SpaceTypeId
+    ORDER BY s.Id ASC;
+END";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId)
         {
             await using var c = await Open();
+            await EnsureSpaceConfigSpUpdatedAsync(c);
             await using var cmd = SP("dbo.WN_SpaceConfig_GetSpaceStatus", c);
             cmd.Parameters.AddWithValue("@ConfigId", configId);
             await using var r = await cmd.ExecuteReaderAsync();
@@ -1486,11 +1785,9 @@ namespace WorkNest.Infrastructure.Repositories
             var spaces = new List<(int Id, string Code, string IdGuid, string PublicId)>();
 
             await using (var getSpaces = new SqlCommand(
-                "SELECT s.Id, s.Code, CAST(s.IdGUID AS NVARCHAR(50)) AS IdGuidStr, CAST(ISNULL(s.IdGUID, s.PublicId) AS NVARCHAR(50)) AS PublicIdStr " +
+                "SELECT s.Id, s.Code, CAST(ISNULL(s.IdGUID, s.Id) AS NVARCHAR(50)) AS IdGuidStr, CAST(ISNULL(s.IdGUID, s.Id) AS NVARCHAR(50)) AS PublicIdStr " +
                 "FROM dbo.WN_Spaces s " +
-                "LEFT JOIN dbo.WN_Locations l ON l.Id = s.LocationIdInt OR l.Id = s.LocationId OR l.IdGUID = s.LocationId " +
-                "LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeIdInt OR st.Id = s.SpaceTypeId OR st.IdGUID = s.SpaceTypeId " +
-                "WHERE (s.LocationIdInt = @L OR s.LocationId = @L OR l.Id = @L) AND (s.SpaceTypeIdInt = @ST OR s.SpaceTypeId = @ST OR st.Id = @ST) AND s.IsActive = 1", c))
+                "WHERE s.LocationId = @L AND s.SpaceTypeId = @ST AND (s.IsActive IS NULL OR s.IsActive = 1)", c))
             {
                 getSpaces.Parameters.AddWithValue("@L", locationId);
                 getSpaces.Parameters.AddWithValue("@ST", spaceTypeId);
