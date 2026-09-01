@@ -55,9 +55,8 @@ namespace WorkNest.Application.Services
                 request.OpeningTime,
                 request.ClosingTime,
                 request.SecurityDeposit,
-                request.PricePerHour,
-                request.PricePerDay,
-                request.PricePerMonth);
+                request.Price,
+                request.BillingPeriodId);
             return ApiResponse.Ok($"Space config for '{category}' updated.");
         }
 

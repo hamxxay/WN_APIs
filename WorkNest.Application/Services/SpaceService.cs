@@ -39,19 +39,49 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateSpaceAsync(SpaceInsertRequest request, int? actorId)
         {
+            if (request.Price.HasValue && request.Price.Value <= 0)
+            {
+                return ApiResponse.Fail("Price must be greater than zero.");
+            }
+
+            if (request.BillingPeriodId.HasValue)
+            {
+                var activeBps = await _db.GetBillingPeriodsAsync();
+                if (!activeBps.Any(b => b.TryGetValue("Id", out var bpId) && bpId is not null && Convert.ToByte(bpId) == request.BillingPeriodId.Value))
+                {
+                    return ApiResponse.Fail("Selected Billing Cycle is invalid or inactive.");
+                }
+            }
+
             var (id, publicId) = await _db.InsertSpaceAsync(
                 request.Name, request.LocationId, request.SpaceTypeId,
                 request.Code, request.Description, request.FloorId,
-                request.ImageUrl, request.Capacity, actorId);
+                request.ImageUrl, request.Capacity, actorId,
+                request.Price, request.BillingPeriodId);
             return ApiResponse.Ok(new { id, publicId }, "Space created.");
         }
 
         public async Task<ApiResponse> UpdateSpaceAsync(int id, SpaceUpdateRequest request, int? actorId)
         {
+            if (request.Price.HasValue && request.Price.Value <= 0)
+            {
+                return ApiResponse.Fail("Price must be greater than zero.");
+            }
+
+            if (request.BillingPeriodId.HasValue)
+            {
+                var activeBps = await _db.GetBillingPeriodsAsync();
+                if (!activeBps.Any(b => b.TryGetValue("Id", out var bpId) && bpId is not null && Convert.ToByte(bpId) == request.BillingPeriodId.Value))
+                {
+                    return ApiResponse.Fail("Selected Billing Cycle is invalid or inactive.");
+                }
+            }
+
             await _db.UpdateSpaceAsync(id, request.Name, request.LocationId, request.SpaceTypeId,
                 request.Code, request.Description, request.FloorId,
-                request.ImageUrl, request.Capacity, actorId);
-            return ApiResponse.Ok("Space updated.");
+                request.ImageUrl, request.Capacity, actorId,
+                request.Price, request.BillingPeriodId);
+            return ApiResponse.Ok("Space pricing updated successfully.");
         }
 
         public async Task<ApiResponse> DeleteSpaceAsync(int id)

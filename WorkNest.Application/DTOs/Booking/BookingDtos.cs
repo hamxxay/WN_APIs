@@ -32,6 +32,12 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime? NextBillingDate { get; set; }
         public decimal BalanceLeft { get; set; }
         public decimal SecurityDeposit { get; set; }
+        public byte? SupportChargesId { get; set; }
+        public decimal AppliedChargePercentage { get; set; }
+        public decimal AppliedTaxPercentage { get; set; }
+        public decimal SupportChargeAmount { get; set; }
+        public decimal TaxAmount { get; set; }
+        public decimal TotalAmount { get; set; }
         public decimal TotalPaidAmount { get; set; }
         public DateTime? BookedOn { get; set; }
         public ContractDetailsDto Contract { get; set; } = new();
@@ -58,6 +64,8 @@ namespace WorkNest.Application.DTOs.Booking
         public int? BillingPeriodMonths { get; set; }
         public int? SecurityDepositMonths { get; set; }
         public int? AdvanceRentMonths { get; set; }
+        public byte? SupportChargesId { get; set; }
+        public int? Capacity { get; set; }
     }
 
     public class BookingRequest
@@ -72,6 +80,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? CnicOrPassport { get; set; }
         public string? Address { get; set; }
         public int? CityId { get; set; }
+        public byte? SupportChargesId { get; set; }
     }
 
     public class SmartBookingRequest

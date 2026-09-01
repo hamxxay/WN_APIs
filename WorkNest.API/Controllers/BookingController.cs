@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.Interfaces;
@@ -369,6 +369,11 @@ namespace WorkNest.API.Controllers
             var pdfBytes = await _bookings.GenerateAdvanceInvoicePdfAsync(id, advMonths, secMonths, monthlyRate, discount);
             return File(pdfBytes, "application/pdf", $"AdvanceInvoice-{id}.pdf");
         }
-    }
+
+        [HttpGet("api/booking/{bookingId:int}/financial-breakdown")]
+        [AllowAnonymous]
+        public async Task<IActionResult> FinancialBreakdown(int bookingId) =>
+            Ok(await _bookings.GetBookingFinancialBreakdownAsync(bookingId));
 }
 
+}

@@ -25,5 +25,6 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null);
         Task<ApiResponse> SendBookingConfirmationEmailAsync(int bookingId);
         Task<byte[]> GenerateAdvanceInvoicePdfAsync(int bookingId, int advanceMonths, int secDepositMonths, decimal monthlyRate, decimal discountAmount);
+        Task<ApiResponse> GetBookingFinancialBreakdownAsync(int bookingId);
     }
 }

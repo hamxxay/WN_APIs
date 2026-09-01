@@ -97,20 +97,41 @@ namespace WorkNest.Application.Services
             if (spaceDetails.Category == "MeetingRoom")
             {
                 var diff = request.EndDateTime - request.StartDateTime;
-                double hours = Math.Ceiling(diff.TotalHours);
-                if (hours <= 0) hours = 1;
+                double totalHours = Math.Ceiling(diff.TotalHours);
+                if (totalHours <= 0) totalHours = 1;
 
-                decimal amount = spaceDetails.Hourly * (decimal)hours;
-                subtotal = amount;
+                bool isDaily = spaceDetails.Daily > 0 && (totalHours >= 24 || spaceDetails.Hourly == 0);
 
-                details.Add(new QuotationDetailDto
+                if (isDaily)
                 {
-                    FeeType = "RoomRent",
-                    Description = $"Meeting Room Rent ({hours} hours @ PKR {spaceDetails.Hourly}/hour)",
-                    Quantity = (decimal)hours,
-                    UnitPrice = spaceDetails.Hourly,
-                    Amount = amount
-                });
+                    int days = (int)Math.Max(1, Math.Ceiling(totalHours / 24.0));
+                    decimal amount = spaceDetails.Daily * days;
+                    subtotal = amount;
+
+                    details.Add(new QuotationDetailDto
+                    {
+                        FeeType = "RoomRent",
+                        Description = $"Meeting Room Rent ",
+                        Quantity = days,
+                        UnitPrice = spaceDetails.Daily,
+                        Amount = amount
+                    });
+                }
+                else
+                {
+                    decimal rate = spaceDetails.Hourly > 0 ? spaceDetails.Hourly : (spaceDetails.Daily > 0 ? spaceDetails.Daily : 1000m);
+                    decimal amount = rate * (decimal)totalHours;
+                    subtotal = amount;
+
+                    details.Add(new QuotationDetailDto
+                    {
+                        FeeType = "RoomRent",
+                        Description = $"Meeting Room Rent",
+                        Quantity = (decimal)totalHours,
+                        UnitPrice = rate,
+                        Amount = amount
+                    });
+                }
             }
             else if (spaceDetails.Category == "PrivateOffice")
             {
@@ -125,7 +146,7 @@ namespace WorkNest.Application.Services
                 details.Add(new QuotationDetailDto
                 {
                     FeeType = "RoomRent",
-                    Description = $"Private Office Rent ({months} months for Capacity {spaceDetails.Capacity} @ PKR {spaceDetails.Monthly}/seat/month)",
+                    Description = $"Private Office",
                     Quantity = months,
                     UnitPrice = monthlyRentOfRoom,
                     Amount = rentAmount
@@ -155,7 +176,7 @@ namespace WorkNest.Application.Services
                 details.Add(new QuotationDetailDto
                 {
                     FeeType = "RoomRent",
-                    Description = $"Shared Space Rent ({months} months @ PKR {spaceDetails.Monthly}/month)",
+                    Description = $"Shared Space",
                     Quantity = months,
                     UnitPrice = spaceDetails.Monthly,
                     Amount = rentAmount
@@ -230,6 +251,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 ValidUntil = Convert.ToDateTime(header["ValidUntil"]),
                 CustomerId = Convert.ToInt32(header["CustomerId"]),
                 CustomerName = header["CustomerName"]?.ToString(),
+                CustomerCompany = header.TryGetValue("CustomerCompany", out var cc) && cc is not null ? cc.ToString() : null,
                 CustomerEmail = header["CustomerEmail"]?.ToString(),
                 SpaceId = Convert.ToInt32(header["SpaceId"]),
                 SpaceName = header["SpaceName"]?.ToString(),
@@ -247,6 +269,11 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 DiscountAmount = Convert.ToDecimal(header["DiscountAmount"]),
                 SecurityDeposit = header.TryGetValue("SecurityDeposit", out var sd) && sd is not null ? Convert.ToDecimal(sd) : 0,
                 TotalAmount = Convert.ToDecimal(header["TotalAmount"]),
+                SupportChargesId = header.TryGetValue("SupportChargesId", out var scid) && scid is not null ? Convert.ToByte(scid) : (byte)4,
+                AppliedChargePercentage = header.TryGetValue("AppliedChargePercentage", out var acp) && acp is not null ? Convert.ToDecimal(acp) : 10.00m,
+                AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp is not null ? Convert.ToDecimal(atp) : 16.00m,
+                SupportChargeAmount = header.TryGetValue("SupportChargeAmount", out var sca) && sca is not null ? Convert.ToDecimal(sca) : Math.Round((Convert.ToDecimal(header["SubtotalAmount"]) - Convert.ToDecimal(header["DiscountAmount"])) * 0.10m, 2),
+                TaxAmount = header.TryGetValue("TaxAmount", out var ta) && ta is not null ? Convert.ToDecimal(ta) : Math.Round(Math.Round((Convert.ToDecimal(header["SubtotalAmount"]) - Convert.ToDecimal(header["DiscountAmount"])) * 0.10m, 2) * 0.16m, 2),
                 Remarks = header["Remarks"]?.ToString(),
                 Status = header["Status"]?.ToString(),
                 Version = Convert.ToInt32(header["Version"]),
@@ -258,6 +285,45 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 CurrentCycleAmount = header.TryGetValue("CurrentCycleAmount", out var cca) && cca is not null ? Convert.ToDecimal(cca) : 0,
                 TotalContractAmount = header.TryGetValue("TotalContractAmount", out var tca) && tca is not null ? Convert.ToDecimal(tca) : Convert.ToDecimal(header["TotalAmount"])
             };
+
+            bool isMeetingRoom = string.Equals(dto.SpaceType, "MeetingRoom", StringComparison.OrdinalIgnoreCase) ||
+                (dto.SpaceTypeName != null && (dto.SpaceTypeName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) || dto.SpaceTypeName.Contains("Conference", StringComparison.OrdinalIgnoreCase))) ||
+                (dto.BillingPeriodMonths <= 0 && dto.TotalContractAmount <= 0);
+
+            if (isMeetingRoom)
+            {
+                dto.SpaceType = "MeetingRoom";
+                dto.MonthlyRent = 0;
+                dto.BillingPeriodMonths = 1;
+                dto.SecurityDeposit = 0;
+                dto.CurrentCycleAmount = dto.SubtotalAmount;
+                dto.TotalContractAmount = dto.SubtotalAmount;
+                decimal supportCharge = Math.Round(dto.SubtotalAmount * 0.10m, 2);
+                dto.SupportChargeAmount = supportCharge;
+                dto.TaxAmountOnAdvanceRent = Math.Round(supportCharge * (dto.AppliedTaxPercentage / 100.0m), 2);
+                dto.TaxAmountOnContract = dto.TaxAmountOnAdvanceRent;
+                dto.TaxAmount = dto.TaxAmountOnAdvanceRent;
+                dto.TotalPayable = Math.Max(0, dto.SubtotalAmount + dto.TaxAmountOnAdvanceRent - dto.DiscountAmount);
+            }
+            else
+            {
+                decimal totalContractRent = dto.TotalContractAmount > 0 ? dto.TotalContractAmount : dto.SubtotalAmount;
+                decimal firstCycleRent = dto.CurrentCycleAmount > 0 ? dto.CurrentCycleAmount : (dto.MonthlyRent * dto.BillingPeriodMonths);
+                if (firstCycleRent <= 0 && totalContractRent > 0 && dto.BillingPeriodMonths > 0)
+                {
+                    int cMonths = ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month;
+                    if (cMonths <= 0) cMonths = 12;
+                    decimal mRent = dto.MonthlyRent > 0 ? dto.MonthlyRent : (totalContractRent / cMonths);
+                    firstCycleRent = mRent * dto.BillingPeriodMonths;
+                }
+
+                dto.CurrentCycleAmount = firstCycleRent;
+                dto.TotalContractAmount = totalContractRent;
+                dto.TaxAmountOnContract = Math.Round(Math.Round(totalContractRent * 0.10m, 2) * (dto.AppliedTaxPercentage / 100.0m), 2);
+                dto.TaxAmountOnAdvanceRent = Math.Round(Math.Round(firstCycleRent * 0.10m, 2) * (dto.AppliedTaxPercentage / 100.0m), 2);
+                dto.TaxAmount = dto.TaxAmountOnAdvanceRent;
+                dto.TotalPayable = Math.Max(0, firstCycleRent + dto.SecurityDeposit + dto.TaxAmountOnAdvanceRent - dto.DiscountAmount);
+            }
 
             dto.CanRespond = string.Equals(dto.Status, "Sent", StringComparison.OrdinalIgnoreCase);
 
@@ -271,11 +337,15 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                     ? ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month
                     : 1,
                 MonthlyRent = dto.MonthlyRent > 0 ? dto.MonthlyRent : dto.SubtotalAmount,
-                CurrentCycleAmount = dto.CurrentCycleAmount > 0 ? dto.CurrentCycleAmount : dto.TotalAmount,
-                TotalContractAmount = dto.TotalContractAmount > 0 ? dto.TotalContractAmount : dto.TotalAmount,
+                CurrentCycleAmount = dto.CurrentCycleAmount,
+                TotalContractAmount = dto.TotalContractAmount,
                 SecurityDeposit = dto.SecurityDeposit,
-                BalanceLeft = dto.TotalContractAmount > 0 ? dto.TotalContractAmount : dto.TotalAmount,
-                NextBillDueDate = dto.StartDateTime
+                BalanceLeft = dto.TotalContractAmount,
+                NextBillDueDate = dto.StartDateTime,
+                AppliedTaxPercentage = dto.AppliedTaxPercentage,
+                TaxAmount = dto.TaxAmountOnAdvanceRent,
+                TaxAmountOnAdvanceRent = dto.TaxAmountOnAdvanceRent,
+                TaxAmountOnContract = dto.TaxAmountOnContract
             };
 
             foreach (var row in detailsRows)
@@ -315,6 +385,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             }
             catch { }
 
+            WorkNest.Application.Helpers.ChallanFieldBuilder.BuildForQuotation(dto);
             return dto;
         }
 
@@ -325,35 +396,12 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
 
             foreach (var r in rows)
             {
-                list.Add(new QuotationResponse
+                int id = Convert.ToInt32(r["Id"]);
+                var fullQuotation = await GetQuotationByIdAsync(id);
+                if (fullQuotation != null)
                 {
-                    Id = Convert.ToInt32(r["Id"]),
-                    Guid = r["Guid"]?.ToString(),
-                    QuotationNumber = r["QuotationNumber"]?.ToString() ?? "",
-                    QuotationDate = Convert.ToDateTime(r["QuotationDate"]),
-                    ValidUntil = Convert.ToDateTime(r["ValidUntil"]),
-                    CustomerId = Convert.ToInt32(r["CustomerId"]),
-                    CustomerName = r["CustomerName"]?.ToString(),
-                    CustomerEmail = r["CustomerEmail"]?.ToString(),
-                    SpaceId = Convert.ToInt32(r["SpaceId"]),
-                    SpaceName = r["SpaceName"]?.ToString(),
-                    SpaceCode = r["SpaceCode"]?.ToString(),
-                    LocationName = r["LocationName"]?.ToString(),
-                    SpaceTypeName = r["SpaceTypeName"]?.ToString(),
-                    StartDateTime = Convert.ToDateTime(r["StartDateTime"]),
-                    EndDateTime = Convert.ToDateTime(r["EndDateTime"]),
-                    SubtotalAmount = Convert.ToDecimal(r["SubtotalAmount"]),
-                    DiscountPercentage = Convert.ToDecimal(r["DiscountPercentage"]),
-                    DiscountAmount = Convert.ToDecimal(r["DiscountAmount"]),
-                    TotalAmount = Convert.ToDecimal(r["TotalAmount"]),
-                    Remarks = r["Remarks"]?.ToString(),
-                    Status = r["Status"]?.ToString(),
-                    Version = Convert.ToInt32(r["Version"]),
-                    IsActive = Convert.ToBoolean(r["IsActive"]),
-                    BillingPeriodMonths = r.TryGetValue("BillingPeriodMonths", out var bpm) && bpm is not null ? Convert.ToInt32(bpm) : 3,
-                    BillingPeriod = r.TryGetValue("BillingPeriod", out var bp) && bp is not null ? bp.ToString() : "3 Months (Quarterly)",
-                    BillingPeriodLabel = r.TryGetValue("BillingPeriodLabel", out var bpl) && bpl is not null ? bpl.ToString() : "3 Months (Quarterly)"
-                });
+                    list.Add(fullQuotation);
+                }
             }
 
             return (list, total);
@@ -403,34 +451,22 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
         public async Task<IEnumerable<QuotationResponse>> GetQuotationsByCustomerAsync(int customerId)
         {
             var rows = await _db.GetQuotationsByCustomerAsync(customerId);
-            return rows.Select(r => new QuotationResponse
+            var list = new List<QuotationResponse>();
+
+            foreach (var r in rows)
             {
-                Id = r.TryGetValue("Id", out var id) && id is not null ? Convert.ToInt32(id) : 0,
-                Guid = r.TryGetValue("Guid", out var g) && g is not null ? g.ToString() : (r.TryGetValue("IdGUID", out var idg) ? idg?.ToString() : null),
-                QuotationNumber = r.TryGetValue("QuotationNumber", out var qn) ? qn?.ToString() ?? "" : "",
-                QuotationDate = r.TryGetValue("QuotationDate", out var qd) && qd is not null ? (ParseDateSafely(qd) ?? DateTime.MinValue) : (r.TryGetValue("CreatedDate", out var cd) && cd is not null ? (ParseDateSafely(cd) ?? DateTime.MinValue) : DateTime.MinValue),
-                ValidUntil = r.TryGetValue("ValidUntil", out var vu) && vu is not null ? (ParseDateSafely(vu) ?? DateTime.MinValue) : DateTime.MinValue,
-                CustomerId = r.TryGetValue("CustomerId", out var cid) && cid is not null ? Convert.ToInt32(cid) : customerId,
-                CustomerName = r.TryGetValue("CustomerName", out var cn) ? cn?.ToString() : null,
-                CustomerEmail = r.TryGetValue("CustomerEmail", out var ce) ? ce?.ToString() : null,
-                SpaceId = r.TryGetValue("SpaceId", out var spid) && spid is not null ? Convert.ToInt32(spid) : 0,
-                SpaceName = r.TryGetValue("SpaceName", out var sn) ? sn?.ToString() : null,
-                SpaceCode = r.TryGetValue("SpaceCode", out var sc) ? sc?.ToString() : null,
-                LocationName = r.TryGetValue("LocationName", out var ln) ? ln?.ToString() : null,
-                SpaceTypeName = r.TryGetValue("SpaceTypeName", out var stn) ? stn?.ToString() : null,
-                StartDateTime = r.TryGetValue("StartDateTime", out var sdt) && sdt is not null ? (ParseDateSafely(sdt) ?? DateTime.MinValue) : DateTime.MinValue,
-                EndDateTime = r.TryGetValue("EndDateTime", out var edt) && edt is not null ? (ParseDateSafely(edt) ?? DateTime.MinValue) : DateTime.MinValue,
-                SubtotalAmount = r.TryGetValue("SubtotalAmount", out var sta) && sta is not null ? Convert.ToDecimal(sta) : 0,
-                DiscountType = r.TryGetValue("DiscountType", out var dt) && dt is not null ? dt.ToString()! : "Percentage",
-                DiscountPercentage = r.TryGetValue("DiscountPercentage", out var dp) && dp is not null ? Convert.ToDecimal(dp) : 0,
-                DiscountAmount = r.TryGetValue("DiscountAmount", out var da) && da is not null ? Convert.ToDecimal(da) : 0,
-                TotalAmount = r.TryGetValue("TotalAmount", out var ta) && ta is not null ? Convert.ToDecimal(ta) : 0,
-                SecurityDeposit = r.TryGetValue("SecurityDeposit", out var sd) && sd is not null ? Convert.ToDecimal(sd) : 0,
-                Remarks = r.TryGetValue("Remarks", out var rem) ? rem?.ToString() : null,
-                Status = r.TryGetValue("Status", out var st) ? st?.ToString() : null,
-                Version = r.TryGetValue("Version", out var ver) && ver is not null ? Convert.ToInt32(ver) : 1,
-                IsActive = r.TryGetValue("IsActive", out var ia) && ia is not null ? Convert.ToBoolean(ia) : true
-            });
+                int id = r.TryGetValue("Id", out var idVal) && idVal is not null ? Convert.ToInt32(idVal) : 0;
+                if (id > 0)
+                {
+                    var fullQuotation = await GetQuotationByIdAsync(id);
+                    if (fullQuotation != null)
+                    {
+                        list.Add(fullQuotation);
+                    }
+                }
+            }
+
+            return list;
         }
 
         public async Task SendQuotationEmailAsync(int quotationId, string? overrideEmail)

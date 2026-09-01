@@ -14,6 +14,14 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public SpaceController(ISpaceService spaces, IDbRepository db) { _spaces = spaces; _db = db; }
 
+        [HttpGet("api/billing-periods")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetBillingPeriods()
+        {
+            var periods = await _db.GetBillingPeriodsAsync();
+            return Ok(ApiResponse.Ok(periods));
+        }
+
         [HttpGet("api/space/available")]
         [AllowAnonymous]
         public async Task<IActionResult> Available()

@@ -10,6 +10,8 @@ namespace WorkNest.Application.DTOs.Space
         public int? FloorId { get; set; }
         public string? ImageUrl { get; set; }
         public int Capacity { get; set; }
+        public decimal? Price { get; set; }
+        public byte? BillingPeriodId { get; set; }
     }
 
     public class SpaceUpdateRequest
@@ -22,6 +24,8 @@ namespace WorkNest.Application.DTOs.Space
         public int? FloorId { get; set; }
         public string? ImageUrl { get; set; }
         public int? Capacity { get; set; }
+        public decimal? Price { get; set; }
+        public byte? BillingPeriodId { get; set; }
     }
 
     public class SpaceDto
@@ -43,11 +47,13 @@ namespace WorkNest.Application.DTOs.Space
         public int? Capacity { get; set; }
         public string? ImageUrl { get; set; }
         public bool? IsActive { get; set; }
+        public decimal? Price { get; set; }
+        public byte? BillingPeriodId { get; set; }
+        public string? BillingPeriodCode { get; set; }
+        public string? BillingPeriodLabel { get; set; }
         public decimal? SeatPrice { get; set; }
         public decimal? RoomPrice { get; set; }
         public decimal? SecurityDeposit { get; set; }
-        public string? BillingPeriodCode { get; set; }
-        public string? BillingPeriodLabel { get; set; }
         public string? Amenities { get; set; }
         public int? TotalCount { get; set; }
     }

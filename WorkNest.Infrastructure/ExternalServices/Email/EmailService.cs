@@ -1,5 +1,6 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Mail;
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.Interfaces;
@@ -8,7 +9,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 {
     /// <summary>
     /// Sends email notifications via Gmail SMTP.
-    /// Credentials loaded from appsettings.json â€” never hardcoded.
+    /// Credentials loaded from appsettings.json - never hardcoded.
     /// </summary>
     public class EmailService : IEmailService
     {
@@ -49,7 +50,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"New Tour Request from {fullName} â€” WorkNest",
+                    Subject    = $"New Tour Request from {fullName} - WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -101,7 +102,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Your WorkNest Quotation â€” {quotationNumber}",
+                    Subject    = $"Your WorkNest Quotation - {quotationNumber}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -128,7 +129,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             }
         }
 
-        public async Task SendChallanEmailAsync(string toEmail, string customerName, string challanNumber, string spaceName, string billingPeriod, decimal totalPayable, DateTime? startOn, DateTime? endOn, decimal totalContractAmount = 0, DateTime? nextBillDueDate = null, decimal balanceLeft = 0, byte[]? pdfBytes = null)
+        public async Task SendChallanEmailAsync(
+            string toEmail, string customerName, string challanNumber, string spaceName, string billingPeriod,
+            decimal totalPayable, DateTime? startOn, DateTime? endOn, decimal totalContractAmount = 0,
+            DateTime? nextBillDueDate = null, decimal balanceLeft = 0, decimal currentCycleAmount = 0,
+            decimal securityDeposit = 0, decimal taxAmount = 0, decimal discountAmount = 0, byte[]? pdfBytes = null)
         {
             var fromEmail = _config["Email:FromEmail"];
             var password  = _config["Email:GmailAppPassword"];
@@ -141,33 +146,63 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
             try
             {
-                var body = $"""
-                    Dear {customerName},
+                bool isContract = nextBillDueDate.HasValue;
+                string periodLabel = isContract ? "Billing Period" : "Billing Basis";
+                string rentLabel   = isContract ? "Advance Rent" : "Rent Amount";
+                string totalLabel  = isContract ? "Total Payable (Current)" : "Total Payable";
 
-                    Your challan has been generated for your booking at WorkNest.
+                var sb = new StringBuilder();
+                sb.AppendLine($"Dear {customerName},");
+                sb.AppendLine();
+                sb.AppendLine("Your challan has been generated for your booking at WorkNest.");
+                sb.AppendLine();
+                sb.AppendLine($"Challan Number          : {challanNumber}");
+                sb.AppendLine($"Space                   : {spaceName}");
+                sb.AppendLine($"{periodLabel.PadRight(24)}: {billingPeriod}");
+                if (startOn.HasValue)
+                    sb.AppendLine($"Start Date              : {startOn:dd MMM yyyy}");
+                if (endOn.HasValue)
+                    sb.AppendLine($"End Date                : {endOn:dd MMM yyyy}");
+                sb.AppendLine();
+                sb.AppendLine("FINANCIAL BREAKDOWN:");
+                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N2}");
+                if (securityDeposit > 0)
+                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N2}");
+                if (taxAmount > 0)
+                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N2}");
+                if (discountAmount > 0)
+                    sb.AppendLine($"Discount                : - PKR {discountAmount:N2}");
+                sb.AppendLine("--------------------------------------------------");
+                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N2}");
 
-                    Challan Number : {challanNumber}
-                    Space          : {spaceName}
-                    Billing Period : {billingPeriod}
-                    Start Date              : {startOn:dd MMM yyyy}
-                    End Date                : {endOn:dd MMM yyyy}
-                    Total Contract Amount   : PKR {totalContractAmount:N2}
-                    Next Bill Due Date      : {nextBillDueDate:dd MMM yyyy}
-                    Balance Left            : PKR {balanceLeft:N2}
-                    Total Payable (Current) : PKR {totalPayable:N2}
+                if (isContract && nextBillDueDate.HasValue)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N2}");
+                    sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
+                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N2}");
+                }
 
-                    Please present this challan at the front desk or use it as a reference for your payment.
+                if (taxAmount > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
+                }
 
-                    Thank you for choosing WorkNest.
+                sb.AppendLine();
+                sb.AppendLine("Please present this challan at the front desk or use it as a reference for your payment.");
+                sb.AppendLine();
+                sb.AppendLine("Thank you for choosing WorkNest.");
+                sb.AppendLine();
+                sb.AppendLine("Best regards,");
+                sb.AppendLine("WorkNest Team");
 
-                    Best regards,
-                    WorkNest Team
-                    """;
+                var body = sb.ToString();
 
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Your WorkNest Challan â€” {challanNumber}",
+                    Subject    = $"Your WorkNest Challan — {challanNumber}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -199,8 +234,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             string toEmail, string customerName, string bookingNumber, string spaceName,
             DateTime? startOn, DateTime? endOn, string? billingPeriod = null,
             decimal totalPayable = 0, decimal currentCycleAmount = 0, decimal securityDeposit = 0,
-            decimal totalContractAmount = 0, DateTime? nextBillDueDate = null, decimal balanceLeft = 0,
-            byte[]? pdfBytes = null)
+            decimal taxAmount = 0, decimal discountAmount = 0, decimal totalContractAmount = 0,
+            DateTime? nextBillDueDate = null, decimal balanceLeft = 0, byte[]? pdfBytes = null)
         {
             var fromEmail = _config["Email:FromEmail"];
             var password  = _config["Email:GmailAppPassword"];
@@ -213,39 +248,64 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
             try
             {
-                var body = $"""
-                    Dear {customerName},
+                bool isContract = nextBillDueDate.HasValue;
+                string cycleLabel = isContract ? "Billing Cycle" : "Billing Basis";
+                string rentLabel  = isContract ? "Advance Rent" : "Rent Amount";
+                string totalLabel = isContract ? "Total Initial Payable" : "Total Payable";
 
-                    Your booking has been confirmed at WorkNest.
+                var sb = new StringBuilder();
+                sb.AppendLine($"Dear {customerName},");
+                sb.AppendLine();
+                sb.AppendLine("Your booking has been confirmed at WorkNest.");
+                sb.AppendLine();
+                sb.AppendLine($"Booking Reference       : {bookingNumber}");
+                sb.AppendLine($"Space                   : {spaceName}");
+                if (startOn.HasValue)
+                    sb.AppendLine($"{(isContract ? "Contract Start Date    " : "Start Date             ")}: {startOn:dd MMM yyyy}");
+                if (endOn.HasValue)
+                    sb.AppendLine($"{(isContract ? "Contract End Date      " : "End Date               ")}: {endOn:dd MMM yyyy}");
+                sb.AppendLine($"{cycleLabel.PadRight(24)}: {billingPeriod ?? "N/A"}");
+                sb.AppendLine();
+                sb.AppendLine("FINANCIAL SUMMARY:");
+                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N2}");
+                if (securityDeposit > 0)
+                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N2}");
+                if (taxAmount > 0)
+                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N2}");
+                if (discountAmount > 0)
+                    sb.AppendLine($"Discount                : - PKR {discountAmount:N2}");
+                sb.AppendLine("--------------------------------------------------");
+                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N2}");
 
-                    Booking Reference       : {bookingNumber}
-                    Space                   : {spaceName}
-                    Contract Start Date     : {startOn:dd MMM yyyy}
-                    Contract End Date       : {endOn:dd MMM yyyy}
-                    Billing Cycle           : {billingPeriod ?? "N/A"}
+                if (isContract && nextBillDueDate.HasValue)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("CONTRACT METRICS:");
+                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N2}");
+                    sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
+                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N2}");
+                }
 
-                    FINANCIAL SUMMARY:
-                    Current Cycle Rent      : PKR {currentCycleAmount:N2}
-                    Security Deposit        : PKR {securityDeposit:N2}
-                    Total Initial Payable   : PKR {totalPayable:N2}
+                if (taxAmount > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
+                }
 
-                    CONTRACT METRICS:
-                    Total Contract Amount   : PKR {totalContractAmount:N2}
-                    Next Bill Due Date      : {(nextBillDueDate.HasValue ? nextBillDueDate.Value.ToString("dd MMM yyyy") : "N/A")}
-                    Balance Left            : PKR {balanceLeft:N2}
+                sb.AppendLine();
+                sb.AppendLine("Please find the booking confirmation PDF attached.");
+                sb.AppendLine();
+                sb.AppendLine("Thank you for choosing WorkNest.");
+                sb.AppendLine();
+                sb.AppendLine("Best regards,");
+                sb.AppendLine("WorkNest Team");
 
-                    Please find the booking confirmation PDF attached.
-
-                    Thank you for choosing WorkNest.
-
-                    Best regards,
-                    WorkNest Team
-                    """;
+                var body = sb.ToString();
 
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Booking Confirmation â€” {bookingNumber} | WorkNest",
+                    Subject    = $"Booking Confirmation - {bookingNumber} | WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
                 };

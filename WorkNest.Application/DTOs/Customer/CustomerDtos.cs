@@ -4,6 +4,7 @@ namespace WorkNest.Application.DTOs.Customer
     {
         public string FirstName { get; set; } = string.Empty;
         public string? LastName { get; set; }
+        public string? Company { get; set; }
         public string Email { get; set; } = string.Empty;
         public string? PhoneNumber { get; set; }
         public string? CnicOrPassport { get; set; }

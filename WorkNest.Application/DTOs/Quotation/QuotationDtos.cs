@@ -10,15 +10,12 @@ namespace WorkNest.Application.DTOs.Quotation
         public int SpaceId { get; set; }
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
-        // Discount: type is "Percentage" or "Amount"
         public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; } = 0;
         public decimal DiscountValue { get; set; } = 0;
-        // Security deposit override (null = use calculated default)
         public decimal? SecurityDepositOverride { get; set; }
         public int? BillingPeriodMonths { get; set; }
         public int? SecurityDepositMonths { get; set; }
-        // Floor (optional)
         public int? FloorId { get; set; }
         public string? Remarks { get; set; }
         public DateTime ValidUntil { get; set; }
@@ -33,12 +30,18 @@ namespace WorkNest.Application.DTOs.Quotation
         public DateTime ValidUntil { get; set; }
         public int CustomerId { get; set; }
         public string? CustomerName { get; set; }
+        public string? CustomerCompany { get; set; }
         public string? CustomerEmail { get; set; }
         public int SpaceId { get; set; }
         public string? SpaceName { get; set; }
         public string? SpaceCode { get; set; }
         public string? LocationName { get; set; }
         public string? SpaceTypeName { get; set; }
+
+        public string SpaceType { get; set; } = string.Empty;
+        public string BillingType { get; set; } = string.Empty;
+        public List<ChallanFieldDto> Fields { get; set; } = new();
+
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
         public decimal SubtotalAmount { get; set; }
@@ -48,12 +51,19 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal DiscountAmount { get; set; }
         public decimal SecurityDeposit { get; set; }
         public decimal TotalAmount { get; set; }
+        public byte? SupportChargesId { get; set; }
+        public decimal AppliedChargePercentage { get; set; } = 10.00m;
+        public decimal AppliedTaxPercentage { get; set; } = 16.00m;
+        public decimal SupportChargeAmount { get; set; }
+        public decimal TaxAmount { get; set; }
+        public decimal TaxAmountOnAdvanceRent { get; set; }
+        public decimal TaxAmountOnContract { get; set; }
+        public decimal TotalPayable { get; set; }
         public string? Remarks { get; set; }
         public string? Status { get; set; }
         public int Version { get; set; }
         public bool IsActive { get; set; }
 
-        // Billing & Contract details
         public int BillingPeriodMonths { get; set; } = 3;
         public string? BillingPeriod { get; set; }
         public string? BillingPeriodLabel { get; set; }

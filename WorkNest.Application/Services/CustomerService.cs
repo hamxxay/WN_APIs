@@ -44,7 +44,7 @@ namespace WorkNest.Application.Services
                 result = await _db.CreateCustomerAsync(
                     request.FirstName, request.LastName, request.Email,
                     request.PhoneNumber, request.CnicOrPassport, request.Address,
-                    request.CityId, request.Notes, createdBy, userId);
+                    request.CityId, request.Notes, createdBy, userId, request.Company);
             }
             catch (Exception ex) when (ex.Message.Contains("UQ_WN_Customers") || ex.Message.Contains("duplicate key"))
             {
@@ -61,7 +61,7 @@ namespace WorkNest.Application.Services
         {
             await _db.UpdateCustomerAsync(id, request.FirstName, request.LastName, request.Email,
                 request.PhoneNumber, request.CnicOrPassport, request.Address,
-                request.CityId, request.Notes, request.IsActive);
+                request.CityId, request.Notes, request.IsActive, request.Company);
             return ApiResponse.Ok("Customer updated successfully.");
         }
 

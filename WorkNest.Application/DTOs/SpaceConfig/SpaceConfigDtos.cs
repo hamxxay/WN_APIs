@@ -8,9 +8,8 @@ namespace WorkNest.Application.DTOs.SpaceConfig
         public string? OpeningTime { get; set; }
         public string? ClosingTime { get; set; }
         public decimal? SecurityDeposit { get; set; }
-        public decimal? PricePerHour { get; set; }
-        public decimal? PricePerDay { get; set; }
-        public decimal? PricePerMonth { get; set; }
+        public decimal? Price { get; set; }
+        public byte? BillingPeriodId { get; set; }
     }
 
     public class SpaceInventoryRequest
@@ -32,9 +31,8 @@ namespace WorkNest.Application.DTOs.SpaceConfig
         public string? ClosingTime { get; set; } = "20:00";
         public decimal SecurityDeposit { get; set; }
         public int? FloorId { get; set; }
-        public decimal PricePerHour { get; set; }
-        public decimal PricePerDay { get; set; }
-        public decimal PricePerMonth { get; set; }
+        public decimal Price { get; set; }
+        public byte? BillingPeriodId { get; set; }
         public string? Amenities { get; set; }
         public int? LocationId { get; set; }
         public int? SpaceTypeId { get; set; }

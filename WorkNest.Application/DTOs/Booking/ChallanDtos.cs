@@ -15,11 +15,20 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal BalanceLeft { get; set; }
         public decimal SecurityDeposit { get; set; }
         public string? SpaceNumber { get; set; }
+        public decimal AppliedTaxPercentage { get; set; } = 16.00m;
+        public decimal TaxAmount { get; set; }
+        public decimal TaxAmountOnAdvanceRent { get; set; }
+        public decimal TaxAmountOnContract { get; set; }
     }
 
-    /// <summary>
-    /// A single financial line in the challan breakdown (from WN_BookingLines).
-    /// </summary>
+    public class ChallanFieldDto
+    {
+        public string Label { get; set; } = string.Empty;
+        public string Value { get; set; } = string.Empty;
+        public string? Key { get; set; }
+        public bool IsHeader { get; set; }
+    }
+
     public class ChallanLineDto
     {
         public int LineId { get; set; }
@@ -36,13 +45,8 @@ namespace WorkNest.Application.DTOs.Booking
         public string? AccountName { get; set; }
     }
 
-    /// <summary>
-    /// Full challan response including booking context and financial breakdown.
-    /// Source of truth: WN_Challans + VW_WN_BookingSummary + WN_BookingLines.
-    /// </summary>
     public class ChallanResponseDto
     {
-        // â”€â”€ Challan info â”€â”€
         public int ChallanId { get; set; }
         public string? ChallanPublicId { get; set; }
         public string ChallanNumber { get; set; } = string.Empty;
@@ -51,7 +55,10 @@ namespace WorkNest.Application.DTOs.Booking
         public int ChallanStatusId { get; set; }
         public string? ChallanNotes { get; set; }
 
-        // â”€â”€ Booking info â”€â”€
+        public string SpaceType { get; set; } = string.Empty;
+        public string BillingType { get; set; } = string.Empty;
+        public List<ChallanFieldDto> Fields { get; set; } = new();
+
         public int BookingId { get; set; }
         public string? BookingPublicId { get; set; }
         public DateTime? StartOn { get; set; }
@@ -62,23 +69,20 @@ namespace WorkNest.Application.DTOs.Booking
         public string? BookingStatusLabel { get; set; }
         public DateTime? BookedOn { get; set; }
 
-        // â”€â”€ Customer info â”€â”€
         public string? CustomerName { get; set; }
+        public string? CustomerCompany { get; set; }
         public string? CustomerEmail { get; set; }
 
-        // â”€â”€ Space info â”€â”€
         public string? SpaceCode { get; set; }
         public string? SpaceNumber { get; set; }
         public string? SpaceName { get; set; }
         public int SpaceCapacity { get; set; }
         public string? SpaceTypeName { get; set; }
 
-        // â”€â”€ Location info â”€â”€
         public string? LocationName { get; set; }
         public string? BranchName { get; set; }
-        public string? CompanyName { get; set; }
+        public string? CompanyName { get => CustomerCompany; set => CustomerCompany = value; }
 
-        // â”€â”€ Billing info â”€â”€
         public string? BillingPeriodCode { get; set; }
         public string? BillingPeriodLabel { get; set; }
         public string? BillingPeriod { get; set; }
@@ -87,13 +91,18 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal SeatPrice { get; set; }
         public decimal RoomPrice { get; set; }
         public decimal MonthlyRent { get; set; }
+        public decimal FirstCycleRent { get; set; }
         public decimal CurrentCycleAmount { get; set; }
         public decimal SecurityDeposit { get; set; }
+        public decimal SupportChargeAmount { get; set; }
         public decimal DiscountPercentage { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal SubtotalAmount { get; set; }
+        public decimal AppliedTaxPercentage { get; set; } = 16.00m;
+        public decimal TaxAmount { get; set; }
+        public decimal TaxAmountOnAdvanceRent { get; set; }
+        public decimal TaxAmountOnContract { get; set; }
 
-        // â”€â”€ Financial breakdown (from WN_BookingLines) â”€â”€
         public List<ChallanLineDto> Details { get; set; } = new();
 
         public decimal TotalPayable { get; set; }
@@ -103,10 +112,11 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal BalanceLeft { get; set; }
         public decimal TotalPaidAmount { get; set; }
 
-                public string? TimeSlot { get; set; }
+        public string? TimeSlot { get; set; }
         public ContractDetailsDto? Contract { get; set; }
 
         public bool IsMeetingRoom =>
+            string.Equals(SpaceType, "MeetingRoom", System.StringComparison.OrdinalIgnoreCase) ||
             (SpaceTypeName != null && (SpaceTypeName.Contains("Meeting", System.StringComparison.OrdinalIgnoreCase) || SpaceTypeName.Contains("Conference", System.StringComparison.OrdinalIgnoreCase))) ||
             (BillingPeriodMonths <= 0 && TotalContractAmount <= 0) ||
             Contract == null;

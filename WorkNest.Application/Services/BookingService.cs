@@ -1,4 +1,4 @@
-using WorkNest.Application.DTOs.Booking;
+﻿using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -435,27 +435,20 @@ namespace WorkNest.Application.Services
             }
 
             dto.DiscountAmount = Math.Abs(dto.DiscountAmount);
-            bool isMeetingRoom = (dto.SpaceTypeName != null && (dto.SpaceTypeName.Contains("Meeting", System.StringComparison.OrdinalIgnoreCase) || dto.SpaceTypeName.Contains("Conference", System.StringComparison.OrdinalIgnoreCase))) || dto.BillingPeriodMonths <= 0;
+            WorkNest.Application.Services.ChallanCalculationService.ApplyToChallan(dto);
 
-            if (isMeetingRoom)
+            if (dto.IsMeetingRoom)
             {
-                dto.SecurityDeposit = 0;
-                dto.MonthlyRent = 0;
-                dto.TotalContractAmount = 0;
                 dto.BalanceLeft = 0;
                 dto.NextBillDueDate = null;
                 dto.NextBillingDate = null;
                 dto.Contract = null;
-                dto.BillingPeriod = "Per Booking";
-                dto.BillingPeriodLabel = "Per Booking";
                 dto.TimeSlot = dto.StartOn.HasValue && dto.EndOn.HasValue
                     ? $"{dto.StartOn.Value:hh:mm tt} - {dto.EndOn.Value:hh:mm tt}"
                     : null;
-                dto.TotalPayable = lineSum > 0 ? lineSum : (header.TryGetValue("TotalAmount", out var ta) && ta is not null ? Convert.ToDecimal(ta) : dto.SubtotalAmount);
             }
             else
             {
-                dto.TotalPayable = Math.Max(0, dto.CurrentCycleAmount + dto.SecurityDeposit);
                 dto.Contract = new ContractDetailsDto
                 {
                     ContractStartDate = dto.ContractStartDate ?? dto.StartOn,
@@ -473,7 +466,6 @@ namespace WorkNest.Application.Services
                     SpaceNumber = dto.SpaceNumber
                 };
             }
-
             return ApiResponse.Ok(dto);
         }
 
@@ -503,6 +495,10 @@ namespace WorkNest.Application.Services
                 dto.TotalContractAmount,
                 dto.NextBillDueDate,
                 dto.BalanceLeft,
+                dto.CurrentCycleAmount,
+                dto.SecurityDeposit,
+                dto.TaxAmount,
+                dto.DiscountAmount,
                 pdf);
 
             return ApiResponse.Ok("Challan email sent successfully.");
@@ -575,6 +571,8 @@ namespace WorkNest.Application.Services
                 dto.TotalPayable,
                 dto.CurrentCycleAmount,
                 dto.SecurityDeposit,
+                dto.TaxAmount,
+                dto.DiscountAmount,
                 dto.TotalContractAmount,
                 dto.NextBillDueDate,
                 dto.BalanceLeft,
@@ -583,7 +581,7 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok("Booking confirmation email sent successfully.");
         }
 
-        // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Helpers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+        // --- Helpers ---
 
         private async Task<int> ResolvePricingIdAsync(int spaceId)
         {
@@ -591,10 +589,38 @@ namespace WorkNest.Application.Services
             return pricing?.TryGetValue("PricingId", out var pid) == true && pid is not null
                 ? Convert.ToInt32(pid) : 0;
         }
-    }
+
+        public async Task<ApiResponse> GetBookingFinancialBreakdownAsync(int bookingId)
+        {
+            var challanRes = await GetChallanAsync(bookingId);
+            if (!challanRes.IsSuccessful || challanRes.Data is not ChallanResponseDto dto)
+                return ApiResponse.Fail("Booking/Challan not found");
+
+            double durationHours = dto.StartOn.HasValue && dto.EndOn.HasValue ? (dto.EndOn.Value - dto.StartOn.Value).TotalHours : 0;
+            decimal quantity = dto.IsMeetingRoom ? (decimal)(durationHours >= 24 ? Math.Ceiling(durationHours / 24.0) : Math.Ceiling(durationHours)) : dto.BillingPeriodMonths;
+            if (quantity <= 0) quantity = 1;
+            decimal unitPrice = dto.SubtotalAmount > 0 && quantity > 0 ? Math.Round(dto.SubtotalAmount / quantity, 2) : dto.SubtotalAmount;
+            decimal supportAmt = Math.Round(dto.SubtotalAmount * 0.10m, 2);
+
+            var breakdown = new
+            {
+                bookingGuid = dto.BookingPublicId ?? dto.ChallanPublicId,
+                challanNumber = dto.ChallanNumber,
+                startDateTime = dto.StartOn,
+                endDateTime = dto.EndOn,
+                calculatedDuration = dto.IsMeetingRoom ? (durationHours >= 24 ? $"{quantity} Days" : $"{durationHours} Hours") : $"{dto.BillingPeriodMonths} Months",
+                quantity = quantity,
+                unitPrice = unitPrice,
+                baseAmount = dto.SubtotalAmount,
+                supportServiceAmount = supportAmt,
+                taxableAmount = supportAmt,
+                pstRate = dto.AppliedTaxPercentage > 0 ? dto.AppliedTaxPercentage : 16.00m,
+                pstAmount = dto.TaxAmount,
+                totalAmount = dto.TotalPayable
+            };
+
+            return ApiResponse.Ok(breakdown);
+        }
 }
 
-
-
-
-
+}
