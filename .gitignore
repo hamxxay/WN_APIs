@@ -28,3 +28,6 @@ WorkNest.API/appsettings.json
 appsettings.json
 **/appsettings.json
 appsettings.*.json
+
+**/WorkNest.Tests/
+

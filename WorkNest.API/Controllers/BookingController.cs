@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.Interfaces;
@@ -189,12 +189,21 @@ namespace WorkNest.API.Controllers
             [FromBody] AdminBookingRequest request,
             [FromHeader(Name = "x-user-email")] string? actorEmail)
         {
-            if (request.SpaceId == 0)
-                return BadRequest(new { isSuccessful = false, message = "SpaceId is required" });
-            if (request.UserId == 0 && string.IsNullOrWhiteSpace(request.CustomerEmail))
-                return BadRequest(new { isSuccessful = false, message = "UserId or CustomerEmail is required" });
+            if (request == null)
+                return BadRequest(new { isSuccessful = false, message = "Booking request payload is required." });
+
+            if ((request.SpaceId ?? 0) == 0 && string.IsNullOrWhiteSpace(request.SpaceIdGuid))
+                return BadRequest(new { isSuccessful = false, message = "SpaceId or SpaceIdGuid is required." });
+
+            if ((request.UserId ?? 0) == 0 && string.IsNullOrWhiteSpace(request.UserIdGuid) && string.IsNullOrWhiteSpace(request.CustomerEmail))
+                return BadRequest(new { isSuccessful = false, message = "UserId, UserIdGuid, or CustomerEmail is required." });
+
             var actor = ResolveUserEmail(actorEmail);
-            return StatusCode(201, await _bookings.CreateAdminBookingAsync(request, actor));
+            var result = await _bookings.CreateAdminBookingAsync(request, actor);
+            if (!result.IsSuccessful)
+                return BadRequest(result);
+
+            return StatusCode(201, result);
         }
 
         [HttpPost("api/booking")]

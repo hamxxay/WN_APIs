@@ -36,6 +36,8 @@ try
         {
             o.JsonSerializerOptions.PropertyNamingPolicy  = System.Text.Json.JsonNamingPolicy.CamelCase;
             o.JsonSerializerOptions.DictionaryKeyPolicy   = System.Text.Json.JsonNamingPolicy.CamelCase;
+            o.JsonSerializerOptions.Converters.Add(new FlexibleDateTimeJsonConverter());
+            o.JsonSerializerOptions.Converters.Add(new FlexibleNullableDateTimeJsonConverter());
         });
 
     // ── FluentValidation ──────────────────────────────────────────────────────
@@ -107,6 +109,11 @@ try
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
     builder.Services.AddScoped<IQuotationService, QuotationService>();
 
+    // ── Background Hosted Services ────────────────────────────────────────────
+    builder.Services.AddHostedService<BillingAutomationService>();
+    builder.Services.AddHostedService<InvoiceDeliveryRetryService>();
+    builder.Services.AddHostedService<AccessCardRestrictionService>();
+
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
 
@@ -151,5 +158,66 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+public class FlexibleDateTimeJsonConverter : System.Text.Json.Serialization.JsonConverter<DateTime>
+{
+    public override DateTime Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+    {
+        if (reader.TokenType == System.Text.Json.JsonTokenType.String)
+        {
+            var str = reader.GetString();
+            if (string.IsNullOrWhiteSpace(str)) return default;
+
+            if (DateTime.TryParse(str, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var dt))
+                return dt;
+
+            if (DateTime.TryParse(str, out var dtLocal))
+                return dtLocal;
+        }
+        else if (reader.TokenType == System.Text.Json.JsonTokenType.Number)
+        {
+            if (reader.TryGetInt64(out var unixEpoch))
+                return DateTimeOffset.FromUnixTimeMilliseconds(unixEpoch).UtcDateTime;
+        }
+
+        return default;
+    }
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, DateTime value, System.Text.Json.JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(value.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
+    }
+}
+
+public class FlexibleNullableDateTimeJsonConverter : System.Text.Json.Serialization.JsonConverter<DateTime?>
+{
+    public override DateTime? Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+    {
+        if (reader.TokenType == System.Text.Json.JsonTokenType.Null)
+            return null;
+
+        if (reader.TokenType == System.Text.Json.JsonTokenType.String)
+        {
+            var str = reader.GetString();
+            if (string.IsNullOrWhiteSpace(str)) return null;
+
+            if (DateTime.TryParse(str, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var dt))
+                return dt;
+
+            if (DateTime.TryParse(str, out var dtLocal))
+                return dtLocal;
+        }
+
+        return null;
+    }
+
+    public override void Write(System.Text.Json.Utf8JsonWriter writer, DateTime? value, System.Text.Json.JsonSerializerOptions options)
+    {
+        if (value.HasValue)
+            writer.WriteStringValue(value.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
+        else
+            writer.WriteNullValue();
+    }
 }
 

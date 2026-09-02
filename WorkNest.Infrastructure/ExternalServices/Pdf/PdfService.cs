@@ -558,7 +558,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
                             tc.Item().Text("1. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text("2. Payment must be made before the challan expiry date to confirm the booking.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("2. Payment must be made before the lexpiry date to confirm the booking.").FontSize(8).FontColor("#6c757d");
                             if (spaceType == "PrivateRoom")
                             {
                                 tc.Item().Text("3. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");

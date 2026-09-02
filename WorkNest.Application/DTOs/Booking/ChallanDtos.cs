@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace WorkNest.Application.DTOs.Booking
 {
     public class ContractDetailsDto
@@ -9,6 +11,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? BillingPeriod { get; set; }
         public int BillingPeriodMonths { get; set; }
         public decimal CurrentCycleAmount { get; set; }
+        [JsonIgnore]
         public decimal TotalContractAmount { get; set; }
         public DateTime? NextBillingDate { get; set; }
         public DateTime? NextBillDueDate { get; set; }
@@ -106,6 +109,7 @@ namespace WorkNest.Application.DTOs.Booking
         public List<ChallanLineDto> Details { get; set; } = new();
 
         public decimal TotalPayable { get; set; }
+        [JsonIgnore]
         public decimal TotalContractAmount { get; set; }
         public DateTime? NextBillingDate { get; set; }
         public DateTime? NextBillDueDate { get; set; }

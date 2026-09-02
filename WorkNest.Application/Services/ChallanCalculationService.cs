@@ -158,12 +158,13 @@ namespace WorkNest.Application.Services
                 res.FirstCycleRent = res.BaseRent;
                 res.TotalContractRent = res.BaseRent;
 
-                res.SupportChargeAmount = Math.Round(res.BaseRent * (res.AppliedChargePercentage / 100.0m), 2);
+                res.DiscountAmount = input.DiscountAmount;
+                decimal discountedMeetingBase = Math.Max(0, res.BaseRent - res.DiscountAmount);
+                res.SupportChargeAmount = Math.Round(discountedMeetingBase * (res.AppliedChargePercentage / 100.0m), 2);
                 res.TaxAmount = Math.Round(res.SupportChargeAmount * (res.AppliedTaxPercentage / 100.0m), 2);
                 res.TaxAmountOnAdvanceRent = res.TaxAmount;
                 res.TaxAmountOnContract = res.TaxAmount;
 
-                res.DiscountAmount = input.DiscountAmount;
                 res.TotalPayable = Math.Max(0, res.BaseRent + res.TaxAmount - res.DiscountAmount);
             }
             else
@@ -211,20 +212,46 @@ namespace WorkNest.Application.Services
 
                 res.SecurityDeposit = res.SpaceType == "PrivateRoom" ? input.SecurityDeposit : 0;
 
-                res.SupportChargeAmount = Math.Round(res.FirstCycleRent * (res.AppliedChargePercentage / 100.0m), 2);
-                res.TaxAmount = Math.Round(res.SupportChargeAmount * (res.AppliedTaxPercentage / 100.0m), 2);
-                res.TaxAmountOnAdvanceRent = res.TaxAmount;
-                res.DiscountAmount = input.DiscountAmount;
-                if (input.DiscountPercentage > 0)
+                decimal discountPct = input.DiscountPercentage > 0 ? input.DiscountPercentage :
+                    (string.Equals(input.DiscountType, "Percentage", StringComparison.OrdinalIgnoreCase) ? input.DiscountValue : 0);
+
+                decimal discountOnRent = 0m;
+                decimal discountOnDeposit = 0m;
+
+                if (discountPct > 0)
                 {
-                    res.DiscountAmount = Math.Round(res.FirstCycleRent * (input.DiscountPercentage / 100.0m), 2);
+                    discountOnRent = Math.Round(res.FirstCycleRent * (discountPct / 100.0m), 2);
+                    discountOnDeposit = Math.Round(res.SecurityDeposit * (discountPct / 100.0m), 2);
                 }
-                else if (string.Equals(input.DiscountType, "Percentage", StringComparison.OrdinalIgnoreCase) && input.DiscountValue > 0)
+                else if (input.DiscountAmount > 0)
                 {
-                    res.DiscountAmount = Math.Round(res.FirstCycleRent * (input.DiscountValue / 100.0m), 2);
+                    decimal effectiveDiscount = input.DiscountAmount;
+                    int contractM = res.ContractPeriodMonths > 0 ? res.ContractPeriodMonths : 12;
+                    int billingM = res.BillingPeriodMonths > 0 ? res.BillingPeriodMonths : 3;
+
+                    if (input.DiscountAmount > res.FirstCycleRent && contractM > billingM)
+                    {
+                        effectiveDiscount = Math.Round(input.DiscountAmount * ((decimal)billingM / contractM), 2);
+                    }
+
+                    decimal totalBase = res.FirstCycleRent + res.SecurityDeposit;
+                    if (totalBase > 0)
+                    {
+                        discountOnRent = Math.Round(effectiveDiscount * (res.FirstCycleRent / totalBase), 2);
+                        discountOnDeposit = effectiveDiscount - discountOnRent;
+                    }
                 }
 
-                res.TotalPayable = Math.Max(0, res.FirstCycleRent + res.SecurityDeposit + res.TaxAmount - res.DiscountAmount);
+                decimal discountedRent = Math.Max(0, res.FirstCycleRent - discountOnRent);
+                decimal discountedDeposit = Math.Max(0, res.SecurityDeposit - discountOnDeposit);
+
+                res.DiscountAmount = discountOnRent + discountOnDeposit;
+                res.SupportChargeAmount = Math.Round(discountedRent * (res.AppliedChargePercentage / 100.0m), 2);
+                res.TaxAmount = Math.Round(res.SupportChargeAmount * (res.AppliedTaxPercentage / 100.0m), 2);
+                res.TaxAmountOnAdvanceRent = res.TaxAmount;
+                res.TaxAmountOnContract = Math.Round(Math.Max(0, res.TotalContractRent - (discountOnRent * (res.ContractPeriodMonths / Math.Max(1, res.BillingPeriodMonths)))) * (res.AppliedChargePercentage / 100.0m) * (res.AppliedTaxPercentage / 100.0m), 2);
+
+                res.TotalPayable = Math.Max(0, discountedRent + discountedDeposit + res.TaxAmount);
             }
 
             BuildFields(res, input);

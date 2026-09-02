@@ -50,8 +50,16 @@ namespace WorkNest.Application.DTOs.Booking
         public int? UserId { get; set; }
         public string? SpaceIdGuid { get; set; }
         public int? SpaceId { get; set; }
-        public DateTime StartDateTime { get; set; }
-        public DateTime EndDateTime { get; set; }
+        public DateTime? StartDateTime { get; set; }
+        public DateTime? EndDateTime { get; set; }
+        public string? StartDate { get; set; }
+        public string? EndDate { get; set; }
+        public string? StartOn { get; set; }
+        public string? EndOn { get; set; }
+        public string? ContractStartDate { get; set; }
+        public string? ContractEndDate { get; set; }
+        public string? BillingStartDate { get; set; }
+        public string? EffectiveFrom { get; set; }
         public string? Notes { get; set; }
         public string? CustomerEmail { get; set; }
         public string? CustomerName { get; set; }

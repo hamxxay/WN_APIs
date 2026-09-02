@@ -1,4 +1,4 @@
-﻿using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -105,37 +105,74 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request, string? actorEmail)
         {
+            if (request is null)
+                return ApiResponse.Fail("Request body is required.");
+
             int userId = request.UserId ?? 0;
 
-            if (userId == 0 && !string.IsNullOrWhiteSpace(request.UserIdGuid)
-                && Guid.TryParse(request.UserIdGuid, out var userGuid))
+            if (userId == 0 && !string.IsNullOrWhiteSpace(request.UserIdGuid))
             {
-                var userRow = await _db.GetUserByPublicIdAsync(userGuid);
-                if (userRow is not null)
-                    userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : 0;
+                if (int.TryParse(request.UserIdGuid, out var uIdInt) && uIdInt > 0)
+                {
+                    userId = uIdInt;
+                }
+                else if (Guid.TryParse(request.UserIdGuid, out var userGuid))
+                {
+                    var userRow = await _db.GetUserByPublicIdAsync(userGuid);
+                    if (userRow is not null)
+                        userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : 0;
+                }
             }
 
             if (userId == 0 && !string.IsNullOrWhiteSpace(request.CustomerEmail))
             {
                 var (id, _) = await _db.SyncUserAsync(request.CustomerEmail, request.CustomerName, request.Phone);
-                if (id is null) return ApiResponse.Fail("Failed to resolve user.");
+                if (id is null) return ApiResponse.Fail("Failed to resolve or create customer user.");
                 userId = id.Value;
             }
+
+            if (userId == 0)
+                return ApiResponse.Fail("UserId, UserIdGuid, or CustomerEmail is required.");
 
             int spaceId = request.SpaceId ?? 0;
 
             if (spaceId == 0 && !string.IsNullOrWhiteSpace(request.SpaceIdGuid))
             {
-                var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
-                var match = rows.FirstOrDefault(r =>
-                    r.TryGetValue("PublicId", out var g) &&
-                    string.Equals(g?.ToString(), request.SpaceIdGuid, StringComparison.OrdinalIgnoreCase));
-                if (match is not null)
-                    spaceId = match.TryGetValue("Id", out var sid) ? Convert.ToInt32(sid) : 0;
+                if (int.TryParse(request.SpaceIdGuid, out var sIdInt) && sIdInt > 0)
+                {
+                    spaceId = sIdInt;
+                }
+                else
+                {
+                    var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
+                    var match = rows.FirstOrDefault(r =>
+                        (r.TryGetValue("PublicId", out var g) || r.TryGetValue("IdGUID", out g) || r.TryGetValue("publicId", out g) || r.TryGetValue("idGUID", out g) || r.TryGetValue("Id", out g) || r.TryGetValue("id", out g)) &&
+                        string.Equals(g?.ToString(), request.SpaceIdGuid, StringComparison.OrdinalIgnoreCase));
+                    if (match is not null)
+                        spaceId = match.TryGetValue("Id", out var sid) ? Convert.ToInt32(sid) : 0;
+                }
             }
 
             if (spaceId == 0)
-                return ApiResponse.Fail("SpaceId is required.");
+                return ApiResponse.Fail("SpaceId or SpaceIdGuid is required.");
+
+            DateTime startOn = request.StartDateTime ?? ParseFlexibleDate(
+                request.StartDate ?? request.StartOn ?? request.ContractStartDate ?? request.BillingStartDate ?? request.EffectiveFrom);
+
+            DateTime endOn = request.EndDateTime ?? ParseFlexibleDate(
+                request.EndDate ?? request.EndOn ?? request.ContractEndDate);
+
+            if (startOn == default)
+            {
+                startOn = DateTime.UtcNow.Date;
+            }
+
+            if (endOn == default || endOn <= startOn)
+            {
+                int months = request.BillingPeriodMonths ?? request.AdvanceRentMonths ?? 1;
+                if (months <= 0) months = 1;
+                endOn = startOn.AddMonths(months);
+            }
 
             int? actorId = null;
             if (!string.IsNullOrWhiteSpace(actorEmail))
@@ -145,7 +182,6 @@ namespace WorkNest.Application.Services
             }
 
             var pricingId = await ResolvePricingIdAsync(spaceId);
-            // pricingId may be 0; WN_Bookings_Insert handles category fallback
 
             var discountType = string.IsNullOrWhiteSpace(request.DiscountType) ? "Percentage" : request.DiscountType;
             var discountValue = request.DiscountValue > 0 ? request.DiscountValue : request.DiscountPercentage;
@@ -165,7 +201,7 @@ namespace WorkNest.Application.Services
 
             var result = await _db.InsertBookingAsync(
                 userId, spaceId, pricingId,
-                request.StartDateTime, request.EndDateTime,
+                startOn, endOn,
                 request.Notes, actorId, request.CustomerEmail,
                 request.CustomerEmail, firstName, lastName, request.Phone,
                 null, null, null, "Created by administrator",
@@ -621,6 +657,16 @@ namespace WorkNest.Application.Services
 
             return ApiResponse.Ok(breakdown);
         }
-}
+
+        private static DateTime ParseFlexibleDate(string? dateStr)
+        {
+            if (string.IsNullOrWhiteSpace(dateStr)) return default;
+            if (DateTime.TryParse(dateStr, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var dt))
+                return dt;
+            if (DateTime.TryParse(dateStr, out var dtLocal))
+                return dtLocal;
+            return default;
+        }
+    }
 
 }
