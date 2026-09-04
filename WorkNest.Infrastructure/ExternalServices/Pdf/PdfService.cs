@@ -276,7 +276,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                     r.ConstantItem(220).AlignRight().Text($"Advance Room Rent ({billingMonths} Mos):");
                                     r.ConstantItem(120).AlignRight().Text($"PKR {firstCycleRent:N2}").Bold();
                                 });
-                                if (spaceType == "PrivateRoom" && secDeposit > 0)
+                                if (secDeposit > 0)
                                 {
                                     c.Item().Row(r =>
                                     {
@@ -500,7 +500,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 inner.Item().Row(r =>
                                 {
-                                    r.ConstantItem(220).AlignRight().Text($"Advance Rent ({c.BillingPeriodLabel ?? c.BillingPeriodCode ?? "Cycle"}):");
+                                    r.ConstantItem(220).AlignRight().Text($"Advance Rent ({c.BillingPeriodMonths} Month(s)):");
                                     r.ConstantItem(120).AlignRight().Text($"PKR {c.CurrentCycleAmount:N2}");
                                 });
                                 if (spaceType == "PrivateRoom" && c.SecurityDeposit > 0)

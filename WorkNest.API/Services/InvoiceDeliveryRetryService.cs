@@ -224,7 +224,7 @@ namespace WorkNest.API.Services
         private async Task<StatementInvoicePdfDto?> BuildPdfDtoAsync(int id, SqlConnection conn)
         {
             var dto = new StatementInvoicePdfDto();
-            using var cmd = new SqlCommand("dbo.WN_sp_GetStatementInvoicePdfData", conn);
+            using var cmd = new SqlCommand("dbo.WN_GetStatementInvoicePdfData", conn);
             cmd.CommandType = CommandType.StoredProcedure;
             cmd.Parameters.AddWithValue("@InvoiceId", id);
 
@@ -249,6 +249,14 @@ namespace WorkNest.API.Services
                 dto.VendorPhone = reader.IsDBNull(reader.GetOrdinal("VendorPhone")) ? "" : reader.GetString(reader.GetOrdinal("VendorPhone"));
                 dto.VendorFax = reader.IsDBNull(reader.GetOrdinal("VendorFax")) ? "" : reader.GetString(reader.GetOrdinal("VendorFax"));
                 dto.VendorNtn = reader.IsDBNull(reader.GetOrdinal("VendorNtn")) ? "" : reader.GetString(reader.GetOrdinal("VendorNtn"));
+                if (HasColumn(reader, "AppliedChargePercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedChargePercentage")))
+                    dto.AppliedChargePercentage = reader.GetDecimal(reader.GetOrdinal("AppliedChargePercentage"));
+                if (HasColumn(reader, "AppliedTaxPercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedTaxPercentage")))
+                    dto.AppliedTaxPercentage = reader.GetDecimal(reader.GetOrdinal("AppliedTaxPercentage"));
+                if (HasColumn(reader, "SupportChargeAmount") && !reader.IsDBNull(reader.GetOrdinal("SupportChargeAmount")))
+                    dto.SupportChargeAmount = reader.GetDecimal(reader.GetOrdinal("SupportChargeAmount"));
+                if (HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount")))
+                    dto.SecurityDepositAmount = reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"));
             }
             else
             {
@@ -290,9 +298,21 @@ namespace WorkNest.API.Services
                         Description = desc,
                         FromDate = lineFrom,
                         ToDate = lineTo,
-                        PriceExclVat = reader.GetDecimal(reader.GetOrdinal("PriceExclVat")),
-                        VatAmount = reader.GetDecimal(reader.GetOrdinal("VatAmount")),
-                        Category = reader.GetString(reader.GetOrdinal("CategoryName"))
+                        PriceExclVat = reader.IsDBNull(reader.GetOrdinal("PriceExclVat")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriceExclVat")),
+                        VatAmount = reader.IsDBNull(reader.GetOrdinal("VatAmount")) ? 0m : reader.GetDecimal(reader.GetOrdinal("VatAmount")),
+                        Category = HasColumn(reader, "CategoryName") && !reader.IsDBNull(reader.GetOrdinal("CategoryName")) ? reader.GetString(reader.GetOrdinal("CategoryName")) : "Recurring",
+                        IsDeposit = isDeposit
+                    });
+                }
+                if (!items.Any(i => i.IsDeposit || i.Description.Contains("Deposit", StringComparison.OrdinalIgnoreCase)) && dto.SecurityDepositAmount > 0)
+                {
+                    items.Add(new StatementInvoiceLineItemDto
+                    {
+                        Description = "Security Deposit (Refundable)",
+                        PriceExclVat = dto.SecurityDepositAmount,
+                        VatAmount = 0m,
+                        Category = "Security Deposit",
+                        IsDeposit = true
                     });
                 }
                 if (items.Count > 0) dto.LineItems = items;
@@ -302,8 +322,8 @@ namespace WorkNest.API.Services
             {
                 if (await reader.ReadAsync())
                 {
-                    dto.PreviousOutstandingBalance = reader.GetDecimal(reader.GetOrdinal("PriorBalance"));
-                    dto.PaymentReceived = reader.GetDecimal(reader.GetOrdinal("PaymentReceived"));
+                    dto.PreviousOutstandingBalance = reader.IsDBNull(reader.GetOrdinal("PriorBalance")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriorBalance"));
+                    dto.PaymentReceived = reader.IsDBNull(reader.GetOrdinal("PaymentReceived")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PaymentReceived"));
                 }
             }
 

@@ -1,8 +1,8 @@
 -- ============================================================================
--- WorkNest Stored Procedures for Invoice Management (All prefixed with WN_sp_)
+-- WorkNest Stored Procedures for Invoice Management (All prefixed with WN_)
 -- ============================================================================
 
--- 1. WN_GetInvoicesList & WN_sp_GetInvoicesList
+-- 1. WN_GetInvoicesList & WN_GetInvoicesList
 CREATE OR ALTER PROCEDURE dbo.WN_GetInvoicesList
     @Page INT = 1,
     @Limit INT = 10,
@@ -50,6 +50,7 @@ BEGIN
         i.CreatedOn,
         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, u.Email)) AS CustomerName,
         u.Email AS CustomerEmail,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), '-') AS CompanyName,
         CASE i.StatusId 
             WHEN 1 THEN 'Unpaid' 
             WHEN 2 THEN 'Paid' 
@@ -71,7 +72,7 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE dbo.WN_sp_GetInvoicesList
+CREATE OR ALTER PROCEDURE dbo.WN_GetInvoicesList
     @Page INT = 1,
     @Limit INT = 10,
     @Search NVARCHAR(200) = NULL,
@@ -82,8 +83,8 @@ BEGIN
 END;
 GO
 
--- 2. WN_sp_GetStatementInvoicePdfData
-CREATE OR ALTER PROCEDURE dbo.WN_sp_GetStatementInvoicePdfData
+-- 2. WN_GetStatementInvoicePdfData
+CREATE OR ALTER PROCEDURE dbo.WN_GetStatementInvoicePdfData
     @InvoiceId INT
 AS
 BEGIN
@@ -102,7 +103,7 @@ BEGIN
         ISNULL(i.GrandTotal, 0) AS GrandTotal,
         ISNULL(i.PaidTotal, 0) AS PaidTotal,
         ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
-        COALESCE(c.Company, u.Name, u.Email, 'Valued Customer') AS AccountName,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ucomp.CompanyName)), ''), '-') AS AccountName,
         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name) AS AttnName,
         COALESCE(c.Address, u.Address, '') AS BillingAddress,
         ISNULL(c.Code, 'WN' + RIGHT('00000' + CAST(ISNULL(c.Id, i.UserId) AS VARCHAR(10)), 5)) AS AccountNumber,
@@ -112,11 +113,17 @@ BEGIN
         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), ISNULL(loc.Address, '3rd Floor EOBI Building-II, I-8 Markaz, Islamabad')) AS VendorAddress,
         ISNULL(comp.Contact, '+92 309 9771774 / +92 308 0256000') AS VendorPhone,
         ISNULL(comp.Fax, '+92 51 8439201') AS VendorFax,
-        ISNULL(comp.NTN, '7492018-3') AS VendorNtn
+        ISNULL(comp.NTN, '7492018-3') AS VendorNtn,
+        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
+        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
+        ISNULL(bd.SupportChargeAmount, 0.00) AS SupportChargeAmount,
+        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount
     FROM dbo.WN_Invoices i WITH (NOLOCK)
-    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (c.UserId = i.UserId OR c.Id = i.UserId) AND c.IsActive = 1
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (c.UserId = i.UserId OR c.Id = i.UserId OR (u.Email IS NOT NULL AND c.Email = u.Email)) AND (c.IsActive = 1 OR c.IsActive IS NULL)
+    LEFT JOIN dbo.Company ucomp WITH (NOLOCK) ON ucomp.Id = u.CompanyId
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
     LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
     LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = ISNULL(NULLIF(loc.CompanyId, 0), 486)
@@ -153,16 +160,8 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE dbo.WN_GetStatementInvoicePdfData
-    @InvoiceId INT
-AS
-BEGIN
-    EXEC dbo.WN_sp_GetStatementInvoicePdfData @InvoiceId = @InvoiceId;
-END;
-GO
-
--- 3. WN_sp_GetInvoiceDetailsById
-CREATE OR ALTER PROCEDURE dbo.WN_sp_GetInvoiceDetailsById
+-- 3. WN_GetInvoiceDetailsById
+CREATE OR ALTER PROCEDURE dbo.WN_GetInvoiceDetailsById
     @InvoiceId INT
 AS
 BEGIN
@@ -192,8 +191,8 @@ BEGIN
 END;
 GO
 
--- 4. WN_sp_RecordInvoicePayment
-CREATE OR ALTER PROCEDURE dbo.WN_sp_RecordInvoicePayment
+-- 4. WN_RecordInvoicePayment
+CREATE OR ALTER PROCEDURE dbo.WN_RecordInvoicePayment
     @InvoiceId INT,
     @PaidAmount DECIMAL(18,4),
     @PaymentMethod NVARCHAR(50) = 'Cash',
@@ -305,8 +304,8 @@ BEGIN
 END;
 GO
 
--- 5. WN_sp_CreateCustomInvoice
-CREATE OR ALTER PROCEDURE dbo.WN_sp_CreateCustomInvoice
+-- 5. WN_CreateCustomInvoice
+CREATE OR ALTER PROCEDURE dbo.WN_CreateCustomInvoice
     @UserId INT,
     @IssuedOn DATE,
     @DueOn DATE,
@@ -361,6 +360,7 @@ BEGIN
         ISNULL(i.SubTotal, 0) AS SubTotal,
         ISNULL(i.TaxTotal, 0) AS TaxTotal,
         ISNULL(i.DiscountTotal, 0) AS DiscountTotal,
+        ISNULL(NULLIF(i.SecurityDepositAmount, 0), ISNULL(NULLIF(b.SecurityDepositRequired, 0), ISNULL(bd.SecurityDeposit, 0))) AS SecurityDepositAmount,
         ISNULL(NULLIF(u.Email, ''), ISNULL(NULLIF(c.Email, ''), '')) AS TargetEmail,
         ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
         ISNULL(s.Name, 'WorkNest Workspace') AS SpaceName
@@ -368,6 +368,7 @@ BEGIN
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = i.UserId
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
     WHERE i.Id = @InvoiceId;
 END;

@@ -143,12 +143,98 @@ namespace WorkNest.API.Controllers
             return false;
         }
 
+        private static bool _invoicePdfSpUpdated = false;
+
+        private async Task EnsureInvoicePdfSpUpdatedAsync(SqlConnection conn)
+        {
+            if (_invoicePdfSpUpdated) return;
+            try
+            {
+                string sql = @"
+CREATE OR ALTER PROCEDURE dbo.WN_GetStatementInvoicePdfData
+    @InvoiceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP 1
+        i.Id,
+        i.InvoiceNumber,
+        i.UserId,
+        i.BookingId,
+        i.IssuedOn,
+        i.DueOn,
+        COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn) AS BillingPeriodStart,
+        COALESCE(i.BillingPeriodEnd, b.EndOn, i.DueOn) AS BillingPeriodEnd,
+        ISNULL(i.GrandTotal, 0) AS GrandTotal,
+        ISNULL(i.PaidTotal, 0) AS PaidTotal,
+        ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ucomp.CompanyName)), ''), '-') AS AccountName,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name) AS AttnName,
+        COALESCE(c.Address, u.Address, '') AS BillingAddress,
+        ISNULL(c.Code, 'WN' + RIGHT('00000' + CAST(ISNULL(c.Id, i.UserId) AS VARCHAR(10)), 5)) AS AccountNumber,
+        ISNULL(c.CnicOrPassport, '') AS SntnNtnNic,
+        ISNULL(loc.Name, 'WorkNest') AS CenterName,
+        ISNULL(comp.CompanyName, 'WorkNest Coworking Spaces (Pvt) Ltd') AS VendorLegalName,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), ISNULL(loc.Address, '3rd Floor EOBI Building-II, I-8 Markaz, Islamabad')) AS VendorAddress,
+        ISNULL(comp.Contact, '+92 309 9771774 / +92 308 0256000') AS VendorPhone,
+        ISNULL(comp.Fax, '+92 51 8439201') AS VendorFax,
+        ISNULL(comp.NTN, '7492018-3') AS VendorNtn,
+        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
+        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
+        ISNULL(bd.SupportChargeAmount, 0.00) AS SupportChargeAmount,
+        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (c.UserId = i.UserId OR c.Id = i.UserId OR (u.Email IS NOT NULL AND c.Email = u.Email)) AND (c.IsActive = 1 OR c.IsActive IS NULL)
+    LEFT JOIN dbo.Company ucomp WITH (NOLOCK) ON ucomp.Id = u.CompanyId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+    LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = ISNULL(NULLIF(loc.CompanyId, 0), 486)
+    WHERE i.Id = @InvoiceId;
+
+    SELECT 
+        l.ChargeTypeId,
+        l.Description,
+        (l.Quantity * l.UnitPrice - l.DiscountAmount) AS PriceExclVat,
+        l.TaxAmount AS VatAmount,
+        l.LineTotal AS TotalInclVat,
+        l.TaxRate,
+        ISNULL(ct.Label, 'Business Support Services') AS CategoryName
+    FROM dbo.WN_InvoiceLines l WITH (NOLOCK)
+    LEFT JOIN dbo.WN_ChargeTypes ct WITH (NOLOCK) ON ct.Id = l.ChargeTypeId
+    WHERE l.InvoiceId = @InvoiceId
+    ORDER BY l.SortOrder, l.Id;
+
+    DECLARE @UserId INT;
+    SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
+
+    SELECT 
+        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
+        ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE UserId = @UserId AND Id < @InvoiceId;
+
+    SELECT TOP 1 Description AS BankName, ShortDesc AS BankAccountNumber
+    FROM dbo.AccountsCOA WITH (NOLOCK)
+    WHERE AccountNature = 'Bank' OR Description LIKE '%Bank%';
+END;";
+                using var cmdSp = new SqlCommand(sql, conn);
+                await cmdSp.ExecuteNonQueryAsync();
+                _invoicePdfSpUpdated = true;
+            }
+            catch { }
+        }
+
         private async Task<StatementInvoicePdfDto?> BuildStatementInvoicePdfDtoAsync(int id, SqlConnection conn)
         {
+            await EnsureInvoicePdfSpUpdatedAsync(conn);
             var dto = new StatementInvoicePdfDto();
             int userId = 0;
 
-            using var cmd = new SqlCommand("dbo.WN_sp_GetStatementInvoicePdfData", conn);
+            using var cmd = new SqlCommand("dbo.WN_GetStatementInvoicePdfData", conn);
             cmd.CommandType = CommandType.StoredProcedure;
             cmd.Parameters.AddWithValue("@InvoiceId", id);
 
@@ -175,6 +261,14 @@ namespace WorkNest.API.Controllers
                     dto.VendorPhone = reader.IsDBNull(reader.GetOrdinal("VendorPhone")) ? "" : reader.GetString(reader.GetOrdinal("VendorPhone"));
                     dto.VendorFax = reader.IsDBNull(reader.GetOrdinal("VendorFax")) ? "" : reader.GetString(reader.GetOrdinal("VendorFax"));
                     dto.VendorNtn = reader.IsDBNull(reader.GetOrdinal("VendorNtn")) ? "" : reader.GetString(reader.GetOrdinal("VendorNtn"));
+                    if (HasColumn(reader, "AppliedChargePercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedChargePercentage")))
+                        dto.AppliedChargePercentage = reader.GetDecimal(reader.GetOrdinal("AppliedChargePercentage"));
+                    if (HasColumn(reader, "AppliedTaxPercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedTaxPercentage")))
+                        dto.AppliedTaxPercentage = reader.GetDecimal(reader.GetOrdinal("AppliedTaxPercentage"));
+                    if (HasColumn(reader, "SupportChargeAmount") && !reader.IsDBNull(reader.GetOrdinal("SupportChargeAmount")))
+                        dto.SupportChargeAmount = reader.GetDecimal(reader.GetOrdinal("SupportChargeAmount"));
+                    if (HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount")))
+                        dto.SecurityDepositAmount = reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"));
                 }
                 else
                 {
@@ -216,9 +310,21 @@ namespace WorkNest.API.Controllers
                             Description = desc,
                             FromDate = lineFrom,
                             ToDate = lineTo,
-                            PriceExclVat = reader.GetDecimal(reader.GetOrdinal("PriceExclVat")),
-                            VatAmount = reader.GetDecimal(reader.GetOrdinal("VatAmount")),
-                            Category = reader.GetString(reader.GetOrdinal("CategoryName"))
+                            PriceExclVat = reader.IsDBNull(reader.GetOrdinal("PriceExclVat")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriceExclVat")),
+                            VatAmount = reader.IsDBNull(reader.GetOrdinal("VatAmount")) ? 0m : reader.GetDecimal(reader.GetOrdinal("VatAmount")),
+                            Category = HasColumn(reader, "CategoryName") && !reader.IsDBNull(reader.GetOrdinal("CategoryName")) ? reader.GetString(reader.GetOrdinal("CategoryName")) : "Recurring",
+                            IsDeposit = isDeposit
+                        });
+                    }
+                    if (!items.Any(i => i.IsDeposit || i.Description.Contains("Deposit", StringComparison.OrdinalIgnoreCase)) && dto.SecurityDepositAmount > 0)
+                    {
+                        items.Add(new StatementInvoiceLineItemDto
+                        {
+                            Description = "Security Deposit (Refundable)",
+                            PriceExclVat = dto.SecurityDepositAmount,
+                            VatAmount = 0m,
+                            Category = "Security Deposit",
+                            IsDeposit = true
                         });
                     }
                     if (items.Count > 0) dto.LineItems = items;
@@ -228,8 +334,8 @@ namespace WorkNest.API.Controllers
                 {
                     if (await reader.ReadAsync())
                     {
-                        dto.PreviousOutstandingBalance = reader.GetDecimal(reader.GetOrdinal("PriorBalance"));
-                        dto.PaymentReceived = reader.GetDecimal(reader.GetOrdinal("PaymentReceived"));
+                        dto.PreviousOutstandingBalance = reader.IsDBNull(reader.GetOrdinal("PriorBalance")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriorBalance"));
+                        dto.PaymentReceived = reader.IsDBNull(reader.GetOrdinal("PaymentReceived")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PaymentReceived"));
                     }
                 }
 
@@ -254,7 +360,7 @@ namespace WorkNest.API.Controllers
                 using var conn = new SqlConnection(GetConnectionString());
                 await conn.OpenAsync();
 
-                using var cmd = new SqlCommand("dbo.WN_sp_GetInvoiceDetailsById", conn);
+                using var cmd = new SqlCommand("dbo.WN_GetInvoiceDetailsById", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@InvoiceId", id);
 
@@ -340,7 +446,7 @@ namespace WorkNest.API.Controllers
 
                 decimal grandTotal = subTotal - discountTotal + taxTotal;
 
-                using var cmd = new SqlCommand("dbo.WN_sp_CreateCustomInvoice", conn);
+                using var cmd = new SqlCommand("dbo.WN_CreateCustomInvoice", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@UserId", req.UserId);
                 cmd.Parameters.AddWithValue("@BookingId", (object?)req.BookingId ?? DBNull.Value);
@@ -457,7 +563,7 @@ namespace WorkNest.API.Controllers
                                 discountAmount: discountTotal,
                                 pdfBytes: pdfBytes
                             );
-                            emailNotice = $" Email dispatched with 5-Page Statement PDF packet attached to {targetEmail}.";
+                            emailNotice = $" Email dispatched with PDF attached to {targetEmail}.";
                         }
                         catch (Exception emailEx)
                         {
@@ -494,7 +600,7 @@ namespace WorkNest.API.Controllers
                 string targetEmail = "";
                 string customerName = "";
                 string spaceName = "WorkNest Workspace";
-                decimal grandTotal = 0, subTotal = 0, taxTotal = 0, discountTotal = 0;
+                decimal grandTotal = 0, subTotal = 0, taxTotal = 0, discountTotal = 0, securityDeposit = 0;
                 DateTime issuedOn = DateTime.Today, dueOn = DateTime.Today;
                 bool found = false;
 
@@ -518,6 +624,10 @@ namespace WorkNest.API.Controllers
                             discountTotal = reader.GetDecimal(reader.GetOrdinal("DiscountTotal"));
                             issuedOn = reader.GetDateTime(reader.GetOrdinal("IssuedOn"));
                             dueOn = reader.GetDateTime(reader.GetOrdinal("DueOn"));
+                            decimal secDep = HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount"))
+                                ? reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"))
+                                : 0m;
+                            securityDeposit = secDep;
                         }
                     }
                 }
@@ -535,11 +645,24 @@ namespace WorkNest.API.Controllers
                     if (pdfDto != null)
                     {
                         pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(pdfDto);
+                        if (securityDeposit <= 0 && pdfDto.SecurityDepositAmount > 0)
+                        {
+                            securityDeposit = pdfDto.SecurityDepositAmount;
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[PDF Error] BuildStatementInvoicePdfDtoAsync returned null for invoice {id}.");
                     }
                 }
                 catch (Exception pdfEx)
                 {
                     Console.WriteLine($"[PDF Error] StatementInvoicePdfGenerator failed for invoice {id}: {pdfEx}");
+                }
+
+                if (pdfBytes == null || pdfBytes.Length == 0)
+                {
+                    return StatusCode(500, new { isSuccessful = false, message = "Failed to generate Invoice PDF attachment. Please ensure dbo.WN_GetStatementInvoicePdfData is updated in the database." });
                 }
 
                 try
@@ -555,12 +678,13 @@ namespace WorkNest.API.Controllers
                         endOn: dueOn,
                         totalContractAmount: grandTotal,
                         currentCycleAmount: subTotal,
+                        securityDeposit: securityDeposit,
                         taxAmount: taxTotal,
                         discountAmount: discountTotal,
                         pdfBytes: pdfBytes
                     );
 
-                    return Ok(new { isSuccessful = true, message = $"Invoice email sent successfully to {targetEmail} with 5-Page Statement PDF packet attached." });
+                    return Ok(new { isSuccessful = true, message = $"Invoice email sent successfully to {targetEmail} with Statement PDF attached." });
                 }
                 catch (Exception emailEx)
                 {
@@ -583,38 +707,28 @@ namespace WorkNest.API.Controllers
                 using var conn = new SqlConnection(GetConnectionString());
                 await conn.OpenAsync();
 
-                string checkSql = "SELECT TOP 1 Id, InvoiceNumber FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id ASC;";
-                using (var checkCmd = new SqlCommand(checkSql, conn))
-                {
-                    checkCmd.Parameters.AddWithValue("@BookingId", bookingId);
-                    using var r = await checkCmd.ExecuteReaderAsync();
-                    if (await r.ReadAsync())
-                    {
-                        int existingId = r.GetInt32(0);
-                        r.Close();
-                        return await SendInvoiceEmail(existingId);
-                    }
-                }
-
                 string bookingSql = @"
                     SELECT TOP 1 
                         b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, b.MonthlyRent, b.SubtotalAmount, b.TotalAmount,
                         b.BillingPeriodMonths, b.SecurityDepositMonths, b.DiscountAmount, b.DiscountPercentage, b.DiscountType,
                         b.SecurityDepositRequired,
+                        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(bd.SecurityDeposit, 0), 0) AS ResolvedSecurityDeposit,
                         u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
-                        s.Name AS SpaceName
+                        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode
                     FROM dbo.WN_Bookings b WITH (NOLOCK)
+                    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
                     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
                     LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = b.UserId
                     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
                     WHERE b.Id = @BookingId;";
 
                 int userId = 0;
-                decimal monthlyRent = 0, discountAmount = 0, discountPercentage = 0, totalAmount = 0, secDepositReq = 0;
+                decimal monthlyRent = 0, subtotalAmount = 0, totalAmount = 0, discountAmount = 0, discountPercentage = 0, secDepositReq = 0, resolvedSecDep = 0;
                 int billingMonths = 3, secMonths = 2;
                 string discountType = "Percentage";
                 DateTime? startOn = null, endOn = null;
-                string customerEmail = "", customerName = "", spaceName = "Workspace";
+                string customerEmail = "", customerName = "", spaceName = "Workspace", spaceTypeName = "", categoryCode = "";
 
                 using (var bCmd = new SqlCommand(bookingSql, conn))
                 {
@@ -626,16 +740,20 @@ namespace WorkNest.API.Controllers
                         startOn = reader.IsDBNull(reader.GetOrdinal("StartOn")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("StartOn"));
                         endOn = reader.IsDBNull(reader.GetOrdinal("EndOn")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("EndOn"));
                         monthlyRent = reader.IsDBNull(reader.GetOrdinal("MonthlyRent")) ? 0 : reader.GetDecimal(reader.GetOrdinal("MonthlyRent"));
+                        subtotalAmount = reader.IsDBNull(reader.GetOrdinal("SubtotalAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("SubtotalAmount"));
                         totalAmount = reader.IsDBNull(reader.GetOrdinal("TotalAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("TotalAmount"));
                         discountAmount = reader.IsDBNull(reader.GetOrdinal("DiscountAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountAmount"));
                         discountPercentage = reader.IsDBNull(reader.GetOrdinal("DiscountPercentage")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountPercentage"));
                         discountType = reader.IsDBNull(reader.GetOrdinal("DiscountType")) ? "Percentage" : reader.GetString(reader.GetOrdinal("DiscountType"));
                         secDepositReq = reader.IsDBNull(reader.GetOrdinal("SecurityDepositRequired")) ? 0 : reader.GetDecimal(reader.GetOrdinal("SecurityDepositRequired"));
+                        resolvedSecDep = HasColumn(reader, "ResolvedSecurityDeposit") && !reader.IsDBNull(reader.GetOrdinal("ResolvedSecurityDeposit")) ? reader.GetDecimal(reader.GetOrdinal("ResolvedSecurityDeposit")) : 0;
                         billingMonths = reader.IsDBNull(reader.GetOrdinal("BillingPeriodMonths")) ? 3 : reader.GetInt32(reader.GetOrdinal("BillingPeriodMonths"));
                         secMonths = reader.IsDBNull(reader.GetOrdinal("SecurityDepositMonths")) ? 2 : reader.GetInt32(reader.GetOrdinal("SecurityDepositMonths"));
                         customerEmail = reader.IsDBNull(reader.GetOrdinal("CustomerEmail")) ? "" : reader.GetString(reader.GetOrdinal("CustomerEmail"));
                         customerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? "Valued Customer" : reader.GetString(reader.GetOrdinal("CustomerName"));
                         spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));
+                        spaceTypeName = reader.IsDBNull(reader.GetOrdinal("SpaceTypeName")) ? "" : reader.GetString(reader.GetOrdinal("SpaceTypeName"));
+                        categoryCode = reader.IsDBNull(reader.GetOrdinal("CategoryCode")) ? "" : reader.GetString(reader.GetOrdinal("CategoryCode"));
                     }
                     else
                     {
@@ -643,19 +761,61 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
-                if (monthlyRent <= 0 && totalAmount > 0)
-                {
-                    monthlyRent = Math.Round(totalAmount / 12m, 2);
-                }
+                bool isMeetingRoom = spaceTypeName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
+                                     spaceTypeName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
+                                     categoryCode.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
+                                     spaceName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
+                                     spaceName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
+                                     (billingMonths <= 0 && startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays < 20);
 
                 DateTime periodStart = startOn ?? DateTime.Today;
-                DateTime periodEnd = periodStart.AddMonths(billingMonths).AddDays(-1);
+                DateTime periodEnd;
+                decimal grossAdvanceRent;
+                decimal securityDeposit = 0m;
+                string mainLineDescription;
+
+                if (isMeetingRoom)
+                {
+                    periodEnd = endOn ?? periodStart;
+                    grossAdvanceRent = subtotalAmount > 0 ? subtotalAmount : totalAmount;
+                    secMonths = 0;
+                    securityDeposit = 0m;
+                    billingMonths = 1;
+                    mainLineDescription = $"Meeting Room Booking Rent ({spaceName})";
+                }
+                else
+                {
+                    if (monthlyRent <= 0 && totalAmount > 0)
+                    {
+                        monthlyRent = Math.Round(totalAmount / 12m, 2);
+                    }
+                    periodEnd = periodStart.AddMonths(billingMonths).AddDays(-1);
+                    grossAdvanceRent = monthlyRent * billingMonths;
+                    if (secDepositReq > 0)
+                    {
+                        securityDeposit = secDepositReq;
+                    }
+                    else if (secMonths > 0 && monthlyRent > 0)
+                    {
+                        securityDeposit = monthlyRent * secMonths;
+                    }
+                    else if (resolvedSecDep > 0)
+                    {
+                        securityDeposit = (secMonths > 1 && resolvedSecDep <= monthlyRent && monthlyRent > 0)
+                            ? (monthlyRent * secMonths)
+                            : resolvedSecDep;
+                    }
+                    else
+                    {
+                        securityDeposit = 0m;
+                    }
+                    mainLineDescription = $"Rent for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
+                }
 
                 int contractMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
                     ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
                     : 12;
 
-                decimal grossAdvanceRent = monthlyRent * billingMonths;
                 decimal appliedDiscount = 0m;
                 if (discountPercentage > 0)
                 {
@@ -663,7 +823,7 @@ namespace WorkNest.API.Controllers
                 }
                 else if (discountAmount > 0)
                 {
-                    if (discountAmount > grossAdvanceRent && contractMonths > billingMonths)
+                    if (!isMeetingRoom && discountAmount > grossAdvanceRent && contractMonths > billingMonths)
                     {
                         appliedDiscount = Math.Round(discountAmount * ((decimal)billingMonths / contractMonths), 2);
                     }
@@ -673,8 +833,98 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
-                bool isDepositRequired = secDepositReq > 0 || secMonths > 0;
-                decimal securityDeposit = isDepositRequired ? (monthlyRent * secMonths) : 0m;
+                decimal discountedBase = Math.Max(0, grossAdvanceRent - appliedDiscount);
+                decimal taxTotal = Math.Round(discountedBase * 0.016m, 2);
+                decimal expectedSubtotal = grossAdvanceRent;
+                decimal expectedGrandTotal = grossAdvanceRent - appliedDiscount + taxTotal + securityDeposit;
+
+                string checkSql = "SELECT TOP 1 Id, InvoiceNumber FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id ASC;";
+                int existingId = 0;
+                using (var checkCmd = new SqlCommand(checkSql, conn))
+                {
+                    checkCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                    using var r = await checkCmd.ExecuteReaderAsync();
+                    if (await r.ReadAsync())
+                    {
+                        existingId = r.GetInt32(0);
+                    }
+                }
+
+                if (existingId > 0)
+                {
+                    string updateSql = @"
+                        UPDATE dbo.WN_Invoices
+                        SET SubTotal = @SubTotal,
+                            DiscountTotal = @DiscountTotal,
+                            TaxTotal = @TaxTotal,
+                            GrandTotal = @GrandTotal,
+                            BillingPeriodStart = @BillingPeriodStart,
+                            BillingPeriodEnd = @BillingPeriodEnd,
+                            AdvanceRentMonths = @AdvanceRentMonths,
+                            SecurityDepositAmount = @SecurityDepositAmount,
+                            UpdatedOn = SYSUTCDATETIME()
+                        WHERE Id = @InvoiceId;";
+                    using (var upCmd = new SqlCommand(updateSql, conn))
+                    {
+                        upCmd.Parameters.AddWithValue("@InvoiceId", existingId);
+                        upCmd.Parameters.AddWithValue("@SubTotal", expectedSubtotal);
+                        upCmd.Parameters.AddWithValue("@DiscountTotal", appliedDiscount);
+                        upCmd.Parameters.AddWithValue("@TaxTotal", taxTotal);
+                        upCmd.Parameters.AddWithValue("@GrandTotal", expectedGrandTotal);
+                        upCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
+                        upCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
+                        upCmd.Parameters.AddWithValue("@AdvanceRentMonths", billingMonths);
+                        upCmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDeposit);
+                        await upCmd.ExecuteNonQueryAsync();
+                    }
+
+                    using (var delCmd = new SqlCommand("DELETE FROM dbo.WN_InvoiceLines WHERE InvoiceId = @InvoiceId;", conn))
+                    {
+                        delCmd.Parameters.AddWithValue("@InvoiceId", existingId);
+                        await delCmd.ExecuteNonQueryAsync();
+                    }
+
+                    string insertLineSql = @"
+                        INSERT INTO dbo.WN_InvoiceLines (
+                            InvoiceId, ChargeTypeId, Description, Quantity,
+                            UnitPrice, DiscountAmount, TaxRate, SortOrder
+                        )
+                        VALUES (
+                            @InvoiceId, 1, @Description, 1,
+                            @UnitPrice, @DiscountAmount, 0.016, 1
+                        );";
+                    using (var insCmd = new SqlCommand(insertLineSql, conn))
+                    {
+                        insCmd.Parameters.AddWithValue("@InvoiceId", existingId);
+                        insCmd.Parameters.AddWithValue("@Description", mainLineDescription);
+                        insCmd.Parameters.AddWithValue("@UnitPrice", grossAdvanceRent);
+                        insCmd.Parameters.AddWithValue("@DiscountAmount", appliedDiscount);
+                        await insCmd.ExecuteNonQueryAsync();
+                    }
+
+                    if (securityDeposit > 0)
+                    {
+                        string insertDepSql = @"
+                            INSERT INTO dbo.WN_InvoiceLines (
+                                InvoiceId, ChargeTypeId, Description, Quantity,
+                                UnitPrice, DiscountAmount, TaxRate, SortOrder
+                            )
+                            VALUES (
+                                @InvoiceId, 2, @Description, @Quantity,
+                                @UnitPrice, 0, 0, 2
+                            );";
+                        using (var depCmd = new SqlCommand(insertDepSql, conn))
+                        {
+                            depCmd.Parameters.AddWithValue("@InvoiceId", existingId);
+                            depCmd.Parameters.AddWithValue("@Description", $"Security Deposit ({secMonths} Month(s) Refundable - {spaceName})");
+                            depCmd.Parameters.AddWithValue("@Quantity", secMonths > 0 ? secMonths : 1);
+                            depCmd.Parameters.AddWithValue("@UnitPrice", secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2) : securityDeposit);
+                            await depCmd.ExecuteNonQueryAsync();
+                        }
+                    }
+
+                    return await SendInvoiceEmail(existingId);
+                }
 
                 var dto = new CreateCustomInvoiceDto
                 {
@@ -695,7 +945,7 @@ namespace WorkNest.API.Controllers
                 {
                     dto.Lines.Add(new CreateCustomInvoiceLineDto
                     {
-                        Description = $"Advance Rent for {periodStart:MMMM d, yyyy} to {periodEnd:MMMM d, yyyy}",
+                        Description = mainLineDescription,
                         Quantity = 1,
                         UnitPrice = grossAdvanceRent,
                         DiscountAmount = appliedDiscount,
@@ -709,8 +959,8 @@ namespace WorkNest.API.Controllers
                     dto.Lines.Add(new CreateCustomInvoiceLineDto
                     {
                         Description = $"Security Deposit ({secMonths} Month(s) Refundable - {spaceName})",
-                        Quantity = 1,
-                        UnitPrice = securityDeposit,
+                        Quantity = secMonths > 0 ? secMonths : 1,
+                        UnitPrice = secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2) : securityDeposit,
                         DiscountAmount = 0,
                         TaxRate = 0,
                         ChargeTypeId = 2
@@ -864,7 +1114,7 @@ namespace WorkNest.API.Controllers
                 {
                     dto.Lines.Add(new CreateCustomInvoiceLineDto
                     {
-                        Description = $"Advance Rent for {periodStart:MMMM d, yyyy} to {periodEnd:MMMM d, yyyy}",
+                        Description = $"Rent for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}",
                         Quantity = 1,
                         UnitPrice = grossAdvanceRent,
                         DiscountAmount = appliedDiscount,

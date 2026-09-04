@@ -45,7 +45,7 @@ namespace WorkNest.Application.Interfaces
         Task CancelBookingAsync(int id, string? userEmail, string? cancelReason, int? updatedById);
         Task ReassignBookingAsync(int id, int newSpaceId, int newPricingId, string? userEmail, int? updatedById);
 
-        // -¢--‚¬-¢--‚¬ Quotation -¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬-¢--‚¬
+        // --- Quotation ---
         Task<IDictionary<string, object?>> InsertQuotationAsync(
             string quotationNumber,
             DateTime validUntil,
@@ -201,6 +201,13 @@ namespace WorkNest.Application.Interfaces
         // --- Booking ---
         Task<(IDictionary<string, object?>? Header, IEnumerable<IDictionary<string, object?>> Lines)> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail);
         Task<(IDictionary<string, object?>? ChallanHeader, IEnumerable<IDictionary<string, object?>> Lines)> GetChallanWithDetailsAsync(int bookingId);
+        // --- AccessCard ---
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAccessCardsAsync(int page, int limit, string? search, int? bookingId, int? customerId, int? spaceId, int? status);
+        Task<IDictionary<string, object?>?> GetAccessCardByIdAsync(string id);
+        Task<IDictionary<string, object?>> CreateAccessCardAsync(int locationId, int customerId, int bookingId, int spaceId, string? cardNumber, DateTime startDate, DateTime endDate, int status, int? createdById);
+        Task UpdateAccessCardAsync(string id, int? locationId, int? customerId, int? bookingId, int? spaceId, string? cardNumber, DateTime? startDate, DateTime? endDate, int? status, int? updatedById);
+        Task DeleteAccessCardAsync(string id);
+        Task GenerateAccessCardsForBookingDbAsync(int bookingId, int? createdById = null);
         Task ExecuteRawSqlAsync(string sql);
     }
 }

@@ -239,6 +239,7 @@ namespace WorkNest.Infrastructure.Repositories
             int? createdById)
         {
             await using var c = await Open();
+            await EnsureQuotationsConvertToBookingSpUpdatedAsync(c);
             await using var cmd = SP("dbo.WN_Quotations_ConvertToBooking", c);
 
             cmd.Parameters.AddWithValue("@QuotationId", quotationId);
@@ -544,7 +545,29 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<IEnumerable<IDictionary<string, object?>>> GetUserHistoryAsync(int userId)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_Users_GetHistory", c);
+            string sql = @"
+                SELECT
+                    b.Id            AS BookingId,
+                    b.IdGUID        AS BookingPublicId,
+                    s.Name          AS SpaceName,
+                    s.Code          AS SpaceCode,
+                    ISNULL(st.Name, st.Description) AS SpaceTypeName,
+                    b.StartOn, b.EndOn,
+                    bs.Label        AS BookingStatus,
+                    bp.Label        AS BillingPeriod,
+                    ISNULL(b.SubtotalAmount, b.TotalAmount) AS RoomPrice,
+                    b.CreatedOn     AS BookedOn
+                FROM dbo.WN_Bookings        b  WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Spaces          s  WITH (NOLOCK) ON s.Id  = b.SpaceId
+                LEFT JOIN dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+                LEFT JOIN dbo.WN_SpacePricing    sp WITH (NOLOCK) ON sp.Id = b.PricingId
+                LEFT JOIN dbo.WN_BillingPeriods  bp WITH (NOLOCK) ON bp.Id = sp.BillingPeriodId
+                LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
+                WHERE b.UserId    = @UserId
+                  AND b.IsDeleted = 0
+                ORDER BY b.CreatedOn DESC;";
+
+            await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@UserId", userId);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
@@ -623,6 +646,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpacesAsync(int page, int limit, string? search)
         {
             await using var c = await Open();
+            await EnsureSpacesGetListSpUpdatedAsync(c);
             await using var cmd = SP("dbo.WN_Spaces_GetList", c);
             cmd.Parameters.AddWithValue("@Page", page);
             cmd.Parameters.AddWithValue("@Limit", limit);
@@ -639,6 +663,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         {
         // --- Space ---
             await using var c = await Open();
+            await EnsureSpacesGetListSpUpdatedAsync(c);
             await using var cmd = SP("dbo.WN_Spaces_GetList", c);
             cmd.Parameters.AddWithValue("@Page", 1);
             cmd.Parameters.AddWithValue("@Limit", 10000);
@@ -738,9 +763,96 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
         // --- Booking ---
 
+        private static bool _bookingColumnsChecked = false;
+        private async Task EnsureBookingColumnsAndBackfillAsync(SqlConnection c)
+        {
+            if (_bookingColumnsChecked) return;
+            try
+            {
+                string sql = @"
+IF EXISTS (SELECT * FROM sys.tables WHERE name = 'WN_Bookings')
+BEGIN
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Bookings') AND name = 'AdvanceRentMonths')
+        ALTER TABLE dbo.WN_Bookings ADD AdvanceRentMonths INT NOT NULL DEFAULT 1;
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Bookings') AND name = 'SecurityDepositMonths')
+        ALTER TABLE dbo.WN_Bookings ADD SecurityDepositMonths INT NOT NULL DEFAULT 0;
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Bookings') AND name = 'SecurityDepositRequired')
+        ALTER TABLE dbo.WN_Bookings ADD SecurityDepositRequired DECIMAL(18,2) NOT NULL DEFAULT 0.00;
+    IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Bookings') AND name = 'SecurityDepositPaid')
+        ALTER TABLE dbo.WN_Bookings ADD SecurityDepositPaid DECIMAL(18,2) NOT NULL DEFAULT 0.00;
+
+    UPDATE dbo.WN_Bookings 
+    SET 
+        AdvanceRentMonths = CASE WHEN ISNULL(AdvanceRentMonths, 0) <= 0 THEN ISNULL(BillingPeriodMonths, 1) ELSE AdvanceRentMonths END,
+        SecurityDepositMonths = CASE WHEN ISNULL(SecurityDepositMonths, 0) <= 0 AND ISNULL(SecurityDepositOverride, 0) > 0 THEN 2 ELSE ISNULL(SecurityDepositMonths, 0) END,
+        SecurityDepositRequired = CASE WHEN ISNULL(SecurityDepositRequired, 0) <= 0 THEN ISNULL(SecurityDepositOverride, ISNULL(SecurityDepositMonths, 0) * ISNULL(MonthlyRent, SubtotalAmount / NULLIF(AdvanceRentMonths, 1))) ELSE SecurityDepositRequired END,
+        SecurityDepositPaid = ISNULL(SecurityDepositPaid, 0.00)
+    WHERE ISNULL(AdvanceRentMonths, 0) <= 0 OR ISNULL(SecurityDepositRequired, 0) <= 0 OR SecurityDepositPaid IS NULL;
+
+    -- Backfill/fix any existing bookings and corresponding invoices where SecurityDepositMonths > 1
+    -- but security deposit was recorded as only 1 month
+    UPDATE b
+    SET b.SecurityDepositRequired = b.SecurityDepositMonths * b.MonthlyRent,
+        b.TotalAmount = b.SubtotalAmount - b.DiscountAmount + ISNULL(i.TaxTotal, 0) + (b.SecurityDepositMonths * b.MonthlyRent)
+    FROM dbo.WN_Bookings b
+    LEFT JOIN dbo.WN_Invoices i ON i.BookingId = b.Id
+    WHERE b.SecurityDepositMonths > 1
+      AND b.MonthlyRent > 0
+      AND b.SecurityDepositOverride IS NULL
+      AND (b.SecurityDepositRequired < (b.SecurityDepositMonths * b.MonthlyRent) OR b.SecurityDepositRequired = b.MonthlyRent);
+
+    UPDATE i
+    SET i.SecurityDepositMonths = b.SecurityDepositMonths,
+        i.SecurityDepositAmount = b.SecurityDepositRequired,
+        i.GrandTotal = i.SubTotal - i.DiscountTotal + i.TaxTotal + b.SecurityDepositRequired
+    FROM dbo.WN_Invoices i
+    JOIN dbo.WN_Bookings b ON b.Id = i.BookingId
+    WHERE b.SecurityDepositMonths > 1
+      AND b.SecurityDepositRequired > 0
+      AND (i.SecurityDepositAmount < b.SecurityDepositRequired OR i.SecurityDepositMonths <> b.SecurityDepositMonths);
+
+    UPDATE il
+    SET il.Quantity = b.SecurityDepositMonths,
+        il.UnitPrice = b.MonthlyRent,
+        il.Description = 'Security Deposit (' + CAST(b.SecurityDepositMonths AS NVARCHAR(5)) + ' Month(s) Refundable)'
+    FROM dbo.WN_InvoiceLines il
+    JOIN dbo.WN_Invoices i ON i.Id = il.InvoiceId
+    JOIN dbo.WN_Bookings b ON b.Id = i.BookingId
+    WHERE il.ChargeTypeId = 2
+      AND b.SecurityDepositMonths > 1
+      AND b.MonthlyRent > 0
+      AND (il.Quantity < b.SecurityDepositMonths OR (il.Quantity * il.UnitPrice) < b.SecurityDepositRequired);
+
+    UPDATE bd
+    SET bd.SecurityDeposit = b.SecurityDepositRequired
+    FROM dbo.WN_BookingDetails bd
+    JOIN dbo.WN_Bookings b ON b.IdGUID = bd.BookingGuid
+    WHERE b.SecurityDepositMonths > 1
+      AND b.SecurityDepositRequired > 0
+      AND bd.SecurityDeposit < b.SecurityDepositRequired;
+
+    UPDATE p
+    SET p.Amount = b.TotalAmount
+    FROM dbo.WN_Payments p
+    JOIN dbo.WN_Bookings b ON b.Id = p.BookingIdInt OR b.IdGUID = p.BookingId
+    WHERE b.SecurityDepositMonths > 1
+      AND b.TotalAmount > p.Amount
+      AND (p.PaymentStatus = 'Pending' OR p.StatusId = 1);
+END";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+                await EnsureBookingsInsertSpUpdatedAsync(c);
+                await EnsureBookingSummaryViewUpdatedAsync(c);
+                await EnsureInvoiceProceduresUpdatedAsync(c);
+                _bookingColumnsChecked = true;
+            }
+            catch { }
+        }
+
         public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetBookingsAsync(int page, int limit, string? search)
         {
             await using var c = await Open();
+            await EnsureBookingColumnsAndBackfillAsync(c);
             await using var cmd = SP("dbo.WN_Bookings_GetList", c);
             cmd.Parameters.AddWithValue("@Page", page);
             cmd.Parameters.AddWithValue("@Limit", limit);
@@ -754,6 +866,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<IDictionary<string, object?>?> GetBookingByPublicIdAsync(Guid publicId, string? userEmail = null)
         {
             await using var c = await Open();
+            await EnsureBookingColumnsAndBackfillAsync(c);
             await using var cmd = SP("dbo.WN_Bookings_GetByPublicId", c);
             cmd.Parameters.AddWithValue("@PublicId", publicId);
             cmd.Parameters.AddWithValue("@UserEmail", (object?)userEmail ?? DBNull.Value);
@@ -834,6 +947,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null)
         {
             await using var c = await Open();
+            await EnsureBookingColumnsAndBackfillAsync(c);
             await using var cmd = SP("dbo.WN_Bookings_Insert", c);
             cmd.Parameters.AddWithValue("@UserId", userId);
             cmd.Parameters.AddWithValue("@SpaceId", spaceId);
@@ -876,21 +990,78 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     discountAmount = subtotal * (discountValue / 100m);
                 }
 
-                var updateParts = new List<string> { "DiscountType = @DT", "DiscountAmount = @DA" };
+                int advRentM = advanceRentMonths ?? billingPeriodMonths ?? 1;
+                int secDepM = securityDepositMonths ?? 0;
+                decimal monthlyRent = result.TryGetValue("MonthlyRent", out var mrObj) && mrObj is not null ? Convert.ToDecimal(mrObj) : 0m;
+                if (monthlyRent == 0m && result.TryGetValue("SubtotalAmount", out var subObj) && subObj is not null)
+                {
+                    monthlyRent = Convert.ToDecimal(subObj) / Math.Max(1, advRentM);
+                }
+                decimal secDepReq = securityDepositOverride ?? (secDepM * monthlyRent);
+
+                var updateParts = new List<string> {
+                    "DiscountType = @DT",
+                    "DiscountAmount = @DA",
+                    "AdvanceRentMonths = @ARM",
+                    "SecurityDepositMonths = @SDM",
+                    "SecurityDepositRequired = @SDR",
+                    "SecurityDepositPaid = ISNULL(SecurityDepositPaid, 0.00)"
+                };
+                if (billingPeriodMonths.HasValue) updateParts.Add("BillingPeriodMonths = @BPM");
                 if (securityDepositOverride.HasValue) updateParts.Add("SecurityDepositOverride = @SDO");
                 if (floorId.HasValue) updateParts.Add("FloorId = @FID");
 
-                var updateSql = $"UPDATE dbo.WN_Bookings SET {string.Join(", ", updateParts)} WHERE Id = @BID";
+                var updateSql = $@"
+                    UPDATE dbo.WN_Bookings 
+                    SET {string.Join(", ", updateParts)},
+                        TotalAmount = CASE WHEN @SDR > 0 THEN SubtotalAmount - @DA + ISNULL((SELECT TOP 1 TaxTotal FROM dbo.WN_Invoices WHERE BookingId = @BID), 0) + @SDR ELSE TotalAmount END
+                    WHERE Id = @BID;
+
+                    UPDATE dbo.WN_BookingDetails
+                    SET SecurityDeposit = @SDR
+                    WHERE BookingGuid = (SELECT IdGUID FROM dbo.WN_Bookings WHERE Id = @BID);
+
+                    UPDATE dbo.WN_BookingLines
+                    SET Quantity = CASE WHEN @SDM > 0 THEN @SDM ELSE 1 END,
+                        UnitPrice = CASE WHEN @SDM > 0 THEN @SDR / @SDM ELSE @SDR END
+                    WHERE BookingId = @BID AND ChargeTypeId = 2;
+
+                    UPDATE dbo.WN_Invoices
+                    SET SecurityDepositAmount = @SDR,
+                        SecurityDepositMonths = @SDM,
+                        GrandTotal = SubTotal - DiscountTotal + TaxTotal + @SDR
+                    WHERE BookingId = @BID;
+
+                    UPDATE dbo.WN_InvoiceLines
+                    SET Quantity = CASE WHEN @SDM > 0 THEN @SDM ELSE 1 END,
+                        UnitPrice = CASE WHEN @SDM > 0 THEN @SDR / @SDM ELSE @SDR END,
+                        Description = CASE WHEN @SDM > 1 THEN 'Security Deposit (' + CAST(@SDM AS NVARCHAR(5)) + ' Month(s) Refundable)' ELSE 'Security Deposit (Refundable)' END
+                    WHERE InvoiceId IN (SELECT Id FROM dbo.WN_Invoices WHERE BookingId = @BID) AND ChargeTypeId = 2;
+                ";
                 await using var upd = new SqlCommand(updateSql, c);
                 upd.Parameters.AddWithValue("@DT", discountType);
                 upd.Parameters.AddWithValue("@DA", discountAmount);
+                upd.Parameters.AddWithValue("@ARM", advRentM);
+                upd.Parameters.AddWithValue("@SDM", secDepM);
+                upd.Parameters.AddWithValue("@SDR", secDepReq);
                 upd.Parameters.AddWithValue("@BID", bookingId);
+                if (billingPeriodMonths.HasValue) upd.Parameters.AddWithValue("@BPM", billingPeriodMonths.Value);
                 if (securityDepositOverride.HasValue) upd.Parameters.AddWithValue("@SDO", securityDepositOverride.Value);
                 if (floorId.HasValue) upd.Parameters.AddWithValue("@FID", floorId.Value);
                 await upd.ExecuteNonQueryAsync();
 
                 result["DiscountType"] = discountType;
                 result["DiscountAmount"] = discountAmount;
+                result["AdvanceRentMonths"] = advRentM;
+                result["SecurityDepositMonths"] = secDepM;
+                result["SecurityDepositRequired"] = secDepReq;
+                result["SecurityDepositPaid"] = 0.00m;
+                if (result.TryGetValue("TotalAmount", out var curTotalObj) && curTotalObj is not null)
+                {
+                    decimal sub = result.TryGetValue("SubtotalAmount", out var saVal) && saVal is not null ? Convert.ToDecimal(saVal) : 0m;
+                    decimal tax = result.TryGetValue("TaxAmount", out var taVal) && taVal is not null ? Convert.ToDecimal(taVal) : 0m;
+                    result["TotalAmount"] = (sub - discountAmount) + tax + secDepReq;
+                }
 
                 // Ensure WN_Payments entry is created for this booking cycle
                 try
@@ -1753,6 +1924,1119 @@ END";
             catch { }
         }
 
+        private async Task EnsureSpacesGetListSpUpdatedAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+CREATE OR ALTER PROCEDURE [dbo].[WN_Spaces_GetList]
+    @Page        INT           = 1,
+    @Limit       INT           = 20,
+    @Search      NVARCHAR(255) = NULL,
+    @LocationId  INT           = NULL,
+    @SpaceTypeId INT           = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Offset INT = (@Page - 1) * @Limit;
+
+    SELECT
+        s.Id, s.IdGUID AS PublicId, s.Code, s.Name, s.Description,
+        s.LocationId, l.Name AS LocationName,
+        s.FloorId, f.Name AS FloorName, f.FloorNumber,
+        s.SpaceTypeId, st.Name AS SpaceTypeName,
+        sc.Code AS CategoryCode, sc.Label AS CategoryLabel,
+        s.Capacity, s.ImageUrl, s.IsActive,
+        CASE
+            WHEN s.IsActive = 0 THEN 'Inactive'
+            WHEN EXISTS (
+                SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
+                WHERE b.SpaceId = s.Id
+                  AND b.BookingStatusId IN (1, 2)
+                  AND b.EndOn >= SYSUTCDATETIME()
+                  AND (b.IsDeleted IS NULL OR b.IsDeleted = 0)
+            ) THEN 'Booked'
+            ELSE 'Available'
+        END AS Status,
+        (
+            SELECT MAX(b.EndOn)
+            FROM dbo.WN_Bookings b WITH (NOLOCK)
+            WHERE b.SpaceId = s.Id
+              AND b.BookingStatusId IN (1, 2)
+              AND b.EndOn >= SYSUTCDATETIME()
+              AND (b.IsDeleted IS NULL OR b.IsDeleted = 0)
+        ) AS BookedTill,
+        s.Price, s.BillingPeriodId, bp.Code AS BillingPeriodCode, bp.Label AS BillingPeriodLabel,
+        s.Price AS SeatPrice, s.Price AS RoomPrice,
+        s.Amenities,
+        COUNT(*) OVER() AS TotalCount
+    FROM  dbo.WN_Spaces          s  WITH (NOLOCK)
+    JOIN  dbo.WN_Locations       l  WITH (NOLOCK) ON l.Id  = s.LocationId
+    JOIN  dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+    JOIN  dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
+    LEFT JOIN dbo.WN_Floors      f  WITH (NOLOCK) ON f.Id  = s.FloorId
+    LEFT JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = s.BillingPeriodId
+    WHERE (@Search IS NULL
+            OR s.Name LIKE '%' + @Search + '%'
+            OR s.Code LIKE '%' + @Search + '%')
+      AND (@LocationId  IS NULL OR s.LocationId  = @LocationId)
+      AND (@SpaceTypeId IS NULL OR s.SpaceTypeId = @SpaceTypeId)
+    ORDER BY s.Id DESC
+    OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+END";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
+        private async Task EnsureQuotationsConvertToBookingSpUpdatedAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+CREATE OR ALTER PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
+    @QuotationId INT,
+    @CreatedById INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        DECLARE @CustomerId INT, @SpaceId INT, @StartOn DATETIME2, @EndOn DATETIME2, 
+                @Subtotal DECIMAL(18,2), @DiscountPct DECIMAL(5,2), @DiscountType NVARCHAR(20), 
+                @DiscountVal DECIMAL(18,2), @SecDep DECIMAL(18,2), @FloorId INT, @BPM INT, 
+                @SupportChargesId TINYINT;
+
+        SELECT 
+            @CustomerId = CustomerId,
+            @SpaceId = SpaceId,
+            @StartOn = StartDateTime,
+            @EndOn = EndDateTime,
+            @Subtotal = SubtotalAmount,
+            @DiscountPct = ISNULL(DiscountPercentage, 0.0),
+            @DiscountType = ISNULL(DiscountType, 'Percentage'),
+            @DiscountVal = ISNULL(DiscountAmount, 0.0),
+            @SecDep = SecurityDeposit,
+            @FloorId = FloorId,
+            @BPM = ISNULL(BillingPeriodMonths, 3),
+            @SupportChargesId = ISNULL(SupportChargesId, 4)
+        FROM dbo.WN_Quotations
+        WHERE Id = @QuotationId;
+
+        IF @CustomerId IS NULL
+            RAISERROR('Quotation not found.', 16, 1);
+
+        DECLARE @UserId INT, @CustomerEmail NVARCHAR(255), @CustomerFirstName NVARCHAR(100),
+                @CustomerLastName NVARCHAR(100), @CustomerPhone NVARCHAR(50), @CustomerCnic NVARCHAR(50),
+                @CustomerAddress NVARCHAR(500), @CustomerCityId INT, @CustomerNotes NVARCHAR(1000),
+                @CustomerCode NVARCHAR(20);
+
+        SELECT TOP 1 
+            @UserId = UserId,
+            @CustomerEmail = Email,
+            @CustomerFirstName = FirstName,
+            @CustomerLastName = LastName,
+            @CustomerPhone = PhoneNumber,
+            @CustomerCnic = CnicOrPassport,
+            @CustomerAddress = Address,
+            @CustomerCityId = CityId,
+            @CustomerNotes = Notes,
+            @CustomerCode = Code
+        FROM dbo.WN_Customers
+        WHERE Id = @CustomerId;
+
+        -- Validate UserId against WN_Users
+        IF @UserId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Users WHERE Id = @UserId)
+        BEGIN
+            SET @UserId = NULL;
+        END
+
+        IF @UserId IS NULL AND @CustomerEmail IS NOT NULL AND @CustomerEmail <> ''
+        BEGIN
+            SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email = @CustomerEmail;
+        END
+
+        DECLARE @CustFullName NVARCHAR(200) = RTRIM(LTRIM(ISNULL(@CustomerFirstName, '') + ' ' + ISNULL(@CustomerLastName, '')));
+        IF @CustFullName = '' SET @CustFullName = ISNULL(@CustomerFirstName, 'Customer');
+
+        DECLARE @InsertResult TABLE (
+            BookingId INT,
+            BookingPublicId UNIQUEIDENTIFIER,
+            ChallanNumber NVARCHAR(50),
+            ChallanValidUntil DATETIME,
+            SubtotalAmount DECIMAL(18,2),
+            TaxAmount DECIMAL(18,2),
+            TotalAmount DECIMAL(18,2),
+            ErrorMessage NVARCHAR(MAX)
+        );
+
+        INSERT INTO @InsertResult
+        EXEC dbo.WN_Bookings_Insert
+            @UserId = @UserId,
+            @SpaceId = @SpaceId,
+            @PricingId = 0,
+            @StartOn = @StartOn,
+            @EndOn = @EndOn,
+            @Notes = 'Converted from Quotation',
+            @CreatedById = @CreatedById,
+            @UserEmail = @CustomerEmail,
+            @CustomerEmail = @CustomerEmail,
+            @CustomerFirstName = @CustFullName,
+            @CustomerLastName = @CustomerLastName,
+            @CustomerPhone = @CustomerPhone,
+            @CustomerCnic = @CustomerCnic,
+            @CustomerAddress = @CustomerAddress,
+            @CustomerCityId = @CustomerCityId,
+            @CustomerNotes = @CustomerNotes,
+            @DiscountPercentage = @DiscountPct,
+            @DiscountAmount = @DiscountVal,
+            @DiscountType = @DiscountType,
+            @BillingPeriodMonths = @BPM,
+            @SupportChargesId = @SupportChargesId;
+
+        DECLARE @NewBookingId INT;
+        DECLARE @NewBookingPublicId UNIQUEIDENTIFIER;
+        DECLARE @ErrMsg NVARCHAR(MAX);
+
+        SELECT TOP 1 
+            @NewBookingId = BookingId,
+            @NewBookingPublicId = BookingPublicId,
+            @ErrMsg = ErrorMessage
+        FROM @InsertResult;
+
+        IF @NewBookingId IS NULL OR @NewBookingId <= 0
+        BEGIN
+            RAISERROR(@ErrMsg, 16, 1);
+        END
+
+        -- Ensure CustomerCode and details on Booking are properly linked to the original Customer
+        UPDATE dbo.WN_Bookings
+        SET CustomerCode = ISNULL(@CustomerCode, CustomerCode),
+            UserId = @UserId
+        WHERE Id = @NewBookingId;
+
+        UPDATE dbo.WN_BookingDetails
+        SET CustomerCode = ISNULL(@CustomerCode, CustomerCode),
+            CustomerName = @CustFullName,
+            CustomerEmail = @CustomerEmail
+        WHERE BookingGuid = @NewBookingPublicId;
+
+        UPDATE dbo.WN_Quotations
+        SET Status = 'Converted',
+            BookingId = @NewBookingId,
+            IsActive = 0,
+            UpdatedDate = SYSUTCDATETIME(),
+            UpdatedById = @CreatedById
+        WHERE Id = @QuotationId;
+
+        COMMIT TRANSACTION;
+
+        SELECT 
+            @NewBookingId AS BookingId,
+            @NewBookingPublicId AS BookingPublicId,
+            @QuotationId AS QuotationId,
+            'Converted' AS Status,
+            NULL AS ErrorMessage;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
+        private async Task EnsureBookingSummaryViewUpdatedAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+CREATE OR ALTER VIEW [dbo].[VW_WN_BookingSummary] AS
+    SELECT 
+        b.Id                      AS BookingId, 
+        b.IdGUID                  AS BookingPublicId, 
+        b.IdGUID                  AS BookingIdGuid, 
+        b.StartOn                 AS StartOn,
+        b.StartOn                 AS ContractStartDate,
+        b.EndOn                   AS EndOn,
+        b.EndOn                   AS ContractEndDate,
+        b.BookingStatusId, 
+        bs.Code                   AS BookingStatusCode, 
+        bs.Label                  AS BookingStatusLabel,
+        b.Notes, 
+        b.CancelReason, 
+        b.CreatedOn               AS BookedOn,
+        u.Id                      AS UserId, 
+        u.IdGUID                  AS UserPublicId, 
+        u.IdGUID                  AS UserIdGuid, 
+        COALESCE(
+            NULLIF(RTRIM(LTRIM(ISNULL(cust.FirstName, '') + ' ' + ISNULL(cust.LastName, ''))), ''),
+            NULLIF(u.Name, ''),
+            'Customer'
+        )                         AS UserName, 
+        COALESCE(NULLIF(cust.Email, ''), u.Email) AS UserEmail,
+        COALESCE(
+            NULLIF(RTRIM(LTRIM(ISNULL(cust.FirstName, '') + ' ' + ISNULL(cust.LastName, ''))), ''),
+            NULLIF(u.Name, ''),
+            'Customer'
+        )                         AS CustomerName, 
+        COALESCE(NULLIF(cust.Email, ''), u.Email) AS CustomerEmail,
+        b.CustomerCode            AS CustomerCode,
+        cust.PhoneNumber          AS CustomerPhone,
+        s.Id                      AS SpaceId, 
+        s.IdGUID                  AS SpacePublicId, 
+        s.IdGUID                  AS SpaceIdGuid, 
+        s.Code                    AS SpaceCode, 
+        ISNULL(NULLIF(s.Code, ''), s.Name) AS SpaceNumber,
+        s.Name                    AS SpaceName, 
+        s.Capacity                AS SpaceCapacity,
+        st.Id                     AS SpaceTypeId, 
+        st.Name                   AS SpaceTypeName,
+        l.Id                      AS LocationId, 
+        l.Name                    AS LocationName,
+        br.Id                     AS BranchId, 
+        br.[Description]          AS BranchName,
+        co.Id                     AS CompanyId, 
+        co.CompanyName            AS CompanyName,
+        ISNULL(sp.SeatPrice, 0.0) AS SeatPrice,
+        
+        CASE 
+          WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0 
+          THEN DATEDIFF(month, b.StartOn, b.EndOn)
+          ELSE 1 
+        END AS NumberOfMonths,
+        CASE 
+          WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0 
+          THEN DATEDIFF(month, b.StartOn, b.EndOn)
+          ELSE 1 
+        END AS ContractDuration,
+
+        CAST(
+          ISNULL(
+            NULLIF(
+              CASE 
+                WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+                THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0)
+                ELSE ISNULL(sp.SeatPrice, 0.0)
+              END, 0.0),
+            CASE 
+              WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+              THEN ISNULL(b.SubtotalAmount, b.TotalAmount) / DATEDIFF(month, b.StartOn, b.EndOn)
+              ELSE ISNULL(b.SubtotalAmount, ISNULL(b.TotalAmount, 35000.00))
+            END
+          ) AS DECIMAL(18,2)
+        ) AS MonthlyRent,
+
+        CASE 
+          WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+          THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0)
+          ELSE ISNULL(sp.SeatPrice, 0.0)
+        END AS RoomPrice,
+
+        ISNULL(
+          NULLIF(inv_meta.BillingPeriodMonths, 0),
+          CASE 
+            WHEN bp.Code = 'Quarterly' OR bp.Code = '3 Months' OR bp.Label LIKE '%3 Month%' THEN 3
+            WHEN bp.Code = 'SemiAnnual' OR bp.Code = '6 Months' OR bp.Label LIKE '%6 Month%' THEN 6
+            WHEN bp.Code = 'BiMonthly' OR bp.Code = '2 Months' OR bp.Label LIKE '%2 Month%' THEN 2
+            WHEN bp.Code = 'Annual' OR bp.Code = '12 Months' OR bp.Label LIKE '%12 Month%' THEN 12
+            ELSE 1
+          END
+        ) AS BillingPeriodMonths,
+
+        bp.Code                   AS BillingPeriodCode, 
+        ISNULL(bp.Label, CAST(ISNULL(inv_meta.BillingPeriodMonths, 1) AS NVARCHAR(10)) + ' Month(s)') AS BillingPeriodLabel,
+        ISNULL(bp.Label, CAST(ISNULL(inv_meta.BillingPeriodMonths, 1) AS NVARCHAR(10)) + ' Month(s)') AS BillingPeriod,
+
+        CAST(
+          COALESCE(
+            NULLIF(b.SecurityDepositRequired, 0),
+            NULLIF(inv_meta.SecurityDepositAmount, 0),
+            CASE 
+              WHEN ISNULL(b.SecurityDepositMonths, 0) > 0 
+              THEN b.SecurityDepositMonths * ISNULL(NULLIF(sp.SeatPrice * s.Capacity, 0), 35000.00 * ISNULL(s.Capacity, 1))
+              WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private') 
+              THEN 2 * ISNULL(NULLIF(sp.SeatPrice * s.Capacity, 0), 35000.00 * ISNULL(s.Capacity, 1))
+              ELSE 0.0
+            END
+          ) AS DECIMAL(18,2)
+        ) AS SecurityDeposit,
+
+        CAST(
+          (
+            ISNULL(
+              NULLIF(
+                CASE 
+                  WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+                  THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0)
+                  ELSE ISNULL(sp.SeatPrice, 0.0)
+                END, 0.0),
+              CASE 
+                WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+                THEN ISNULL(b.SubtotalAmount, b.TotalAmount) / DATEDIFF(month, b.StartOn, b.EndOn)
+                ELSE ISNULL(b.SubtotalAmount, ISNULL(b.TotalAmount, 35000.00))
+              END
+            ) * ISNULL(
+                  NULLIF(inv_meta.BillingPeriodMonths, 0),
+                  CASE 
+                    WHEN bp.Code = 'Quarterly' OR bp.Code = '3 Months' OR bp.Label LIKE '%3 Month%' THEN 3
+                    WHEN bp.Code = 'SemiAnnual' OR bp.Code = '6 Months' OR bp.Label LIKE '%6 Month%' THEN 6
+                    WHEN bp.Code = 'BiMonthly' OR bp.Code = '2 Months' OR bp.Label LIKE '%2 Month%' THEN 2
+                    WHEN bp.Code = 'Annual' OR bp.Code = '12 Months' OR bp.Label LIKE '%12 Month%' THEN 12
+                    ELSE 1
+                  END
+                )
+          ) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))
+          AS DECIMAL(18,2)
+        ) AS CurrentCycleAmount,
+
+        CAST(
+          ISNULL(
+            NULLIF(b.TotalAmount, 0.0),
+            (
+              (
+                ISNULL(
+                  NULLIF(
+                    CASE 
+                      WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+                      THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0)
+                      ELSE ISNULL(sp.SeatPrice, 0.0)
+                    END, 0.0),
+                  CASE 
+                    WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+                    THEN ISNULL(b.SubtotalAmount, b.TotalAmount) / DATEDIFF(month, b.StartOn, b.EndOn)
+                    ELSE ISNULL(b.SubtotalAmount, ISNULL(b.TotalAmount, 35000.00))
+                  END
+                ) * CASE 
+                      WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0 
+                      THEN DATEDIFF(month, b.StartOn, b.EndOn)
+                      ELSE 1 
+                    END
+              ) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))
+            ) + COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(inv_meta.SecurityDepositAmount, 0), ISNULL(sp.SecurityDeposit, 0.0))
+          ) AS DECIMAL(18,2)
+        ) AS TotalContractAmount,
+
+        ISNULL(b.TotalAmount, 0.0) AS TotalAmount,
+        CAST(ISNULL(inv_paid.PaidTotal, 0.0) AS DECIMAL(18,2)) AS TotalPaidAmount,
+
+        CAST(
+          CASE 
+            WHEN ISNULL(
+                   NULLIF(b.TotalAmount, 0.0),
+                   ((ISNULL(NULLIF(CASE WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private') THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0) ELSE ISNULL(sp.SeatPrice, 0.0) END, 0.0), 35000.00) * CASE WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0 THEN DATEDIFF(month, b.StartOn, b.EndOn) ELSE 1 END) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))) + COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(inv_meta.SecurityDepositAmount, 0), ISNULL(sp.SecurityDeposit, 0.0))
+                 ) - ISNULL(inv_paid.PaidTotal, 0.0) > 0
+            THEN ISNULL(
+                   NULLIF(b.TotalAmount, 0.0),
+                   ((ISNULL(NULLIF(CASE WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private') THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0) ELSE ISNULL(sp.SeatPrice, 0.0) END, 0.0), 35000.00) * CASE WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0 THEN DATEDIFF(month, b.StartOn, b.EndOn) ELSE 1 END) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))) + COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(inv_meta.SecurityDepositAmount, 0), ISNULL(sp.SecurityDeposit, 0.0))
+                 ) - ISNULL(inv_paid.PaidTotal, 0.0)
+            ELSE 0.0
+          END AS DECIMAL(18,2)
+        ) AS BalanceLeft,
+
+        CASE 
+          WHEN b.StartOn IS NOT NULL THEN
+            CASE 
+              WHEN inv_paid.PaidCyclesCount > 0 THEN
+                DATEADD(month, (inv_paid.PaidCyclesCount * ISNULL(NULLIF(inv_meta.BillingPeriodMonths, 0), 1)), b.StartOn)
+              ELSE
+                DATEADD(month, ISNULL(NULLIF(inv_meta.BillingPeriodMonths, 0), 1), b.StartOn)
+            END
+          ELSE ch.ValidUntil
+        END AS NextBillDueDate,
+
+        CASE 
+          WHEN b.StartOn IS NOT NULL THEN
+            CASE 
+              WHEN inv_paid.PaidCyclesCount > 0 THEN
+                DATEADD(month, (inv_paid.PaidCyclesCount * ISNULL(NULLIF(inv_meta.BillingPeriodMonths, 0), 1)), b.StartOn)
+              ELSE
+                DATEADD(month, ISNULL(NULLIF(inv_meta.BillingPeriodMonths, 0), 1), b.StartOn)
+            END
+          ELSE ch.ValidUntil
+        END AS NextBillingDate,
+
+        ISNULL(b.DiscountPercentage, 0.0) AS DiscountPercentage,
+        ISNULL(b.DiscountAmount, 0.0)     AS DiscountAmount,
+        ISNULL(b.SubtotalAmount, 0.0)     AS SubtotalAmount,
+        ch.ChallanNumber, 
+        ch.ValidUntil             AS ChallanValidUntil, 
+        ch.StatusId               AS ChallanStatusId,
+        ISNULL(b.SecurityDepositMonths, 0) AS SecurityDepositMonths,
+        ISNULL(b.SecurityDepositRequired, 0.00) AS SecurityDepositRequired,
+        ISNULL(b.SecurityDepositPaid, 0.00) AS SecurityDepositPaid,
+        ISNULL(b.AdvanceRentMonths, 1) AS AdvanceRentMonths
+
+    FROM       [dbo].[WN_Bookings]        b
+    LEFT JOIN  [dbo].[WN_Users]           u    ON u.Id  = b.UserId
+    LEFT JOIN  [dbo].[WN_Customers]       cust ON cust.Code = b.CustomerCode OR (b.CustomerCode IS NULL AND cust.UserId = b.UserId)
+    LEFT JOIN  [dbo].[WN_Spaces]          s    ON s.Id  = b.SpaceId
+    LEFT JOIN  [dbo].[WN_SpaceTypes]      st   ON st.Id = s.SpaceTypeId
+    LEFT JOIN  [dbo].[WN_SpaceCategories] sc   ON sc.Id = st.CategoryId
+    LEFT JOIN  [dbo].[WN_Locations]       l    ON l.Id  = s.LocationId
+    LEFT JOIN  [dbo].[Branches]           br   ON br.Id = l.BranchId
+    LEFT JOIN  [dbo].[Company]            co   ON co.Id = br.CompanyId
+    LEFT JOIN  [dbo].[WN_SpacePricing]    sp   ON sp.Id = b.PricingId
+    LEFT JOIN  [dbo].[WN_BillingPeriods]  bp   ON bp.Id = sp.BillingPeriodId
+    LEFT JOIN  [dbo].[WN_BookingStatuses] bs   ON bs.Id = b.BookingStatusId
+
+    OUTER APPLY (
+        SELECT TOP 1 
+            BillingPeriodMonths,
+            SecurityDepositAmount,
+            BillingPeriodStart,
+            BillingPeriodEnd
+        FROM dbo.WN_Invoices
+        WHERE BookingId = b.Id AND IsDeleted = 0
+        ORDER BY Id ASC
+    ) inv_meta
+
+    OUTER APPLY (
+        SELECT 
+            SUM(ISNULL(PaidTotal, 0.0)) AS PaidTotal,
+            COUNT(CASE WHEN StatusId = 2 OR StatusId = 1 THEN 1 END) AS PaidCyclesCount
+        FROM dbo.WN_Invoices
+        WHERE BookingId = b.Id AND IsDeleted = 0
+    ) inv_paid
+
+    OUTER APPLY (
+        SELECT TOP 1 
+            ChallanNumber,
+            ValidUntil,
+            StatusId
+        FROM dbo.WN_Challans
+        WHERE BookingId = b.Id
+        ORDER BY Id DESC
+    ) ch;";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
+        private async Task EnsureBookingsInsertSpUpdatedAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_Insert]
+    @UserId                  INT,
+    @SpaceId                 INT,
+    @PricingId               INT,
+    @StartOn                 DATETIME2,
+    @EndOn                   DATETIME2,
+    @Notes                   NVARCHAR(MAX) = NULL,
+    @CreatedById             INT           = NULL,
+    @UserEmail               NVARCHAR(256) = NULL,
+    @CustomerEmail           NVARCHAR(255) = NULL,
+    @CustomerFirstName       NVARCHAR(100) = NULL,
+    @CustomerLastName        NVARCHAR(100) = NULL,
+    @CustomerPhone           NVARCHAR(50)  = NULL,
+    @CustomerCnic            NVARCHAR(50)  = NULL,
+    @CustomerAddress         NVARCHAR(500) = NULL,
+    @CustomerCityId          INT           = NULL,
+    @CustomerNotes           NVARCHAR(1000) = NULL,
+    @DiscountPercentage      DECIMAL(5,2)  = 0,
+    @DiscountAmount          DECIMAL(18,2) = 0,
+    @DiscountType            NVARCHAR(20)  = 'Percentage',
+    @BillingPeriodMonths     INT           = NULL,
+    @SecurityDepositMonths   INT           = NULL,
+    @AdvanceRentMonths       INT           = NULL,
+    @SupportChargesId        TINYINT       = NULL,
+    @Capacity                SMALLINT      = NULL,
+    @OverrideSubtotal        DECIMAL(18,2) = NULL,
+    @OverrideTax             DECIMAL(18,2) = NULL,
+    @OverrideTotal           DECIMAL(18,2) = NULL,
+    @OverrideDuration        DECIMAL(18,2) = NULL,
+    @OverrideUnitPrice       DECIMAL(18,2) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        DECLARE @CapOverride SMALLINT = @Capacity;
+        DECLARE @CategoryCode NVARCHAR(50), @SpaceGuid UNIQUEIDENTIFIER, @SpaceCode NVARCHAR(50), @SpaceName NVARCHAR(255), @LocationId INT;
+
+        SELECT 
+            @Capacity     = ISNULL(@CapOverride, s.Capacity),
+            @CategoryCode = sc.Code,
+            @SpaceGuid    = s.IdGUID,
+            @SpaceCode    = s.Code,
+            @SpaceName    = s.Name,
+            @LocationId   = s.LocationId
+        FROM dbo.WN_Spaces s WITH (NOLOCK)
+        LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+        LEFT JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
+        WHERE s.Id = @SpaceId AND s.IsActive = 1;
+
+        IF @Capacity IS NULL
+        BEGIN
+            SELECT TOP 1 
+                @Capacity   = ISNULL(Capacity, 1), 
+                @SpaceGuid  = IdGUID, 
+                @SpaceCode  = Code, 
+                @SpaceName  = Name,
+                @LocationId = LocationId
+            FROM dbo.WN_Spaces WITH (NOLOCK) WHERE Id = @SpaceId;
+        END
+
+        DECLARE @BillingPeriodCode NVARCHAR(20);
+        IF @CategoryCode IN ('PrivateOffice', 'Private', 'SharedSpace', 'Shared')
+            SET @BillingPeriodCode = 'Monthly';
+        ELSE IF @CategoryCode IN ('ConferenceRoom', 'Conference', 'MeetingRoom', 'Meeting')
+            SET @BillingPeriodCode = 'Daily';
+        ELSE
+            SET @BillingPeriodCode = 'Hourly';
+
+        DECLARE @ResolvedPricingId INT, @SeatPrice DECIMAL(18,4), @SecurityDeposit DECIMAL(18,4);
+
+        SELECT TOP 1 
+            @ResolvedPricingId = sp.Id,
+            @SeatPrice        = sp.SeatPrice,
+            @SecurityDeposit  = sp.SecurityDeposit
+        FROM dbo.WN_SpacePricing sp WITH (NOLOCK)
+        JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = sp.BillingPeriodId
+        WHERE sp.SpaceId       = @SpaceId
+          AND sp.IsActive      = 1
+          AND (bp.Code          = @BillingPeriodCode OR sp.BillingPeriodId > 0)
+          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+        ORDER BY sp.EffectiveFrom DESC;
+
+        IF @SeatPrice IS NULL OR @SeatPrice <= 0
+        BEGIN
+            SELECT TOP 1 
+                @SeatPrice       = CASE 
+                                     WHEN @CategoryCode IN ('PrivateOffice', 'Private') THEN 35000.00
+                                     WHEN @CategoryCode IN ('SharedSpace', 'Shared') THEN 30000.00
+                                     WHEN @CategoryCode IN ('ConferenceRoom', 'Conference', 'MeetingRoom', 'Meeting') THEN 20000.00
+                                     ELSE 6000.00
+                                   END,
+                @SecurityDeposit = CASE 
+                                     WHEN @CategoryCode IN ('PrivateOffice', 'Private') THEN 35000.00 * ISNULL(@Capacity, 1)
+                                     ELSE 0.00
+                                   END
+            FROM dbo.WN_Spaces WITH (NOLOCK) WHERE Id = @SpaceId;
+
+            SET @ResolvedPricingId = ISNULL(@ResolvedPricingId, 0);
+        END
+
+        IF @OverrideUnitPrice IS NOT NULL AND @OverrideUnitPrice > 0
+            SET @SeatPrice = @OverrideUnitPrice;
+
+        IF EXISTS (
+            SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK)
+            WHERE SpaceId         = @SpaceId
+              AND IsDeleted       = 0
+              AND BookingStatusId IN (1, 2)
+              AND @StartOn        < EndOn
+              AND @EndOn          > StartOn
+        )
+        BEGIN
+            ROLLBACK TRANSACTION;
+            SELECT NULL AS BookingId, NULL AS BookingPublicId,
+                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
+                   'Space is not available for the requested period (overlapping booking).' AS ErrorMessage;
+            RETURN;
+        END
+
+        DECLARE @TargetEmail NVARCHAR(255) = ISNULL(@CustomerEmail, @UserEmail);
+        DECLARE @CustomerCode NVARCHAR(20) = NULL;
+
+        IF @TargetEmail IS NOT NULL AND @TargetEmail <> ''
+        BEGIN
+            SELECT TOP 1 @CustomerCode = Code
+            FROM dbo.WN_Customers WITH (UPDLOCK)
+            WHERE Email = @TargetEmail;
+        END
+
+        IF @CustomerCode IS NULL AND @UserId IS NOT NULL AND @UserId > 0
+        BEGIN
+            SELECT TOP 1 @CustomerCode = Code
+            FROM dbo.WN_Customers WITH (UPDLOCK)
+            WHERE UserId = @UserId;
+        END
+
+        IF @CustomerCode IS NULL
+        BEGIN
+            DECLARE @FName NVARCHAR(100) = ISNULL(@CustomerFirstName, 'Customer');
+            DECLARE @LName NVARCHAR(100) = @CustomerLastName;
+            DECLARE @Email NVARCHAR(255) = @TargetEmail;
+            DECLARE @Phone NVARCHAR(50)  = @CustomerPhone;
+
+            IF @Email IS NULL
+            BEGIN
+                SELECT @Email = Email, @FName = ISNULL(@FName, Name)
+                FROM dbo.WN_Users WITH (NOLOCK)
+                WHERE Id = @UserId;
+            END
+
+            DECLARE @NewCustId INT;
+            
+            INSERT INTO dbo.WN_Customers (
+                UserId, FirstName, LastName, Email, PhoneNumber, CnicOrPassport, Address, CityId, IsActive, CreatedAt, Notes
+            )
+            VALUES (
+                @UserId, @FName, @LName, @Email, @Phone, @CustomerCnic, @CustomerAddress, @CustomerCityId, 1, SYSUTCDATETIME(), @CustomerNotes
+            );
+
+            SET @NewCustId = SCOPE_IDENTITY();
+            SELECT @CustomerCode = Code FROM dbo.WN_Customers WHERE Id = @NewCustId;
+        END
+        ELSE
+        BEGIN
+            IF @UserId IS NOT NULL AND @UserId > 0
+            BEGIN
+                UPDATE dbo.WN_Customers
+                SET UserId = @UserId
+                WHERE Code = @CustomerCode AND (UserId IS NULL OR UserId <= 0);
+            END
+        END
+
+        DECLARE @RentAccountId    INT = NULL;
+        DECLARE @DepositAccountId INT = NULL;
+
+        SELECT TOP 1 
+            @RentAccountId    = sp.RentAccountId,
+            @DepositAccountId = sp.DepositAccountId
+        FROM dbo.WN_SpacePricing sp WITH (NOLOCK)
+        WHERE sp.SpaceId = @SpaceId AND sp.IsActive = 1;
+
+        IF @RentAccountId IS NULL
+        BEGIN
+            SELECT TOP 1 
+                @RentAccountId    = RentAccountId,
+                @DepositAccountId = DepositAccountId
+            FROM dbo.WN_SpaceConfig WITH (NOLOCK)
+            WHERE SpaceTypeId = (SELECT SpaceTypeId FROM dbo.WN_Spaces WHERE Id = @SpaceId);
+        END
+
+        IF @RentAccountId IS NULL SET @RentAccountId = 2852;
+        IF @DepositAccountId IS NULL AND (@SecurityDeposit > 0 OR @SecurityDepositMonths > 0) SET @DepositAccountId = 76;
+
+        DECLARE @Duration DECIMAL(18,2) = 1.0;
+        DECLARE @RentAmount DECIMAL(18,2) = 0.0;
+        DECLARE @AdvMonths INT;
+        DECLARE @SecMonths INT;
+        DECLARE @BillPeriodMonths INT;
+        
+        IF @BillingPeriodCode = 'Monthly'
+        BEGIN
+            DECLARE @Months INT = DATEDIFF(month, @StartOn, @EndOn);
+            IF @Months <= 0 SET @Months = 1;
+            SET @Duration = CAST(@Months AS DECIMAL(18,2));
+
+            SET @AdvMonths = ISNULL(@AdvanceRentMonths, ISNULL(@BillingPeriodMonths, CASE WHEN @CategoryCode IN ('PrivateOffice','Private','SharedSpace','Shared') THEN 3 ELSE 1 END));
+            SET @SecMonths = ISNULL(@SecurityDepositMonths, CASE WHEN @CategoryCode IN ('PrivateOffice','Private') THEN 2 ELSE 0 END);
+            SET @BillPeriodMonths = ISNULL(@BillingPeriodMonths, @AdvMonths);
+            
+            IF @CategoryCode IN ('PrivateOffice', 'Private')
+                SET @RentAmount = @SeatPrice * ISNULL(@Capacity, 1) * @AdvMonths;
+            ELSE
+                SET @RentAmount = @SeatPrice * @AdvMonths;
+        END
+        ELSE
+        BEGIN
+            DECLARE @Minutes INT = DATEDIFF(minute, @StartOn, @EndOn);
+            DECLARE @TotalHours DECIMAL(18,2) = CEILING(CAST(@Minutes AS DECIMAL(18,2)) / 60.0);
+            IF @TotalHours <= 0 SET @TotalHours = 1.0;
+
+            IF @TotalHours >= 24.0
+            BEGIN
+                DECLARE @Days DECIMAL(18,2) = CEILING(@TotalHours / 24.0);
+                SET @Duration = @Days;
+                SET @RentAmount = @SeatPrice * @Days;
+            END
+            ELSE
+            BEGIN
+                SET @Duration = @TotalHours;
+                SET @RentAmount = @SeatPrice * @TotalHours;
+            END
+
+            SET @AdvMonths = ISNULL(@AdvanceRentMonths, 1);
+            SET @SecMonths = ISNULL(@SecurityDepositMonths, 0);
+            SET @BillPeriodMonths = ISNULL(@BillingPeriodMonths, 1);
+        END
+
+        IF @OverrideDuration IS NOT NULL AND @OverrideDuration > 0
+            SET @Duration = @OverrideDuration;
+        IF @OverrideSubtotal IS NOT NULL AND @OverrideSubtotal > 0
+            SET @RentAmount = @OverrideSubtotal;
+
+        DECLARE @MonthlyRent DECIMAL(18,2) = 0.0;
+        IF @OverrideUnitPrice IS NOT NULL AND @OverrideUnitPrice > 0
+            SET @MonthlyRent = @OverrideUnitPrice;
+        ELSE IF @CategoryCode IN ('PrivateOffice', 'Private')
+            SET @MonthlyRent = @SeatPrice * ISNULL(@Capacity, 1);
+        ELSE
+            SET @MonthlyRent = @SeatPrice;
+
+        DECLARE @MonthlyDepositRate DECIMAL(18,2) = 0.0;
+        IF @SecurityDeposit IS NOT NULL AND @SecurityDeposit > 0
+            SET @MonthlyDepositRate = @SecurityDeposit;
+        ELSE IF @CategoryCode IN ('PrivateOffice', 'Private', 'SharedSpace', 'Shared')
+            SET @MonthlyDepositRate = @MonthlyRent;
+
+        IF @SecMonths > 0
+            SET @SecurityDeposit = @MonthlyDepositRate * @SecMonths;
+        ELSE
+            SET @SecurityDeposit = 0.00;
+
+        DECLARE @DiscountAmt DECIMAL(18,2) = ISNULL(@DiscountAmount, 0);
+        IF @DiscountAmt <= 0 AND ISNULL(@DiscountPercentage, 0) > 0
+            SET @DiscountAmt = @RentAmount * (@DiscountPercentage / 100.0);
+        ELSE IF @DiscountAmt > 0 AND ISNULL(@DiscountPercentage, 0) <= 0 AND @RentAmount > 0
+            SET @DiscountPercentage = ROUND((@DiscountAmt / @RentAmount) * 100.0, 2);
+
+        DECLARE @DiscountOnRent DECIMAL(18,2) = 0.00;
+        DECLARE @DiscountOnDeposit DECIMAL(18,2) = 0.00;
+
+        IF ISNULL(@DiscountPercentage, 0) > 0
+        BEGIN
+            SET @DiscountOnRent = ROUND(@RentAmount * (@DiscountPercentage / 100.0), 2);
+            SET @DiscountOnDeposit = ROUND(ISNULL(@SecurityDeposit, 0) * (@DiscountPercentage / 100.0), 2);
+        END
+        ELSE IF ISNULL(@DiscountAmount, 0) > 0
+        BEGIN
+            DECLARE @TotalBase DECIMAL(18,2) = @RentAmount + ISNULL(@SecurityDeposit, 0);
+            IF @TotalBase > 0
+            BEGIN
+                SET @DiscountOnRent = ROUND(@DiscountAmount * (@RentAmount / @TotalBase), 2);
+                SET @DiscountOnDeposit = @DiscountAmount - @DiscountOnRent;
+            END
+        END
+
+        DECLARE @DiscountedRent DECIMAL(18,2) = @RentAmount - @DiscountOnRent;
+        DECLARE @DiscountedDeposit DECIMAL(18,2) = ISNULL(@SecurityDeposit, 0) - @DiscountOnDeposit;
+        DECLARE @TotalDiscountAmount DECIMAL(18,2) = @DiscountOnRent + @DiscountOnDeposit;
+        DECLARE @BaseRent DECIMAL(18,2) = @DiscountedRent;
+
+        DECLARE @ProvinceId INT = NULL;
+        DECLARE @TaxApplicable BIT = 0;
+        DECLARE @AppliedChargePercentage DECIMAL(5,2) = 10.00;
+        DECLARE @AppliedTaxPercentage DECIMAL(5,2) = 16.00;
+        DECLARE @SupportChargeAmount DECIMAL(18,2) = 0.00;
+        DECLARE @TaxAmount DECIMAL(18,2) = 0.00;
+        DECLARE @BookingDateAnchor DATETIME = SYSUTCDATETIME();
+
+        IF @LocationId IS NOT NULL
+        BEGIN
+            SELECT TOP 1 @ProvinceId = l.ProvinceId
+            FROM dbo.WN_Locations l WITH (NOLOCK)
+            WHERE l.Id = @LocationId;
+        END
+
+        IF @SupportChargesId IS NOT NULL
+        BEGIN
+            IF @ProvinceId IS NOT NULL
+            BEGIN
+                SELECT TOP 1 @TaxApplicable = ISNULL(TaxApplicable, 0)
+                FROM dbo.WN_ProvinceChargeTypeTax WITH (NOLOCK)
+                WHERE ProvinceId = @ProvinceId AND ChargeTypeId = @SupportChargesId;
+            END
+
+            SELECT TOP 1 @AppliedChargePercentage = ISNULL(ChargePercentage, 10.00)
+            FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+            WHERE ChargeTypeId = @SupportChargesId
+              AND StartDate <= @BookingDateAnchor
+              AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
+            ORDER BY StartDate DESC;
+
+            IF @TaxApplicable = 1 AND @ProvinceId IS NOT NULL
+            BEGIN
+                SELECT TOP 1 @AppliedTaxPercentage = ISNULL(TaxPercentage, 16.00)
+                FROM dbo.WN_Tax WITH (NOLOCK)
+                WHERE ProvinceId = @ProvinceId
+                  AND StartDate <= @BookingDateAnchor
+                  AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
+                ORDER BY StartDate DESC;
+            END
+        END
+
+        SET @SupportChargeAmount = ROUND(@DiscountedRent * (@AppliedChargePercentage / 100.0), 2);
+        SET @TaxAmount           = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
+
+        IF @OverrideTax IS NOT NULL AND @OverrideTax >= 0
+            SET @TaxAmount = @OverrideTax;
+
+        DECLARE @TotalAmount DECIMAL(18,2) = @DiscountedRent + @TaxAmount + @DiscountedDeposit;
+
+        IF @OverrideTotal IS NOT NULL AND @OverrideTotal > 0
+            SET @TotalAmount = @OverrideTotal;
+
+        DECLARE @Today      DATE = CAST(SYSUTCDATETIME() AS DATE);
+        DECLARE @SeqNum     INT;
+        DECLARE @ChallanNum NVARCHAR(50);
+
+        UPDATE dbo.WN_ChallanCounter WITH (UPDLOCK, HOLDLOCK)
+        SET LastNumber = LastNumber + 1
+        WHERE CounterDate = @Today;
+
+        IF @@ROWCOUNT = 0
+            INSERT INTO dbo.WN_ChallanCounter (CounterDate, LastNumber)
+            SELECT @Today, 1
+            WHERE NOT EXISTS (
+                SELECT 1 FROM dbo.WN_ChallanCounter WITH (UPDLOCK, HOLDLOCK)
+                WHERE CounterDate = @Today
+            );
+
+        SELECT @SeqNum = LastNumber
+        FROM dbo.WN_ChallanCounter WITH (NOLOCK)
+        WHERE CounterDate = @Today;
+
+        SET @ChallanNum = 'WN-' + CONVERT(NVARCHAR(8), @Today, 112) + '-'
+                        + RIGHT('000000' + CAST(@SeqNum AS NVARCHAR(6)), 6);
+
+        DECLARE @ChallanValidUntil DATETIME = DATEADD(DAY, 5, @Today);
+        DECLARE @UserGuid UNIQUEIDENTIFIER;
+        SELECT @UserGuid = IdGUID FROM dbo.WN_Users WHERE Id = @UserId;
+        DECLARE @CreatedByGuid UNIQUEIDENTIFIER = NULL;
+        IF @CreatedById IS NOT NULL
+            SELECT @CreatedByGuid = IdGUID FROM dbo.WN_Users WHERE Id = @CreatedById;
+
+        -- Insert Booking
+        INSERT INTO dbo.WN_Bookings (
+            IdGUID, BookingDate, CustomerCode,
+            BankAccountId, SecurityDepositAccountId, Notes, RejectReason,
+            CreatedOn, UpdatedOn, TransactionDate,
+            ChallanNumber, ValidityDate, UserId, SpaceId, PricingId,
+            StartOn, EndOn, BookingStatusId, CancelReason, IsDeleted, CreatedById, UpdatedById,
+            DiscountPercentage, DiscountAmount, DiscountType, SubtotalAmount, TotalAmount,
+            MonthlyRent, BillingPeriodMonths, AdvanceRentMonths, SecurityDepositMonths, SecurityDepositRequired, SecurityDepositPaid
+        )
+        VALUES (
+            NEWID(), SYSUTCDATETIME(), @CustomerCode,
+            @RentAccountId, @DepositAccountId, @Notes, NULL,
+            SYSUTCDATETIME(), NULL, SYSUTCDATETIME(),
+            @ChallanNum, @ChallanValidUntil, @UserId, @SpaceId, @ResolvedPricingId,
+            @StartOn, @EndOn, 1, NULL, 0, @CreatedById, NULL,
+            @DiscountPercentage, @TotalDiscountAmount, ISNULL(@DiscountType, 'Percentage'), @RentAmount, @TotalAmount,
+            @MonthlyRent, @BillPeriodMonths, @AdvMonths, @SecMonths, @SecurityDeposit, 0.00
+        );
+
+        DECLARE @BookingId INT = SCOPE_IDENTITY();
+        DECLARE @BookingGuid UNIQUEIDENTIFIER;
+        SELECT @BookingGuid = IdGUID FROM dbo.WN_Bookings WHERE Id = @BookingId;
+
+        -- Insert BookingDetail snapshot row
+        EXEC dbo.WN_BookingDetails_Insert
+            @BookingGuid             = @BookingGuid,
+            @CustomerCode            = @CustomerCode,
+            @CustomerName            = @CustomerFirstName,
+            @CustomerEmail           = @TargetEmail,
+            @SpaceName               = @SpaceName,
+            @SpaceCode               = @SpaceCode,
+            @SpaceCategory           = @CategoryCode,
+            @StartDateTime           = @StartOn,
+            @EndDateTime             = @EndOn,
+            @RentAmount              = @DiscountedRent,
+            @SecurityDeposit         = @DiscountedDeposit,
+            @RentAccountId           = @RentAccountId,
+            @DepositAccountId        = @DepositAccountId,
+            @PaymentMethod           = NULL,
+            @Notes                   = @Notes,
+            @SupportChargesId        = @SupportChargesId,
+            @AppliedChargePercentage = @AppliedChargePercentage,
+            @AppliedTaxPercentage    = @AppliedTaxPercentage;
+
+        -- Insert Challan
+        INSERT INTO dbo.WN_Challans
+            (BookingId, ChallanNumber, ValidUntil, StatusId, CreatedById)
+        VALUES
+            (@BookingId, @ChallanNum, @ChallanValidUntil, 1, @CreatedById);
+
+        -- Insert BookingLines
+        DECLARE @UnitPrice DECIMAL(18,2);
+        IF @OverrideUnitPrice IS NOT NULL AND @OverrideUnitPrice > 0
+            SET @UnitPrice = @OverrideUnitPrice;
+        ELSE IF @CategoryCode IN ('PrivateOffice', 'Private')
+            SET @UnitPrice = @SeatPrice * ISNULL(@Capacity, 1);
+        ELSE
+            SET @UnitPrice = @SeatPrice;
+
+        DECLARE @LineTaxRate DECIMAL(6,4) = CASE WHEN @DiscountedRent > 0 THEN CAST(ROUND(@TaxAmount / @DiscountedRent, 4) AS DECIMAL(6,4)) ELSE 0 END;
+
+        INSERT INTO dbo.WN_BookingLines
+            (BookingId, ChargeTypeId, Description, Quantity, UnitPrice,
+             DiscountAmount, TaxRate, AccountId, CreatedById)
+        VALUES
+            (@BookingId, 1, 'Room Rent', @AdvMonths, @UnitPrice,
+             @DiscountOnRent, @LineTaxRate, @RentAccountId, @CreatedById);
+
+        IF @SecurityDeposit > 0
+            INSERT INTO dbo.WN_BookingLines
+                (BookingId, ChargeTypeId, Description, Quantity, UnitPrice,
+                 DiscountAmount, TaxRate, AccountId, CreatedById)
+            VALUES
+                (@BookingId, 2, 
+                 CASE WHEN @SecMonths > 1 
+                      THEN 'Security Deposit (' + CAST(@SecMonths AS NVARCHAR(5)) + ' Month(s) Refundable)' 
+                      ELSE 'Security Deposit (Refundable)' 
+                 END, 
+                 @SecMonths, @MonthlyDepositRate,
+                 @DiscountOnDeposit, 0, @DepositAccountId, @CreatedById);
+
+        -- Insert Invoice Header
+        DECLARE @InvoiceNumber NVARCHAR(50) = 'INV-' + REPLACE(@ChallanNum, 'WN-', '');
+        DECLARE @CycleEnd DATETIME = DATEADD(MONTH, @AdvMonths, @StartOn);
+
+        INSERT INTO dbo.WN_Invoices (
+            PublicId, InvoiceNumber, UserId, BookingId, MembershipId,
+            IssuedOn, DueOn, SubTotal, DiscountTotal, TaxTotal, GrandTotal, PaidTotal,
+            CurrencyCode, StatusId, Notes, CreatedOn, CreatedById, InvoiceTypeId,
+            AdvanceRentMonths, SecurityDepositMonths, SecurityDepositAmount, AccountsCoaId,
+            BillingPeriodMonths, BillingPeriodStart, BillingPeriodEnd
+        )
+        VALUES (
+            NEWID(), @InvoiceNumber, @UserId, @BookingId, NULL,
+            @Today, CAST(@ChallanValidUntil AS DATE), @RentAmount, @TotalDiscountAmount, @TaxAmount, @TotalAmount, 0,
+            'PKR', 1, @Notes, SYSUTCDATETIME(), @CreatedById, 1,
+            @AdvMonths, @SecMonths, ISNULL(@DiscountedDeposit, 0), @RentAccountId,
+            @BillPeriodMonths, @StartOn, @CycleEnd
+        );
+
+        DECLARE @InvoiceId INT = SCOPE_IDENTITY();
+
+        -- Insert Invoice Lines
+        INSERT INTO dbo.WN_InvoiceLines (
+            InvoiceId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, SortOrder
+        )
+        VALUES (
+            @InvoiceId, 1, 'Room Rent', @AdvMonths, @UnitPrice, @DiscountOnRent, @LineTaxRate, @RentAccountId, 1
+        );
+
+        IF @SecurityDeposit > 0
+            INSERT INTO dbo.WN_InvoiceLines (
+                InvoiceId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, SortOrder
+            )
+            VALUES (
+                @InvoiceId, 2, 
+                CASE WHEN @SecMonths > 1 
+                     THEN 'Security Deposit (' + CAST(@SecMonths AS NVARCHAR(5)) + ' Month(s) Refundable)' 
+                     ELSE 'Security Deposit (Refundable)' 
+                END, 
+                @SecMonths, @MonthlyDepositRate, @DiscountOnDeposit, 0, @DepositAccountId, 2
+            );
+
+        -- Auto-generate Access Cards for this booking (Capacity + 1)
+        EXEC dbo.WN_AccessCards_PopulateAllBookings @TargetBookingId = @BookingId;
+
+        COMMIT TRANSACTION;
+
+        SELECT 
+            @BookingId AS BookingId,
+            @BookingGuid AS BookingPublicId,
+            @ChallanNum AS ChallanNumber,
+            @ChallanValidUntil AS ChallanValidUntil,
+            @RentAmount AS SubtotalAmount,
+            @TaxAmount AS TaxAmount,
+            @TotalAmount AS TotalAmount,
+            NULL AS ErrorMessage;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+        SELECT NULL AS BookingId, NULL AS BookingPublicId,
+               NULL AS ChallanNumber, NULL AS ChallanValidUntil,
+               NULL AS SubtotalAmount, NULL AS TaxAmount, NULL AS TotalAmount,
+               @ErrMsg AS ErrorMessage;
+    END CATCH
+END;";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
+        private async Task EnsureInvoiceProceduresUpdatedAsync(SqlConnection c)
+        {
+            try
+            {
+                string sql = @"
+CREATE OR ALTER PROCEDURE dbo.WN_GetStatementInvoicePdfData
+    @InvoiceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Result 1: Header / Vendor / Customer / Center Info
+    SELECT TOP 1
+        i.Id,
+        i.InvoiceNumber,
+        i.UserId,
+        i.BookingId,
+        i.IssuedOn,
+        i.DueOn,
+        COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn) AS BillingPeriodStart,
+        COALESCE(i.BillingPeriodEnd, b.EndOn, i.DueOn) AS BillingPeriodEnd,
+        ISNULL(i.GrandTotal, 0) AS GrandTotal,
+        ISNULL(i.PaidTotal, 0) AS PaidTotal,
+        ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ucomp.CompanyName)), ''), '-') AS AccountName,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name) AS AttnName,
+        COALESCE(c.Address, u.Address, '') AS BillingAddress,
+        ISNULL(c.Code, 'WN' + RIGHT('00000' + CAST(ISNULL(c.Id, i.UserId) AS VARCHAR(10)), 5)) AS AccountNumber,
+        ISNULL(c.CnicOrPassport, '') AS SntnNtnNic,
+        ISNULL(loc.Name, 'WorkNest') AS CenterName,
+        ISNULL(comp.CompanyName, 'WorkNest Coworking Spaces (Pvt) Ltd') AS VendorLegalName,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), ISNULL(loc.Address, '3rd Floor EOBI Building-II, I-8 Markaz, Islamabad')) AS VendorAddress,
+        ISNULL(comp.Contact, '+92 309 9771774 / +92 308 0256000') AS VendorPhone,
+        ISNULL(comp.Fax, '+92 51 8439201') AS VendorFax,
+        ISNULL(comp.NTN, '7492018-3') AS VendorNtn,
+        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
+        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
+        ISNULL(bd.SupportChargeAmount, 0.00) AS SupportChargeAmount,
+        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (c.UserId = i.UserId OR c.Id = i.UserId OR (u.Email IS NOT NULL AND c.Email = u.Email)) AND (c.IsActive = 1 OR c.IsActive IS NULL)
+    LEFT JOIN dbo.Company ucomp WITH (NOLOCK) ON ucomp.Id = u.CompanyId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+    LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = ISNULL(NULLIF(loc.CompanyId, 0), 486)
+    WHERE i.Id = @InvoiceId;
+
+    -- Result 2: Line Items
+    SELECT 
+        l.ChargeTypeId,
+        l.Description,
+        (l.Quantity * l.UnitPrice - l.DiscountAmount) AS PriceExclVat,
+        l.TaxAmount AS VatAmount,
+        l.LineTotal AS TotalInclVat,
+        l.TaxRate,
+        ISNULL(ct.Label, 'Business Support Services') AS CategoryName
+    FROM dbo.WN_InvoiceLines l WITH (NOLOCK)
+    LEFT JOIN dbo.WN_ChargeTypes ct WITH (NOLOCK) ON ct.Id = l.ChargeTypeId
+    WHERE l.InvoiceId = @InvoiceId
+    ORDER BY l.SortOrder, l.Id;
+
+    -- Result 3: Prior Balances
+    DECLARE @UserId INT;
+    SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
+
+    SELECT 
+        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
+        ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE UserId = @UserId AND Id < @InvoiceId;
+
+    -- Result 4: Bank Details
+    SELECT TOP 1 Description AS BankName, ShortDesc AS BankAccountNumber
+    FROM dbo.AccountsCOA WITH (NOLOCK)
+    WHERE AccountNature = 'Bank' OR Description LIKE '%Bank%';
+END;";
+                await using var cmd = new SqlCommand(sql, c);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { }
+        }
+
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId)
         {
             await using var c = await Open();
@@ -2157,6 +3441,7 @@ END";
         public async Task<(IDictionary<string, object?>? Header, IEnumerable<IDictionary<string, object?>> Lines)> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail)
         {
             await using var c = await Open();
+            await EnsureBookingSummaryViewUpdatedAsync(c);
             await using var cmd = SP("dbo.WN_BookingDetails_GetByBooking", c);
             cmd.Parameters.AddWithValue("@BookingIdentifier", bookingIdentifier);
             cmd.Parameters.AddWithValue("@UserEmail", (object?)userEmail ?? DBNull.Value);
@@ -2197,6 +3482,86 @@ END";
         {
             await using var c = await Open();
             await using var cmd = new SqlCommand(sql, c);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // --- AccessCard ---
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAccessCardsAsync(int page, int limit, string? search, int? bookingId, int? customerId, int? spaceId, int? status)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_AccessCards_GetList", c);
+            cmd.Parameters.AddWithValue("@Page", page < 1 ? 1 : page);
+            cmd.Parameters.AddWithValue("@Limit", limit < 1 ? 20 : limit);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@BookingId", (object?)bookingId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerId", (object?)customerId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceId", (object?)spaceId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            var rows = await ReadAll(r);
+            int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
+            return (rows, total);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetAccessCardByIdAsync(string id)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_AccessCards_GetById", c);
+            cmd.Parameters.AddWithValue("@Id", id);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        public async Task<IDictionary<string, object?>> CreateAccessCardAsync(int locationId, int customerId, int bookingId, int spaceId, string? cardNumber, DateTime startDate, DateTime endDate, int status, int? createdById)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_AccessCards_Insert", c);
+            cmd.Parameters.AddWithValue("@LocationId", locationId);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@BookingId", bookingId);
+            cmd.Parameters.AddWithValue("@SpaceId", spaceId);
+            cmd.Parameters.AddWithValue("@CardNumber", (object?)cardNumber ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@StartDate", startDate);
+            cmd.Parameters.AddWithValue("@EndDate", endDate);
+            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : new Dictionary<string, object?>();
+        }
+
+        public async Task UpdateAccessCardAsync(string id, int? locationId, int? customerId, int? bookingId, int? spaceId, string? cardNumber, DateTime? startDate, DateTime? endDate, int? status, int? updatedById)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_AccessCards_Update", c);
+            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerId", (object?)customerId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@BookingId", (object?)bookingId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceId", (object?)spaceId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CardNumber", (object?)cardNumber ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@StartDate", (object?)startDate ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@EndDate", (object?)endDate ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task DeleteAccessCardAsync(string id)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_AccessCards_Delete", c);
+            cmd.Parameters.AddWithValue("@Id", id);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task GenerateAccessCardsForBookingDbAsync(int bookingId, int? createdById = null)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_AccessCards_PopulateAllBookings", c);
+            cmd.Parameters.AddWithValue("@TargetBookingId", bookingId);
             await cmd.ExecuteNonQueryAsync();
         }
     }

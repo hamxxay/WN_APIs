@@ -41,6 +41,15 @@ namespace WorkNest.API.Controllers
             return await Get(id);
         }
 
+        [HttpGet("api/user/{email}")]
+        public async Task<IActionResult> GetByEmail(string email)
+        {
+            var row = await _db.GetUserByEmailAsync(email);
+            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
+            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            return await Get(id);
+        }
+
         [HttpGet("api/user/{id:int}/history")]
         public async Task<IActionResult> History(int id)
         {

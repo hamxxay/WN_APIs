@@ -108,6 +108,7 @@ try
     builder.Services.AddScoped<IAccountCoaService, AccountCoaService>();
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
     builder.Services.AddScoped<IQuotationService, QuotationService>();
+    builder.Services.AddScoped<IAccessCardService, AccessCardService>();
 
     // ── Background Hosted Services ────────────────────────────────────────────
     builder.Services.AddHostedService<BillingAutomationService>();

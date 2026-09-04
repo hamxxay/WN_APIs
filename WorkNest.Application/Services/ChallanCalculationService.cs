@@ -32,6 +32,7 @@ namespace WorkNest.Application.Services
         public int SpaceTypeId { get; set; }
         public int Capacity { get; set; } = 1;
         public decimal Price { get; set; } = 0m;
+        public string? CategoryCode { get; set; }
         public string? SpaceTypeName { get; set; }
         public string? SpaceCode { get; set; }
         public string? SpaceName { get; set; }
@@ -89,13 +90,16 @@ namespace WorkNest.Application.Services
             var res = new ChallanCalculationResult();
 
             string stName = input.SpaceTypeName ?? "";
+            string catCode = input.CategoryCode ?? "";
             bool isMeetingRoom = stName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
                                  stName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
+                                 catCode.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
                                  (input.BillingPeriodMonths <= 0 && input.TotalContractAmount <= 0);
 
             bool isPrivate = stName.Contains("Private", StringComparison.OrdinalIgnoreCase) ||
                              stName.Contains("Office", StringComparison.OrdinalIgnoreCase) ||
                              stName.Contains("Room", StringComparison.OrdinalIgnoreCase) ||
+                             catCode.Contains("Private", StringComparison.OrdinalIgnoreCase) ||
                              input.SpaceTypeId == 1;
 
             if (isMeetingRoom)
@@ -210,7 +214,7 @@ namespace WorkNest.Application.Services
 
                 res.BaseRent = res.FirstCycleRent;
 
-                res.SecurityDeposit = res.SpaceType == "PrivateRoom" ? input.SecurityDeposit : 0;
+                res.SecurityDeposit = (input.SecurityDeposit > 0 || res.SpaceType == "PrivateRoom") ? input.SecurityDeposit : 0;
 
                 decimal discountPct = input.DiscountPercentage > 0 ? input.DiscountPercentage :
                     (string.Equals(input.DiscountType, "Percentage", StringComparison.OrdinalIgnoreCase) ? input.DiscountValue : 0);
@@ -386,9 +390,24 @@ namespace WorkNest.Application.Services
                 }
             }
 
+            decimal secDeposit = q.SecurityDeposit;
+            if (secDeposit <= 0 && q.Details != null && q.Details.Count > 0)
+            {
+                var secLine = q.Details.FirstOrDefault(d => string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) || (d.Description != null && d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase)));
+                if (secLine != null && secLine.Amount > 0)
+                {
+                    secDeposit = secLine.Amount;
+                }
+            }
+            if (secDeposit <= 0 && q.Contract != null && q.Contract.SecurityDeposit > 0)
+            {
+                secDeposit = q.Contract.SecurityDeposit;
+            }
+
             var input = new ChallanCalculationInput
             {
                 SpaceTypeName = q.SpaceTypeName,
+                CategoryCode = q.SpaceType,
                 SpaceCode = q.SpaceCode,
                 SpaceName = q.SpaceName,
                 StartOn = q.StartDateTime,
@@ -399,7 +418,7 @@ namespace WorkNest.Application.Services
                 CurrentCycleAmount = effectiveSubtotal,
                 ContractPeriodMonths = q.Contract?.NumberOfMonths > 0 ? q.Contract.NumberOfMonths : 12,
                 BillingPeriodMonths = q.BillingPeriodMonths > 0 ? q.BillingPeriodMonths : 3,
-                SecurityDeposit = q.SecurityDeposit,
+                SecurityDeposit = secDeposit,
                 AppliedChargePercentage = q.AppliedChargePercentage > 0 ? q.AppliedChargePercentage : 10.00m,
                 AppliedTaxPercentage = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 16.00m,
                 DiscountType = q.DiscountType ?? "Percentage",

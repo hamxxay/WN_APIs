@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Mail;
 using System.Text;
 using Microsoft.Extensions.Configuration;
@@ -199,10 +199,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 var body = sb.ToString();
 
+                string docType = challanNumber.StartsWith("INV", StringComparison.OrdinalIgnoreCase) ? "Invoice" : "Challan";
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Your WorkNest Challan — {challanNumber}",
+                    Subject    = $"Your WorkNest {docType} — {challanNumber}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -210,8 +211,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 if (pdfBytes != null && pdfBytes.Length > 0)
                 {
-                    var attachment = new Attachment(new MemoryStream(pdfBytes), $"Challan-{challanNumber}.pdf", "application/pdf");
+                    string attachFileName = $"{docType}-{challanNumber}.pdf";
+                    var attachment = new Attachment(new MemoryStream(pdfBytes), attachFileName, "application/pdf");
                     mailMessage.Attachments.Add(attachment);
+                }
+                else
+                {
+                    _logger.LogWarning("[EMAIL] Warning: {DocType} {Number} email to {To} is being sent WITHOUT PDF attachment (pdfBytes is null or empty).", docType, challanNumber, toEmail);
                 }
 
                 using var smtp = new SmtpClient("smtp.gmail.com", 587)

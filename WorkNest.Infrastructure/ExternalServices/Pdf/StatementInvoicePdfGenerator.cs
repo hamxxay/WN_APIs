@@ -29,7 +29,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public decimal CurrentInvoiceTotal { get; set; } = 287500.00m;
         public decimal TotalOutstandingDue => PreviousOutstandingBalance - PaymentReceived + CurrentInvoiceTotal;
 
-        public decimal VatRate { get; set; } = 0.15m;
+        public decimal VatRate { get; set; } = 0.16m;
+        public decimal SupportChargeRate { get; set; } = 0.10m;
+        public decimal? SupportChargeAmount { get; set; }
+        public decimal? AppliedChargePercentage { get; set; }
+        public decimal? AppliedTaxPercentage { get; set; }
+        public decimal SecurityDepositAmount { get; set; }
         public string CurrencyCode { get; set; } = "PKR";
 
         public List<StatementInvoiceLineItemDto> LineItems { get; set; } = new();
@@ -62,6 +67,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public decimal VatAmount { get; set; }
         public decimal TotalInclVat => PriceExclVat + VatAmount;
         public string Category { get; set; } = "Recurring"; // "Recurring", "One-off", "IT Services"
+        public bool IsDeposit { get; set; }
     }
 
     public class StatementInvoicePdfGenerator
@@ -80,6 +86,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             {
                 data.LineItems = GetDefaultLineItems(data.VatRate);
             }
+            if (data.SecurityDepositAmount > 0 && !data.LineItems.Any(i => IsDepositItem(i)))
+            {
+                data.LineItems.Add(new StatementInvoiceLineItemDto
+                {
+                    Description = "Security Deposit (Refundable)",
+                    PriceExclVat = data.SecurityDepositAmount,
+                    VatAmount = 0m,
+                    Category = "Security Deposit",
+                    IsDeposit = true
+                });
+            }
 
             return Document.Create(container =>
             {
@@ -89,22 +106,23 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     page.Margin(30);
                     page.DefaultTextStyle(x => x.FontSize(9).FontFamily("Arial"));
 
+                    page.Header().Element(c => ComposeHeader(c, data));
                     page.Footer().Element(c => ComposeFooter(c, data));
 
                     page.Content().Column(col =>
                     {
                         // PAGE 1 — Statement of Account
-                        ComposePage1(col, data);
+                        // ComposePage1(col, data);
 
-                        col.Item().PageBreak();
+                        // col.Item().PageBreak();
 
                         // PAGE 2 — Invoice
                         ComposePage2(col, data);
 
-                        col.Item().PageBreak();
+                        // col.Item().PageBreak();
 
                         // PAGE 3 — Your Invoice Details
-                        ComposePage3(col, data);
+                        // ComposePage3(col, data);
 
                         // col.Item().PageBreak();
 
@@ -120,81 +138,81 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             }).GeneratePdf();
         }
 
-        #region Page 1 — Statement of Account
-        private static void ComposePage1(ColumnDescriptor col, StatementInvoicePdfDto data)
-        {
-            col.Item().Row(r =>
-            {
-                r.RelativeItem().Column(c =>
-                {
-                    c.Item().Text("STATEMENT OF ACCOUNT").FontSize(16).Bold().FontColor("#1a1a2e");
-                    c.Item().Text(data.CenterName).FontSize(10).FontColor("#555555").Bold();
-                });
-            });
+        // #region Page 1 — Statement of Account
+        // private static void ComposePage1(ColumnDescriptor col, StatementInvoicePdfDto data)
+        // {
+        //     col.Item().Row(r =>
+        //     {
+        //         r.RelativeItem().Column(c =>
+        //         {
+        //             c.Item().Text("STATEMENT OF ACCOUNT").FontSize(16).Bold().FontColor("#1a1a2e");
+        //             c.Item().Text(data.CenterName).FontSize(10).FontColor("#555555").Bold();
+        //         });
+        //     });
 
-            col.Item().PaddingTop(10).Row(r =>
-            {
-                r.RelativeItem().Column(c =>
-                {
-                    c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#888888");
-                    c.Item().Text(data.AccountName).Bold().FontSize(10).FontColor("#1a1a2e");
-                    if (!string.IsNullOrWhiteSpace(data.AttnName))
-                        c.Item().Text($"Attn: {data.AttnName}").FontColor("#444444");
-                    c.Item().Text(data.BillingAddress).FontColor("#555555");
-                });
+        //     col.Item().PaddingTop(10).Row(r =>
+        //     {
+        //         r.RelativeItem().Column(c =>
+        //         {
+        //             c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#888888");
+        //             c.Item().Text(data.AccountName).Bold().FontSize(10).FontColor("#1a1a2e");
+        //             if (!string.IsNullOrWhiteSpace(data.AttnName))
+        //                 c.Item().Text($"Attn: {data.AttnName}").FontColor("#444444");
+        //             c.Item().Text(data.BillingAddress).FontColor("#555555");
+        //         });
 
-                r.ConstantItem(220).Column(c =>
-                {
-                    c.Item().Row(row => { row.RelativeItem().Text("Account Number:").FontColor("#666666"); row.AutoItem().Text(data.AccountNumber).Bold(); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Invoice Number:").FontColor("#666666"); row.AutoItem().Text(data.InvoiceNumber).Bold(); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Statement Date:").FontColor("#666666"); row.AutoItem().Text($"{data.StatementDate:dd MMM yyyy}"); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Due Date:").FontColor("#666666"); row.AutoItem().Text($"{data.DueDate:dd MMM yyyy}").Bold().FontColor("#d9534f"); });
-                });
-            });
+        //         r.ConstantItem(220).Column(c =>
+        //         {
+        //             c.Item().Row(row => { row.RelativeItem().Text("Customer Code:").FontColor("#666666"); row.AutoItem().Text(data.AccountNumber).Bold(); });
+        //             c.Item().Row(row => { row.RelativeItem().Text("Invoice Number:").FontColor("#666666"); row.AutoItem().Text(data.InvoiceNumber).Bold(); });
+        //             c.Item().Row(row => { row.RelativeItem().Text("Statement Date:").FontColor("#666666"); row.AutoItem().Text($"{data.StatementDate:dd MMM yyyy}"); });
+        //             c.Item().Row(row => { row.RelativeItem().Text("Due Date:").FontColor("#666666"); row.AutoItem().Text($"{data.DueDate:dd MMM yyyy}").Bold().FontColor("#d9534f"); });
+        //         });
+        //     });
 
-            col.Item().PaddingTop(12).Border(1).BorderColor("#e0e0e0").Background("#f8f9fa").Padding(8).Column(c =>
-            {
-                c.Item().Text("USEFUL INFORMATION").Bold().FontSize(9).FontColor("#1a1a2e");
-                c.Item().Text("Need help with your account or invoice? Visit our online customer portal or contact community support.").FontSize(8).FontColor("#555555");
-                c.Item().Text($"Support Phone: {data.VendorPhone} | Email: support@worknestpk.com").FontSize(8).FontColor("#1a1a2e");
-            });
+        //     col.Item().PaddingTop(12).Border(1).BorderColor("#e0e0e0").Background("#f8f9fa").Padding(8).Column(c =>
+        //     {
+        //         c.Item().Text("USEFUL INFORMATION").Bold().FontSize(9).FontColor("#1a1a2e");
+        //         c.Item().Text("Need help with your account or invoice? Visit our online customer portal or contact community support.").FontSize(8).FontColor("#555555");
+        //         c.Item().Text($"Support Phone: {data.VendorPhone} | Email: support@worknestpk.com").FontSize(8).FontColor("#1a1a2e");
+        //     });
 
-            col.Item().PaddingTop(15).Table(table =>
-            {
-                table.ColumnsDefinition(columns =>
-                {
-                    columns.ConstantColumn(100);
-                    columns.RelativeColumn();
-                    columns.ConstantColumn(140);
-                });
+        //     col.Item().PaddingTop(15).Table(table =>
+        //     {
+        //         table.ColumnsDefinition(columns =>
+        //         {
+        //             columns.ConstantColumn(100);
+        //             columns.RelativeColumn();
+        //             columns.ConstantColumn(140);
+        //         });
 
-                table.Header(h =>
-                {
-                    h.Cell().Background("#1a1a2e").Padding(6).Text("Date").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(6).Text("Description").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(6).AlignRight().Text("Amount").Bold().FontColor("#ffffff");
-                });
+        //         table.Header(h =>
+        //         {
+        //             h.Cell().Background("#1a1a2e").Padding(6).Text("Date").Bold().FontColor("#ffffff");
+        //             h.Cell().Background("#1a1a2e").Padding(6).Text("Description").Bold().FontColor("#ffffff");
+        //             h.Cell().Background("#1a1a2e").Padding(6).AlignRight().Text("Amount").Bold().FontColor("#ffffff");
+        //         });
 
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"{data.StatementDate.AddMonths(-1):dd MMM yyyy}");
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text("Prior Outstanding Balance");
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, data.PreviousOutstandingBalance));
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"{data.StatementDate.AddMonths(-1):dd MMM yyyy}");
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text("Prior Outstanding Balance");
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, data.PreviousOutstandingBalance));
 
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"{data.StatementDate:dd MMM yyyy}");
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text("Payments Received");
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, -data.PaymentReceived));
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"{data.StatementDate:dd MMM yyyy}");
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text("Payments Received");
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, -data.PaymentReceived));
 
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"{data.InvoiceDate:dd MMM yyyy}");
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"This Invoice (#{data.InvoiceNumber})");
-                table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, data.CurrentInvoiceTotal));
-            });
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"{data.InvoiceDate:dd MMM yyyy}");
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).Text($"This Invoice (#{data.InvoiceNumber})");
+        //         table.Cell().BorderBottom(1).BorderColor("#e0e0e0").Padding(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, data.CurrentInvoiceTotal));
+        //     });
 
-            col.Item().PaddingTop(10).AlignRight().Row(r =>
-            {
-                r.RelativeItem().AlignRight().Text("Total outstanding balance due:").Bold().FontSize(11).FontColor("#1a1a2e");
-                r.ConstantItem(150).AlignRight().Text(FormatCurrency(data.CurrencyCode, data.TotalOutstandingDue)).Bold().FontSize(12).FontColor("#1a1a2e");
-            });
-        }
-        #endregion
+        //     col.Item().PaddingTop(10).AlignRight().Row(r =>
+        //     {
+        //         r.RelativeItem().AlignRight().Text("Total outstanding balance due:").Bold().FontSize(11).FontColor("#1a1a2e");
+        //         r.ConstantItem(150).AlignRight().Text(FormatCurrency(data.CurrencyCode, data.TotalOutstandingDue)).Bold().FontSize(12).FontColor("#1a1a2e");
+        //     });
+        // }
+        // #endregion
 
         #region Page 2 — Invoice
         private static void ComposePage2(ColumnDescriptor col, StatementInvoicePdfDto data)
@@ -204,7 +222,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 r.RelativeItem().Column(c =>
                 {
                     c.Item().Text("INVOICE").FontSize(16).Bold().FontColor("#1a1a2e");
-                    c.Item().Text(data.CenterName).FontSize(10).FontColor("#555555").Bold();
+                    // c.Item().Text(data.CenterName).FontSize(10).FontColor("#555555").Bold();
                 });
             });
 
@@ -213,7 +231,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 r.RelativeItem().Column(c =>
                 {
                     c.Item().Text("BILL TO").FontSize(8).Bold().FontColor("#888888");
-                    c.Item().Text($"Company Name: {data.AccountName}").Bold().FontSize(10).FontColor("#1a1a2e");
+                    string companyName = "-";
+                    if (!string.IsNullOrWhiteSpace(data.AccountName) &&
+                        !string.Equals(data.AccountName.Trim(), data.AttnName?.Trim(), StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(data.AccountName.Trim(), "Valued Customer", StringComparison.OrdinalIgnoreCase))
+                    {
+                        companyName = data.AccountName.Trim();
+                    }
+                    c.Item().Text($"Company Name: {companyName}").Bold().FontSize(10).FontColor("#1a1a2e");
                     if (!string.IsNullOrWhiteSpace(data.AttnName))
                         c.Item().Text($"Attn: {data.AttnName}").FontColor("#444444");
                     c.Item().Text(data.BillingAddress).FontColor("#555555");
@@ -221,11 +246,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                 r.ConstantItem(220).Column(c =>
                 {
-                    c.Item().Row(row => { row.RelativeItem().Text("Customer Code:").FontColor("#666666"); row.AutoItem().Text(data.AccountNumber).Bold(); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Invoice Number:").FontColor("#666666"); row.AutoItem().Text(data.InvoiceNumber).Bold(); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Invoice Date:").FontColor("#666666"); row.AutoItem().Text($"{data.InvoiceDate:dd MMM yyyy}"); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Due Date:").FontColor("#666666"); row.AutoItem().Text($"{data.DueDate:dd MMM yyyy}").Bold().FontColor("#d9534f"); });
-                    // c.Item().Row(row => { row.RelativeItem().Text("SNTN / NTN / NIC:").FontColor("#666666"); row.AutoItem().Text(data.SntnNtnNic); });
+                    c.Item().Row(row => { row.ConstantItem(100).Text("Customer Code:").FontColor("#666666"); row.RelativeItem().Text(data.AccountNumber).Bold(); });
+                    c.Item().Row(row => { row.ConstantItem(100).Text("Invoice Number:").FontColor("#666666"); row.RelativeItem().Text(data.InvoiceNumber).Bold(); });
+                    c.Item().Row(row => { row.ConstantItem(100).Text("Invoice Date:").FontColor("#666666"); row.RelativeItem().Text($"{data.InvoiceDate:dd MMM yyyy}"); });
+                    c.Item().Row(row => { row.ConstantItem(100).Text("Due Date:").FontColor("#666666"); row.RelativeItem().Text($"{data.DueDate:dd MMM yyyy}").Bold().FontColor("#d9534f"); });
+                    // c.Item().Row(row => { row.ConstantItem(100).Text("SNTN / NTN / NIC:").FontColor("#666666"); row.RelativeItem().Text(data.SntnNtnNic); });
                 });
             });
 
@@ -234,18 +259,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 table.ColumnsDefinition(columns =>
                 {
                     columns.RelativeColumn(3);
-                    columns.ConstantColumn(70);
-                    columns.ConstantColumn(70);
-                    columns.ConstantColumn(75);
-                    columns.ConstantColumn(65);
+                    columns.ConstantColumn(85);
                     columns.ConstantColumn(80);
+                    columns.ConstantColumn(85);
                 });
 
                 table.Header(h =>
                 {
                     h.Cell().Background("#1a1a2e").Padding(5).Text("Description of Charges").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(5).Text("From").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(5).Text("To").Bold().FontColor("#ffffff");
                     h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Price").Bold().FontColor("#ffffff");
                     h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Tax Amount").Bold().FontColor("#ffffff");
                     h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Total").Bold().FontColor("#ffffff");
@@ -254,8 +275,6 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 foreach (var item in data.LineItems)
                 {
                     table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.Description);
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.FromDate.HasValue ? $"{item.FromDate:dd/MM/yy}" : "-");
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.ToDate.HasValue ? $"{item.ToDate:dd/MM/yy}" : "-");
                     table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.PriceExclVat));
                     table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.VatAmount));
                     table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.TotalInclVat));
@@ -263,14 +282,43 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             });
 
             decimal totalExclVat = data.LineItems.Sum(i => i.PriceExclVat);
+            decimal depositTotal = data.LineItems.Where(i => IsDepositItem(i)).Sum(i => i.PriceExclVat);
+            decimal rentTotal = totalExclVat - depositTotal;
             decimal totalVat = data.LineItems.Sum(i => i.VatAmount);
             decimal grandTotal = data.LineItems.Sum(i => i.TotalInclVat);
 
+            decimal chargePercentage = data.AppliedChargePercentage ?? (data.SupportChargeRate > 0 ? data.SupportChargeRate * 100m : 10m);
+            decimal supportCharges = data.SupportChargeAmount ?? (rentTotal > 0 ? Math.Round(rentTotal * (chargePercentage / 100m), 2) : 0m);
+
+            decimal taxPercentage;
+            if (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0)
+            {
+                taxPercentage = data.AppliedTaxPercentage.Value;
+            }
+            else if (supportCharges > 0 && totalVat > 0)
+            {
+                taxPercentage = Math.Round((totalVat / supportCharges) * 100m, 0);
+            }
+            else
+            {
+                taxPercentage = data.VatRate > 0 ? (data.VatRate * 100m) : 16m;
+            }
+
             col.Item().PaddingTop(10).AlignRight().Column(c =>
             {
-                c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):"); r.ConstantItem(120).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)); });
-                c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Tax:"); r.ConstantItem(120).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)); });
-                c.Item().PaddingTop4).Row(r =>
+                if (depositTotal > 0)
+                {
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. Tax):"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)); });
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#d97706"); });
+                }
+                else
+                {
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)); });
+                }
+
+                c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"Support Charges ({chargePercentage:G29}%):"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)); });
+                c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Charges):"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)); });
+                c.Item().PaddingTop(4).Row(r =>
                 {
                     r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(10).FontColor("#1a1a2e");
                     r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#1a1a2e");
@@ -279,91 +327,96 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
             // col.Item().PaddingTop(15).Text("See next page for an itemized breakdown of charges.").Italic().FontSize(8.5f).FontColor("#666666");
         }
-        #endregion
 
-        #region Page 3 — Your Invoice Details
-        private static void ComposePage3(ColumnDescriptor col, StatementInvoicePdfDto data)
+        private static bool IsDepositItem(StatementInvoiceLineItemDto item)
         {
-            col.Item().Row(r =>
-            {
-                r.RelativeItem().Column(c =>
-                {
-                    c.Item().Text("YOUR INVOICE DETAILS").FontSize(16).Bold().FontColor("#1a1a2e");
-                    c.Item().Text(data.CenterName).FontSize(10).FontColor("#555555").Bold();
-                });
-            });
-
-            col.Item().PaddingTop(10).Row(r =>
-            {
-                r.RelativeItem().Column(c =>
-                {
-                    c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#888888");
-                    c.Item().Text(data.AccountName).Bold().FontSize(10).FontColor("#1a1a2e");
-                    if (!string.IsNullOrWhiteSpace(data.AttnName))
-                        c.Item().Text($"Attn: {data.AttnName}").FontColor("#444444");
-                    c.Item().Text(data.BillingAddress).FontColor("#555555");
-                });
-
-                r.ConstantItem(220).Column(c =>
-                {
-                    c.Item().Row(row => { row.RelativeItem().Text("Account Number:").FontColor("#666666"); row.AutoItem().Text(data.AccountNumber).Bold(); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Invoice Number:").FontColor("#666666"); row.AutoItem().Text(data.InvoiceNumber).Bold(); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Statement Date:").FontColor("#666666"); row.AutoItem().Text($"{data.StatementDate:dd MMM yyyy}"); });
-                    c.Item().Row(row => { row.RelativeItem().Text("Due Date:").FontColor("#666666"); row.AutoItem().Text($"{data.DueDate:dd MMM yyyy}").Bold().FontColor("#d9534f"); });
-                });
-            });
-
-            col.Item().PaddingTop(15).Text("RECURRING CHARGES").Bold().FontSize(10).FontColor("#1a1a2e");
-
-            col.Item().PaddingTop(5).Table(table =>
-            {
-                table.ColumnsDefinition(columns =>
-                {
-                    columns.RelativeColumn(3);
-                    columns.ConstantColumn(70);
-                    columns.ConstantColumn(70);
-                    columns.ConstantColumn(75);
-                    columns.ConstantColumn(65);
-                    columns.ConstantColumn(80);
-                });
-
-                table.Header(h =>
-                {
-                    h.Cell().Background("#1a1a2e").Padding(5).Text("Item Description").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(5).Text("From Date").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(5).Text("To Date").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Price").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Tax Amount").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Total (inc. Tax)").Bold().FontColor("#ffffff");
-                });
-
-                foreach (var item in data.LineItems)
-                {
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.Description);
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.FromDate.HasValue ? $"{item.FromDate:dd/MM/yyyy}" : "-");
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.ToDate.HasValue ? $"{item.ToDate:dd/MM/yyyy}" : "-");
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.PriceExclVat));
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.VatAmount));
-                    table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.TotalInclVat));
-                }
-            });
-
-            decimal totalExclVat = data.LineItems.Sum(i => i.PriceExclVat);
-            decimal totalVat = data.LineItems.Sum(i => i.VatAmount);
-            decimal grandTotal = data.LineItems.Sum(i => i.TotalInclVat);
-
-            col.Item().PaddingTop(10).AlignRight().Column(c =>
-            {
-                c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Subtotal:"); r.ConstantItem(120).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)); });
-                c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Tax:"); r.ConstantItem(120).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)); });
-                c.Item().PaddingTop(4).Row(r =>
-                {
-                    r.RelativeItem().AlignRight().Text("Total Charges:").Bold().FontSize(11).FontColor("#1a1a2e");
-                    r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(12).FontColor("#1a1a2e");
-                });
-            });
+            return item.IsDeposit || item.Description.Contains("Deposit", StringComparison.OrdinalIgnoreCase);
         }
         #endregion
+
+        // #region Page 3 — Your Invoice Details
+        // private static void ComposePage3(ColumnDescriptor col, StatementInvoicePdfDto data)
+        // {
+        //     col.Item().Row(r =>
+        //     {
+        //         r.RelativeItem().Column(c =>
+        //         {
+        //             c.Item().Text("YOUR INVOICE DETAILS").FontSize(16).Bold().FontColor("#1a1a2e");
+        //             c.Item().Text(data.CenterName).FontSize(10).FontColor("#555555").Bold();
+        //         });
+        //     });
+
+        //     col.Item().PaddingTop(10).Row(r =>
+        //     {
+        //         r.RelativeItem().Column(c =>
+        //         {
+        //             c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#888888");
+        //             c.Item().Text(data.AccountName).Bold().FontSize(10).FontColor("#1a1a2e");
+        //             if (!string.IsNullOrWhiteSpace(data.AttnName))
+        //                 c.Item().Text($"Attn: {data.AttnName}").FontColor("#444444");
+        //             c.Item().Text(data.BillingAddress).FontColor("#555555");
+        //         });
+
+        //         r.ConstantItem(220).Column(c =>
+        //         {
+        //             c.Item().Row(row => { row.RelativeItem().Text("Account Number:").FontColor("#666666"); row.AutoItem().Text(data.AccountNumber).Bold(); });
+        //             c.Item().Row(row => { row.RelativeItem().Text("Invoice Number:").FontColor("#666666"); row.AutoItem().Text(data.InvoiceNumber).Bold(); });
+        //             c.Item().Row(row => { row.RelativeItem().Text("Statement Date:").FontColor("#666666"); row.AutoItem().Text($"{data.StatementDate:dd MMM yyyy}"); });
+        //             c.Item().Row(row => { row.RelativeItem().Text("Due Date:").FontColor("#666666"); row.AutoItem().Text($"{data.DueDate:dd MMM yyyy}").Bold().FontColor("#d9534f"); });
+        //         });
+        //     });
+
+        //     col.Item().PaddingTop(15).Text("RECURRING CHARGES").Bold().FontSize(10).FontColor("#1a1a2e");
+
+        //     col.Item().PaddingTop(5).Table(table =>
+        //     {
+        //         table.ColumnsDefinition(columns =>
+        //         {
+        //             columns.RelativeColumn(3);
+        //             columns.ConstantColumn(70);
+        //             columns.ConstantColumn(70);
+        //             columns.ConstantColumn(75);
+        //             columns.ConstantColumn(65);
+        //             columns.ConstantColumn(80);
+        //         });
+
+        //         table.Header(h =>
+        //         {
+        //             h.Cell().Background("#1a1a2e").Padding(5).Text("Item Description").Bold().FontColor("#ffffff");
+        //             h.Cell().Background("#1a1a2e").Padding(5).Text("From Date").Bold().FontColor("#ffffff");
+        //             h.Cell().Background("#1a1a2e").Padding(5).Text("To Date").Bold().FontColor("#ffffff");
+        //             h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Price").Bold().FontColor("#ffffff");
+        //             h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Tax Amount").Bold().FontColor("#ffffff");
+        //             h.Cell().Background("#1a1a2e").Padding(5).AlignRight().Text("Total (inc. Tax)").Bold().FontColor("#ffffff");
+        //         });
+
+        //         foreach (var item in data.LineItems)
+        //         {
+        //             table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.Description);
+        //             table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.FromDate.HasValue ? $"{item.FromDate:dd/MM/yyyy}" : "-");
+        //             table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).Text(item.ToDate.HasValue ? $"{item.ToDate:dd/MM/yyyy}" : "-");
+        //             table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.PriceExclVat));
+        //             table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.VatAmount));
+        //             table.Cell().BorderBottom(1).BorderColor("#f0f0f0").Padding(5).AlignRight().Text(FormatAmount(item.TotalInclVat));
+        //         }
+        //     });
+
+        //     decimal totalExclVat = data.LineItems.Sum(i => i.PriceExclVat);
+        //     decimal totalVat = data.LineItems.Sum(i => i.VatAmount);
+        //     decimal grandTotal = data.LineItems.Sum(i => i.TotalInclVat);
+
+        //     col.Item().PaddingTop(10).AlignRight().Column(c =>
+        //     {
+        //         c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Subtotal:"); r.ConstantItem(120).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)); });
+        //         c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Tax:"); r.ConstantItem(120).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)); });
+        //         c.Item().PaddingTop(4).Row(r =>
+        //         {
+        //             r.RelativeItem().AlignRight().Text("Total Charges:").Bold().FontSize(11).FontColor("#1a1a2e");
+        //             r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(12).FontColor("#1a1a2e");
+        //         });
+        //     });
+        // }
+        // #endregion
 
         // #region Page 4 — Methods of Payment + Understanding Your Invoice (Part 1)
         // private static void ComposePage4(ColumnDescriptor col, StatementInvoicePdfDto data)
@@ -506,6 +559,70 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         // }
         // #endregion
 
+        #region Common Header
+        private static string GetLogoFilePath(string? configuredPath)
+        {
+            if (!string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath))
+                return configuredPath;
+
+            var searchPaths = new[]
+            {
+                @"F:\WorkNest_FE\public\images\Logo.png",
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "public", "images", "Logo.png"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "images", "Logo.png"),
+                Path.Combine(Directory.GetCurrentDirectory(), "..", "WorkNest_FE", "public", "images", "Logo.png"),
+                Path.Combine(Directory.GetCurrentDirectory(), "public", "images", "Logo.png")
+            };
+
+            foreach (var path in searchPaths)
+            {
+                if (File.Exists(path)) return path;
+            }
+
+            return string.Empty;
+        }
+
+        private static void ComposeHeader(IContainer container, StatementInvoicePdfDto data)
+        {
+            string logoPath = GetLogoFilePath(data.VendorLogoPath);
+
+            container.Column(col =>
+            {
+                col.Item().Row(row =>
+                {
+                    row.RelativeItem().AlignMiddle().Column(c =>
+                    {
+                        if (!string.IsNullOrWhiteSpace(logoPath))
+                        {
+                            c.Item().Row(r =>
+                            {
+                                r.AutoItem().Height(35).Image(logoPath).FitHeight();
+                                r.AutoItem().AlignMiddle().PaddingLeft(2).Text("orkNest").FontSize(22).Bold().FontColor("#1a1a2e");
+                            });
+                        }
+                        else
+                        {
+                            c.Item().Text(data.VendorLegalName ?? "WorkNest").FontSize(20).Bold().FontColor("#1a1a2e");
+                        }
+                    });
+
+                    row.ConstantItem(260).Column(c =>
+                    {
+                        c.Item().AlignRight().Text(data.VendorLegalName).Bold().FontSize(9).FontColor("#1a1a2e");
+                        c.Item().AlignRight().Text(data.VendorAddress).FontSize(8).FontColor("#555555");
+                        c.Item().AlignRight().Text($"Phone: {data.VendorPhone}").FontSize(8).FontColor("#555555");
+                        if (!string.IsNullOrWhiteSpace(data.VendorNtn))
+                        {
+                            c.Item().AlignRight().Text($"NTN: {data.VendorNtn}").FontSize(8).FontColor("#555555");
+                        }
+                    });
+                });
+
+                col.Item().PaddingTop(6).PaddingBottom(10).LineHorizontal(1.5f).LineColor("#1a1a2e");
+            });
+        }
+        #endregion
+
         #region Common Footer
         private static void ComposeFooter(IContainer container, StatementInvoicePdfDto data)
         {
@@ -558,6 +675,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal officeBase = 200000.00m;
             decimal itBase = 30000.00m;
             decimal kitchenBase = 20000.00m;
+            decimal supportRate = 0.10m;
 
             return new List<StatementInvoiceLineItemDto>
             {
@@ -567,7 +685,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     FromDate = startDate,
                     ToDate = endDate,
                     PriceExclVat = officeBase,
-                    VatAmount = officeBase * vatRate,
+                    VatAmount = Math.Round(officeBase * supportRate * vatRate, 2),
                     Category = "Recurring"
                 },
                 new StatementInvoiceLineItemDto
@@ -576,7 +694,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     FromDate = startDate,
                     ToDate = endDate,
                     PriceExclVat = itBase,
-                    VatAmount = itBase * vatRate,
+                    VatAmount = Math.Round(itBase * supportRate * vatRate, 2),
                     Category = "IT Services"
                 },
                 new StatementInvoiceLineItemDto
@@ -585,7 +703,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     FromDate = startDate,
                     ToDate = endDate,
                     PriceExclVat = kitchenBase,
-                    VatAmount = kitchenBase * vatRate,
+                    VatAmount = Math.Round(kitchenBase * supportRate * vatRate, 2),
                     Category = "Recurring"
                 }
             };
