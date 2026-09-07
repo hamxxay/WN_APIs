@@ -83,6 +83,10 @@ namespace WorkNest.Application.Interfaces
             string? userEmail = null
         );
         Task<IEnumerable<IDictionary<string, object?>>> GetQuotationsByCustomerAsync(int customerId);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetCustomerQuotationsAsync(int customerId, int page, int limit, string? status);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetCustomerInvoicesDbAsync(int customerId, int userId, int page, int limit, int? statusId);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetCustomerAttendantsPaginatedDbAsync(int customerId, int page, int limit);
+        Task<bool> CheckBookingOwnershipAsync(int bookingId, int customerId, int userId);
         Task<IDictionary<string, object?>> ConvertQuotationToBookingAsync(
             int quotationId,
             int? createdById

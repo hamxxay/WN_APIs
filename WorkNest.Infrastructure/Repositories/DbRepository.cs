@@ -1,4 +1,4 @@
-
+﻿
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System.Data;
@@ -2155,7 +2155,7 @@ END;";
             try
             {
                 string sql = @"
-CREATE OR ALTER VIEW [dbo].[VW_WN_BookingSummary] AS
+CREATE OR ALTER VIEW [dbo].[WN_vw_BookingSummary] AS
     SELECT 
         b.Id                      AS BookingId, 
         b.IdGUID                  AS BookingPublicId, 
@@ -3570,7 +3570,7 @@ END;";
         public async Task<(int PersonId, Guid PersonGuid)> AddAttendantSpAsync(string name, string email, string phone, string idType, string idNumber, int customerId)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_sp_AddAttendant", c);
+            await using var cmd = SP("dbo.WN_AddAttendant", c);
             cmd.Parameters.AddWithValue("@Name", name);
             cmd.Parameters.AddWithValue("@Email", email);
             cmd.Parameters.AddWithValue("@Phone", phone);
@@ -3656,7 +3656,7 @@ END;";
         public async Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_sp_AssignAttendantToBooking", c);
+            await using var cmd = SP("dbo.WN_AssignAttendantToBooking", c);
             cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
             cmd.Parameters.AddWithValue("@PersonId", personId);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
@@ -3690,7 +3690,7 @@ END;";
         public async Task<int> ToggleAccessStatusSpAsync(int bookingDetailId, int customerId, int? personId, bool isEnabled)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_sp_ToggleAccessStatus", c);
+            await using var cmd = SP("dbo.WN_ToggleAccessStatus", c);
             cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
             cmd.Parameters.AddWithValue("@PersonId", (object?)personId ?? DBNull.Value);
@@ -3770,7 +3770,7 @@ END;";
         public async Task<IDictionary<string, object?>> CreateSurchargeInvoiceSpAsync(int bookingDetailId, int personId, int customerId, decimal surchargeAmount, int excessSeatCount)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_sp_CreateSurchargeInvoice", c);
+            await using var cmd = SP("dbo.WN_CreateSurchargeInvoice", c);
             cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
             cmd.Parameters.AddWithValue("@PersonId", personId);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
@@ -3784,7 +3784,179 @@ END;";
             }
             return new Dictionary<string, object?>();
         }
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetCustomerQuotationsAsync(
+            int customerId,
+            int page,
+            int limit,
+            string? status)
+        {
+            await using var c = await Open();
+            if (page < 1) page = 1;
+            if (limit < 1) limit = 10;
+            int offset = (page - 1) * limit;
+
+            string whereClause = "WHERE q.CustomerId = @CustomerId AND (@Status IS NULL OR @Status = '' OR @Status = 'all' OR q.Status = @Status) ";
+
+            string countSql = $"SELECT COUNT(1) FROM dbo.WN_Quotations q {whereClause}";
+            await using var countCmd = new SqlCommand(countSql, c);
+            countCmd.Parameters.AddWithValue("@CustomerId", customerId);
+            countCmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+            int total = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
+
+            string sql = $@"
+                SELECT q.*, CONCAT(cu.FirstName, ' ', ISNULL(cu.LastName, '')) AS CustomerName, cu.Email AS CustomerEmail, cu.Company AS CustomerCompany, 
+                       s.Name AS SpaceName, s.Code AS SpaceCode, l.Name AS LocationName, st.Name AS SpaceTypeName
+                FROM dbo.WN_Quotations q 
+                LEFT JOIN dbo.WN_Customers cu ON cu.Id = q.CustomerId 
+                LEFT JOIN dbo.WN_Spaces s ON s.Id = q.SpaceId 
+                LEFT JOIN dbo.WN_Locations l ON l.Id = s.LocationId 
+                LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeId 
+                {whereClause}
+                ORDER BY q.CreatedDate DESC 
+                OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Offset", offset);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            var rows = await ReadAll(r);
+            return (rows, total);
+        }
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetCustomerInvoicesDbAsync(
+            int customerId,
+            int userId,
+            int page,
+            int limit,
+            int? statusId)
+        {
+            await using var c = await Open();
+            if (page < 1) page = 1;
+            if (limit < 1) limit = 10;
+            int offset = (page - 1) * limit;
+
+            string whereClause = @"
+                WHERE (i.UserId = @UserId 
+                    OR i.BookingId IN (SELECT Id FROM dbo.WN_Bookings WHERE CustomerId = @CustomerId)
+                    OR i.UserId IN (SELECT UserId FROM dbo.WN_Customers WHERE Id = @CustomerId))
+                  AND (@StatusId IS NULL OR @StatusId <= 0 OR i.StatusId = @StatusId)";
+
+            string countSql = $"SELECT COUNT(1) FROM dbo.WN_Invoices i WITH (NOLOCK) {whereClause}";
+            await using var countCmd = new SqlCommand(countSql, c);
+            countCmd.Parameters.AddWithValue("@CustomerId", customerId);
+            countCmd.Parameters.AddWithValue("@UserId", userId);
+            countCmd.Parameters.AddWithValue("@StatusId", (object?)statusId ?? DBNull.Value);
+            int total = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
+
+            string sql = $@"
+                SELECT 
+                    i.Id,
+                    i.PublicId,
+                    i.InvoiceNumber,
+                    i.UserId,
+                    i.BookingId,
+                    i.IssuedOn,
+                    i.DueOn,
+                    COALESCE(i.BillingPeriodStart, b.StartOn) AS BillingPeriodStart,
+                    COALESCE(i.BillingPeriodEnd, b.EndOn) AS BillingPeriodEnd,
+                    ISNULL(i.SubTotal, 0) AS SubTotal,
+                    ISNULL(i.DiscountTotal, 0) AS DiscountTotal,
+                    ISNULL(i.TaxTotal, 0) AS TaxTotal,
+                    ISNULL(i.GrandTotal, 0) AS GrandTotal,
+                    ISNULL(i.PaidTotal, 0) AS PaidTotal,
+                    ISNULL(i.GrandTotal - i.PaidTotal, 0) AS BalanceDue,
+                    i.CurrencyCode,
+                    i.StatusId,
+                    i.InvoiceTypeId,
+                    i.Notes,
+                    i.CreatedOn,
+                    CASE i.StatusId 
+                        WHEN 1 THEN 'Unpaid' 
+                        WHEN 2 THEN 'Paid' 
+                        WHEN 3 THEN 'Partial' 
+                        WHEN 4 THEN 'Overdue' 
+                        ELSE 'Unknown' 
+                    END AS StatusLabel
+                FROM dbo.WN_Invoices i WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                {whereClause}
+                ORDER BY i.Id DESC
+                OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@StatusId", (object?)statusId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Offset", offset);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            var rows = await ReadAll(r);
+            return (rows, total);
+        }
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetCustomerAttendantsPaginatedDbAsync(
+            int customerId,
+            int page,
+            int limit)
+        {
+            await using var c = await Open();
+            if (page < 1) page = 1;
+            if (limit < 1) limit = 10;
+            int offset = (page - 1) * limit;
+
+            string countSql = "SELECT COUNT(1) FROM dbo.WN_CustomerAttendants ca WITH (NOLOCK) WHERE ca.CustomerId = @CustomerId AND ca.IsActive = 1";
+            await using var countCmd = new SqlCommand(countSql, c);
+            countCmd.Parameters.AddWithValue("@CustomerId", customerId);
+            int total = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
+
+            string sql = @"
+                SELECT ca.Id AS CustomerAttendantId, p.PersonId, p.PersonGuid, p.Name, p.Email, p.Phone, p.IdType, p.IdNumber, ca.CustomerId, ca.IsActive, ca.CreatedAt,
+                       b.Id AS BookingId, s.Name AS SpaceName
+                FROM dbo.WN_CustomerAttendants ca WITH (NOLOCK)
+                JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ca.PersonId
+                LEFT JOIN dbo.WN_BookingAttendants ba WITH (NOLOCK) ON ba.PersonId = p.PersonId AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))
+                LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                WHERE ca.CustomerId = @CustomerId AND ca.IsActive = 1
+                ORDER BY ca.Id DESC
+                OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@Offset", offset);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            var rows = await ReadAll(r);
+            return (rows, total);
+        }
+
+        public async Task<bool> CheckBookingOwnershipAsync(int bookingId, int customerId, int userId)
+        {
+            await using var c = await Open();
+            string sql = @"
+                SELECT TOP 1 1 
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+                WHERE (b.Id = @BookingId OR bd.Id = @BookingId)
+                  AND (b.CustomerId = @CustomerId 
+                    OR b.UserGuid IN (SELECT IdGUID FROM dbo.WN_Users WHERE Id = @UserId)
+                    OR b.CustomerId IN (SELECT Id FROM dbo.WN_Customers WHERE UserId = @UserId))";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@BookingId", bookingId);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            var res = await cmd.ExecuteScalarAsync();
+            return res != null && res != DBNull.Value;
+        }
     }
 }
+
 
 

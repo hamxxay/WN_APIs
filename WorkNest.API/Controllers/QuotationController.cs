@@ -49,8 +49,36 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [AllowAnonymous]
+        [HttpGet("api/quotations")]
+        [HttpGet("api/quotation/my")]
+        public async Task<IActionResult> GetMyQuotations([FromHeader(Name = "x-user-email")] string? actorEmail)
+        {
+            try
+            {
+                var email = ResolveUserEmail(actorEmail);
+                if (string.IsNullOrWhiteSpace(email)) return Unauthorized(ApiResponse.Fail("User identity required."));
+                var userRow = await _db.GetUserByEmailAsync(email);
+                if (userRow == null) return Unauthorized(ApiResponse.Fail("User not found."));
+                int customerId = userRow.TryGetValue("CustomerId", out var cid) && cid != null ? Convert.ToInt32(cid) : 0;
+                int userId = userRow.TryGetValue("Id", out var uid) && uid != null ? Convert.ToInt32(uid) : 0;
+                if (customerId <= 0 && userId > 0)
+                {
+                    var custRow = await _db.GetCustomerByUserIdAsync(userId);
+                    if (custRow != null && custRow.TryGetValue("Id", out var custId) && custId != null) customerId = Convert.ToInt32(custId);
+                }
+                if (customerId <= 0) return Ok(ApiResponse.Ok(new List<object>()));
+                var res = await _quotations.GetQuotationsByCustomerAsync(customerId);
+                return Ok(ApiResponse.Ok(res));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ApiResponse.Fail(ex.Message));
+            }
+        }
+
+        [AllowAnonymous]
         [HttpGet("api/quotation/by-customer/{customerId:int}")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
         public async Task<IActionResult> GetByCustomer(int customerId)
         {
             try
@@ -64,7 +92,9 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [AllowAnonymous]
         [HttpGet("api/quotation/{id:int}")]
+        [HttpGet("api/quotations/{id:int}")]
         public async Task<IActionResult> GetById(int id)
         {
             var res = await _quotations.GetQuotationByIdAsync(id);
@@ -126,6 +156,7 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [AllowAnonymous]
         [HttpPost("api/quotation/{id:int}/accept")]
         [HttpPost("api/quotation/{id:int}/versions/{version:int}/accept")]
         [HttpPost("api/quotations/{id:int}/accept")]
@@ -163,6 +194,7 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [AllowAnonymous]
         [HttpPost("api/quotation/{id:int}/decline")]
         [HttpPost("api/quotation/{id:int}/versions/{version:int}/decline")]
         [HttpPost("api/quotations/{id:int}/decline")]
@@ -229,6 +261,7 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [AllowAnonymous]
         [HttpGet("api/quotation/{id:int}/versions")]
         [HttpGet("api/quotations/{id:int}/versions")]
         public async Task<IActionResult> GetVersions(int id)
@@ -237,6 +270,7 @@ namespace WorkNest.API.Controllers
             return Ok(ApiResponse.Ok(res));
         }
 
+        [AllowAnonymous]
         [HttpGet("api/quotation/{id:int}/versions/{version:int}")]
         [HttpGet("api/quotations/{id:int}/versions/{version:int}")]
         public async Task<IActionResult> GetVersionById(int id, int version)
@@ -251,9 +285,9 @@ namespace WorkNest.API.Controllers
             return Ok(ApiResponse.Ok(specificVersion));
         }
 
+        [AllowAnonymous]
         [HttpGet("api/quotation/activities")]
         [HttpGet("api/quotations/activities")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
         public async Task<IActionResult> GetActivities([FromQuery] int? quotationId = null, [FromQuery] int limit = 20)
         {
             var res = await _quotations.GetActivitiesAsync(quotationId, limit);
