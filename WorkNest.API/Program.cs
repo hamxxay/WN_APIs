@@ -109,6 +109,7 @@ try
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
     builder.Services.AddScoped<IQuotationService, QuotationService>();
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();
+    builder.Services.AddScoped<IAttendantService, AttendantService>();
 
     // ── Background Hosted Services ────────────────────────────────────────────
     builder.Services.AddHostedService<BillingAutomationService>();
@@ -123,7 +124,7 @@ try
         app.UsePathBase("/WorkNest");
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
-    // CORS must come before routing, authentication, and authorization
+    app.UseStaticFiles();
     app.UseCorsWithConfig();
     
     app.UseRouting();

@@ -72,17 +72,6 @@ BEGIN
 END;
 GO
 
-CREATE OR ALTER PROCEDURE dbo.WN_GetInvoicesList
-    @Page INT = 1,
-    @Limit INT = 10,
-    @Search NVARCHAR(200) = NULL,
-    @TypeId INT = NULL
-AS
-BEGIN
-    EXEC dbo.WN_GetInvoicesList @Page, @Limit, @Search, @TypeId;
-END;
-GO
-
 -- 2. WN_GetStatementInvoicePdfData
 CREATE OR ALTER PROCEDURE dbo.WN_GetStatementInvoicePdfData
     @InvoiceId INT

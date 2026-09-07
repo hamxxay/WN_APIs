@@ -209,5 +209,19 @@ namespace WorkNest.Application.Interfaces
         Task DeleteAccessCardAsync(string id);
         Task GenerateAccessCardsForBookingDbAsync(int bookingId, int? createdById = null);
         Task ExecuteRawSqlAsync(string sql);
+
+        // --- Attendants & Access Control ---
+        Task<(int PersonId, Guid PersonGuid)> AddAttendantSpAsync(string name, string email, string phone, string idType, string idNumber, int customerId);
+        Task UpdatePersonAsync(int personId, string name, string email, string phone);
+        Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAttendantsDbAsync(int customerId);
+        Task<IEnumerable<IDictionary<string, object?>>> GetBookingAttendantsDbAsync(int bookingDetailId);
+        Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom);
+        Task SoftRemoveAttendantFromBookingDbAsync(int bookingDetailId, int personId);
+        Task<int> ToggleAccessStatusSpAsync(int bookingDetailId, int customerId, int? personId, bool isEnabled);
+        Task<IEnumerable<IDictionary<string, object?>>> GetAccessStatusExportDbAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetCustomerActiveSpacesDbAsync(int customerId);
+        Task<IDictionary<string, object?>?> GetBookingDetailSummaryDbAsync(int bookingDetailId);
+        Task<IDictionary<string, object?>> CreateSurchargeInvoiceSpAsync(int bookingDetailId, int personId, int customerId, decimal surchargeAmount, int excessSeatCount);
     }
 }
+

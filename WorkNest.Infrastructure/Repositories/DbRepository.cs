@@ -3564,6 +3564,227 @@ END;";
             cmd.Parameters.AddWithValue("@TargetBookingId", bookingId);
             await cmd.ExecuteNonQueryAsync();
         }
+
+        // --- Attendants & Access Control Implementation ---
+
+        public async Task<(int PersonId, Guid PersonGuid)> AddAttendantSpAsync(string name, string email, string phone, string idType, string idNumber, int customerId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_sp_AddAttendant", c);
+            cmd.Parameters.AddWithValue("@Name", name);
+            cmd.Parameters.AddWithValue("@Email", email);
+            cmd.Parameters.AddWithValue("@Phone", phone);
+            cmd.Parameters.AddWithValue("@IdType", idType);
+            cmd.Parameters.AddWithValue("@IdNumber", idNumber);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+
+            var pId = new SqlParameter("@PersonId", SqlDbType.Int) { Direction = ParameterDirection.Output };
+            var pGuid = new SqlParameter("@PersonGuid", SqlDbType.UniqueIdentifier) { Direction = ParameterDirection.Output };
+            cmd.Parameters.Add(pId);
+            cmd.Parameters.Add(pGuid);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var personId = Convert.ToInt32(r["PersonId"]);
+                var personGuid = (Guid)r["PersonGuid"];
+                return (personId, personGuid);
+            }
+
+            return ((int)(pId.Value ?? 0), pGuid.Value is Guid g ? g : Guid.Empty);
+        }
+
+        public async Task UpdatePersonAsync(int personId, string name, string email, string phone)
+        {
+            await using var c = await Open();
+            const string sql = @"UPDATE dbo.WN_Persons SET Name = @Name, Email = @Email, Phone = @Phone WHERE PersonId = @PersonId;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@PersonId", personId);
+            cmd.Parameters.AddWithValue("@Name", name);
+            cmd.Parameters.AddWithValue("@Email", email);
+            cmd.Parameters.AddWithValue("@Phone", phone);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAttendantsDbAsync(int customerId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT ca.Id AS CustomerAttendantId, p.PersonId, p.PersonGuid, p.Name, p.Email, p.Phone, p.IdType, p.IdNumber, ca.CustomerId, ca.IsActive, ca.CreatedAt
+                FROM dbo.WN_CustomerAttendants ca WITH (NOLOCK)
+                JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ca.PersonId
+                WHERE ca.CustomerId = @CustomerId AND ca.IsActive = 1
+                ORDER BY p.Name ASC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetBookingAttendantsDbAsync(int bookingDetailId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT 
+                    ba.Id,
+                    ba.BookingDetailId,
+                    ba.PersonId,
+                    p.PersonGuid,
+                    ba.CustomerId,
+                    p.Name,
+                    p.Email,
+                    p.Phone,
+                    p.IdType,
+                    p.IdNumber,
+                    ba.AssignedFrom,
+                    ba.AssignedTo,
+                    ISNULL(acc.IsEnabled, 1) AS IsEnabled,
+                    ba.IsOverCapacity,
+                    ba.ExcessSeatCount,
+                    ba.SurchargeApplied
+                FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+                JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ba.PersonId
+                LEFT JOIN dbo.WN_AccessStatus acc WITH (NOLOCK) ON acc.BookingDetailId = ba.BookingDetailId AND acc.PersonId = ba.PersonId
+                WHERE ba.BookingDetailId = @BookingDetailId AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))
+                ORDER BY p.Name ASC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_sp_AssignAttendantToBooking", c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            cmd.Parameters.AddWithValue("@PersonId", personId);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@AssignedFrom", assignedFrom.Date);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                return RowToDictionary(r);
+            }
+            return new Dictionary<string, object?>();
+        }
+
+        public async Task SoftRemoveAttendantFromBookingDbAsync(int bookingDetailId, int personId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                UPDATE dbo.WN_BookingAttendants 
+                SET AssignedTo = DATEADD(day, -1, CAST(SYSUTCDATETIME() AS DATE)) 
+                WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSUTCDATETIME() AS DATE));
+
+                UPDATE dbo.WN_AccessStatus 
+                SET IsEnabled = 0, RevokedAt = SYSUTCDATETIME() 
+                WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            cmd.Parameters.AddWithValue("@PersonId", personId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<int> ToggleAccessStatusSpAsync(int bookingDetailId, int customerId, int? personId, bool isEnabled)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_sp_ToggleAccessStatus", c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@PersonId", (object?)personId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@IsEnabled", isEnabled);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                return Convert.ToInt32(r["RowsUpdated"]);
+            }
+            return 0;
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAccessStatusExportDbAsync()
+        {
+            await using var c = await Open();
+            const string sql = @"SELECT PersonGuid, Name, Phone, Email, IsEnabled, BookingDetailId, CustomerId FROM dbo.WN_vw_AccessStatusExport;";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetCustomerActiveSpacesDbAsync(int customerId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT 
+                    bd.Id AS BookingDetailId,
+                    bd.BookingGuid,
+                    ISNULL(bd.SpaceName, N'Dedicated Space') AS SpaceName,
+                    ISNULL(bd.SpaceCode, N'') AS SpaceCode,
+                    ISNULL(bd.SpaceCategory, N'Private Office') AS SpaceCategory,
+                    bd.StartDateTime,
+                    bd.EndDateTime,
+                    ISNULL(s.Capacity, 1) AS Capacity,
+                    (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))) AS ActiveAttendantsCount
+                FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = bd.CustomerCode OR c.Email = bd.CustomerEmail
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
+                WHERE (c.Id = @CustomerId OR bd.CustomerCode = (SELECT Code FROM dbo.WN_Customers WHERE Id = @CustomerId))
+                  AND bd.IsDeleted = 0
+                ORDER BY bd.Id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetBookingDetailSummaryDbAsync(int bookingDetailId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT 
+                    bd.Id AS BookingDetailId,
+                    bd.BookingGuid,
+                    bd.SpaceName,
+                    bd.SpaceCode,
+                    bd.SpaceCategory,
+                    bd.RentAmount,
+                    bd.Amount,
+                    s.Price AS SpacePrice,
+                    ISNULL(s.Capacity, 1) AS Capacity,
+                    (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))) AS CurrentActiveAttendants
+                FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
+                WHERE bd.Id = @BookingDetailId;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                return RowToDictionary(r);
+            }
+            return null;
+        }
+
+        public async Task<IDictionary<string, object?>> CreateSurchargeInvoiceSpAsync(int bookingDetailId, int personId, int customerId, decimal surchargeAmount, int excessSeatCount)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_sp_CreateSurchargeInvoice", c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            cmd.Parameters.AddWithValue("@PersonId", personId);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@SurchargeAmount", surchargeAmount);
+            cmd.Parameters.AddWithValue("@ExcessSeatCount", excessSeatCount);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                return RowToDictionary(r);
+            }
+            return new Dictionary<string, object?>();
+        }
     }
 }
+
 
