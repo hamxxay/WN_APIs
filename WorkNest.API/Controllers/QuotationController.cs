@@ -27,7 +27,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/quotation")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,super_admin,receptionist,sales_executive")]
         public async Task<IActionResult> Create([FromBody] QuotationRequest request, [FromHeader(Name = "x-user-email")] string? actorEmail)
         {
             var email = ResolveUserEmail(actorEmail);
@@ -103,7 +103,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/quotation")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,super_admin,receptionist,sales_executive")]
         public async Task<IActionResult> GetList([FromQuery] int page = 1, [FromQuery] int limit = 10, [FromQuery] string? search = null)
         {
             var (rows, total) = await _quotations.GetQuotationsAsync(page, limit, search);
@@ -111,7 +111,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/quotation/history")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,super_admin,receptionist,sales_executive")]
         public async Task<IActionResult> GetHistory([FromQuery] int customerId, [FromQuery] int spaceId)
         {
             var res = await _quotations.GetQuotationHistoryAsync(customerId, spaceId);
@@ -119,7 +119,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/quotation/{id:int}/send-email")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,super_admin,receptionist,sales_executive")]
         public async Task<IActionResult> SendEmail(int id, [FromBody] SendQuotationEmailRequest request)
         {
             try
@@ -134,7 +134,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/quotation/{id:int}/convert")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,super_admin,receptionist,sales_executive")]
         public async Task<IActionResult> ConvertQuotation(int id, [FromHeader(Name = "x-user-email")] string? actorEmail)
         {
             var email = ResolveUserEmail(actorEmail);
@@ -239,7 +239,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/quotation/{id:int}/versions")]
         [HttpPost("api/quotations/{id:int}/create-version")]
         [HttpPost("api/quotations/{id:int}/versions")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,super_admin,receptionist,sales_executive")]
         public async Task<IActionResult> CreateNewVersion(int id, [FromHeader(Name = "x-user-email")] string? actorEmail = null)
         {
             var email = ResolveUserEmail(actorEmail);
@@ -298,7 +298,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/quotations/{id:int}/send")]
         [HttpPost("api/quotation/{id:int}/versions/{version:int}/send")]
         [HttpPost("api/quotations/{id:int}/versions/{version:int}/send")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,super_admin,receptionist,sales_executive")]
         public async Task<IActionResult> SendQuotation(int id, [FromRoute] int version = 1, [FromHeader(Name = "x-user-email")] string? actorEmail = null)
         {
             var email = ResolveUserEmail(actorEmail);

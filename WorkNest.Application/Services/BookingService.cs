@@ -333,6 +333,9 @@ namespace WorkNest.Application.Services
                 SpaceCapacity = header.TryGetValue("SpaceCapacity", out var sc) && sc != null ? Convert.ToInt32(sc) : 1,
                 SpaceTypeName = header["SpaceTypeName"]?.ToString(),
                 LocationName = header["LocationName"]?.ToString(),
+                LocationAddress = header.TryGetValue("LocationAddress", out var la) && la != null ? la.ToString() : null,
+                CityName = header.TryGetValue("CityName", out var cn) && cn != null ? cn.ToString() : null,
+                CustomerAddress = header.TryGetValue("CustomerAddress", out var ca) && ca != null ? ca.ToString() : null,
                 BranchName = header["BranchName"]?.ToString(),
                 CompanyName = header["CompanyName"]?.ToString(),
                 BookingStatusCode = header["BookingStatusCode"]?.ToString(),
@@ -424,6 +427,9 @@ namespace WorkNest.Application.Services
                 SpaceTypeName = header["SpaceTypeName"]?.ToString(),
 
                 LocationName = header["LocationName"]?.ToString(),
+                LocationAddress = header.TryGetValue("LocationAddress", out var la2) && la2 != null ? la2.ToString() : null,
+                CityName = header.TryGetValue("CityName", out var cn2) && cn2 != null ? cn2.ToString() : null,
+                CustomerAddress = header.TryGetValue("CustomerAddress", out var ca2) && ca2 != null ? ca2.ToString() : null,
                 BranchName = header["BranchName"]?.ToString(),
                 CompanyName = header["CompanyName"]?.ToString(),
 

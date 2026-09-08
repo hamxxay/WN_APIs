@@ -6,12 +6,15 @@ namespace WorkNest.Application.DTOs.Booking
         public string? BookingPublicId { get; set; }
         public string? CustomerName { get; set; }
         public string? CustomerEmail { get; set; }
+        public string? CustomerAddress { get; set; }
         public string? SpaceCode { get; set; }
         public string? SpaceName { get; set; }
         public string? SpaceNumber { get; set; }
         public int SpaceCapacity { get; set; }
         public string? SpaceTypeName { get; set; }
         public string? LocationName { get; set; }
+        public string? LocationAddress { get; set; }
+        public string? CityName { get; set; }
         public string? BranchName { get; set; }
         public string? CompanyName { get; set; }
         public string? BookingStatusCode { get; set; }

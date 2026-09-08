@@ -61,33 +61,46 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             row.RelativeItem().Column(c =>
                             {
-                                c.Item().Text("Quotation To").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text("Customer Details").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text($"Attn: {q.CustomerName ?? "-"}").FontColor("#444444");
                                 if (!string.IsNullOrWhiteSpace(q.CustomerCompany))
                                 {
-                                    c.Item().Text($"Bill to: {q.CustomerCompany}").FontColor("#1a1a2e").Bold();
+                                    c.Item().Text($"Customer Name: {q.CustomerCompany}").FontColor("#1a1a2e");
                                 }
-                                c.Item().Text($"Attn: {q.CustomerName ?? "-"}").FontColor("#444444");
-                                c.Item().Text($"Email: {q.CustomerEmail ?? "-"}").FontColor("#555555");
+                                if (!string.IsNullOrWhiteSpace(q.CustomerAddress))
+                                {
+                                    c.Item().Text($"Address: {q.CustomerAddress}").FontColor("#555555");
+                                }
+                                // c.Item().Text($"Email: {q.CustomerEmail ?? "-"}").FontColor("#555555");
                             });
                             row.RelativeItem().Column(c =>
                             {
                                 c.Item().Text("Quotation For").FontSize(9).Bold().FontColor("#888888");
-                                c.Item().Text(q.SpaceName ?? q.SpaceCode ?? "-").Bold();
+                                c.Item().Text(q.SpaceName ?? q.SpaceCode ?? "-");
                                 c.Item().Text(q.SpaceTypeName ?? "-").FontColor("#555555");
-                                c.Item().Text(q.LocationName ?? "-").FontColor("#555555");
+
+                                string cityName = !string.IsNullOrWhiteSpace(q.CityName) ? q.CityName : "Islamabad";
+                                string locName = q.LocationName ?? "";
+                                string locationDisplay = locName;
+                                if (!string.IsNullOrWhiteSpace(cityName) && !locName.Contains(cityName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    locationDisplay = string.IsNullOrWhiteSpace(locName) ? cityName : $"{locName}, {cityName}";
+                                }
+                                if (string.IsNullOrWhiteSpace(locationDisplay)) locationDisplay = "-";
+                                c.Item().Text(locationDisplay).FontColor("#555555");
                             });
                             row.RelativeItem().Column(c =>
                             {
-                                c.Item().Text("PERIOD").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().AlignRight().Text("PERIOD").FontSize(9).Bold().FontColor("#888888");
                                 if (spaceType == "MeetingRoom")
                                 {
-                                    c.Item().Text($"From: {q.StartDateTime:dd MMM yyyy hh:mm tt}");
-                                    c.Item().Text($"To:   {q.EndDateTime:dd MMM yyyy hh:mm tt}");
+                                    c.Item().AlignRight().Text($"From: {q.StartDateTime:dd MMM yyyy hh:mm tt}");
+                                    c.Item().AlignRight().Text($"To:   {q.EndDateTime:dd MMM yyyy hh:mm tt}");
                                 }
                                 else
                                 {
-                                    c.Item().Text($"From: {q.StartDateTime:dd MMM yyyy}");
-                                    c.Item().Text($"To:   {q.EndDateTime:dd MMM yyyy}");
+                                    c.Item().AlignRight().Text($"From: {q.StartDateTime:dd MMM yyyy}");
+                                    c.Item().AlignRight().Text($"To:   {q.EndDateTime:dd MMM yyyy}");
                                 }
                             });
                         });
@@ -192,7 +205,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 // });
                                 row.RelativeItem().Column(c =>
                                 {
-                                    c.Item().Text("MONTHLY RENT").FontSize(7.5f).Bold().FontColor("#64748b");
+                                    c.Item().Text("Private Office Charges").FontSize(7.5f).Bold().FontColor("#64748b");
                                     c.Item().Text($"PKR {monthlyRent:N2}").Bold().FontSize(9.5f).FontColor("#2563eb");
                                     c.Item().Text("per month").FontSize(7f).FontColor("#64748b");
                                 });
@@ -215,8 +228,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             table.ColumnsDefinition(cols =>
                             {
+                                cols.ConstantColumn(35);
                                 cols.RelativeColumn(4);
-                                cols.RelativeColumn(1);
+                                cols.RelativeColumn(2);
                                 cols.RelativeColumn(2);
                                 cols.RelativeColumn(2);
                             });
@@ -224,32 +238,60 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             table.Header(header =>
                             {
                                 var durationHeader = spaceType == "MeetingRoom" ? "Duration" : "No. of Months";
-                                foreach (var h in new[] { "Description", durationHeader, "Unit Price", "Amount" })
+                                foreach (var h in new[] { "S.No", "Description", durationHeader, "Unit Price", "Amount" })
                                     header.Cell().Background("#1a1a2e").Padding(6)
                                         .Text(h).FontColor(Colors.White).Bold().FontSize(9);
                             });
 
                             bool alt = false;
+                            int sno = 1;
                             if (q.Details != null && q.Details.Count > 0)
                             {
                                 foreach (var d in q.Details)
                                 {
                                     var bg = alt ? "#f9f9f9" : "#ffffff";
+                                    table.Cell().Background(bg).Padding(6).Text(sno++.ToString());
                                     table.Cell().Background(bg).Padding(6).Text(d.Description);
 
-                                    string qtyLabel = spaceType == "MeetingRoom"
-                                        ? $"{d.Quantity:N0} Hour(s)"
-                                        : $"{d.Quantity:N0} Month(s)";
+                                    string qtyLabel;
+                                    decimal unitPrice = d.UnitPrice > 0 ? d.UnitPrice : monthlyRent;
+                                    decimal lineAmount = d.Amount;
+
+                                    if (spaceType == "MeetingRoom")
+                                    {
+                                        qtyLabel = $"{d.Quantity:N0} Hour(s)";
+                                    }
+                                    else
+                                    {
+                                        bool isSecurityDeposit = string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) || 
+                                                                 (d.Description != null && d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase));
+                                        
+                                        if (isSecurityDeposit)
+                                        {
+                                            decimal qty = d.Quantity > 0 ? d.Quantity : (q.SecurityDepositMonths > 0 ? q.SecurityDepositMonths : 1);
+                                            qtyLabel = $"{qty:G29}";
+                                            unitPrice = d.UnitPrice > 0 ? d.UnitPrice : (qty > 0 ? d.Amount / qty : (monthlyRent > 0 ? monthlyRent : secDeposit));
+                                            lineAmount = d.Amount > 0 ? d.Amount : secDeposit;
+                                        }
+                                        else
+                                        {
+                                            int months = billingMonths;
+                                            qtyLabel = $"{months}";
+                                            if (unitPrice <= 0) unitPrice = monthlyRent;
+                                            lineAmount = Math.Round(unitPrice * months, 2);
+                                        }
+                                    }
 
                                     table.Cell().Background(bg).Padding(6).AlignRight().Text(qtyLabel);
-                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {d.UnitPrice:N2}");
-                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {d.Amount:N2}");
+                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {unitPrice:N2}");
+                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {lineAmount:N2}");
                                     alt = !alt;
                                 }
                             }
                             else
                             {
                                 var bg = "#ffffff";
+                                table.Cell().Background(bg).Padding(6).Text("1");
                                 table.Cell().Background(bg).Padding(6).Text("Room Rent");
                                 if (spaceType == "MeetingRoom")
                                 {
@@ -259,7 +301,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 }
                                 else
                                 {
-                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"{billingMonths} Month(s)");
+                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"{billingMonths}");
                                 }
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {monthlyRent:N2}");
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {firstCycleRent:N2}");
@@ -331,20 +373,20 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
-                            tc.Item().Text("1. The price is exclusive of all tax.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text("2. Worknest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text("3. This quotation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#6c757d");
-                            if (spaceType == "PrivateRoom")
+                            int itemNum = 1;
+                            tc.Item().Text($"{itemNum++}. The price is exclusive of all tax.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. The room rent is inclusive of support service charges").FontSize(8).FontColor("#6c757d");                            tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. This quotation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#6c757d");
+                            if (spaceType == "PrivateRoom" || secDeposit > 0)
                             {
-                                tc.Item().Text("4. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
-                                tc.Item().Text("5. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#6c757d");
-                                tc.Item().Text("6. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
                             }
-                            else
+                            if (spaceType != "MeetingRoom")
                             {
-                                tc.Item().Text("4. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#6c757d");
-                                tc.Item().Text("5. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                                tc.Item().Text($"{itemNum++}. Room charges will be paid in advance for {billingMonths} month(s).").FontSize(8).FontColor("#6c757d");
                             }
+                            tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
                         });
                     });
 
@@ -399,41 +441,47 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             row.RelativeItem().Column(inner =>
                             {
                                 inner.Item().Text("CUSTOMER").FontSize(9).Bold().FontColor("#888888");
-                                inner.Item().Text("Company: " + (c.CustomerCompany ?? "-"));
                                 inner.Item().Text("attn: " + (c.CustomerName ?? "-")).Bold();
+                                inner.Item().Text("Company: " + (c.CustomerCompany ?? "-"));
                                 inner.Item().Text("Email: " + (c.CustomerEmail ?? "-")).FontColor("#555555");
+                                inner.Item().Text("Address: " + (c.CustomerAddress?? "-")).FontColor("#555555");
                             });
                             row.RelativeItem().Column(inner =>
                             {
                                 inner.Item().Text("SPACE").FontSize(9).Bold().FontColor("#888888");
                                 inner.Item().Text(c.SpaceName ?? c.SpaceCode ?? "-").Bold();
                                 inner.Item().Text(c.SpaceTypeName ?? "-").FontColor("#555555");
-                                inner.Item().Text(c.LocationName ?? "-").FontColor("#555555");
-                                inner.Item().Text(c.BranchName ?? "-").FontColor("#555555");
+                                string cityName = !string.IsNullOrWhiteSpace(c.CityName) ? c.CityName : "Islamabad";
+                                string locName = c.LocationName ?? "";
+                                string locationDisplay = locName;
+                                if (!string.IsNullOrWhiteSpace(cityName) && !locName.Contains(cityName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    locationDisplay = string.IsNullOrWhiteSpace(locName) ? cityName : $"{locName}, {cityName}";
+                                }
+                                if (string.IsNullOrWhiteSpace(locationDisplay)) locationDisplay = "-";
+                                inner.Item().Text(locationDisplay).FontColor("#555555");
                             });
                             row.RelativeItem().Column(inner =>
                             {
-                                inner.Item().Text("BOOKING DETAILS").FontSize(9).Bold().FontColor("#888888");
+                                inner.Item().AlignRight().Text("BOOKING DETAILS").FontSize(9).Bold().FontColor("#888888");
                                 if (spaceType == "MeetingRoom")
                                 {
-                                    inner.Item().Text($"From: {c.StartOn:dd MMM yyyy hh:mm tt}");
-                                    inner.Item().Text($"To:   {c.EndOn:dd MMM yyyy hh:mm tt}");
+                                    inner.Item().AlignRight().Text($"From: {c.StartOn:dd MMM yyyy hh:mm tt}");
+                                    inner.Item().AlignRight().Text($"To:   {c.EndOn:dd MMM yyyy hh:mm tt}");
                                     if (!string.IsNullOrWhiteSpace(c.TimeSlot))
                                     {
-                                        inner.Item().Text($"Slot: {c.TimeSlot}").FontColor("#555555");
+                                        inner.Item().AlignRight().Text($"Slot: {c.TimeSlot}").FontColor("#555555");
                                     }
                                 }
                                 else
                                 {
-                                    inner.Item().Text($"From: {c.StartOn:dd MMM yyyy}");
-                                    inner.Item().Text($"To:   {c.EndOn:dd MMM yyyy}");
-                                    inner.Item().Text($"Billing: {c.BillingPeriodLabel ?? c.BillingPeriodCode ?? "-"}").FontColor("#555555");
-                                    // inner.Item().Text($"Contract Total: PKR {c.TotalContractAmount:N2}").FontColor("#15803d").Bold();
+                                    inner.Item().AlignRight().Text($"From: {c.StartOn:dd MMM yyyy}");
+                                    inner.Item().AlignRight().Text($"To:   {c.EndOn:dd MMM yyyy}");
+                                    inner.Item().AlignRight().Text($"Billing: {c.BillingPeriodLabel ?? c.BillingPeriodCode ?? "-"}").FontColor("#555555");
                                     if (c.NextBillDueDate.HasValue)
                                     {
-                                        inner.Item().Text($"Next Bill Due: {c.NextBillDueDate:dd MMM yyyy}").FontColor("#0284c7");
+                                        inner.Item().AlignRight().Text($"Next Bill Due: {c.NextBillDueDate:dd MMM yyyy}").FontColor("#0284c7");
                                     }
-                                    // inner.Item().Text($"Balance Left: PKR {c.BalanceLeft:N2}").FontColor("#b45309");
                                 }
                             });
                         });
@@ -444,6 +492,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             table.ColumnsDefinition(cols =>
                             {
+                                cols.ConstantColumn(35);
                                 cols.RelativeColumn(3);
                                 cols.RelativeColumn(2);
                                 cols.RelativeColumn(2);
@@ -454,12 +503,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                             table.Header(header =>
                             {
-                                foreach (var h in new[] { "Description", "Office Number", "Unit Price", "Add Ons", "Discount", "Total" })
+                                foreach (var h in new[] { "S.No", "Description", "Office Number", "Unit Price", "Add Ons", "Discount", "Total" })
                                     header.Cell().Background("#1a1a2e").Padding(6)
                                         .Text(h).FontColor(Colors.White).Bold().FontSize(9);
                             });
 
                             bool alt = false;
+                            int sno = 1;
                             var displayLines = spaceType == "MeetingRoom"
                                 ? c.Details.Where(d => !d.ChargeTypeCode.Contains("TAX", StringComparison.OrdinalIgnoreCase) && !d.ChargeTypeLabel.Contains("Tax", StringComparison.OrdinalIgnoreCase) && !d.ChargeTypeCode.Contains("SERVICE", StringComparison.OrdinalIgnoreCase)).ToList()
                                 : c.Details;
@@ -483,6 +533,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 var bg = alt ? "#f9f9f9" : "#ffffff";
                                 var desc = string.IsNullOrWhiteSpace(line.Description) ? line.ChargeTypeLabel : line.Description;
                                 string officeNo = c.SpaceCode ?? c.SpaceNumber ?? c.SpaceName ?? "-";
+                                table.Cell().Background(bg).Padding(6).Text(sno++.ToString());
                                 table.Cell().Background(bg).Padding(6).Text(desc);
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text(officeNo);
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.UnitPrice:N2}");
@@ -557,14 +608,20 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
-                            tc.Item().Text("1. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text("2. Payment must be made before the lexpiry date to confirm the booking.").FontSize(8).FontColor("#6c757d");
-                            if (spaceType == "PrivateRoom")
+                            int itemNum = 1;
+                            tc.Item().Text($"{itemNum++}. The price is exclusive of all tax.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. Payment must be made before the expiry date to confirm the booking.").FontSize(8).FontColor("#6c757d");
+                            if (spaceType == "PrivateRoom" || c.SecurityDeposit > 0)
                             {
-                                tc.Item().Text("3. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
+                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
                             }
-                            tc.Item().Text("4. Cancellation policy applies as per the signed agreement.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text("5. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                            if (spaceType != "MeetingRoom")
+                            {
+                                tc.Item().Text($"{itemNum++}. Room charges will be paid in advance for {c.BillingPeriodMonths} month(s).").FontSize(8).FontColor("#6c757d");
+                            }
+                            tc.Item().Text($"{itemNum++}. Cancellation policy applies as per the signed agreement.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
                         });
                     });
 

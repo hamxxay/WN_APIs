@@ -60,6 +60,8 @@ namespace WorkNest.API.Services
         {
             using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(stoppingToken);
+            using var setCmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", conn);
+            await setCmd.ExecuteNonQueryAsync(stoppingToken);
 
             var pendingItems = new List<QueueItemDto>();
 

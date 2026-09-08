@@ -110,6 +110,38 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [HttpGet("api/invoice/by-customer/{customerId:int}")]
+        [HttpGet("api/invoice/customer/{customerId:int}")]
+        [HttpGet("api/customers/{customerId:int}/invoices")]
+        [HttpGet("api/customer/{customerId:int}/invoices")]
+        public async Task<IActionResult> GetInvoicesByCustomerId(
+            int customerId,
+            [FromQuery] int page = 1,
+            [FromQuery] int limit = 10,
+            [FromQuery] int? statusId = null)
+        {
+            try
+            {
+                if (customerId <= 0)
+                    return BadRequest(new { isSuccessful = false, message = "Invalid customerId." });
+
+                var (rows, total) = await _db.GetCustomerInvoicesDbAsync(customerId, 0, page, limit, statusId);
+
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    data = rows,
+                    totalCount = total,
+                    page = page,
+                    limit = limit
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
         [HttpGet("api/invoice/{id:int}/pdf")]
         [HttpGet("api/invoice/{id:int}/statement-pdf")]
         [AllowAnonymous]

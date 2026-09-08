@@ -29,7 +29,7 @@ namespace WorkNest.Application.Services
             return null;
         }
 
-        private async Task<(decimal Hourly, decimal Daily, decimal Monthly, decimal SecurityDeposit, string Category, string SpaceName, string SpaceCode, int Capacity)> ResolveSpaceDetailsAsync(int spaceId)
+        private async Task<(decimal Hourly, decimal Daily, decimal Monthly, decimal SecurityDeposit, string Category, string SpaceName, string SpaceCode, int Capacity, decimal MaxDiscountPercent)> ResolveSpaceDetailsAsync(int spaceId)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
             var spaceRow = rows.FirstOrDefault(r => Convert.ToInt32(r["Id"]) == spaceId);
@@ -38,6 +38,7 @@ namespace WorkNest.Application.Services
             string spaceName = spaceRow["Name"]?.ToString() ?? "";
             string spaceCode = spaceRow["Code"]?.ToString() ?? "";
             int capacity = spaceRow.ContainsKey("Capacity") && spaceRow["Capacity"] != null ? Convert.ToInt32(spaceRow["Capacity"]) : 1;
+            decimal maxDiscountPercent = spaceRow.ContainsKey("MaxDiscountPercent") && spaceRow["MaxDiscountPercent"] != null ? Convert.ToDecimal(spaceRow["MaxDiscountPercent"]) : 20.00m;
             string category = spaceRow["SpaceTypeName"]?.ToString() ?? "";
 
             // Try active pricing plan first
@@ -72,24 +73,51 @@ namespace WorkNest.Application.Services
                 if (hourly == 0) hourly = 6000;
             }
 
-            return (hourly, daily, monthly, secDeposit, category, spaceName, spaceCode, capacity);
+            return (hourly, daily, monthly, secDeposit, category, spaceName, spaceCode, capacity, maxDiscountPercent);
         }
 
         public async Task<QuotationResponse> CreateQuotationAsync(QuotationRequest request, int? createdById)
         {
+            var spaceDetails = await ResolveSpaceDetailsAsync(request.SpaceId);
+
+            // Base price validation: can only be increased, NOT decreased below standard space rate
+            if (request.PerSeatBasePrice.HasValue && request.PerSeatBasePrice.Value > 0)
+            {
+                if (request.PerSeatBasePrice.Value < spaceDetails.Monthly)
+                {
+                    throw new ArgumentException($"Base price for {spaceDetails.SpaceName} is locked and can only be increased. Minimum allowed base price is PKR {spaceDetails.Monthly:N2}.");
+                }
+            }
+
+            // PerSeatBasePrice, Capacity, MonthlyBasePrice calculations
+            decimal perSeatBasePrice = request.PerSeatBasePrice.HasValue && request.PerSeatBasePrice.Value > 0
+                ? request.PerSeatBasePrice.Value
+                : spaceDetails.Monthly;
+            int capacity = spaceDetails.Capacity;
+            decimal monthlyBasePrice = perSeatBasePrice * capacity;
+
             // Validate discount
             var discountType = string.IsNullOrWhiteSpace(request.DiscountType) ? "Percentage" : request.DiscountType;
             var discountValue = request.DiscountValue > 0 ? request.DiscountValue : request.DiscountPercentage;
 
-            if (discountType == "Percentage" && (discountValue < 0 || discountValue > 100))
-                throw new ArgumentException("Percentage discount must be between 0% and 100%.");
             if (discountValue < 0)
                 throw new ArgumentException("Discount value cannot be negative.");
 
-            // For backward compat: if DiscountType is Percentage, keep discountPercentage
-            decimal discountPercentage = discountType == "Percentage" ? discountValue : 0;
+            // Server-side Discount Cap Validation
+            if (discountType == "Percentage" || discountType == "Percent")
+            {
+                if (discountValue > spaceDetails.MaxDiscountPercent)
+                    throw new ArgumentException($"Discount percentage ({discountValue}%) exceeds maximum allowed discount cap of {spaceDetails.MaxDiscountPercent}%.");
+            }
+            else if (discountType == "Fixed" || discountType == "Amount")
+            {
+                decimal maxAllowedFixed = Math.Round(monthlyBasePrice * (spaceDetails.MaxDiscountPercent / 100m), 2);
+                if (discountValue > maxAllowedFixed)
+                    throw new ArgumentException($"Fixed monthly discount (PKR {discountValue:N2}) exceeds maximum allowed discount cap of {spaceDetails.MaxDiscountPercent}% (PKR {maxAllowedFixed:N2} per month).");
+            }
 
-            var spaceDetails = await ResolveSpaceDetailsAsync(request.SpaceId);
+            // For backward compat: if DiscountType is Percentage, keep discountPercentage
+            decimal discountPercentage = (discountType == "Percentage" || discountType == "Percent") ? discountValue : 0;
 
             decimal subtotal = 0;
             var details = new List<QuotationDetailDto>();
@@ -139,7 +167,7 @@ namespace WorkNest.Application.Services
                 int months = ((request.EndDateTime.Year - request.StartDateTime.Year) * 12) + request.EndDateTime.Month - request.StartDateTime.Month;
                 if (months <= 0) months = 1;
 
-                decimal monthlyRentOfRoom = spaceDetails.Monthly * spaceDetails.Capacity;
+                decimal monthlyRentOfRoom = monthlyBasePrice;
                 decimal rentAmount = monthlyRentOfRoom * months;
                 subtotal = rentAmount;
 
@@ -152,16 +180,20 @@ namespace WorkNest.Application.Services
                     Amount = rentAmount
                 });
 
-                // Security deposit: use override if provided, else default to 1 month room rent
-                decimal secDeposit = request.SecurityDepositOverride.HasValue
+                // Security deposit: use override if provided, else default to (monthlyRentOfRoom * secMonths)
+                int secMonths = request.SecurityDepositMonths.HasValue && request.SecurityDepositMonths.Value > 0
+                    ? request.SecurityDepositMonths.Value
+                    : 1;
+                decimal secDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
                     ? request.SecurityDepositOverride.Value
-                    : (spaceDetails.SecurityDeposit > 0 ? spaceDetails.SecurityDeposit : monthlyRentOfRoom);
+                    : (monthlyRentOfRoom * secMonths);
+
                 details.Add(new QuotationDetailDto
                 {
                     FeeType = "SecurityDeposit",
-                    Description = "Security Deposit (Refundable)",
-                    Quantity = 1,
-                    UnitPrice = secDeposit,
+                    Description = $"Security Deposit ({secMonths} Month{(secMonths > 1 ? "s" : "")}) (Refundable)",
+                    Quantity = secMonths,
+                    UnitPrice = monthlyRentOfRoom,
                     Amount = secDeposit
                 });
             }
@@ -170,7 +202,7 @@ namespace WorkNest.Application.Services
                 int months = ((request.EndDateTime.Year - request.StartDateTime.Year) * 12) + request.EndDateTime.Month - request.StartDateTime.Month;
                 if (months <= 0) months = 1;
 
-                decimal rentAmount = spaceDetails.Monthly * months;
+                decimal rentAmount = monthlyBasePrice * months;
                 subtotal = rentAmount;
 
                 details.Add(new QuotationDetailDto
@@ -178,7 +210,7 @@ namespace WorkNest.Application.Services
                     FeeType = "RoomRent",
                     Description = $"Shared Space",
                     Quantity = months,
-                    UnitPrice = spaceDetails.Monthly,
+                    UnitPrice = monthlyBasePrice,
                     Amount = rentAmount
                 });
             }
@@ -189,7 +221,7 @@ namespace WorkNest.Application.Services
             string quotationNumber = $"WN-QT-{todayStr}-{randomStr}";
 
             // Calculate discount and total amounts
-            decimal discountAmount = discountType == "Amount"
+            decimal discountAmount = (discountType == "Amount" || discountType == "Fixed")
                 ? discountValue
                 : subtotal * (discountValue / 100m);
             decimal totalAmount = subtotal - discountAmount;
@@ -198,6 +230,14 @@ namespace WorkNest.Application.Services
             int billingPeriodMonths = request.BillingPeriodMonths.HasValue && request.BillingPeriodMonths.Value > 0
                 ? request.BillingPeriodMonths.Value
                 : (spaceDetails.Category == "MeetingRoom" ? 1 : 3);
+
+            int securityDepositMonths = request.SecurityDepositMonths.HasValue && request.SecurityDepositMonths.Value > 0
+                ? request.SecurityDepositMonths.Value
+                : 1;
+
+            decimal calculatedSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+                ? request.SecurityDepositOverride.Value
+                : (spaceDetails.Category == "PrivateOffice" ? monthlyBasePrice * securityDepositMonths : 0);
 
             var result = await _db.InsertQuotationAsync(
                 quotationNumber,
@@ -214,7 +254,13 @@ namespace WorkNest.Application.Services
                 discountValue,
                 request.SecurityDepositOverride,
                 request.FloorId,
-                billingPeriodMonths
+                billingPeriodMonths,
+                perSeatBasePrice,
+                capacity,
+                monthlyBasePrice,
+                spaceDetails.MaxDiscountPercent,
+                securityDepositMonths,
+                calculatedSecDeposit
             );
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -253,14 +299,21 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 CustomerName = header["CustomerName"]?.ToString(),
                 CustomerCompany = header.TryGetValue("CustomerCompany", out var cc) && cc is not null ? cc.ToString() : null,
                 CustomerEmail = header["CustomerEmail"]?.ToString(),
+                CustomerAddress = header.TryGetValue("CustomerAddress", out var ca) && ca is not null ? ca.ToString() : null,
                 SpaceId = Convert.ToInt32(header["SpaceId"]),
                 SpaceName = header["SpaceName"]?.ToString(),
                 SpaceCode = header["SpaceCode"]?.ToString(),
                 LocationName = header["LocationName"]?.ToString(),
+                LocationAddress = header.TryGetValue("LocationAddress", out var la) && la is not null ? la.ToString() : null,
+                CityName = header.TryGetValue("CityName", out var cn) && cn is not null ? cn.ToString() : null,
                 SpaceTypeName = header["SpaceTypeName"]?.ToString(),
                 StartDateTime = Convert.ToDateTime(header["StartDateTime"]),
                 EndDateTime = Convert.ToDateTime(header["EndDateTime"]),
                 SubtotalAmount = Convert.ToDecimal(header["SubtotalAmount"]),
+                PerSeatBasePrice = header.TryGetValue("PerSeatBasePrice", out var psbp) && psbp is not null ? Convert.ToDecimal(psbp) : null,
+                Capacity = header.TryGetValue("Capacity", out var cap) && cap is not null ? Convert.ToInt32(cap) : null,
+                MonthlyBasePrice = header.TryGetValue("MonthlyBasePrice", out var mbp) && mbp is not null ? Convert.ToDecimal(mbp) : null,
+                MaxDiscountPercent = header.TryGetValue("MaxDiscountPercent", out var mdp) && mdp is not null ? Convert.ToDecimal(mdp) : null,
                 DiscountType = header.TryGetValue("DiscountType", out var dt) && dt is not null ? dt.ToString()! : "Percentage",
                 DiscountPercentage = Convert.ToDecimal(header["DiscountPercentage"]),
                 DiscountValue = header.TryGetValue("DiscountType", out var dt2) && dt2?.ToString() == "Amount"
@@ -279,6 +332,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 Version = Convert.ToInt32(header["Version"]),
                 IsActive = Convert.ToBoolean(header["IsActive"]),
                 BillingPeriodMonths = header.TryGetValue("BillingPeriodMonths", out var bpm) && bpm is not null ? Convert.ToInt32(bpm) : 3,
+                SecurityDepositMonths = header.TryGetValue("SecurityDepositMonths", out var sdm) && sdm is not null ? Convert.ToInt32(sdm) : 1,
                 BillingPeriod = header.TryGetValue("BillingPeriod", out var bp) && bp is not null ? bp.ToString() : "3 Months (Quarterly)",
                 BillingPeriodLabel = header.TryGetValue("BillingPeriodLabel", out var bpl) && bpl is not null ? bpl.ToString() : "3 Months (Quarterly)",
                 MonthlyRent = header.TryGetValue("MonthlyRent", out var mr) && mr is not null ? Convert.ToDecimal(mr) : 0,

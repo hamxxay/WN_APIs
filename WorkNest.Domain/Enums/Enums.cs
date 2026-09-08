@@ -12,8 +12,9 @@ namespace WorkNest.Domain.Enums
     /// <summary>User role IDs stored in WN_Users.RoleId column.</summary>
     public enum UserRole
     {
-        SuperAdmin = 1,
-        Admin      = 2,
-        General    = 14
+        SuperAdmin     = 1,
+        Admin          = 2,
+        General        = 14,
+        SalesExecutive = 16
     }
 }

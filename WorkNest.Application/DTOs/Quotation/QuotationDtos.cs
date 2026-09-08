@@ -10,6 +10,10 @@ namespace WorkNest.Application.DTOs.Quotation
         public int SpaceId { get; set; }
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
+        public decimal? PerSeatBasePrice { get; set; }
+        public int? Capacity { get; set; }
+        public decimal? MonthlyBasePrice { get; set; }
+        public decimal? MaxDiscountPercent { get; set; }
         public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; } = 0;
         public decimal DiscountValue { get; set; } = 0;
@@ -32,10 +36,13 @@ namespace WorkNest.Application.DTOs.Quotation
         public string? CustomerName { get; set; }
         public string? CustomerCompany { get; set; }
         public string? CustomerEmail { get; set; }
+        public string? CustomerAddress { get; set; }
         public int SpaceId { get; set; }
         public string? SpaceName { get; set; }
         public string? SpaceCode { get; set; }
         public string? LocationName { get; set; }
+        public string? LocationAddress { get; set; }
+        public string? CityName { get; set; }
         public string? SpaceTypeName { get; set; }
 
         public string SpaceType { get; set; } = string.Empty;
@@ -44,6 +51,10 @@ namespace WorkNest.Application.DTOs.Quotation
 
         public DateTime StartDateTime { get; set; }
         public DateTime EndDateTime { get; set; }
+        public decimal? PerSeatBasePrice { get; set; }
+        public int? Capacity { get; set; }
+        public decimal? MonthlyBasePrice { get; set; }
+        public decimal? MaxDiscountPercent { get; set; }
         public decimal SubtotalAmount { get; set; }
         public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; }
@@ -65,6 +76,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public bool IsActive { get; set; }
 
         public int BillingPeriodMonths { get; set; } = 3;
+        public int SecurityDepositMonths { get; set; } = 1;
         public string? BillingPeriod { get; set; }
         public string? BillingPeriodLabel { get; set; }
         public decimal MonthlyRent { get; set; }

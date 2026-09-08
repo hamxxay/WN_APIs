@@ -61,7 +61,13 @@ namespace WorkNest.Application.Interfaces
             decimal discountValue = 0,
             decimal? securityDepositOverride = null,
             int? floorId = null,
-            int? billingPeriodMonths = null
+            int? billingPeriodMonths = null,
+            decimal? perSeatBasePrice = null,
+            int? capacity = null,
+            decimal? monthlyBasePrice = null,
+            decimal? maxDiscountPercent = null,
+            int? securityDepositMonths = null,
+            decimal? securityDeposit = null
         );
         Task<IDictionary<string, object?>?> GetQuotationByIdAsync(
             int quotationId,

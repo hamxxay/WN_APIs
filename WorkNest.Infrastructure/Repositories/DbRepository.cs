@@ -1,4 +1,4 @@
-﻿
+
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System.Data;
@@ -48,6 +48,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             var c = new SqlConnection(_connectionString);
             await c.OpenAsync();
+            await using var cmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", c);
+            await cmd.ExecuteNonQueryAsync();
             return c;
         }
 
@@ -116,7 +118,13 @@ namespace WorkNest.Infrastructure.Repositories
             decimal discountValue = 0,
             decimal? securityDepositOverride = null,
             int? floorId = null,
-            int? billingPeriodMonths = null)
+            int? billingPeriodMonths = null,
+            decimal? perSeatBasePrice = null,
+            int? capacity = null,
+            decimal? monthlyBasePrice = null,
+            decimal? maxDiscountPercent = null,
+            int? securityDepositMonths = null,
+            decimal? securityDeposit = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_Insert", c);
@@ -137,30 +145,57 @@ namespace WorkNest.Infrastructure.Repositories
             if (await r.ReadAsync()) result = ToDict(r);
             await r.CloseAsync();
 
-            // Persist new fields after insert
+            // Persist new breakdown and cap fields after insert
             if (result.TryGetValue("Id", out var qidObj) && qidObj is not null)
             {
                 int quotationId = Convert.ToInt32(qidObj);
 
-                decimal discountAmount = discountType == "Amount"
+                decimal discountAmount = (discountType == "Amount" || discountType == "Fixed")
                     ? discountValue
                     : subtotalAmount * (discountValue / 100m);
 
-                decimal secDeposit = securityDepositOverride ?? 0;
+                decimal secDeposit = securityDeposit.HasValue
+                    ? securityDeposit.Value
+                    : (securityDepositOverride ?? 0);
 
-                var updateParts = new List<string> { "DiscountType = @DT", "SecurityDeposit = @SD" };
+                var updateParts = new List<string> {
+                    "DiscountType = @DT",
+                    "DiscountAmount = @DA",
+                    "SecurityDeposit = @SD"
+                };
                 if (floorId.HasValue) updateParts.Add("FloorId = @FID");
+                if (billingPeriodMonths.HasValue) updateParts.Add("BillingPeriodMonths = @BPM");
+                if (securityDepositMonths.HasValue) updateParts.Add("SecurityDepositMonths = @SDM");
+                if (perSeatBasePrice.HasValue) updateParts.Add("PerSeatBasePrice = @PSBP");
+                if (capacity.HasValue) updateParts.Add("Capacity = @CAP");
+                if (monthlyBasePrice.HasValue) updateParts.Add("MonthlyBasePrice = @MBP");
+                if (maxDiscountPercent.HasValue) updateParts.Add("MaxDiscountPercent = @MDP");
 
                 var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
                 await using var upd = new SqlCommand(updateSql, c);
                 upd.Parameters.AddWithValue("@DT", discountType);
+                upd.Parameters.AddWithValue("@DA", discountAmount);
                 upd.Parameters.AddWithValue("@SD", secDeposit);
                 upd.Parameters.AddWithValue("@QID", quotationId);
                 if (floorId.HasValue) upd.Parameters.AddWithValue("@FID", floorId.Value);
+                if (billingPeriodMonths.HasValue) upd.Parameters.AddWithValue("@BPM", billingPeriodMonths.Value);
+                if (securityDepositMonths.HasValue) upd.Parameters.AddWithValue("@SDM", securityDepositMonths.Value);
+                if (perSeatBasePrice.HasValue) upd.Parameters.AddWithValue("@PSBP", perSeatBasePrice.Value);
+                if (capacity.HasValue) upd.Parameters.AddWithValue("@CAP", capacity.Value);
+                if (monthlyBasePrice.HasValue) upd.Parameters.AddWithValue("@MBP", monthlyBasePrice.Value);
+                if (maxDiscountPercent.HasValue) upd.Parameters.AddWithValue("@MDP", maxDiscountPercent.Value);
+
                 await upd.ExecuteNonQueryAsync();
 
                 result["DiscountType"] = discountType;
+                result["DiscountAmount"] = discountAmount;
                 result["SecurityDeposit"] = secDeposit;
+                if (billingPeriodMonths.HasValue) result["BillingPeriodMonths"] = billingPeriodMonths.Value;
+                if (securityDepositMonths.HasValue) result["SecurityDepositMonths"] = securityDepositMonths.Value;
+                if (perSeatBasePrice.HasValue) result["PerSeatBasePrice"] = perSeatBasePrice.Value;
+                if (capacity.HasValue) result["Capacity"] = capacity.Value;
+                if (monthlyBasePrice.HasValue) result["MonthlyBasePrice"] = monthlyBasePrice.Value;
+                if (maxDiscountPercent.HasValue) result["MaxDiscountPercent"] = maxDiscountPercent.Value;
             }
 
             return result;
@@ -1994,6 +2029,9 @@ END";
         {
             try
             {
+                await using var cmdSet = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", c);
+                await cmdSet.ExecuteNonQueryAsync();
+
                 string sql = @"
 CREATE OR ALTER PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
     @QuotationId INT,
@@ -2001,148 +2039,89 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
 AS
 BEGIN
     SET NOCOUNT ON;
-    BEGIN TRANSACTION;
-    BEGIN TRY
-        DECLARE @CustomerId INT, @SpaceId INT, @StartOn DATETIME2, @EndOn DATETIME2, 
-                @Subtotal DECIMAL(18,2), @DiscountPct DECIMAL(5,2), @DiscountType NVARCHAR(20), 
-                @DiscountVal DECIMAL(18,2), @SecDep DECIMAL(18,2), @FloorId INT, @BPM INT, 
-                @SupportChargesId TINYINT;
+    DECLARE @CustomerId INT, @SpaceId INT, @StartOn DATETIME2, @EndOn DATETIME2, 
+            @Subtotal DECIMAL(18,2), @DiscountPct DECIMAL(5,2), @DiscountType NVARCHAR(20), 
+            @DiscountVal DECIMAL(18,2), @SecDep DECIMAL(18,2), @FloorId INT, @BPM INT, @SDM INT, 
+            @SupportChargesId TINYINT;
 
-        SELECT 
-            @CustomerId = CustomerId,
-            @SpaceId = SpaceId,
-            @StartOn = StartDateTime,
-            @EndOn = EndDateTime,
-            @Subtotal = SubtotalAmount,
-            @DiscountPct = ISNULL(DiscountPercentage, 0.0),
-            @DiscountType = ISNULL(DiscountType, 'Percentage'),
-            @DiscountVal = ISNULL(DiscountAmount, 0.0),
-            @SecDep = SecurityDeposit,
-            @FloorId = FloorId,
-            @BPM = ISNULL(BillingPeriodMonths, 3),
-            @SupportChargesId = ISNULL(SupportChargesId, 4)
-        FROM dbo.WN_Quotations
-        WHERE Id = @QuotationId;
+    SELECT 
+        @CustomerId = CustomerId,
+        @SpaceId = SpaceId,
+        @StartOn = StartDateTime,
+        @EndOn = EndDateTime,
+        @Subtotal = SubtotalAmount,
+        @DiscountPct = ISNULL(DiscountPercentage, 0.0),
+        @DiscountType = ISNULL(DiscountType, 'Percentage'),
+        @DiscountVal = ISNULL(DiscountAmount, 0.0),
+        @SecDep = SecurityDeposit,
+        @FloorId = FloorId,
+        @BPM = ISNULL(BillingPeriodMonths, 3),
+        @SDM = ISNULL(SecurityDepositMonths, 1),
+        @SupportChargesId = ISNULL(SupportChargesId, 4)
+    FROM dbo.WN_Quotations
+    WHERE Id = @QuotationId;
 
-        IF @CustomerId IS NULL
-            RAISERROR('Quotation not found.', 16, 1);
+    IF @CustomerId IS NULL
+    BEGIN
+        SELECT NULL AS BookingId, NULL AS BookingPublicId, NULL AS ChallanNumber, NULL AS ChallanValidUntil, NULL AS SubtotalAmount, NULL AS TaxAmount, NULL AS TotalAmount, 'Quotation not found.' AS ErrorMessage;
+        RETURN;
+    END
 
-        DECLARE @UserId INT, @CustomerEmail NVARCHAR(255), @CustomerFirstName NVARCHAR(100),
-                @CustomerLastName NVARCHAR(100), @CustomerPhone NVARCHAR(50), @CustomerCnic NVARCHAR(50),
-                @CustomerAddress NVARCHAR(500), @CustomerCityId INT, @CustomerNotes NVARCHAR(1000),
-                @CustomerCode NVARCHAR(20);
+    DECLARE @UserId INT, @CustomerEmail NVARCHAR(255), @CustomerFirstName NVARCHAR(100),
+            @CustomerLastName NVARCHAR(100), @CustomerPhone NVARCHAR(50), @CustomerCnic NVARCHAR(50),
+            @CustomerAddress NVARCHAR(500), @CustomerCityId INT, @CustomerNotes NVARCHAR(1000),
+            @CustomerCode NVARCHAR(20);
 
-        SELECT TOP 1 
-            @UserId = UserId,
-            @CustomerEmail = Email,
-            @CustomerFirstName = FirstName,
-            @CustomerLastName = LastName,
-            @CustomerPhone = PhoneNumber,
-            @CustomerCnic = CnicOrPassport,
-            @CustomerAddress = Address,
-            @CustomerCityId = CityId,
-            @CustomerNotes = Notes,
-            @CustomerCode = Code
-        FROM dbo.WN_Customers
-        WHERE Id = @CustomerId;
+    SELECT TOP 1 
+        @UserId = UserId,
+        @CustomerEmail = Email,
+        @CustomerFirstName = FirstName,
+        @CustomerLastName = LastName,
+        @CustomerPhone = PhoneNumber,
+        @CustomerCnic = CnicOrPassport,
+        @CustomerAddress = Address,
+        @CustomerCityId = CityId,
+        @CustomerNotes = Notes,
+        @CustomerCode = Code
+    FROM dbo.WN_Customers
+    WHERE Id = @CustomerId;
 
-        -- Validate UserId against WN_Users
-        IF @UserId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Users WHERE Id = @UserId)
-        BEGIN
-            SET @UserId = NULL;
-        END
+    IF @UserId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Users WHERE Id = @UserId)
+    BEGIN
+        SET @UserId = NULL;
+    END
 
-        IF @UserId IS NULL AND @CustomerEmail IS NOT NULL AND @CustomerEmail <> ''
-        BEGIN
-            SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email = @CustomerEmail;
-        END
+    IF @UserId IS NULL AND @CustomerEmail IS NOT NULL AND @CustomerEmail <> ''
+    BEGIN
+        SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email = @CustomerEmail;
+    END
 
-        DECLARE @CustFullName NVARCHAR(200) = RTRIM(LTRIM(ISNULL(@CustomerFirstName, '') + ' ' + ISNULL(@CustomerLastName, '')));
-        IF @CustFullName = '' SET @CustFullName = ISNULL(@CustomerFirstName, 'Customer');
+    DECLARE @CustFullName NVARCHAR(200) = RTRIM(LTRIM(ISNULL(@CustomerFirstName, '') + ' ' + ISNULL(@CustomerLastName, '')));
+    IF @CustFullName = '' SET @CustFullName = ISNULL(@CustomerFirstName, 'Customer');
 
-        DECLARE @InsertResult TABLE (
-            BookingId INT,
-            BookingPublicId UNIQUEIDENTIFIER,
-            ChallanNumber NVARCHAR(50),
-            ChallanValidUntil DATETIME,
-            SubtotalAmount DECIMAL(18,2),
-            TaxAmount DECIMAL(18,2),
-            TotalAmount DECIMAL(18,2),
-            ErrorMessage NVARCHAR(MAX)
-        );
-
-        INSERT INTO @InsertResult
-        EXEC dbo.WN_Bookings_Insert
-            @UserId = @UserId,
-            @SpaceId = @SpaceId,
-            @PricingId = 0,
-            @StartOn = @StartOn,
-            @EndOn = @EndOn,
-            @Notes = 'Converted from Quotation',
-            @CreatedById = @CreatedById,
-            @UserEmail = @CustomerEmail,
-            @CustomerEmail = @CustomerEmail,
-            @CustomerFirstName = @CustFullName,
-            @CustomerLastName = @CustomerLastName,
-            @CustomerPhone = @CustomerPhone,
-            @CustomerCnic = @CustomerCnic,
-            @CustomerAddress = @CustomerAddress,
-            @CustomerCityId = @CustomerCityId,
-            @CustomerNotes = @CustomerNotes,
-            @DiscountPercentage = @DiscountPct,
-            @DiscountAmount = @DiscountVal,
-            @DiscountType = @DiscountType,
-            @BillingPeriodMonths = @BPM,
-            @SupportChargesId = @SupportChargesId;
-
-        DECLARE @NewBookingId INT;
-        DECLARE @NewBookingPublicId UNIQUEIDENTIFIER;
-        DECLARE @ErrMsg NVARCHAR(MAX);
-
-        SELECT TOP 1 
-            @NewBookingId = BookingId,
-            @NewBookingPublicId = BookingPublicId,
-            @ErrMsg = ErrorMessage
-        FROM @InsertResult;
-
-        IF @NewBookingId IS NULL OR @NewBookingId <= 0
-        BEGIN
-            RAISERROR(@ErrMsg, 16, 1);
-        END
-
-        -- Ensure CustomerCode and details on Booking are properly linked to the original Customer
-        UPDATE dbo.WN_Bookings
-        SET CustomerCode = ISNULL(@CustomerCode, CustomerCode),
-            UserId = @UserId
-        WHERE Id = @NewBookingId;
-
-        UPDATE dbo.WN_BookingDetails
-        SET CustomerCode = ISNULL(@CustomerCode, CustomerCode),
-            CustomerName = @CustFullName,
-            CustomerEmail = @CustomerEmail
-        WHERE BookingGuid = @NewBookingPublicId;
-
-        UPDATE dbo.WN_Quotations
-        SET Status = 'Converted',
-            BookingId = @NewBookingId,
-            IsActive = 0,
-            UpdatedDate = SYSUTCDATETIME(),
-            UpdatedById = @CreatedById
-        WHERE Id = @QuotationId;
-
-        COMMIT TRANSACTION;
-
-        SELECT 
-            @NewBookingId AS BookingId,
-            @NewBookingPublicId AS BookingPublicId,
-            @QuotationId AS QuotationId,
-            'Converted' AS Status,
-            NULL AS ErrorMessage;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        THROW;
-    END CATCH
+    EXEC dbo.WN_Bookings_Insert
+        @UserId = @UserId,
+        @SpaceId = @SpaceId,
+        @PricingId = 0,
+        @StartOn = @StartOn,
+        @EndOn = @EndOn,
+        @Notes = 'Converted from Quotation',
+        @CreatedById = @CreatedById,
+        @UserEmail = @CustomerEmail,
+        @CustomerEmail = @CustomerEmail,
+        @CustomerFirstName = @CustFullName,
+        @CustomerLastName = @CustomerLastName,
+        @CustomerPhone = @CustomerPhone,
+        @CustomerCnic = @CustomerCnic,
+        @CustomerAddress = @CustomerAddress,
+        @CustomerCityId = @CustomerCityId,
+        @CustomerNotes = @CustomerNotes,
+        @DiscountPercentage = @DiscountPct,
+        @DiscountAmount = @DiscountVal,
+        @DiscountType = @DiscountType,
+        @BillingPeriodMonths = @BPM,
+        @SecurityDepositMonths = @SDM,
+        @SupportChargesId = @SupportChargesId;
 END;";
                 await using var cmd = new SqlCommand(sql, c);
                 await cmd.ExecuteNonQueryAsync();
@@ -2422,6 +2401,9 @@ CREATE OR ALTER VIEW [dbo].[WN_vw_BookingSummary] AS
         {
             try
             {
+                await using var cmdSet = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", c);
+                await cmdSet.ExecuteNonQueryAsync();
+
                 string sql = @"
 CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_Insert]
     @UserId                  INT,
@@ -2450,13 +2432,18 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_Insert]
     @Capacity                SMALLINT      = NULL,
     @OverrideSubtotal        DECIMAL(18,2) = NULL,
     @OverrideTax             DECIMAL(18,2) = NULL,
-    @OverrideTotal           DECIMAL(18,2) = NULL,
     @OverrideDuration        DECIMAL(18,2) = NULL,
-    @OverrideUnitPrice       DECIMAL(18,2) = NULL
+    @OverrideUnitPrice       DECIMAL(18,2) = NULL,
+    @QuotationId             INT           = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
-    BEGIN TRANSACTION;
+    DECLARE @TranCount INT = @@TRANCOUNT;
+    IF @TranCount = 0
+        BEGIN TRANSACTION;
+    ELSE
+        SAVE TRANSACTION WN_Bookings_Insert_Save;
+
     BEGIN TRY
         DECLARE @CapOverride SMALLINT = @Capacity;
         DECLARE @CategoryCode NVARCHAR(50), @SpaceGuid UNIQUEIDENTIFIER, @SpaceCode NVARCHAR(50), @SpaceName NVARCHAR(255), @LocationId INT;
@@ -2537,7 +2524,11 @@ BEGIN
               AND @EndOn          > StartOn
         )
         BEGIN
-            ROLLBACK TRANSACTION;
+            IF @TranCount = 0
+                ROLLBACK TRANSACTION;
+            ELSE IF XACT_STATE() <> -1
+                ROLLBACK TRANSACTION WN_Bookings_Insert_Save;
+
             SELECT NULL AS BookingId, NULL AS BookingPublicId,
                    NULL AS ChallanNumber, NULL AS ChallanValidUntil,
                    'Space is not available for the requested period (overlapping booking).' AS ErrorMessage;
@@ -2925,7 +2916,19 @@ BEGIN
         -- Auto-generate Access Cards for this booking (Capacity + 1)
         EXEC dbo.WN_AccessCards_PopulateAllBookings @TargetBookingId = @BookingId;
 
-        COMMIT TRANSACTION;
+        IF @QuotationId IS NOT NULL AND @QuotationId > 0
+        BEGIN
+            UPDATE dbo.WN_Quotations
+            SET Status = 'Converted',
+                BookingId = @BookingId,
+                IsActive = 0,
+                UpdatedDate = SYSUTCDATETIME(),
+                UpdatedById = @CreatedById
+            WHERE Id = @QuotationId;
+        END
+
+        IF @TranCount = 0
+            COMMIT TRANSACTION;
 
         SELECT 
             @BookingId AS BookingId,
@@ -2938,7 +2941,14 @@ BEGIN
             NULL AS ErrorMessage;
     END TRY
     BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        IF @TranCount = 0
+        BEGIN
+            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        END
+        ELSE IF XACT_STATE() <> -1
+        BEGIN
+            ROLLBACK TRANSACTION WN_Bookings_Insert_Save;
+        END
         DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
         SELECT NULL AS BookingId, NULL AS BookingPublicId,
                NULL AS ChallanNumber, NULL AS ChallanValidUntil,
@@ -3840,10 +3850,20 @@ END;";
             int offset = (page - 1) * limit;
 
             string whereClause = @"
-                WHERE (i.UserId = @UserId 
-                    OR i.BookingId IN (SELECT Id FROM dbo.WN_Bookings WHERE CustomerId = @CustomerId)
-                    OR i.UserId IN (SELECT UserId FROM dbo.WN_Customers WHERE Id = @CustomerId))
-                  AND (@StatusId IS NULL OR @StatusId <= 0 OR i.StatusId = @StatusId)";
+                WHERE (
+                    (@CustomerId > 0 AND (
+                        i.UserId = @CustomerId
+                        OR i.UserId IN (SELECT UserId FROM dbo.WN_Customers WHERE Id = @CustomerId AND UserId IS NOT NULL)
+                        OR i.BookingId IN (SELECT Id FROM dbo.WN_Bookings WHERE CustomerId = @CustomerId)
+                        OR i.UserId IN (
+                            SELECT u.Id FROM dbo.WN_Users u WITH (NOLOCK)
+                            INNER JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Email = u.Email
+                            WHERE c.Id = @CustomerId
+                        )
+                    ))
+                    OR (@UserId > 0 AND i.UserId = @UserId)
+                )
+                AND (@StatusId IS NULL OR @StatusId <= 0 OR i.StatusId = @StatusId)";
 
             string countSql = $"SELECT COUNT(1) FROM dbo.WN_Invoices i WITH (NOLOCK) {whereClause}";
             await using var countCmd = new SqlCommand(countSql, c);

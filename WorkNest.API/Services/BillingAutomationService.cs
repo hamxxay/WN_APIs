@@ -51,6 +51,8 @@ namespace WorkNest.API.Services
 
             using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(stoppingToken);
+            using var setCmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", conn);
+            await setCmd.ExecuteNonQueryAsync(stoppingToken);
 
             // Step 1: Fetch active bookings due for next billing cycle (within 5 days of cycle end)
             var dueBookings = new List<DueBookingDto>();

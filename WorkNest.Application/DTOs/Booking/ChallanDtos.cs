@@ -75,6 +75,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? CustomerName { get; set; }
         public string? CustomerCompany { get; set; }
         public string? CustomerEmail { get; set; }
+        public string? CustomerAddress { get; set; }
 
         public string? SpaceCode { get; set; }
         public string? SpaceNumber { get; set; }
@@ -83,6 +84,8 @@ namespace WorkNest.Application.DTOs.Booking
         public string? SpaceTypeName { get; set; }
 
         public string? LocationName { get; set; }
+        public string? LocationAddress { get; set; }
+        public string? CityName { get; set; }
         public string? BranchName { get; set; }
         public string? CompanyName { get => CustomerCompany; set => CustomerCompany = value; }
 

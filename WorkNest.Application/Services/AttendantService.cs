@@ -234,7 +234,7 @@ namespace WorkNest.Application.Services
                 }
             }
 
-            return result;
+            return result ?? new Dictionary<string, object?>();
         }
 
         public async Task SoftRemoveAttendantFromBookingAsync(int bookingDetailId, int personId)

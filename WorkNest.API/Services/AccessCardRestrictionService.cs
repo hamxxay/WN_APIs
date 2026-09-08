@@ -53,9 +53,8 @@ namespace WorkNest.API.Services
 
             using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(stoppingToken);
-
-            using var cmd = new SqlCommand("dbo.WN_ReRestrictLapsedPartialPayments", conn);
-            cmd.CommandType = CommandType.StoredProcedure;
+            using var cmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; EXEC dbo.WN_ReRestrictLapsedPartialPayments;", conn);
+            cmd.CommandType = CommandType.Text;
             int affected = await cmd.ExecuteNonQueryAsync(stoppingToken);
 
             _logger.LogInformation("Completed access card restriction check. {Count} access card(s) re-restricted.", affected);
