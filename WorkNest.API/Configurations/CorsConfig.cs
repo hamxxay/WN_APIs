@@ -28,21 +28,19 @@ namespace WorkNest.API.Configurations
                     }
                     else
                     {
-                        // In production, restrict to configured origins only
-                        if (origins.Length > 0)
+                        // In production, allow configured origins and all .vercel.app deployment URLs
+                        policy.SetIsOriginAllowed(origin =>
                         {
-                            policy.WithOrigins(origins)
-                                  .AllowAnyMethod()
-                                  .AllowAnyHeader()
-                                  .AllowCredentials()
-                                  .WithExposedHeaders("*");
-                        }
-                        else
-                        {
-                            policy.AllowAnyOrigin()
-                                  .AllowAnyMethod()
-                                  .AllowAnyHeader();
-                        }
+                            if (string.IsNullOrWhiteSpace(origin)) return false;
+                            if (origins.Any(o => string.Equals(o, origin, StringComparison.OrdinalIgnoreCase))) return true;
+                            if (origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase)) return true;
+                            if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase)) return true;
+                            return false;
+                        })
+                        .AllowAnyMethod()
+                        .AllowAnyHeader()
+                        .AllowCredentials()
+                        .WithExposedHeaders("*");
                     }
                 });
             });

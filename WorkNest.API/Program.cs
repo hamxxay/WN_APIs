@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Claims;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -72,6 +73,8 @@ try
                 ValidAudience           = jwtSection["Audience"],
                 ValidateLifetime        = true,
                 ClockSkew               = TimeSpan.Zero,
+                RoleClaimType           = ClaimTypes.Role,
+                NameClaimType           = ClaimTypes.NameIdentifier
             };
         });
 

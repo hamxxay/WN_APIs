@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Auth;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
@@ -122,13 +122,20 @@ namespace WorkNest.Application.Services
             var row = await _db.GetUserByEmailAsync(email);
             if (row is null) return ApiResponse.Fail("User not found");
 
+            var publicId = (row.TryGetValue("IdGUID", out var idg) && idg is not null && !string.IsNullOrWhiteSpace(idg.ToString())) 
+                ? idg.ToString() 
+                : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
+
+            var role = Roles.FromRow(row);
+
             return ApiResponse.Ok(new
             {
-                id         = row.TryGetValue("PublicId",    out var g) ? g?.ToString() : null,
+                id         = publicId,
                 email      = row.TryGetValue("Email",       out var e) ? e?.ToString() : email,
                 name       = row.TryGetValue("Name",        out var n) ? n?.ToString() : null,
                 phone      = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null,
-                role       = Roles.FromRow(row),
+                role       = role,
+                roles      = new[] { role },
                 customerId = row.TryGetValue("CustomerId",  out var c) ? c?.ToString() : null,
             });
         }

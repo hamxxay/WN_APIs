@@ -39,7 +39,13 @@ namespace WorkNest.API.Controllers
         {
             var email = User.FindFirst(ClaimTypes.Email)?.Value
                         ?? User.FindFirst("email")?.Value
+                        ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Email)?.Value
                         ?? userEmail;
+
+            if (string.IsNullOrWhiteSpace(email) && Request.Headers.TryGetValue("x-user-email", out var hVal))
+            {
+                email = hVal.ToString();
+            }
 
             if (string.IsNullOrWhiteSpace(email))
                 return Unauthorized(new { isSuccessful = false, message = "User email header or token claim required" });

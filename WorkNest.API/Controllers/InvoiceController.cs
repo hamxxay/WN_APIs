@@ -202,10 +202,10 @@ BEGIN
         ISNULL(i.PaidTotal, 0) AS PaidTotal,
         ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
         COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ucomp.CompanyName)), ''), '-') AS AccountName,
-        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name) AS AttnName,
-        COALESCE(c.Address, u.Address, '') AS BillingAddress,
-        ISNULL(c.Code, 'WN' + RIGHT('00000' + CAST(ISNULL(c.Id, i.UserId) AS VARCHAR(10)), 5)) AS AccountNumber,
-        ISNULL(c.CnicOrPassport, '') AS SntnNtnNic,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), ISNULL(u.Name, 'Valued Customer'))) AS AttnName,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Address)), ''), NULLIF(LTRIM(RTRIM(u.Address)), ''), '') AS BillingAddress,
+        ISNULL(NULLIF(LTRIM(RTRIM(c.Code)), ''), ISNULL(NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''), ISNULL(NULLIF(LTRIM(RTRIM(bd.CustomerCode)), ''), 'WN' + RIGHT('00000' + CAST(ISNULL(c.Id, i.UserId) AS VARCHAR(10)), 5)))) AS AccountNumber,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.CnicOrPassport)), ''), NULLIF(LTRIM(RTRIM(ucomp.NTN)), ''), '') AS SntnNtnNic,
         ISNULL(loc.Name, 'WorkNest') AS CenterName,
         ISNULL(comp.CompanyName, 'WorkNest Coworking Spaces (Pvt) Ltd') AS VendorLegalName,
         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), ISNULL(loc.Address, '3rd Floor EOBI Building-II, I-8 Markaz, Islamabad')) AS VendorAddress,
@@ -217,11 +217,16 @@ BEGIN
         ISNULL(bd.SupportChargeAmount, 0.00) AS SupportChargeAmount,
         COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount
     FROM dbo.WN_Invoices i WITH (NOLOCK)
-    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
-    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (c.UserId = i.UserId OR c.Id = i.UserId OR (u.Email IS NOT NULL AND c.Email = u.Email)) AND (c.IsActive = 1 OR c.IsActive IS NULL)
-    LEFT JOIN dbo.Company ucomp WITH (NOLOCK) ON ucomp.Id = u.CompanyId
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (
+        (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND c.Code = b.CustomerCode)
+        OR (bd.CustomerCode IS NOT NULL AND bd.CustomerCode <> '' AND c.Code = bd.CustomerCode)
+        OR (i.UserId IS NOT NULL AND i.UserId > 0 AND c.UserId = i.UserId)
+        OR (u.Email IS NOT NULL AND u.Email <> '' AND c.Email = u.Email)
+    ) AND (c.IsActive = 1 OR c.IsActive IS NULL)
+    LEFT JOIN dbo.Company ucomp WITH (NOLOCK) ON ucomp.Id = u.CompanyId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
     LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
     LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = ISNULL(NULLIF(loc.CompanyId, 0), 486)
@@ -326,7 +331,7 @@ END;";
                         {
                             lineFrom = null;
                             lineTo = null;
-                            if (!desc.Contains("(Refundable)", StringComparison.OrdinalIgnoreCase))
+                            if (!desc.Contains("Refundable", StringComparison.OrdinalIgnoreCase))
                             {
                                 desc = desc.Trim() + " (Refundable)";
                             }
@@ -352,7 +357,7 @@ END;";
                     {
                         items.Add(new StatementInvoiceLineItemDto
                         {
-                            Description = "Security Deposit (Refundable)",
+                            Description = "Security Deposit",
                             PriceExclVat = dto.SecurityDepositAmount,
                             VatAmount = 0m,
                             Category = "Security Deposit",
@@ -841,7 +846,7 @@ END;";
                     {
                         securityDeposit = 0m;
                     }
-                    mainLineDescription = $"Rent for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
+                    mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
                 }
 
                 int contractMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 

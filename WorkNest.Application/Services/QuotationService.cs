@@ -220,11 +220,11 @@ namespace WorkNest.Application.Services
             string randomStr = Guid.NewGuid().ToString().Substring(0, 6).ToUpper();
             string quotationNumber = $"WN-QT-{todayStr}-{randomStr}";
 
-            // Calculate discount and total amounts
+            // Calculate discount and total amounts against room rent subtotal
             decimal discountAmount = (discountType == "Amount" || discountType == "Fixed")
-                ? discountValue
-                : subtotal * (discountValue / 100m);
-            decimal totalAmount = subtotal - discountAmount;
+                ? Math.Min(discountValue, subtotal)
+                : Math.Round(subtotal * (discountValue / 100m), 2);
+            decimal totalAmount = Math.Max(0, subtotal - discountAmount);
 
             // Insert quotation into DB
             int billingPeriodMonths = request.BillingPeriodMonths.HasValue && request.BillingPeriodMonths.Value > 0

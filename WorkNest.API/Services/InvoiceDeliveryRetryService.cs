@@ -284,7 +284,7 @@ namespace WorkNest.API.Services
                     {
                         lineFrom = null;
                         lineTo = null;
-                        if (!desc.Contains("(Refundable)", StringComparison.OrdinalIgnoreCase))
+                        if (!desc.Contains("Refundable", StringComparison.OrdinalIgnoreCase))
                         {
                             desc = desc.Trim() + " (Refundable)";
                         }

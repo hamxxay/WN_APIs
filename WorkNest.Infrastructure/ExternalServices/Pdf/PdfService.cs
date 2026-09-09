@@ -137,6 +137,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             discountAmount = Math.Round(firstCycleRent * (q.DiscountValue / 100.0m), 2);
                         }
+                        else if ((string.Equals(q.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(q.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) && q.DiscountValue > 0)
+                        {
+                            discountAmount = Math.Min(q.DiscountValue, firstCycleRent);
+                        }
+                        else if (discountAmount > firstCycleRent && spaceType != "MeetingRoom")
+                        {
+                            discountAmount = firstCycleRent;
+                        }
 
                         decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 16.00m;
                         decimal taxOnAdvanceRent = q.TaxAmountOnAdvanceRent > 0 ? q.TaxAmountOnAdvanceRent : Math.Round(Math.Round(firstCycleRent * 0.10m, 2) * (taxPct / 100.0m), 2);
@@ -374,19 +382,20 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
                             int itemNum = 1;
-                            tc.Item().Text($"{itemNum++}. The price is exclusive of all tax.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text($"{itemNum++}. The room rent is inclusive of support service charges").FontSize(8).FontColor("#6c757d");                            tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text($"{itemNum++}. This quotation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. The price is exclusive of all tax.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. The room rent is inclusive of support service charges").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. This quotation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#495057");
                             if (spaceType == "PrivateRoom" || secDeposit > 0)
                             {
-                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
+                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#495057");
                             }
                             if (spaceType != "MeetingRoom")
                             {
-                                tc.Item().Text($"{itemNum++}. Room charges will be paid in advance for {billingMonths} month(s).").FontSize(8).FontColor("#6c757d");
+                                tc.Item().Text($"{itemNum++}. Room charges will be paid in advance for {billingMonths} month(s).").FontSize(8).FontColor("#495057");
                             }
-                            tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
                         });
                     });
 
@@ -609,19 +618,19 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
                             int itemNum = 1;
-                            tc.Item().Text($"{itemNum++}. The price is exclusive of all tax.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text($"{itemNum++}. Payment must be made before the expiry date to confirm the booking.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. The price is exclusive of all tax.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. Payment must be made before the expiry date to confirm the booking.").FontSize(8).FontColor("#495057");
                             if (spaceType == "PrivateRoom" || c.SecurityDeposit > 0)
                             {
-                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#6c757d");
+                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#495057");
                             }
                             if (spaceType != "MeetingRoom")
                             {
-                                tc.Item().Text($"{itemNum++}. Room charges will be paid in advance for {c.BillingPeriodMonths} month(s).").FontSize(8).FontColor("#6c757d");
+                                tc.Item().Text($"{itemNum++}. Room charges will be paid in advance for {c.BillingPeriodMonths} month(s).").FontSize(8).FontColor("#495057");
                             }
-                            tc.Item().Text($"{itemNum++}. Cancellation policy applies as per the signed agreement.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text($"{itemNum++}. Cancellation policy applies as per the signed agreement.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
                         });
                     });
 
@@ -779,9 +788,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
-                            tc.Item().Text("1. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text("2. Security deposit is fully refundable upon termination, subject to lease terms.").FontSize(8).FontColor("#6c757d");
-                            tc.Item().Text("3. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#6c757d");
+                            tc.Item().Text("1. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text("2. Security deposit is fully refundable upon termination, subject to lease terms.").FontSize(8).FontColor("#495057");
+                            tc.Item().Text("3. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
                         });
                     });
 
@@ -790,29 +799,44 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             }).GeneratePdf();
         }
 
-        private static readonly string LogoPath = @"F:\WorkNest_FE\public\images\Logo.png";
+        private static string GetLogoPath()
+        {
+            var paths = new[]
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "images", "Logo_black.png"),
+                Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "Logo_black.png"),
+                @"F:\WN_APIs\WorkNest.API\wwwroot\images\Logo_black.png",
+                @"F:\WorkNest_FE\public\images\Logo_black.png",
+                @"F:\WorkNest_FE\public\images\Logo.png"
+            };
+            foreach (var p in paths)
+            {
+                if (File.Exists(p)) return p;
+            }
+            return @"F:\WorkNest_FE\public\images\Logo.png";
+        }
 
         private static void ComposeHeader(IContainer container)
         {
+            string logoPath = GetLogoPath();
             container.Column(col =>
             {
                 col.Item().Row(row =>
                 {
                     row.RelativeItem().AlignMiddle().Column(c =>
                     {
-                        if (File.Exists(LogoPath))
+                        if (File.Exists(logoPath))
                         {
                             c.Item().Row(r =>
                             {
-                                r.AutoItem().Height(40).Image(LogoPath).FitHeight();
-                                r.AutoItem().AlignMiddle().PaddingLeft(2).Text("orkNest").FontSize(25).Bold().FontColor("#1a1a2e");
+                                r.AutoItem().Height(40).Image(logoPath).FitHeight();
+                                r.AutoItem().AlignMiddle().PaddingLeft(2).Text("orkNest").FontSize(25).Bold().FontColor("#000000");
                             });
                         }
                         else
                         {
-                            c.Item().Text("WorkNest").FontSize(22).Bold().FontColor("#1a1a2e");
+                            c.Item().Text("WorkNest").FontSize(22).Bold().FontColor("#000000");
                         }
-                        // c.Item().Text("Coworking Space Management").FontSize(8.5f).FontColor("#64748b");
                     });
 
                     row.ConstantItem(240).Column(c =>
