@@ -55,39 +55,67 @@ namespace WorkNest.Infrastructure.Repositories
 
         // --- User ---
 
-        public async Task<(int? Id, string? PublicId)> SyncUserAsync(string email, string? name, string? phone, string? passwordHash = null)
+        public async Task<(int? Id, string? PublicId)> SyncUserAsync(string email, string? name, string? phone, string? passwordHash = null, int? roleId = null, int? companyId = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Users_GetByEmail", c);
             cmd.Parameters.AddWithValue("@Email", email);
             await using var r = await cmd.ExecuteReaderAsync();
+
+            var resolvedName = !string.IsNullOrWhiteSpace(name)
+                ? name.Trim()
+                : (!string.IsNullOrWhiteSpace(email) ? email.Split('@')[0] : "User");
+            var userName = resolvedName;
+            var finalRoleId = roleId ?? WorkNest.Common.Constants.Roles.GeneralId;
+            var finalCompanyId = companyId ?? 484;
+
             if (await r.ReadAsync())
             {
                 var row = ToDict(r);
                 var id = row.TryGetValue("Id", out var eid) ? Convert.ToInt32(eid) : (int?)null;
                 var pub = (row.TryGetValue("IdGUID", out var idg) && idg is not null) ? idg.ToString() : (row.TryGetValue("PublicId", out var eg) ? eg?.ToString() : null);
                 await r.CloseAsync();
+
+                var existingName = row.TryGetValue("Name", out var exN) ? exN?.ToString() : null;
+                var existingUserName = row.TryGetValue("UserName", out var exUN) ? exUN?.ToString() : null;
+                var existingRoleId = row.TryGetValue("RoleId", out var exR) && exR is not null ? Convert.ToInt32(exR) : (int?)null;
+                var existingCompanyId = row.TryGetValue("CompanyId", out var exC) && exC is not null ? Convert.ToInt32(exC) : (int?)null;
+
+                var nameToSet = !string.IsNullOrWhiteSpace(existingName) ? existingName : resolvedName;
+                var userNameToSet = !string.IsNullOrWhiteSpace(existingUserName) ? existingUserName : userName;
+                var roleToSet = existingRoleId ?? finalRoleId;
+                var companyToSet = existingCompanyId ?? finalCompanyId;
+
                 await using var upd = SP("dbo.WN_Users_Update", c);
                 upd.Parameters.AddWithValue("@Id", id);
-                upd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
+                upd.Parameters.AddWithValue("@Name", (object?)nameToSet ?? DBNull.Value);
                 upd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
-                upd.Parameters.AddWithValue("@CompanyId", DBNull.Value);
+                upd.Parameters.AddWithValue("@CompanyId", companyToSet);
                 upd.Parameters.AddWithValue("@CityId", DBNull.Value);
                 upd.Parameters.AddWithValue("@Address", DBNull.Value);
                 upd.Parameters.AddWithValue("@CnicOrPassport", DBNull.Value);
                 upd.Parameters.AddWithValue("@AvatarUrl", DBNull.Value);
                 upd.Parameters.AddWithValue("@Notes", DBNull.Value);
                 await upd.ExecuteNonQueryAsync();
+
+                await using var rawCmd = new SqlCommand("UPDATE dbo.WN_Users SET RoleId = ISNULL(RoleId, @RoleId), UserName = ISNULL(UserName, @UserName), CompanyId = ISNULL(CompanyId, @CompanyId) WHERE Id = @Id", c);
+                rawCmd.Parameters.AddWithValue("@RoleId", roleToSet);
+                rawCmd.Parameters.AddWithValue("@UserName", userNameToSet);
+                rawCmd.Parameters.AddWithValue("@CompanyId", companyToSet);
+                rawCmd.Parameters.AddWithValue("@Id", id);
+                await rawCmd.ExecuteNonQueryAsync();
+
                 return (id, pub);
             }
             await r.CloseAsync();
+
             await using var ins = SP("dbo.WN_Users_Insert", c);
             ins.Parameters.AddWithValue("@Email", email);
             ins.Parameters.AddWithValue("@PasswordHash", (object?)passwordHash ?? DBNull.Value);
-            ins.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
+            ins.Parameters.AddWithValue("@Name", (object?)resolvedName ?? DBNull.Value);
             ins.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
-            ins.Parameters.AddWithValue("@RoleId", DBNull.Value);
-            ins.Parameters.AddWithValue("@CompanyId", DBNull.Value);
+            ins.Parameters.AddWithValue("@RoleId", finalRoleId);
+            ins.Parameters.AddWithValue("@CompanyId", finalCompanyId);
             ins.Parameters.AddWithValue("@CityId", DBNull.Value);
             ins.Parameters.AddWithValue("@Address", DBNull.Value);
             ins.Parameters.AddWithValue("@CnicOrPassport", DBNull.Value);
@@ -98,8 +126,21 @@ namespace WorkNest.Infrastructure.Repositories
             if (await ir.ReadAsync())
             {
                 var row = ToDict(ir);
-                return (row.TryGetValue("Id", out var nid) ? Convert.ToInt32(nid) : (int?)null,
-                        (row.TryGetValue("IdGUID", out var idg) && idg is not null) ? idg.ToString() : (row.TryGetValue("PublicId", out var ng) ? ng?.ToString() : null));
+                var insertedId = row.TryGetValue("Id", out var nid) ? Convert.ToInt32(nid) : (int?)null;
+                var insertedPub = (row.TryGetValue("IdGUID", out var idg) && idg is not null) ? idg.ToString() : (row.TryGetValue("PublicId", out var ng) ? ng?.ToString() : null);
+                await ir.CloseAsync();
+
+                if (insertedId.HasValue)
+                {
+                    await using var rawCmd = new SqlCommand("UPDATE dbo.WN_Users SET UserName = ISNULL(UserName, @UserName), RoleId = ISNULL(RoleId, @RoleId), CompanyId = ISNULL(CompanyId, @CompanyId) WHERE Id = @Id", c);
+                    rawCmd.Parameters.AddWithValue("@UserName", userName);
+                    rawCmd.Parameters.AddWithValue("@RoleId", finalRoleId);
+                    rawCmd.Parameters.AddWithValue("@CompanyId", finalCompanyId);
+                    rawCmd.Parameters.AddWithValue("@Id", insertedId.Value);
+                    await rawCmd.ExecuteNonQueryAsync();
+                }
+
+                return (insertedId, insertedPub);
             }
             return (null, null);
         }

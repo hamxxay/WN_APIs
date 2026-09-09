@@ -5,7 +5,7 @@ namespace WorkNest.Application.Interfaces
     public interface IDbRepository
     {
         // --- User ---
-        Task<(int? Id, string? PublicId)> SyncUserAsync(string email, string? name, string? phone, string? passwordHash = null);
+        Task<(int? Id, string? PublicId)> SyncUserAsync(string email, string? name, string? phone, string? passwordHash = null, int? roleId = null, int? companyId = null);
         Task<(int? Id, string? PublicId)> GetUserIdByEmailAsync(string email);
         Task<IDictionary<string, object?>?> GetUserByEmailAsync(string email);
         Task<IDictionary<string, object?>?> GetUserByIdAsync(int id);

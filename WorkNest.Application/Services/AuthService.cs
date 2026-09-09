@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Auth;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
@@ -21,14 +21,23 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> SyncUserAsync(UserSyncRequest request)
         {
-            var (id, publicId) = await _db.SyncUserAsync(request.Email, request.Name, request.Phone, request.PasswordHash);
+            var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
+            var roleId = request.RoleId ?? Roles.GeneralId;
+            var companyId = request.CompanyId ?? 484;
+
+            var (id, publicId) = await _db.SyncUserAsync(request.Email, name, request.Phone, request.PasswordHash, roleId, companyId);
+            await EnsureCustomerAsync(request.Email, name, request.Phone, id);
             return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User synchronized successfully.");
         }
 
         public async Task<ApiResponse> RegisterAsync(UserRegisterRequest request)
         {
-            var (id, publicId) = await _db.SyncUserAsync(request.Email, request.Name, request.Phone, request.Password);
-            await EnsureCustomerAsync(request.Email, request.Name, request.Phone, id);
+            var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
+            var roleId = request.RoleId ?? Roles.GeneralId;
+            var companyId = request.CompanyId ?? 484;
+
+            var (id, publicId) = await _db.SyncUserAsync(request.Email, name, request.Phone, request.Password, roleId, companyId);
+            await EnsureCustomerAsync(request.Email, name, request.Phone, id);
             return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User registered successfully.");
         }
 
@@ -38,11 +47,14 @@ namespace WorkNest.Application.Services
             string? publicId;
             string role;
 
+            var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
+
             if (row is null)
             {
-                var (_, pid) = await _db.SyncUserAsync(request.Email, null, null, request.Password);
+                var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, request.Password, Roles.GeneralId, 484);
                 publicId = pid;
                 role = Roles.General;
+                await EnsureCustomerAsync(request.Email, name, null, newId);
             }
             else
             {
@@ -50,6 +62,13 @@ namespace WorkNest.Application.Services
                     ? idg.ToString() 
                     : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
                 role = Roles.FromRow(row);
+
+                var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
+                var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
+                var nameToUse = !string.IsNullOrWhiteSpace(existingName) ? existingName : name;
+
+                await _db.SyncUserAsync(request.Email, nameToUse, null, request.Password, null, null);
+                await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
             }
 
             var token = _jwt.GenerateToken(publicId ?? "", request.Email, role);
@@ -64,19 +83,28 @@ namespace WorkNest.Application.Services
                 string? publicId;
                 string role;
 
+                var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
+
                 if (row is not null)
                 {
                     publicId = (row.TryGetValue("IdGUID", out var idg) && idg is not null && !string.IsNullOrWhiteSpace(idg.ToString())) 
                         ? idg.ToString() 
                         : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
                     role = Roles.FromRow(row);
+
+                    var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
+                    var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
+                    var nameToUse = !string.IsNullOrWhiteSpace(existingName) ? existingName : name;
+
+                    await _db.SyncUserAsync(request.Email, nameToUse, null, null, null, null);
+                    await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
                 }
                 else
                 {
-                    var (newId, pid) = await _db.SyncUserAsync(request.Email, request.Name, null);
+                    var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, null, Roles.GeneralId, 484);
                     publicId = pid;
                     role = Roles.General;
-                    await EnsureCustomerAsync(request.Email, request.Name, null, newId);
+                    await EnsureCustomerAsync(request.Email, name, null, newId);
                 }
 
                 var token = _jwt.GenerateToken(publicId ?? "", request.Email, role);
@@ -107,15 +135,59 @@ namespace WorkNest.Application.Services
 
         public ApiResponse Logout() => ApiResponse.Ok("Logged out successfully.");
 
-        private async Task EnsureCustomerAsync(string email, string? name, string? phone, int? userId)
+        private static string ResolveName(string? name, string? firstName, string? lastName, string email)
         {
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                return name.Trim();
+            }
+
+            var combined = string.Join(" ", new[] { firstName, lastName }.Where(s => !string.IsNullOrWhiteSpace(s))).Trim();
+            if (!string.IsNullOrWhiteSpace(combined))
+            {
+                return combined;
+            }
+
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                var parts = email.Split('@');
+                if (parts.Length > 0 && !string.IsNullOrWhiteSpace(parts[0]))
+                {
+                    return parts[0].Trim();
+                }
+            }
+
+            return "User";
+        }
+
+        private async Task EnsureCustomerAsync(string email, string? name, string? phone, int? userId, string? company = null)
+        {
+            var resolvedName = string.IsNullOrWhiteSpace(name) ? email.Split('@')[0] : name.Trim();
             var existing = await _db.GetCustomerByEmailAsync(email);
-            if (existing is not null && existing.TryGetValue("Id", out var eid) && eid is not null) return;
-            var nameParts = (name ?? "").Split(' ', 2);
+
+            if (existing is not null && existing.TryGetValue("Id", out var eid) && eid is not null)
+            {
+                if (userId.HasValue && (!existing.TryGetValue("UserId", out var existingUid) || existingUid is null || Convert.ToInt32(existingUid) == 0))
+                {
+                    var guid = existing.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
+                    if (!string.IsNullOrWhiteSpace(guid))
+                    {
+                        var firstName = existing.TryGetValue("FirstName", out var fn) ? fn?.ToString() : null;
+                        var lastName = existing.TryGetValue("LastName", out var ln) ? ln?.ToString() : null;
+                        await _db.UpdateCustomerAsync(guid, firstName, lastName, email, phone, null, null, null, null, true, company);
+                    }
+                }
+                return;
+            }
+
+            var nameParts = resolvedName.Split(' ', 2);
+            var firstNameVal = nameParts[0].Length > 0 ? nameParts[0] : email.Split('@')[0];
+            var lastNameVal = nameParts.Length > 1 ? nameParts[1] : null;
+
             await _db.CreateCustomerAsync(
-                nameParts[0].Length > 0 ? nameParts[0] : email,
-                nameParts.Length > 1 ? nameParts[1] : null,
-                email, phone, null, null, null, null, null, userId);
+                firstNameVal,
+                lastNameVal,
+                email, phone, null, null, null, null, null, userId, company);
         }
     }
 }

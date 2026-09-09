@@ -1,11 +1,15 @@
-namespace WorkNest.Application.DTOs.Auth
+﻿namespace WorkNest.Application.DTOs.Auth
 {
     public class UserSyncRequest
     {
         public string Email { get; set; } = string.Empty;
         public string? Name { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
         public string? Phone { get; set; }
         public string? PasswordHash { get; set; }
+        public int? RoleId { get; set; }
+        public int? CompanyId { get; set; }
     }
 
     public class UserRegisterRequest
@@ -13,13 +17,20 @@ namespace WorkNest.Application.DTOs.Auth
         public string Email { get; set; } = string.Empty;
         public string? Password { get; set; }
         public string? Name { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
         public string? Phone { get; set; }
+        public int? RoleId { get; set; }
+        public int? CompanyId { get; set; }
     }
 
     public class UserLoginRequest
     {
         public string Email { get; set; } = string.Empty;
         public string? Password { get; set; }
+        public string? Name { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
     }
 
     public class GoogleLoginRequest
@@ -27,6 +38,8 @@ namespace WorkNest.Application.DTOs.Auth
         public string IdToken { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string? Name { get; set; }
+        public string? FirstName { get; set; }
+        public string? LastName { get; set; }
     }
 
     public class AuthResponse
