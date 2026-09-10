@@ -68,7 +68,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/booking/recent")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
         public async Task<IActionResult> Recent([FromQuery] int top = 10) =>
             Ok(await _bookings.GetRecentBookingsAsync(top));
 
@@ -107,7 +107,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/booking/{publicId:guid}")]
         public async Task<IActionResult> Get(Guid publicId, [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            bool isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("receptionist");
+            bool isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsInRole("receptionist") || User.IsInRole("Receptionist") || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
             var email = isAdmin ? null : ResolveUserEmail(userEmail);
             var result = await _bookings.GetBookingByIdAsync(publicId, email);
             if (!result.IsSuccessful) return NotFound(result);
@@ -117,7 +117,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/booking/{id:int}")]
         public async Task<IActionResult> GetDetails(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            bool isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("receptionist");
+            bool isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsInRole("receptionist") || User.IsInRole("Receptionist") || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
             var email = isAdmin ? null : ResolveUserEmail(userEmail);
             var result = await _bookings.GetBookingDetailsAsync(id.ToString(), email);
             if (!result.IsSuccessful) return NotFound(result);
@@ -131,7 +131,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/booking/{id:int}/challan")]
         public async Task<IActionResult> GetChallan(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            bool isAdmin = User.IsInRole("admin") || User.IsInRole("super_admin") || User.IsInRole("receptionist");
+            bool isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsInRole("receptionist") || User.IsInRole("Receptionist") || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
             var email = isAdmin ? null : ResolveUserEmail(userEmail);
             var result = await _bookings.GetChallanAsync(id);
             if (!result.IsSuccessful) return NotFound(result);
@@ -184,7 +184,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/booking/create-admin")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
         public async Task<IActionResult> AdminCreate(
             [FromBody] AdminBookingRequest request,
             [FromHeader(Name = "x-user-email")] string? actorEmail)
@@ -313,7 +313,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/booking/{id:int}/send-challan-email")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
         public async Task<IActionResult> SendChallanEmail(int id, [FromBody] SendChallanEmailRequest? request)
         {
             byte[]? pdfBytes = null;
@@ -328,7 +328,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/booking/{id:int}/send-confirmation-email")]
-        [Authorize(Roles = "admin,super_admin,receptionist")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
         public async Task<IActionResult> SendConfirmationEmail(int id)
         {
             var result = await _bookings.SendBookingConfirmationEmailAsync(id);

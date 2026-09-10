@@ -59,10 +59,12 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> UpdateCustomerAsync(string id, CustomerRequest request)
         {
-            await _db.UpdateCustomerAsync(id, request.FirstName, request.LastName, request.Email,
+            var updated = await _db.UpdateCustomerAsync(id, request.FirstName, request.LastName, request.Email,
                 request.PhoneNumber, request.CnicOrPassport, request.Address,
                 request.CityId, request.Notes, request.IsActive, request.Company);
-            return ApiResponse.Ok("Customer updated successfully.");
+            if (updated is null)
+                return ApiResponse.Fail("Customer not found or update failed.");
+            return ApiResponse.Ok(updated, "Customer updated successfully.");
         }
 
         public async Task<ApiResponse> DeleteCustomerAsync(string id)

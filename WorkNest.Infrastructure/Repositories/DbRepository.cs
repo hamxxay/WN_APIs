@@ -2072,11 +2072,30 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadAll(r);
         }
 
+        private static void AddIdOrGuidParameters(SqlCommand cmd, string identifier)
+        {
+            if (Guid.TryParse(identifier, out var guidVal))
+            {
+                cmd.Parameters.AddWithValue("@IdGUID", guidVal);
+                cmd.Parameters.AddWithValue("@Id", DBNull.Value);
+            }
+            else if (int.TryParse(identifier, out var intVal))
+            {
+                cmd.Parameters.AddWithValue("@IdGUID", DBNull.Value);
+                cmd.Parameters.AddWithValue("@Id", intVal);
+            }
+            else
+            {
+                cmd.Parameters.AddWithValue("@IdGUID", DBNull.Value);
+                cmd.Parameters.AddWithValue("@Id", DBNull.Value);
+            }
+        }
+
         public async Task<IDictionary<string, object?>?> GetCustomerByGuidAsync(string guid)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_GetByGuid", c);
-            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            AddIdOrGuidParameters(cmd, guid);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? ToDict(r) : null;
         }
@@ -2101,11 +2120,11 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return new Dictionary<string, object?>();
         }
 
-        public async Task UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null)
+        public async Task<IDictionary<string, object?>?> UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_Update", c);
-            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            AddIdOrGuidParameters(cmd, guid);
             cmd.Parameters.AddWithValue("@FirstName", (object?)firstName ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@LastName", (object?)lastName ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Email", (object?)email ?? DBNull.Value);
@@ -2116,14 +2135,15 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@IsActive", isActive.HasValue ? (object)(isActive.Value ? 1 : 0) : DBNull.Value);
             cmd.Parameters.AddWithValue("@Company", (object?)company ?? DBNull.Value);
-            await cmd.ExecuteNonQueryAsync();
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
         }
 
         public async Task DeleteCustomerAsync(string guid)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_Delete", c);
-            cmd.Parameters.AddWithValue("@IdGUID", guid);
+            AddIdOrGuidParameters(cmd, guid);
             await cmd.ExecuteNonQueryAsync();
         }
 

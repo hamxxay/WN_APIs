@@ -205,7 +205,7 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>?> GetCustomerByUserIdAsync(int userId);
         Task<IDictionary<string, object?>?> GetCustomerByEmailAsync(string email);
         Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null);
-        Task UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null);
+        Task<IDictionary<string, object?>?> UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null);
         Task DeleteCustomerAsync(string guid);
 
         // --- Booking ---

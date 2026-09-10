@@ -41,6 +41,15 @@ namespace WorkNest.API.Controllers
                 ?? "";
         }
 
+        private async Task<SqlConnection> OpenConnectionAsync()
+        {
+            var conn = new SqlConnection(GetConnectionString());
+            await conn.OpenAsync();
+            using var cmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", conn);
+            await cmd.ExecuteNonQueryAsync();
+            return conn;
+        }
+
         private string? ResolveUserEmail(string? headerEmail)
         {
             var claimEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
@@ -61,8 +70,7 @@ namespace WorkNest.API.Controllers
                 if (limit <= 0) limit = 10;
                 int offset = (page - 1) * limit;
 
-                using var conn = new SqlConnection(GetConnectionString());
-                await conn.OpenAsync();
+                using var conn = await OpenConnectionAsync();
 
                 using var cmd = new SqlCommand("dbo.WN_GetInvoicesList", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
@@ -149,8 +157,7 @@ namespace WorkNest.API.Controllers
         {
             try
             {
-                using var conn = new SqlConnection(GetConnectionString());
-                await conn.OpenAsync();
+                using var conn = await OpenConnectionAsync();
 
                 var dto = await BuildStatementInvoicePdfDtoAsync(id, conn);
                 if (dto == null)
@@ -394,8 +401,7 @@ END;";
         {
             try
             {
-                using var conn = new SqlConnection(GetConnectionString());
-                await conn.OpenAsync();
+                using var conn = await OpenConnectionAsync();
 
                 using var cmd = new SqlCommand("dbo.WN_GetInvoiceDetailsById", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
@@ -465,8 +471,7 @@ END;";
                 if (req == null || req.UserId <= 0 || req.Lines == null || req.Lines.Count == 0)
                     return BadRequest(new { isSuccessful = false, message = "UserId and at least one line item are required." });
 
-                using var conn = new SqlConnection(GetConnectionString());
-                await conn.OpenAsync();
+                using var conn = await OpenConnectionAsync();
 
                 decimal subTotal = 0;
                 decimal discountTotal = 0;
@@ -630,8 +635,7 @@ END;";
         {
             try
             {
-                using var conn = new SqlConnection(GetConnectionString());
-                await conn.OpenAsync();
+                using var conn = await OpenConnectionAsync();
 
                 string invoiceNumber = "";
                 string targetEmail = "";
@@ -741,8 +745,7 @@ END;";
         {
             try
             {
-                using var conn = new SqlConnection(GetConnectionString());
-                await conn.OpenAsync();
+                using var conn = await OpenConnectionAsync();
 
                 string bookingSql = @"
                     SELECT TOP 1 
@@ -1030,8 +1033,7 @@ END;";
         {
             try
             {
-                using var conn = new SqlConnection(GetConnectionString());
-                await conn.OpenAsync();
+                using var conn = await OpenConnectionAsync();
 
                 string bookingSql = @"
                     SELECT TOP 1 
