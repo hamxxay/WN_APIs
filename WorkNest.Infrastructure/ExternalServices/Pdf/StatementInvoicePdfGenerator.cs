@@ -329,10 +329,26 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 tc.Spacing(2);
                 int itemNum = 1;
                 tc.Item().Text($"{itemNum++}. Please deposit this payment in the following bank ").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"Bank Name: Bank Of Punjab").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"Account Title: Worknest pvt Ltd").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"Account Number: 15570100744731").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"And send the recipt on +923201809696").FontSize(7.5f).FontColor("#000000");
+
+                bool isF7 = data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase));
+
+                if (isF7)
+                {
+                    tc.Item().Text($"Account Title: Work Nest Co-Working").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Account: 6-2-10-20389-714-250794").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"IBAN: PK26MPBL0210587140250794").FontSize(7.5f).FontColor("#000000");
+                }
+                else
+                {
+                    tc.Item().Text($"Bank Name: Bank Of Punjab").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Account Title: WORKNEST PRIVATE LIMITED").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Account Number: 5310449521900010").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"IBAN: PK24BPUN5310449521900010 ").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Swift code: BPUNPKKA ").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Branch code: 0839 ").FontSize(7.5f).FontColor("#000000");
+                }
+
+                tc.Item().Text($"And send the receipt on +923201809696").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid for 5 days after due date ").FontSize(7.5f).FontColor("#000000");
 
 
