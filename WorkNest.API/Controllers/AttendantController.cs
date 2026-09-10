@@ -9,6 +9,7 @@ using WorkNest.Application.Interfaces;
 namespace WorkNest.API.Controllers
 {
     [ApiController]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
     public class AttendantController : ControllerBase
     {
         private readonly IAttendantService _attendants;

@@ -7,7 +7,7 @@ using WorkNest.Application.Interfaces;
 namespace WorkNest.API.Controllers
 {
     [ApiController]
-    [Authorize]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
     public class AccessCardController : ControllerBase
     {
         private readonly IAccessCardService _accessCards;

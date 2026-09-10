@@ -242,6 +242,8 @@ BEGIN
     SELECT 
         l.ChargeTypeId,
         l.Description,
+        ISNULL(l.Quantity, 1) AS Quantity,
+        ISNULL(l.UnitPrice, 0) AS UnitPrice,
         (l.Quantity * l.UnitPrice - l.DiscountAmount) AS PriceExclVat,
         l.TaxAmount AS VatAmount,
         l.LineTotal AS TotalInclVat,
@@ -349,12 +351,19 @@ END;";
                             lineTo = dto.BillingPeriodEnd ?? dto.DueDate;
                         }
 
+                        decimal qty = HasColumn(reader, "Quantity") && !reader.IsDBNull(reader.GetOrdinal("Quantity")) ? Convert.ToDecimal(reader.GetValue(reader.GetOrdinal("Quantity"))) : 1m;
+                        decimal unitPrice = HasColumn(reader, "UnitPrice") && !reader.IsDBNull(reader.GetOrdinal("UnitPrice")) ? Convert.ToDecimal(reader.GetValue(reader.GetOrdinal("UnitPrice"))) : 0m;
+                        decimal priceExcl = reader.IsDBNull(reader.GetOrdinal("PriceExclVat")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriceExclVat"));
+                        if (unitPrice == 0 && qty > 0) unitPrice = priceExcl / qty;
+
                         items.Add(new StatementInvoiceLineItemDto
                         {
                             Description = desc,
                             FromDate = lineFrom,
                             ToDate = lineTo,
-                            PriceExclVat = reader.IsDBNull(reader.GetOrdinal("PriceExclVat")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriceExclVat")),
+                            Quantity = qty,
+                            UnitPrice = unitPrice,
+                            PriceExclVat = priceExcl,
                             VatAmount = reader.IsDBNull(reader.GetOrdinal("VatAmount")) ? 0m : reader.GetDecimal(reader.GetOrdinal("VatAmount")),
                             Category = HasColumn(reader, "CategoryName") && !reader.IsDBNull(reader.GetOrdinal("CategoryName")) ? reader.GetString(reader.GetOrdinal("CategoryName")) : "Recurring",
                             IsDeposit = isDeposit

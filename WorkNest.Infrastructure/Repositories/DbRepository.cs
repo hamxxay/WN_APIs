@@ -961,7 +961,6 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 var updateSql = $@"
                     UPDATE dbo.WN_Bookings 
                     SET {string.Join(", ", updateParts)},
-                        DiscountAmount = @DA,
                         TotalAmount = CASE WHEN @SDR > 0 THEN SubtotalAmount - @DA + ISNULL((SELECT TOP 1 TaxTotal FROM dbo.WN_Invoices WHERE BookingId = @BID), 0) + @SDR ELSE TotalAmount END
                     WHERE Id = @BID;
 

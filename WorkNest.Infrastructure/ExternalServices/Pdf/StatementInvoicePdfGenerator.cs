@@ -63,6 +63,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public string Description { get; set; } = string.Empty;
         public DateTime? FromDate { get; set; }
         public DateTime? ToDate { get; set; }
+        public decimal Quantity { get; set; } = 1;
+        public decimal UnitPrice { get; set; }
         public decimal PriceExclVat { get; set; }
         public decimal VatAmount { get; set; }
         public decimal TotalInclVat => PriceExclVat + VatAmount;
@@ -238,20 +240,20 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     {
                         companyName = data.AccountName.Trim();
                     }
-                    c.Item().Text($"Company Name: {companyName}").FontSize(10).FontColor("#000000");
-                    if (!string.IsNullOrWhiteSpace(data.AttnName))
-                        c.Item().Text($"Attn: {data.AttnName}").FontSize(10).FontColor("#000000");
-                    c.Item().Text(data.BillingAddress).FontSize(10).FontColor("#000000");
-                    c.Item().Text($"SNTN / NTN / NIC: {data.SntnNtnNic}").FontColor("#000000");
+                    c.Item().Text($"Customer Name: {companyName}").FontSize(10).FontColor("#000000");
+                    // if (!string.IsNullOrWhiteSpace(data.AttnName))
+                    //     c.Item().Text($"Attn: {data.AttnName}").FontSize(10).FontColor("#000000");
+                    c.Item().Text($"Address: {data.BillingAddress}").FontSize(10).FontColor("#000000");
+                    c.Item().Text($"NTN / CNIC: {data.SntnNtnNic}").FontColor("#000000");
 
                 });
 
                 r.ConstantItem(240).Column(c =>
                 {
-                    c.Item().Row(row => { row.ConstantItem(110).Text("Customer Code:").FontColor("#000000"); row.RelativeItem().Text(data.AccountNumber).Bold().FontColor("#000000"); });
-                    c.Item().Row(row => { row.ConstantItem(110).Text("Invoice Number:").FontColor("#000000"); row.RelativeItem().Text(data.InvoiceNumber).Bold().FontColor("#000000"); });
+                    c.Item().Row(row => { row.ConstantItem(110).Text("Customer Code:").FontColor("#000000"); row.RelativeItem().Text(data.AccountNumber).FontColor("#000000"); });
+                    c.Item().Row(row => { row.ConstantItem(110).Text("Invoice Number:").FontColor("#000000"); row.RelativeItem().Text(data.InvoiceNumber).FontColor("#000000"); });
                     c.Item().Row(row => { row.ConstantItem(110).Text("Invoice Date:").FontColor("#000000"); row.RelativeItem().Text($"{data.InvoiceDate:dd MMM yyyy}").FontColor("#000000"); });
-                    c.Item().Row(row => { row.ConstantItem(110).Text("Due Date:").FontColor("#000000"); row.RelativeItem().Text($"{data.DueDate:dd MMM yyyy}").Bold().FontColor("#000000"); });
+                    c.Item().Row(row => { row.ConstantItem(110).Text("Due Date:").FontColor("#000000"); row.RelativeItem().Text($"{data.DueDate:dd MMM yyyy}").FontColor("#000000"); });
                 });
             });
 
@@ -266,41 +268,37 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                 table.Header(h =>
                 {
-                    h.Cell().Background("#000000").Padding(5).Text("Description of Charges").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#000000").Padding(5).AlignRight().Text("Price").Bold().FontColor("#ffffff");
+                    h.Cell().Background("#000000").Padding(5).Text("Description").Bold().FontColor("#ffffff");
+                    h.Cell().Background("#000000").Padding(5).AlignRight().Text("Unit Price").Bold().FontColor("#ffffff");
                     h.Cell().Background("#000000").Padding(5).AlignRight().Text("Total").Bold().FontColor("#ffffff");
                 });
 
                 foreach (var item in data.LineItems)
                 {
+                    decimal displayQty = item.Quantity > 0 ? item.Quantity : 1;
+                    decimal displayUnitPrice = item.UnitPrice > 0 ? item.UnitPrice : (displayQty > 0 ? item.PriceExclVat / displayQty : item.PriceExclVat);
+
                     table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).Text(item.Description).FontColor("#000000");
+                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).AlignRight().Text(FormatAmount(displayUnitPrice)).FontColor("#000000");
                     table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).AlignRight().Text(FormatAmount(item.PriceExclVat)).FontColor("#000000");
-                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).AlignRight().Text(FormatAmount(item.TotalInclVat)).FontColor("#000000");
                 }
             });
 
             decimal totalExclVat = data.LineItems.Sum(i => i.PriceExclVat);
             decimal depositTotal = data.LineItems.Where(i => IsDepositItem(i)).Sum(i => i.PriceExclVat);
             decimal rentTotal = totalExclVat - depositTotal;
-            decimal totalVat = data.LineItems.Sum(i => i.VatAmount);
-            decimal grandTotal = data.LineItems.Sum(i => i.TotalInclVat);
 
             decimal chargePercentage = data.AppliedChargePercentage ?? (data.SupportChargeRate > 0 ? data.SupportChargeRate * 100m : 10m);
-            decimal supportCharges = data.SupportChargeAmount ?? (rentTotal > 0 ? Math.Round(rentTotal * (chargePercentage / 100m), 2) : 0m);
+            decimal supportCharges = rentTotal > 0
+                ? Math.Round(rentTotal * (chargePercentage / 100m), 2)
+                : (data.SupportChargeAmount ?? 0m);
 
-            decimal taxPercentage;
-            if (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0)
-            {
-                taxPercentage = data.AppliedTaxPercentage.Value;
-            }
-            else if (supportCharges > 0 && totalVat > 0)
-            {
-                taxPercentage = Math.Round((totalVat / supportCharges) * 100m, 0);
-            }
-            else
-            {
-                taxPercentage = data.VatRate > 0 ? (data.VatRate * 100m) : 16m;
-            }
+            decimal taxPercentage = data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0
+                ? data.AppliedTaxPercentage.Value
+                : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
+
+            decimal totalVat = Math.Round(supportCharges * (taxPercentage / 100m), 2);
+            decimal grandTotal = totalExclVat + supportCharges + totalVat;
 
             col.Item().PaddingTop(10).AlignRight().Column(c =>
             {
@@ -670,11 +668,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 c.Item().LineHorizontal(1).LineColor("#000000");
                 c.Item().PaddingTop(4).Row(row =>
                 {
-                    row.RelativeItem().Column(col =>
-                    {
-                        col.Item().Text($"{data.VendorLegalName} | NTN: {data.VendorNtn} | Phone: {data.VendorPhone}").FontSize(7.5f).FontColor("#000000");
-                        col.Item().Text(data.VendorAddress).FontSize(7.5f).FontColor("#000000");
-                    });
+                    // row.RelativeItem().Column(col =>
+                    // {
+                    //     col.Item().Text($"{data.VendorLegalName} | NTN: {data.VendorNtn} | Phone: {data.VendorPhone}").FontSize(7.5f).FontColor("#000000");
+                    //     col.Item().Text(data.VendorAddress).FontSize(7.5f).FontColor("#000000");
+                    // });
 
                     row.ConstantItem(100).AlignRight().Text(x =>
                     {
