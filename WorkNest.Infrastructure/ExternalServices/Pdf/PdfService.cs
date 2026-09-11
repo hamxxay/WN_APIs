@@ -869,5 +869,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 });
             });
         }
+
+        public byte[] GenerateSalesTaxInvoicePdf(WorkNest.Application.DTOs.Payment.CustomerSTInvoiceDto dto)
+        {
+            return SalesTaxInvoicePdfGenerator.GeneratePdf(dto);
+        }
     }
 }

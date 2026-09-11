@@ -1,9 +1,13 @@
 using WorkNest.Application.DTOs.SpaceConfig;
+using WorkNest.Application.DTOs.Payment;
 
 namespace WorkNest.Application.Interfaces
 {
     public interface IDbRepository
     {
+        // --- Sales Tax Invoice ---
+        Task<CustomerSTInvoiceDto?> GetCustomerSTInvoiceByPublicIdAsync(Guid publicId);
+        Task<Guid?> GetSTInvoicePublicIdByInvoiceIdAsync(int invoiceId);
         // --- User ---
         Task<(int? Id, string? PublicId)> SyncUserAsync(string email, string? name, string? phone, string? passwordHash = null, int? roleId = null, int? companyId = null);
         Task<(int? Id, string? PublicId)> GetUserIdByEmailAsync(string email);

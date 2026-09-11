@@ -152,6 +152,7 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("api/invoice/{id:int}/pdf")]
         [HttpGet("api/invoice/{id:int}/statement-pdf")]
+        [HttpGet("api/invoice/{id:int}/download")]
         [AllowAnonymous]
         public async Task<IActionResult> GetStatementInvoicePdf(int id)
         {
@@ -164,7 +165,44 @@ namespace WorkNest.API.Controllers
                     return NotFound(new { isSuccessful = false, message = "Invoice not found." });
 
                 byte[] pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(dto);
-                return File(pdfBytes, "application/pdf", $"Statement-Invoice-{dto.InvoiceNumber}.pdf");
+                string fileName = $"Statement-Invoice-{dto.InvoiceNumber}.pdf";
+                if (Request.Path.Value?.Contains("/download", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return File(pdfBytes, "application/pdf", fileName);
+                }
+
+                Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
+                return File(pdfBytes, "application/pdf");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        [HttpGet("api/invoice/sales-tax/{publicId:guid}/pdf")]
+        [HttpGet("api/invoice/sales-tax/{publicId:guid}/download")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetSalesTaxPdf(Guid publicId)
+        {
+            try
+            {
+                var dto = await _db.GetCustomerSTInvoiceByPublicIdAsync(publicId);
+                if (dto == null)
+                {
+                    return NotFound(new { isSuccessful = false, message = "Sales Tax Invoice not found." });
+                }
+
+                byte[] pdfBytes = _pdf.GenerateSalesTaxInvoicePdf(dto);
+
+                string fileName = $"{dto.STInvoiceNumber}.pdf";
+                if (Request.Path.Value?.Contains("/download", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return File(pdfBytes, "application/pdf", fileName);
+                }
+
+                Response.Headers["Content-Disposition"] = $"inline; filename=\"{fileName}\"";
+                return File(pdfBytes, "application/pdf");
             }
             catch (Exception ex)
             {
@@ -400,6 +438,21 @@ END;";
                         if (!reader.IsDBNull(1)) dto.BankAccountNumber = reader.GetString(1);
                     }
                 }
+            }
+
+            var stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
+            if (stPublicId.HasValue)
+            {
+                var baseUrl = _config["Application:PublicBaseUrl"];
+                if (string.IsNullOrWhiteSpace(baseUrl) && Request != null)
+                {
+                    baseUrl = $"{Request.Scheme}://{Request.Host}";
+                }
+                if (string.IsNullOrWhiteSpace(baseUrl))
+                {
+                    baseUrl = "http://localhost:5200";
+                }
+                dto.SupportChargesInvoiceUrl = $"{baseUrl.TrimEnd('/')}/api/invoice/sales-tax/{stPublicId.Value}/pdf";
             }
 
             return dto;

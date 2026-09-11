@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using System.Data;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.DTOs.SpaceConfig;
+using WorkNest.Application.DTOs.Payment;
 
 namespace WorkNest.Infrastructure.Repositories
 {
@@ -2700,6 +2701,111 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@UserId", userId);
             var res = await cmd.ExecuteScalarAsync();
             return res != null && res != DBNull.Value;
+        }
+
+        public async Task<CustomerSTInvoiceDto?> GetCustomerSTInvoiceByPublicIdAsync(Guid publicId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_GetCustomerSTInvoiceByPublicId", c);
+            cmd.Parameters.AddWithValue("@PublicId", publicId);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return null;
+
+            var dto = new CustomerSTInvoiceDto
+            {
+                STInvoiceId = r.GetInt32(r.GetOrdinal("STInvoiceId")),
+                STPublicId = r.GetGuid(r.GetOrdinal("STPublicId")),
+                CustomerInvoiceId = r.GetInt32(r.GetOrdinal("CustomerInvoiceId")),
+                STInvoiceNumber = r.GetString(r.GetOrdinal("STInvoiceNumber")),
+                ParentInvoiceNumber = r.GetString(r.GetOrdinal("ParentInvoiceNumber")),
+                IssuedOn = r.GetDateTime(r.GetOrdinal("IssuedOn")),
+                DueOn = r.GetDateTime(r.GetOrdinal("DueOn")),
+                CurrencyCode = r.IsDBNull(r.GetOrdinal("CurrencyCode")) ? "PKR" : r.GetString(r.GetOrdinal("CurrencyCode")),
+
+                TariffHeading = r.GetString(r.GetOrdinal("TariffHeading")),
+                TariffLabel = r.GetString(r.GetOrdinal("TariffLabel")),
+
+                RoomRentDescription = r.GetString(r.GetOrdinal("RoomRentDescription")),
+                RoomRentAmount = r.GetDecimal(r.GetOrdinal("RoomRentAmount")),
+                RoomRentTaxRate = r.GetDecimal(r.GetOrdinal("RoomRentTaxRate")),
+                RoomRentTaxAmount = r.GetDecimal(r.GetOrdinal("RoomRentTaxAmount")),
+
+                ServiceChargeDescription = r.GetString(r.GetOrdinal("ServiceChargeDescription")),
+                ServiceChargeAmount = r.GetDecimal(r.GetOrdinal("ServiceChargeAmount")),
+                ServiceChargeTaxRate = r.GetDecimal(r.GetOrdinal("ServiceChargeTaxRate")),
+                ServiceChargeTaxAmount = r.GetDecimal(r.GetOrdinal("ServiceChargeTaxAmount")),
+
+                SecurityDepositDescription = r.IsDBNull(r.GetOrdinal("SecurityDepositDescription")) ? null : r.GetString(r.GetOrdinal("SecurityDepositDescription")),
+                SecurityDepositAmount = r.IsDBNull(r.GetOrdinal("SecurityDepositAmount")) ? null : r.GetDecimal(r.GetOrdinal("SecurityDepositAmount")),
+                SecurityDepositTaxRate = r.GetDecimal(r.GetOrdinal("SecurityDepositTaxRate")),
+                SecurityDepositTaxAmount = r.GetDecimal(r.GetOrdinal("SecurityDepositTaxAmount")),
+
+                SubTotal = r.GetDecimal(r.GetOrdinal("SubTotal")),
+                TaxTotal = r.GetDecimal(r.GetOrdinal("TaxTotal")),
+                GrandTotal = r.GetDecimal(r.GetOrdinal("GrandTotal")),
+                CreatedOn = r.GetDateTime(r.GetOrdinal("CreatedOn")),
+
+                CustomerName = r.IsDBNull(r.GetOrdinal("CustomerName")) ? "Valued Customer" : r.GetString(r.GetOrdinal("CustomerName")),
+                CustomerAddress = r.IsDBNull(r.GetOrdinal("CustomerAddress")) ? "" : r.GetString(r.GetOrdinal("CustomerAddress")),
+                CustomerCode = r.IsDBNull(r.GetOrdinal("CustomerCode")) ? "" : r.GetString(r.GetOrdinal("CustomerCode")),
+                SntnNtnNic = r.IsDBNull(r.GetOrdinal("SntnNtnNic")) ? "" : r.GetString(r.GetOrdinal("SntnNtnNic")),
+
+                VendorLegalName = r.IsDBNull(r.GetOrdinal("VendorLegalName")) ? "WorkNest Coworking Spaces (Pvt) Ltd" : r.GetString(r.GetOrdinal("VendorLegalName")),
+                VendorAddress = r.IsDBNull(r.GetOrdinal("VendorAddress")) ? "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad" : r.GetString(r.GetOrdinal("VendorAddress")),
+                VendorPhone = r.IsDBNull(r.GetOrdinal("VendorPhone")) ? "+92 309 9771774 / +92 308 0256000" : r.GetString(r.GetOrdinal("VendorPhone")),
+                VendorNtn = r.IsDBNull(r.GetOrdinal("VendorNtn")) ? "7492018-3" : r.GetString(r.GetOrdinal("VendorNtn")),
+            };
+
+            // Line 1: Room Rent
+            dto.LineItems.Add(new CustomerSTInvoiceLineDto
+            {
+                Description = dto.RoomRentDescription,
+                ExclusiveAmount = dto.RoomRentAmount,
+                TaxPercentage = dto.RoomRentTaxRate,
+                TaxAmount = dto.RoomRentTaxAmount
+            });
+
+            // Line 2: Service Charges
+            dto.LineItems.Add(new CustomerSTInvoiceLineDto
+            {
+                Description = dto.ServiceChargeDescription,
+                ExclusiveAmount = dto.ServiceChargeAmount,
+                TaxPercentage = dto.ServiceChargeTaxRate,
+                TaxAmount = dto.ServiceChargeTaxAmount
+            });
+
+            // Line 3: Security Deposit (only when non-null and > 0)
+            if (dto.SecurityDepositAmount.HasValue && dto.SecurityDepositAmount.Value > 0)
+            {
+                dto.LineItems.Add(new CustomerSTInvoiceLineDto
+                {
+                    Description = !string.IsNullOrWhiteSpace(dto.SecurityDepositDescription) ? dto.SecurityDepositDescription : "Security Deposit (Refundable)",
+                    ExclusiveAmount = dto.SecurityDepositAmount.Value,
+                    TaxPercentage = dto.SecurityDepositTaxRate,
+                    TaxAmount = dto.SecurityDepositTaxAmount
+                });
+            }
+
+            return dto;
+        }
+
+        public async Task<Guid?> GetSTInvoicePublicIdByInvoiceIdAsync(int invoiceId)
+        {
+            await using var c = await Open();
+            string sql = "SELECT TOP 1 PublicId FROM dbo.WN_CustomerSTInvoice WITH (NOLOCK) WHERE CustomerInvoiceId = @InvoiceId ORDER BY Id DESC";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
+            var res = await cmd.ExecuteScalarAsync();
+            if (res != null && res != DBNull.Value && res is Guid g)
+            {
+                return g;
+            }
+            if (res != null && res != DBNull.Value && Guid.TryParse(res.ToString(), out var parsedGuid))
+            {
+                return parsedGuid;
+            }
+            return null;
         }
     }
 }

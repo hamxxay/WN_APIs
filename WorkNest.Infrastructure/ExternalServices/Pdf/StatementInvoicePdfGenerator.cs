@@ -37,6 +37,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public decimal SecurityDepositAmount { get; set; }
         public string CurrencyCode { get; set; } = "PKR";
 
+        public string? SupportChargesInvoiceUrl { get; set; }
+
         public List<StatementInvoiceLineItemDto> LineItems { get; set; } = new();
 
         // Bank Details
@@ -289,16 +291,18 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal rentTotal = totalExclVat - depositTotal;
 
             decimal chargePercentage = data.AppliedChargePercentage ?? (data.SupportChargeRate > 0 ? data.SupportChargeRate * 100m : 10m);
-            decimal supportCharges = rentTotal > 0
-                ? Math.Round(rentTotal * (chargePercentage / 100m), 2)
-                : (data.SupportChargeAmount ?? 0m);
+            decimal supportCharges = data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0
+                ? data.SupportChargeAmount.Value
+                : (rentTotal > 0 ? Math.Round(rentTotal * (chargePercentage / 100m), 2) : 0m);
 
             decimal taxPercentage = data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0
                 ? data.AppliedTaxPercentage.Value
                 : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
 
             decimal totalVat = Math.Round(supportCharges * (taxPercentage / 100m), 2);
-            decimal grandTotal = totalExclVat + supportCharges + totalVat;
+            decimal grandTotal = data.CurrentInvoiceTotal > 0
+                ? data.CurrentInvoiceTotal
+                : (totalExclVat + supportCharges + totalVat);
 
             col.Item().PaddingTop(10).AlignRight().Column(c =>
             {
@@ -319,6 +323,15 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(10).FontColor("#000000");
                     r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
                 });
+
+                if (!string.IsNullOrWhiteSpace(data.SupportChargesInvoiceUrl))
+                {
+                    c.Item().PaddingTop(6).AlignRight().Text(tx =>
+                    {
+                        tx.Hyperlink("Click to view the invoice for support charges", data.SupportChargesInvoiceUrl)
+                          .Bold().FontSize(9).FontColor("#1d4ed8").Underline();
+                    });
+                }
             });
 
             col.Item().PaddingTop(12).Border(1).BorderColor("#cccccc").Background("#fdfdfd").Padding(8).Column(tc =>
