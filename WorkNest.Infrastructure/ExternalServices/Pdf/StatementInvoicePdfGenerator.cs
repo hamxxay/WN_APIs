@@ -328,7 +328,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 {
                     c.Item().PaddingTop(6).AlignRight().Text(tx =>
                     {
-                        tx.Hyperlink("invoice for support charges", data.SupportChargesInvoiceUrl)
+                        tx.Hyperlink("  invoice for support charges", data.SupportChargesInvoiceUrl)
                           .Bold().FontSize(9).FontColor("#1d4ed8").Underline();
                     });
                 }
@@ -339,7 +339,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#000000");
                 tc.Spacing(2);
                 int itemNum = 1;
-                tc.Item().Text($"{itemNum++}. Please deposit this payment into the following bank account: ").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"{itemNum++}. Please deposit this payment in the following bank ").FontSize(7.5f).FontColor("#000000");
 
                 bool isF7 = data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase));
 
@@ -359,8 +359,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     tc.Item().Text($"Branch code: 0839 ").FontSize(7.5f).FontColor("#000000");
                 }
 
-                tc.Item().Text($"And send the receipt to +923201809696").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid within 5 days of the due date.").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"And send the receipt on +923201809696").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid for 5 days after due date ").FontSize(7.5f).FontColor("#000000");
+
+
+                tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial Sales Tax (PST) on support services.").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. Payment is due on or before the due date specified on this invoice.").FontSize(7.5f).FontColor("#000000");
                 if (depositTotal > 0 || data.SecurityDepositAmount > 0)
                 {
