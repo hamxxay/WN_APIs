@@ -6,16 +6,21 @@ using WorkNest.Application.Interfaces;
 using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
 
+using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
+
 namespace WorkNest.Infrastructure.Repositories
 {
     public class DbRepository : IDbRepository
     {
         private readonly string _connectionString;
+        private readonly IHttpContextAccessor? _httpContextAccessor;
 
-        public DbRepository(IConfiguration configuration)
+        public DbRepository(IConfiguration configuration, IHttpContextAccessor? httpContextAccessor = null)
         {
             _connectionString = configuration.GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+            _httpContextAccessor = httpContextAccessor;
         }
 
         private static object? N(object? v) => v is DBNull ? null : v;
@@ -49,8 +54,99 @@ namespace WorkNest.Infrastructure.Repositories
         {
             var c = new SqlConnection(_connectionString);
             await c.OpenAsync();
-            await using var cmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", c);
-            await cmd.ExecuteNonQueryAsync();
+            await using (var cmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON;", c))
+            {
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            try
+            {
+                var httpContext = _httpContextAccessor?.HttpContext;
+                string? userIdOrGuid = null;
+                string? userEmail = null;
+
+                if (httpContext != null)
+                {
+                    var user = httpContext.User;
+                    if (user != null)
+                    {
+                        userIdOrGuid = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                                    ?? user.FindFirst("sub")?.Value
+                                    ?? user.FindFirst("UserId")?.Value
+                                    ?? user.FindFirst("id")?.Value;
+
+                        userEmail = user.FindFirst(ClaimTypes.Email)?.Value
+                                 ?? user.FindFirst("email")?.Value
+                                 ?? user.Identity?.Name;
+                    }
+
+                    if (httpContext.Request?.Headers != null)
+                    {
+                        if (string.IsNullOrWhiteSpace(userEmail))
+                        {
+                            if (httpContext.Request.Headers.TryGetValue("x-user-email", out var headerEmail) && !string.IsNullOrWhiteSpace(headerEmail))
+                            {
+                                userEmail = headerEmail.ToString();
+                            }
+                            else if (httpContext.Request.Headers.TryGetValue("X-User-Email", out var headerEmail2) && !string.IsNullOrWhiteSpace(headerEmail2))
+                            {
+                                userEmail = headerEmail2.ToString();
+                            }
+                        }
+
+                        if (string.IsNullOrWhiteSpace(userIdOrGuid))
+                        {
+                            if (httpContext.Request.Headers.TryGetValue("x-user-id", out var headerUid) && !string.IsNullOrWhiteSpace(headerUid))
+                            {
+                                userIdOrGuid = headerUid.ToString();
+                            }
+                            else if (httpContext.Request.Headers.TryGetValue("X-User-Id", out var headerUid2) && !string.IsNullOrWhiteSpace(headerUid2))
+                            {
+                                userIdOrGuid = headerUid2.ToString();
+                            }
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrWhiteSpace(userIdOrGuid) || !string.IsNullOrWhiteSpace(userEmail))
+                {
+                    await using var setCtx = new SqlCommand(@"
+                        DECLARE @ResolvedId INT = NULL;
+                        
+                        IF @UserIdOrGuid IS NOT NULL AND ISNUMERIC(@UserIdOrGuid) = 1
+                        BEGIN
+                            SET @ResolvedId = CAST(@UserIdOrGuid AS INT);
+                        END
+                        
+                        IF @ResolvedId IS NULL
+                        BEGIN
+                            SELECT TOP 1 @ResolvedId = Id 
+                            FROM dbo.WN_Users WITH (NOLOCK)
+                            WHERE (CAST(IdGUID AS NVARCHAR(64)) = @UserIdOrGuid OR Email = @UserIdOrGuid OR Email = @UserEmail);
+                        END
+
+                        IF @ResolvedId IS NOT NULL
+                        BEGIN
+                            EXEC sp_set_session_context @key = N'AppUserId', @value = @ResolvedId;
+                        END
+
+                        IF @UserEmail IS NOT NULL
+                        BEGIN
+                            EXEC sp_set_session_context @key = N'AppUserEmail', @value = @UserEmail;
+                        END
+
+                        EXEC sp_set_session_context @key = N'SourceApp', @value = N'WebAPI';", c);
+
+                    setCtx.Parameters.AddWithValue("@UserIdOrGuid", (object?)userIdOrGuid ?? DBNull.Value);
+                    setCtx.Parameters.AddWithValue("@UserEmail", (object?)userEmail ?? DBNull.Value);
+                    await setCtx.ExecuteNonQueryAsync();
+                }
+            }
+            catch
+            {
+                // Silently swallow session context setup issues to ensure database connectivity is preserved
+            }
+
             return c;
         }
 
@@ -941,9 +1037,13 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 int advRentM = advanceRentMonths ?? billingPeriodMonths ?? 1;
                 int secDepM = securityDepositMonths ?? 0;
                 decimal monthlyRent = result.TryGetValue("MonthlyRent", out var mrObj) && mrObj is not null ? Convert.ToDecimal(mrObj) : 0m;
-                if (monthlyRent == 0m && result.TryGetValue("SubtotalAmount", out var subObj) && subObj is not null)
+                if (result.TryGetValue("SubtotalAmount", out var subObj) && subObj is not null)
                 {
-                    monthlyRent = Convert.ToDecimal(subObj) / Math.Max(1, advRentM);
+                    decimal subVal = Convert.ToDecimal(subObj);
+                    if (subVal > 0m && (monthlyRent == 0m || Math.Abs(monthlyRent * Math.Max(1, advRentM) - subVal) > 1m))
+                    {
+                        monthlyRent = subVal / Math.Max(1, advRentM);
+                    }
                 }
                 decimal secDepReq = securityDepositOverride ?? (secDepM * monthlyRent);
 
@@ -2751,41 +2851,30 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 CustomerCode = r.IsDBNull(r.GetOrdinal("CustomerCode")) ? "" : r.GetString(r.GetOrdinal("CustomerCode")),
                 SntnNtnNic = r.IsDBNull(r.GetOrdinal("SntnNtnNic")) ? "" : r.GetString(r.GetOrdinal("SntnNtnNic")),
 
+                CenterName = HasColumn(r, "CenterName") && !r.IsDBNull(r.GetOrdinal("CenterName")) ? r.GetString(r.GetOrdinal("CenterName")) : null,
                 VendorLegalName = r.IsDBNull(r.GetOrdinal("VendorLegalName")) ? "WorkNest Coworking Spaces (Pvt) Ltd" : r.GetString(r.GetOrdinal("VendorLegalName")),
                 VendorAddress = r.IsDBNull(r.GetOrdinal("VendorAddress")) ? "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad" : r.GetString(r.GetOrdinal("VendorAddress")),
                 VendorPhone = r.IsDBNull(r.GetOrdinal("VendorPhone")) ? "+92 309 9771774 / +92 308 0256000" : r.GetString(r.GetOrdinal("VendorPhone")),
                 VendorNtn = r.IsDBNull(r.GetOrdinal("VendorNtn")) ? "7492018-3" : r.GetString(r.GetOrdinal("VendorNtn")),
             };
 
-            // Line 1: Room Rent
+            // Single line item: Service Charges, Tax on it, and Total
+            decimal serviceChargeExclusive = dto.ServiceChargeAmount > 0 ? dto.ServiceChargeAmount : dto.SubTotal;
+            decimal serviceChargeTaxRate = dto.ServiceChargeTaxRate;
+            decimal serviceChargeTaxAmount = dto.ServiceChargeTaxAmount > 0 ? dto.ServiceChargeTaxAmount : dto.TaxTotal;
+
             dto.LineItems.Add(new CustomerSTInvoiceLineDto
             {
-                Description = dto.RoomRentDescription,
-                ExclusiveAmount = dto.RoomRentAmount,
-                TaxPercentage = dto.RoomRentTaxRate,
-                TaxAmount = dto.RoomRentTaxAmount
+                Description = !string.IsNullOrWhiteSpace(dto.ServiceChargeDescription) ? dto.ServiceChargeDescription : "Service Charges",
+                ExclusiveAmount = serviceChargeExclusive,
+                TaxPercentage = serviceChargeTaxRate,
+                TaxAmount = serviceChargeTaxAmount
             });
 
-            // Line 2: Service Charges
-            dto.LineItems.Add(new CustomerSTInvoiceLineDto
-            {
-                Description = dto.ServiceChargeDescription,
-                ExclusiveAmount = dto.ServiceChargeAmount,
-                TaxPercentage = dto.ServiceChargeTaxRate,
-                TaxAmount = dto.ServiceChargeTaxAmount
-            });
-
-            // Line 3: Security Deposit (only when non-null and > 0)
-            if (dto.SecurityDepositAmount.HasValue && dto.SecurityDepositAmount.Value > 0)
-            {
-                dto.LineItems.Add(new CustomerSTInvoiceLineDto
-                {
-                    Description = !string.IsNullOrWhiteSpace(dto.SecurityDepositDescription) ? dto.SecurityDepositDescription : "Security Deposit (Refundable)",
-                    ExclusiveAmount = dto.SecurityDepositAmount.Value,
-                    TaxPercentage = dto.SecurityDepositTaxRate,
-                    TaxAmount = dto.SecurityDepositTaxAmount
-                });
-            }
+            // Set ST Invoice totals strictly to the Service Charges entry
+            dto.SubTotal = serviceChargeExclusive;
+            dto.TaxTotal = serviceChargeTaxAmount;
+            dto.GrandTotal = serviceChargeExclusive + serviceChargeTaxAmount;
 
             return dto;
         }
@@ -2806,6 +2895,16 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 return parsedGuid;
             }
             return null;
+        }
+
+        private static bool HasColumn(System.Data.Common.DbDataReader r, string columnName)
+        {
+            for (int i = 0; i < r.FieldCount; i++)
+            {
+                if (r.GetName(i).Equals(columnName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
     }
 }

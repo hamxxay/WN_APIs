@@ -298,6 +298,15 @@ namespace WorkNest.Application.Services
             var numberOfMonths = header.TryGetValue("NumberOfMonths", out var nom) && nom != null ? Convert.ToInt32(nom) : 1;
             var currentCycleAmount = header.TryGetValue("CurrentCycleAmount", out var cca) && cca != null ? Convert.ToDecimal(cca) : 0m;
             var totalContractAmount = header.TryGetValue("TotalContractAmount", out var tca) && tca != null ? Convert.ToDecimal(tca) : 0m;
+
+            if (currentCycleAmount <= 0m || (totalContractAmount > 0m && currentCycleAmount >= totalContractAmount && billingPeriodMonths < numberOfMonths))
+            {
+                if (monthlyRent > 0m && billingPeriodMonths > 0)
+                {
+                    currentCycleAmount = monthlyRent * billingPeriodMonths;
+                }
+            }
+
             var balanceLeft = header.TryGetValue("BalanceLeft", out var bl) && bl != null ? Convert.ToDecimal(bl) : 0m;
             var securityDeposit = header.TryGetValue("SecurityDeposit", out var sd) && sd != null ? Convert.ToDecimal(sd) : 0m;
             var totalPaidAmount = header.TryGetValue("TotalPaidAmount", out var tpa) && tpa != null ? Convert.ToDecimal(tpa) : 0m;
@@ -320,6 +329,9 @@ namespace WorkNest.Application.Services
                 SecurityDeposit = securityDeposit,
                 SpaceNumber = spaceNum
             };
+
+            decimal supportTaxOnCycle = Math.Round(Math.Round(currentCycleAmount * 0.10m, 2) * 0.16m, 2);
+            decimal totalPayableInitial = Math.Max(0, currentCycleAmount + securityDeposit + supportTaxOnCycle);
 
             var result = new BookingDetailsResponseDto
             {
@@ -351,11 +363,14 @@ namespace WorkNest.Application.Services
                 BillingPeriodLabel = header["BillingPeriodLabel"]?.ToString(),
                 BillingPeriodMonths = billingPeriodMonths,
                 CurrentCycleAmount = currentCycleAmount,
+                FirstCycleRent = currentCycleAmount,
                 TotalContractAmount = totalContractAmount,
                 NextBillDueDate = nextBillDueDate,
                 NextBillingDate = nextBillingDate ?? nextBillDueDate,
                 BalanceLeft = balanceLeft,
                 SecurityDeposit = securityDeposit,
+                TotalAmount = header.TryGetValue("TotalAmount", out var ta) && ta != null ? Convert.ToDecimal(ta) : totalContractAmount,
+                TotalPayable = totalPayableInitial,
                 TotalPaidAmount = totalPaidAmount,
                 BookedOn = ParseDateSafely(header["BookedOn"]),
                 Contract = contractObj,

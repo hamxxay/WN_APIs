@@ -30,6 +30,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? BillingPeriodLabel { get; set; }
         public int BillingPeriodMonths { get; set; }
         public decimal CurrentCycleAmount { get; set; }
+        public decimal FirstCycleRent { get; set; }
         public decimal TotalContractAmount { get; set; }
         public DateTime? NextBillDueDate { get; set; }
         public DateTime? NextBillingDate { get; set; }
@@ -41,6 +42,7 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal SupportChargeAmount { get; set; }
         public decimal TaxAmount { get; set; }
         public decimal TotalAmount { get; set; }
+        public decimal TotalPayable { get; set; }
         public decimal TotalPaidAmount { get; set; }
         public DateTime? BookedOn { get; set; }
         public ContractDetailsDto Contract { get; set; } = new();

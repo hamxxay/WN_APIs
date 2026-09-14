@@ -46,13 +46,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             {
                 r.RelativeItem().Text(tx =>
                 {
-                    tx.Span("Tariff Heading: ").Bold().FontColor("#000000");
-                    tx.Span(data.TariffHeading ?? "9805.9200").FontColor("#000000");
-                    tx.Span("  |  Tariff Description: ").Bold().FontColor("#000000");
+                    tx.Span("HS  Description:").Bold().FontColor("#000000");
                     tx.Span(data.TariffLabel ?? "Business Support Services").FontColor("#000000");
+                    tx.Span("  |  HS Code: ").Bold().FontColor("#000000");
+                    tx.Span(data.TariffHeading ?? "9805.9200").FontColor("#000000");
                 });
             });
-
+    
             // Meta & Customer Details
             col.Item().PaddingTop(10).Row(r =>
             {
@@ -125,6 +125,44 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     r.RelativeItem().AlignRight().Text("Grand Total (inc. Tax):").Bold().FontSize(10).FontColor("#000000");
                     r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, data.GrandTotal)).Bold().FontSize(11).FontColor("#000000");
                 });
+            });
+
+            // Terms & Conditions Block
+            decimal depositTotal = data.SecurityDepositAmount ?? 0;
+            col.Item().PaddingTop(12).Border(1).BorderColor("#cccccc").Background("#fdfdfd").Padding(8).Column(tc =>
+            {
+                tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#000000");
+                tc.Spacing(2);
+                int itemNum = 1;
+                tc.Item().Text($"{itemNum++}. Please deposit this payment into the following bank account: ").FontSize(7.5f).FontColor("#000000");
+
+                bool isF7 = data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase));
+
+                if (isF7)
+                {
+                    tc.Item().Text($"Account Title: Work Nest Co-Working").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Account: 6-2-10-20389-714-250794").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"IBAN: PK26MPBL0210587140250794").FontSize(7.5f).FontColor("#000000");
+                }
+                else
+                {
+                    tc.Item().Text($"Bank Name: Bank Of Punjab").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Account Title: WORKNEST PRIVATE LIMITED").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Account Number: 5310449521900010").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"IBAN: PK24BPUN5310449521900010 ").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Swift code: BPUNPKKA ").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"Branch code: 0839 ").FontSize(7.5f).FontColor("#000000");
+                }
+
+                tc.Item().Text($"And send the receipt to +923201809696").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid within 5 days of the due date.").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"{itemNum++}. Payment is due on or before the due date specified on this invoice.").FontSize(7.5f).FontColor("#000000");
+                if (depositTotal > 0 || data.SecurityDepositAmount > 0)
+                {
+                    tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(7.5f).FontColor("#000000");
+                }
+                tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(7.5f).FontColor("#000000");
             });
         }
 

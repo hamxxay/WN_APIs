@@ -19,6 +19,7 @@ namespace WorkNest.Application.DTOs.Payment
         public DateTime IssuedOn { get; set; }
         public DateTime DueOn { get; set; }
         public string CurrencyCode { get; set; } = "PKR";
+        public string? CenterName { get; set; }
 
         public string TariffHeading { get; set; } = "9805.9200";
         public string TariffLabel { get; set; } = "Business Support Services";

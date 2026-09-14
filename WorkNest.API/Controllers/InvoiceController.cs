@@ -887,9 +887,19 @@ END;";
                 }
                 else
                 {
-                    if (monthlyRent <= 0 && totalAmount > 0)
+                    int cMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
+                        ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
+                        : 12;
+                    if (monthlyRent <= 0)
                     {
-                        monthlyRent = Math.Round(totalAmount / 12m, 2);
+                        if (subtotalAmount > 0 && cMonths > 0)
+                        {
+                            monthlyRent = Math.Round(subtotalAmount / cMonths, 2);
+                        }
+                        else if (totalAmount > 0 && cMonths > 0)
+                        {
+                            monthlyRent = Math.Round(totalAmount / cMonths, 2);
+                        }
                     }
                     periodEnd = periodStart.AddMonths(billingMonths).AddDays(-1);
                     grossAdvanceRent = monthlyRent * billingMonths;
@@ -1099,7 +1109,7 @@ END;";
 
                 string bookingSql = @"
                     SELECT TOP 1 
-                        b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, b.MonthlyRent, b.TotalAmount,
+                        b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, b.MonthlyRent, b.SubtotalAmount, b.TotalAmount,
                         b.BillingPeriodMonths, b.DiscountAmount, b.DiscountPercentage, b.DiscountType,
                         u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
                         s.Name AS SpaceName
@@ -1110,7 +1120,7 @@ END;";
                     WHERE b.Id = @BookingId;";
 
                 int userId = 0;
-                decimal monthlyRent = 0, discountAmount = 0, discountPercentage = 0, totalAmount = 0;
+                decimal monthlyRent = 0, subtotalAmount = 0, discountAmount = 0, discountPercentage = 0, totalAmount = 0;
                 int billingMonths = 3;
                 DateTime? startOn = null, endOn = null;
                 string customerEmail = "", customerName = "", spaceName = "Workspace";
@@ -1125,6 +1135,7 @@ END;";
                         startOn = reader.IsDBNull(reader.GetOrdinal("StartOn")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("StartOn"));
                         endOn = reader.IsDBNull(reader.GetOrdinal("EndOn")) ? (DateTime?)null : reader.GetDateTime(reader.GetOrdinal("EndOn"));
                         monthlyRent = reader.IsDBNull(reader.GetOrdinal("MonthlyRent")) ? 0 : reader.GetDecimal(reader.GetOrdinal("MonthlyRent"));
+                        subtotalAmount = reader.IsDBNull(reader.GetOrdinal("SubtotalAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("SubtotalAmount"));
                         totalAmount = reader.IsDBNull(reader.GetOrdinal("TotalAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("TotalAmount"));
                         discountAmount = reader.IsDBNull(reader.GetOrdinal("DiscountAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountAmount"));
                         discountPercentage = reader.IsDBNull(reader.GetOrdinal("DiscountPercentage")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountPercentage"));
@@ -1157,9 +1168,19 @@ END;";
 
                 DateTime periodEnd = periodStart.AddMonths(billingMonths).AddDays(-1);
 
-                if (monthlyRent <= 0 && totalAmount > 0)
+                int cMonthsCycle = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
+                    ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
+                    : 12;
+                if (monthlyRent <= 0)
                 {
-                    monthlyRent = Math.Round(totalAmount / 12m, 2);
+                    if (subtotalAmount > 0 && cMonthsCycle > 0)
+                    {
+                        monthlyRent = Math.Round(subtotalAmount / cMonthsCycle, 2);
+                    }
+                    else if (totalAmount > 0 && cMonthsCycle > 0)
+                    {
+                        monthlyRent = Math.Round(totalAmount / cMonthsCycle, 2);
+                    }
                 }
 
                 int contractMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 

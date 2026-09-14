@@ -62,12 +62,8 @@ tied to each column, since that's where the real meaning lives today.
 Where meaning can't be determined with confidence, flag it rather than
 guessing.
 
-Create `WN_StatusLookUp`:
-(Id, EntityName — the table this code applies to, e.g. 'WN_Invoices' or
-'WN_AccessCards', StatusCode — the existing int value as already stored
-in that table, StatusLabel, Description, IsActive), with a unique
-constraint on (EntityName, StatusCode). Populate it with every
-(EntityName, StatusCode) pair discovered across the whole schema.
+Create / reference `dbo.OrderStatus` view:
+(Id, Description, Status), replacing legacy `WN_StatusLookUp`.
 
 **Enforcement, since a true database-level FK isn't possible here**:
 because this is a documentation table rather than a migrated FK
@@ -335,7 +331,7 @@ invoices that already exist and are unpaid.
   against the existing table (name/columns to be confirmed against
   Schema.sql, but the design pattern is confirmed correct, not a new
   table to build).
-- Retrofit approach for `WN_StatusLookUp` is documentation/reference only
+- Retrofit approach for `dbo.OrderStatus` view is documentation/reference only
   — no data migration, no true FK (Step 0a).
 - PDF/email delivery: direct call from the Agent Job to the backend, with
   automatic fallback to a retry queue on failure (Step 3).
