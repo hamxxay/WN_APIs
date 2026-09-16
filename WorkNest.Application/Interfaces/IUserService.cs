@@ -5,7 +5,7 @@ namespace WorkNest.Application.Interfaces
 {
     public interface IUserService
     {
-        Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search);
+        Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null);
         Task<ApiResponse> GetUserByIdAsync(int id);
         Task<ApiResponse> GetUserHistoryAsync(int id);
         Task<ApiResponse> CreateUserAsync(UserCreateRequest request, int? actorId);

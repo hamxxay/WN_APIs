@@ -289,50 +289,88 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal totalExclVat = data.LineItems.Sum(i => i.PriceExclVat);
             decimal depositTotal = data.LineItems.Where(i => IsDepositItem(i)).Sum(i => i.PriceExclVat);
             decimal rentTotal = totalExclVat - depositTotal;
+            decimal totalLineVat = data.LineItems.Sum(i => i.VatAmount);
 
-            decimal chargePercentage = data.AppliedChargePercentage ?? (data.SupportChargeRate > 0 ? data.SupportChargeRate * 100m : 10m);
-            decimal supportCharges = data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0
-                ? data.SupportChargeAmount.Value
-                : (rentTotal > 0 ? Math.Round(rentTotal * (chargePercentage / 100m), 2) : 0m);
+            bool isExplicitlyNoTax = (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value == 0m)
+                                  && (data.AppliedChargePercentage.HasValue && data.AppliedChargePercentage.Value == 0m);
 
-            decimal taxPercentage = data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0
-                ? data.AppliedTaxPercentage.Value
-                : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
+            bool hasTax = !isExplicitlyNoTax && (
+                totalLineVat > 0
+                || (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0)
+                || (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
+            );
 
-            decimal totalVat = Math.Round(supportCharges * (taxPercentage / 100m), 2);
-            decimal grandTotal = data.CurrentInvoiceTotal > 0
-                ? data.CurrentInvoiceTotal
-                : (totalExclVat + supportCharges + totalVat);
-
-            col.Item().PaddingTop(10).AlignRight().Column(c =>
+            if (hasTax)
             {
-                if (depositTotal > 0)
-                {
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
-                }
-                else
-                {
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
-                }
+                decimal chargePercentage = data.AppliedChargePercentage ?? (data.SupportChargeRate > 0 ? data.SupportChargeRate * 100m : 10m);
+                decimal supportCharges = data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0
+                    ? data.SupportChargeAmount.Value
+                    : (rentTotal > 0 ? Math.Round(rentTotal * (chargePercentage / 100m), 2) : 0m);
 
-                c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"Support Charges ({chargePercentage:G29}%):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
-                c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Charges):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });
-                c.Item().PaddingTop(4).Row(r =>
-                {
-                    r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(10).FontColor("#000000");
-                    r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
-                });
+                decimal taxPercentage = data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0
+                    ? data.AppliedTaxPercentage.Value
+                    : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
 
-                if (!string.IsNullOrWhiteSpace(data.SupportChargesInvoiceUrl))
+                decimal totalVat = totalLineVat > 0 ? totalLineVat : Math.Round(supportCharges * (taxPercentage / 100m), 2);
+                decimal grandTotal = data.CurrentInvoiceTotal > 0
+                    ? data.CurrentInvoiceTotal
+                    : (totalExclVat + supportCharges + totalVat);
+
+                col.Item().PaddingTop(10).AlignRight().Column(c =>
                 {
-                    c.Item().PaddingTop(6).AlignRight().Text(tx =>
+                    if (depositTotal > 0)
                     {
-                        tx.Hyperlink("  invoice for support charges", data.SupportChargesInvoiceUrl)
-                          .Bold().FontSize(9).FontColor("#1d4ed8").Underline();
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
+                    }
+                    else
+                    { 
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
+                    }
+
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"Support Charges ({chargePercentage:G29}%):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Charges):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });
+                    c.Item().PaddingTop(4).Row(r =>
+                    {
+                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(10).FontColor("#000000");
+                        r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
                     });
-                }
-            });
+
+                    if (!string.IsNullOrWhiteSpace(data.SupportChargesInvoiceUrl))
+                    {
+                        c.Item().PaddingTop(6).AlignRight().Text(tx =>
+                        {
+                            tx.Hyperlink("  invoice for support charges", data.SupportChargesInvoiceUrl)
+                              .Bold().FontSize(9).FontColor("#1d4ed8").Underline();
+                        });
+                    }
+                });
+            }
+            else
+            {
+                decimal grandTotal = data.CurrentInvoiceTotal > 0
+                    ? data.CurrentInvoiceTotal
+                    : totalExclVat;
+
+                col.Item().PaddingTop(10).AlignRight().Column(c =>
+                {
+                    if (depositTotal > 0)
+                    {
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent:").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
+                    }
+                    else
+                    {
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Sub Total:").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
+                    }
+
+                    c.Item().PaddingTop(4).Row(r =>
+                    {
+                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total:").Bold().FontSize(10).FontColor("#000000");
+                        r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
+                    });
+                });
+            }
 
             col.Item().PaddingTop(12).Border(1).BorderColor("#cccccc").Background("#fdfdfd").Padding(8).Column(tc =>
             {

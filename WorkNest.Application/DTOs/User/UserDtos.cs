@@ -13,14 +13,17 @@ namespace WorkNest.Application.DTOs.User
         public string? Role { get; set; }
         public int? CompanyId { get; set; }
         public int? CityId { get; set; }
+        public int? LocationId { get; set; }
     }
 
     public class UserUpdateRequest
     {
         public string? Name { get; set; }
         public string? Phone { get; set; }
+        public string? Role { get; set; }
         public int? CompanyId { get; set; }
         public int? CityId { get; set; }
+        public int? LocationId { get; set; }
         public string? Address { get; set; }
         public string? CnicOrPassport { get; set; }
         public string? AvatarUrl { get; set; }
@@ -30,6 +33,7 @@ namespace WorkNest.Application.DTOs.User
     public class UserRoleUpdateRequest
     {
         public string Role { get; set; } = string.Empty;
+        public int? LocationId { get; set; }
     }
 
     public class UserDto
@@ -42,6 +46,7 @@ namespace WorkNest.Application.DTOs.User
         public bool IsActive { get; set; }
         public string? CreatedOn { get; set; }
         public string? Role { get; set; }
+        public int? LocationId { get; set; }
     }
 
     public class UserHistoryResponse

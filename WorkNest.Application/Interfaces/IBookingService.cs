@@ -1,11 +1,11 @@
-﻿using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.Booking;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Interfaces
 {
     public interface IBookingService
     {
-        Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search);
+        Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null);
         Task<ApiResponse> GetBookingByIdAsync(Guid publicId, string? userEmail);
         Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail);
         Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10);

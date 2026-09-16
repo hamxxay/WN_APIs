@@ -31,3 +31,4 @@ appsettings.*.json
 
 **/WorkNest.Tests/
 
+scratch/*

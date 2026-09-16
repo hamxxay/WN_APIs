@@ -34,6 +34,9 @@ namespace WorkNest.API.Configurations
                             if (string.IsNullOrWhiteSpace(origin)) return false;
                             if (origins.Any(o => string.Equals(o, origin, StringComparison.OrdinalIgnoreCase))) return true;
                             if (origin.EndsWith(".vercel.app", StringComparison.OrdinalIgnoreCase)) return true;
+                            if (origin.EndsWith(".eaccounting360.com.pk", StringComparison.OrdinalIgnoreCase)) return true;
+                            if (string.Equals(origin, "https://aeo.eaccounting360.com.pk", StringComparison.OrdinalIgnoreCase)) return true;
+                            if (string.Equals(origin, "http://aeo.eaccounting360.com.pk", StringComparison.OrdinalIgnoreCase)) return true;
                             if (origin.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase)) return true;
                             return false;
                         })

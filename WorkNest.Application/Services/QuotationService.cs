@@ -443,9 +443,9 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             return dto;
         }
 
-        public async Task<(IEnumerable<QuotationResponse> Rows, int Total)> GetQuotationsAsync(int page, int limit, string? search)
+        public async Task<(IEnumerable<QuotationResponse> Rows, int Total)> GetQuotationsAsync(int page, int limit, string? search, int? locationId = null)
         {
-            var (rows, total) = await _db.GetQuotationsAsync(page, limit, search);
+            var (rows, total) = await _db.GetQuotationsAsync(page, limit, search, locationId);
             var list = new List<QuotationResponse>();
 
             foreach (var r in rows)

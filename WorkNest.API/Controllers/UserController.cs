@@ -4,10 +4,14 @@ using WorkNest.Application.DTOs.User;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+
 namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize]
+    [ValidateLocationScope]
     public class UserController : ControllerBase
     {
         private readonly IUserService _users;
@@ -20,7 +24,8 @@ namespace WorkNest.API.Controllers
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null)
         {
-            var (items, total) = await _users.GetUsersAsync(page, limit, search);
+            int? filterLocationId = User.IsLocationBoundRole() ? User.GetLocationId() : null;
+            var (items, total) = await _users.GetUsersAsync(page, limit, search, filterLocationId);
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 

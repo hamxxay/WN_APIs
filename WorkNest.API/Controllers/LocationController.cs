@@ -4,10 +4,14 @@ using WorkNest.Application.DTOs.Location;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+
 namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize]
+    [ValidateLocationScope]
     public class LocationController : ControllerBase
     {
         private readonly ILocationService _locations;
@@ -16,8 +20,31 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("api/location/all")]
         [AllowAnonymous]
-        public async Task<IActionResult> All() =>
-            Ok(ApiResponse.Ok(await _locations.GetAllLocationsAsync()));
+        public async Task<IActionResult> All()
+        {
+            var all = await _locations.GetAllLocationsAsync();
+            if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
+            {
+                var claimLocId = User.GetLocationId();
+                if (claimLocId.HasValue)
+                {
+                    var filtered = all.Where(l =>
+                    {
+                        if (l is System.Collections.IDictionary dict && dict.Contains("Id") && dict["Id"] != null)
+                            return Convert.ToInt32(dict["Id"]) == claimLocId.Value;
+                        var prop = l.GetType().GetProperty("Id");
+                        if (prop != null)
+                        {
+                            var v = prop.GetValue(l);
+                            return v != null && Convert.ToInt32(v) == claimLocId.Value;
+                        }
+                        return false;
+                    });
+                    return Ok(ApiResponse.Ok(filtered));
+                }
+            }
+            return Ok(ApiResponse.Ok(all));
+        }
 
         [HttpGet("api/location")]
         [AllowAnonymous]
@@ -27,6 +54,26 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? search = null)
         {
             var (items, total) = await _locations.GetLocationsAsync(page, limit, search);
+            if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
+            {
+                var claimLocId = User.GetLocationId();
+                if (claimLocId.HasValue)
+                {
+                    var filtered = items.Where(l =>
+                    {
+                        if (l is System.Collections.IDictionary dict && dict.Contains("Id") && dict["Id"] != null)
+                            return Convert.ToInt32(dict["Id"]) == claimLocId.Value;
+                        var prop = l.GetType().GetProperty("Id");
+                        if (prop != null)
+                        {
+                            var v = prop.GetValue(l);
+                            return v != null && Convert.ToInt32(v) == claimLocId.Value;
+                        }
+                        return false;
+                    }).ToList();
+                    return Ok(new PaginatedResponse<object> { Data = filtered, Total = filtered.Count });
+                }
+            }
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 

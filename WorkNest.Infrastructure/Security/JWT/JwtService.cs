@@ -21,7 +21,7 @@ namespace WorkNest.Infrastructure.Security.JWT
         }
 
         /// <summary>Generates a signed JWT for the given user identity.</summary>
-        public string GenerateToken(string userId, string email, string role)
+        public string GenerateToken(string userId, string email, string role, int? locationId = null)
         {
             if (string.IsNullOrWhiteSpace(_settings.SecretKey))
                 throw new InvalidOperationException("JwtSettings:SecretKey is not configured.");
@@ -30,7 +30,7 @@ namespace WorkNest.Infrastructure.Security.JWT
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
             var now = DateTimeOffset.UtcNow;
-            var claims = new[]
+            var claimsList = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, userId ?? string.Empty),
                 new Claim(ClaimTypes.NameIdentifier, userId ?? string.Empty),
@@ -43,12 +43,18 @@ namespace WorkNest.Infrastructure.Security.JWT
                 new Claim(JwtRegisteredClaimNames.Nbf, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
             };
 
+            if (locationId.HasValue)
+            {
+                claimsList.Add(new Claim("location_id", locationId.Value.ToString()));
+                claimsList.Add(new Claim("LocationId", locationId.Value.ToString()));
+            }
+
             var expiryMinutes = _settings.ExpiryMinutes > 0 ? _settings.ExpiryMinutes : 1440;
 
             var token = new JwtSecurityToken(
                 issuer: string.IsNullOrWhiteSpace(_settings.Issuer) ? null : _settings.Issuer,
                 audience: string.IsNullOrWhiteSpace(_settings.Audience) ? null : _settings.Audience,
-                claims: claims,
+                claims: claimsList,
                 expires: DateTime.UtcNow.AddMinutes(expiryMinutes),
                 signingCredentials: creds
             );

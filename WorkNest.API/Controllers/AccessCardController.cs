@@ -4,10 +4,14 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.AccessCard;
 using WorkNest.Application.Interfaces;
 
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+
 namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
+    [ValidateLocationScope]
     public class AccessCardController : ControllerBase
     {
         private readonly IAccessCardService _accessCards;

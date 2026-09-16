@@ -12,9 +12,9 @@ namespace WorkNest.Application.Services
         private readonly IPdfService _pdf;
         public BookingService(IDbRepository db, IEmailService email, IPdfService pdf) { _db = db; _email = email; _pdf = pdf; }
 
-        public async Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search)
+        public async Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null)
         {
-            var (rows, total) = await _db.GetBookingsAsync(page, limit, search);
+            var (rows, total) = await _db.GetBookingsAsync(page, limit, search, locationId);
             return (rows.Cast<object>(), total);
         }
 

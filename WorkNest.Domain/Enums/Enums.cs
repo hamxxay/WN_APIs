@@ -3,10 +3,10 @@ namespace WorkNest.Domain.Enums
     /// <summary>Booking status values stored in WN_Bookings.BookingStatus column.</summary>
     public enum BookingStatus
     {
-        Confirmed = 1,
-        Cancelled = 2,
+        Pending   = 5,
+        Cancelled = 86,
         Rejected  = 3,
-        Completed = 4
+        Confirmed = 33
     }
 
     /// <summary>User role IDs stored in WN_Users.RoleId column.</summary>

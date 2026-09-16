@@ -11,10 +11,14 @@ using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
 
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+
 namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize]
+    [ValidateLocationScope]
     public class InvoiceController : ControllerBase
     {
         private readonly IPaymentService _payments;
@@ -62,13 +66,24 @@ namespace WorkNest.API.Controllers
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null,
-            [FromQuery] int? typeId = null)
+            [FromQuery] int? typeId = null,
+            [FromQuery] int? locationId = null)
         {
             try
             {
                 if (page <= 0) page = 1;
                 if (limit <= 0) limit = 10;
                 int offset = (page - 1) * limit;
+
+                int? effectiveLocationId = locationId;
+                if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
+                {
+                    var claimLocId = User.GetLocationId();
+                    if (claimLocId.HasValue)
+                    {
+                        effectiveLocationId = claimLocId.Value;
+                    }
+                }
 
                 using var conn = await OpenConnectionAsync();
 
@@ -78,6 +93,7 @@ namespace WorkNest.API.Controllers
                 cmd.Parameters.AddWithValue("@Limit", limit);
                 cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@TypeId", (object?)typeId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@LocationId", (object?)effectiveLocationId ?? DBNull.Value);
 
                 int totalCount = 0;
                 var items = new List<Dictionary<string, object?>>();
@@ -150,6 +166,9 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [HttpGet("WorkNest/api/invoice/{id:int}/pdf")]
+        [HttpGet("WorkNest/api/invoice/{id:int}/statement-pdf")]
+        [HttpGet("WorkNest/api/invoice/{id:int}/download")]
         [HttpGet("api/invoice/{id:int}/pdf")]
         [HttpGet("api/invoice/{id:int}/statement-pdf")]
         [HttpGet("api/invoice/{id:int}/download")]
@@ -180,6 +199,8 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [HttpGet("WorkNest/api/invoice/sales-tax/{publicId:guid}/pdf")]
+        [HttpGet("WorkNest/api/invoice/sales-tax/{publicId:guid}/download")]
         [HttpGet("api/invoice/sales-tax/{publicId:guid}/pdf")]
         [HttpGet("api/invoice/sales-tax/{publicId:guid}/download")]
         [AllowAnonymous]
@@ -188,6 +209,68 @@ namespace WorkNest.API.Controllers
             try
             {
                 var dto = await _db.GetCustomerSTInvoiceByPublicIdAsync(publicId);
+                if (dto == null)
+                {
+                    using var conn = await OpenConnectionAsync();
+                    string findInvoiceSql = @"
+                        SELECT TOP 1 Id, InvoiceNumber, ISNULL(SubTotal, 0) AS SubTotal, ISNULL(DiscountTotal, 0) AS DiscountTotal, ISNULL(TaxTotal, 0) AS TaxTotal
+                        FROM dbo.WN_Invoices WITH (NOLOCK)
+                        WHERE PublicId = @PublicId;";
+
+                    using var cmdFind = new SqlCommand(findInvoiceSql, conn);
+                    cmdFind.Parameters.AddWithValue("@PublicId", publicId);
+                    using var rFind = await cmdFind.ExecuteReaderAsync();
+                    if (await rFind.ReadAsync())
+                    {
+                        int invId = rFind.GetInt32(0);
+                        string invNum = rFind.GetString(1);
+                        decimal subTotal = rFind.GetDecimal(2);
+                        decimal discTotal = rFind.GetDecimal(3);
+                        decimal taxTotal = rFind.GetDecimal(4);
+
+                        rFind.Close();
+
+                        string stInvoiceNumber = invNum.Replace("INV-", "ST-INV-");
+                        decimal roomRentExcl = subTotal - discTotal;
+                        decimal stTaxRate = taxTotal > 0 ? 16.00m : 0.00m;
+
+                        string insertStSql = @"
+                            IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId OR PublicId = @PublicId)
+                            BEGIN
+                                INSERT INTO dbo.WN_CustomerSTInvoice (
+                                    PublicId, CustomerInvoiceId, STInvoiceNumber,
+                                    TariffHeading, TariffLabel,
+                                    RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
+                                    ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
+                                    SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
+                                    SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
+                                )
+                                VALUES (
+                                    @PublicId, @InvoiceId, @STInvoiceNumber,
+                                    '9805.9200', 'Business Support Services',
+                                    'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
+                                    'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
+                                    NULL, NULL, 0.00, 0.00,
+                                    @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
+                                );
+                            END;";
+
+                        using var stCmd = new SqlCommand(insertStSql, conn);
+                        stCmd.Parameters.AddWithValue("@PublicId", publicId);
+                        stCmd.Parameters.AddWithValue("@InvoiceId", invId);
+                        stCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
+                        stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentExcl);
+                        stCmd.Parameters.AddWithValue("@ServiceChargeAmount", roomRentExcl);
+                        stCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
+                        stCmd.Parameters.AddWithValue("@SubTotal", roomRentExcl);
+                        stCmd.Parameters.AddWithValue("@TaxAmount", taxTotal);
+                        stCmd.Parameters.AddWithValue("@GrandTotal", roomRentExcl + taxTotal);
+                        await stCmd.ExecuteNonQueryAsync();
+
+                        dto = await _db.GetCustomerSTInvoiceByPublicIdAsync(publicId);
+                    }
+                }
+
                 if (dto == null)
                 {
                     return NotFound(new { isSuccessful = false, message = "Sales Tax Invoice not found." });
@@ -440,19 +523,83 @@ END;";
                 }
             }
 
+            decimal totalLineVat = dto.LineItems.Sum(i => i.VatAmount);
+            bool hasTax = totalLineVat > 0 
+                       || (dto.AppliedTaxPercentage.HasValue && dto.AppliedTaxPercentage.Value > 0)
+                       || (dto.SupportChargeAmount.HasValue && dto.SupportChargeAmount.Value > 0);
+
+            if (!hasTax && totalLineVat == 0)
+            {
+                dto.AppliedTaxPercentage = 0m;
+                dto.AppliedChargePercentage = 0m;
+                dto.SupportChargesInvoiceUrl = null;
+            }
+            else
+            {
             var stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
-            if (stPublicId.HasValue)
+            if (!stPublicId.HasValue)
+            {
+                string stInvoiceNumber = dto.InvoiceNumber.Replace("INV-", "ST-INV-");
+                decimal roomRentExcl = dto.LineItems.Where(i => !i.IsDeposit).Sum(i => i.PriceExclVat);
+                decimal stSubTotal = roomRentExcl;
+                decimal stGrandTotal = stSubTotal + totalLineVat;
+                decimal stTaxRate = totalLineVat > 0 ? 16.00m : 0.00m;
+
+                string autoInsertSql = @"
+                    IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId)
+                    BEGIN
+                        INSERT INTO dbo.WN_CustomerSTInvoice (
+                            PublicId, CustomerInvoiceId, STInvoiceNumber,
+                            TariffHeading, TariffLabel,
+                            RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
+                            ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
+                            SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
+                            SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
+                        )
+                        VALUES (
+                            NEWID(), @InvoiceId, @STInvoiceNumber,
+                            '9805.9200', 'Business Support Services',
+                            'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
+                            'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
+                            NULL, NULL, 0.00, 0.00,
+                            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
+                        );
+                    END;";
+
+                using var autoStCmd = new SqlCommand(autoInsertSql, conn);
+                autoStCmd.Parameters.AddWithValue("@InvoiceId", id);
+                autoStCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
+                autoStCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentExcl);
+                autoStCmd.Parameters.AddWithValue("@ServiceChargeAmount", roomRentExcl);
+                autoStCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
+                autoStCmd.Parameters.AddWithValue("@SubTotal", roomRentExcl);
+                autoStCmd.Parameters.AddWithValue("@TaxAmount", totalLineVat);
+                autoStCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
+                await autoStCmd.ExecuteNonQueryAsync();
+
+                stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
+            }
+
+            if (stPublicId.HasValue && hasTax)
             {
                 var baseUrl = _config["Application:PublicBaseUrl"];
-                if (string.IsNullOrWhiteSpace(baseUrl) && Request != null)
+                if ((string.IsNullOrWhiteSpace(baseUrl) || baseUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase)) && Request != null)
                 {
-                    baseUrl = $"{Request.Scheme}://{Request.Host}";
+                    baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase}";
                 }
                 if (string.IsNullOrWhiteSpace(baseUrl))
                 {
                     baseUrl = "http://localhost:5200";
                 }
-                dto.SupportChargesInvoiceUrl = $"{baseUrl.TrimEnd('/')}/api/invoice/sales-tax/{stPublicId.Value}/pdf";
+
+                var cleanBase = baseUrl.TrimEnd('/');
+                var pathPrefix = cleanBase.EndsWith("/WorkNest", StringComparison.OrdinalIgnoreCase) ? "" : "/WorkNest";
+                dto.SupportChargesInvoiceUrl = $"{cleanBase}{pathPrefix}/api/invoice/sales-tax/{stPublicId.Value}/pdf";
+            }
+            else
+            {
+                dto.SupportChargesInvoiceUrl = null;
+            }
             }
 
             return dto;
@@ -615,6 +762,44 @@ END;";
                 updateCmd.Parameters.AddWithValue("@SecurityDepositAmount", req.SecurityDepositAmount ?? 0m);
                 updateCmd.Parameters.AddWithValue("@SubTotal", subTotal - discountTotal);
                 await updateCmd.ExecuteNonQueryAsync();
+
+                string stInvoiceNumber = invoiceNumber.Replace("INV-", "ST-INV-");
+                decimal roomRentExcl = subTotal - discountTotal;
+                decimal stSubTotal = roomRentExcl;
+                decimal stGrandTotal = stSubTotal + taxTotal;
+                decimal stTaxRate = taxTotal > 0 ? 16.00m : 0.00m;
+
+                string insertStSql = @"
+                    IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId)
+                    BEGIN
+                        INSERT INTO dbo.WN_CustomerSTInvoice (
+                            PublicId, CustomerInvoiceId, STInvoiceNumber,
+                            TariffHeading, TariffLabel,
+                            RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
+                            ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
+                            SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
+                            SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
+                        )
+                        VALUES (
+                            NEWID(), @InvoiceId, @STInvoiceNumber,
+                            '9805.9200', 'Business Support Services',
+                            'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
+                            'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
+                            NULL, NULL, 0.00, 0.00,
+                            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
+                        );
+                    END;";
+
+                using var stCmd = new SqlCommand(insertStSql, conn);
+                stCmd.Parameters.AddWithValue("@InvoiceId", newInvoiceId);
+                stCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
+                stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentExcl);
+                stCmd.Parameters.AddWithValue("@ServiceChargeAmount", roomRentExcl);
+                stCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
+                stCmd.Parameters.AddWithValue("@SubTotal", roomRentExcl);
+                stCmd.Parameters.AddWithValue("@TaxAmount", taxTotal);
+                stCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
+                await stCmd.ExecuteNonQueryAsync();
 
                 string emailNotice = "";
                 if (req.SendEmail)

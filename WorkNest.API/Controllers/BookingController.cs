@@ -4,6 +4,9 @@ using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+
 namespace WorkNest.API.Controllers
 {
     public class SendChallanEmailRequest
@@ -12,6 +15,7 @@ namespace WorkNest.API.Controllers
     }
     [ApiController]
     [Authorize]
+    [ValidateLocationScope]
     public class BookingController : ControllerBase
     {
         private readonly IBookingService _bookings;
@@ -98,9 +102,20 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
-            [FromQuery] string? search = null)
+            [FromQuery] string? search = null,
+            [FromQuery] int? locationId = null)
         {
-            var (items, total) = await _bookings.GetBookingsAsync(page, limit, search);
+            int? effectiveLocationId = locationId;
+            if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
+            {
+                var claimLocId = User.GetLocationId();
+                if (claimLocId.HasValue)
+                {
+                    effectiveLocationId = claimLocId.Value;
+                }
+            }
+
+            var (items, total) = await _bookings.GetBookingsAsync(page, limit, search, effectiveLocationId);
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 

@@ -391,7 +391,8 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationsAsync(
             int page,
             int limit,
-            string? search)
+            string? search,
+            int? locationId = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_GetList", c);
@@ -399,6 +400,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@Page", page);
             cmd.Parameters.AddWithValue("@Limit", limit);
             cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
 
             await using var r = await cmd.ExecuteReaderAsync();
 
@@ -657,13 +659,14 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await r.ReadAsync() ? ToDict(r) : null;
         }
 
-        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetUsersAsync(int page, int limit, string? search)
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Users_GetList", c);
             cmd.Parameters.AddWithValue("@Page", page);
             cmd.Parameters.AddWithValue("@Limit", limit);
             cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             var rows = await ReadAll(r);
             int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
@@ -701,7 +704,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadAll(r);
         }
 
-        public async Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById)
+        public async Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById, int? locationId = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Users_Insert", c);
@@ -717,6 +720,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@AvatarUrl", (object?)avatarUrl ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -727,20 +731,38 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return (null, null);
         }
 
-        public async Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes)
+        public async Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_Users_Update", c);
-            cmd.Parameters.AddWithValue("@Id", id);
-            cmd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CompanyId", (object?)companyId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CityId", (object?)cityId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CnicOrPassport", (object?)cnic ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@AvatarUrl", (object?)avatarUrl ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
-            await cmd.ExecuteNonQueryAsync();
+            try
+            {
+                await using var cmd = SP("dbo.WN_Users_Update", c);
+                cmd.Parameters.AddWithValue("@Id", id);
+                cmd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CompanyId", (object?)companyId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CityId", (object?)cityId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CnicOrPassport", (object?)cnic ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@AvatarUrl", (object?)avatarUrl ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Message.Contains("@LocationId") || ex.Message.Contains("too many arguments"))
+            {
+                await using var fallback = SP("dbo.WN_Users_Update", c);
+                fallback.Parameters.AddWithValue("@Id", id);
+                fallback.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
+                fallback.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
+                fallback.Parameters.AddWithValue("@CompanyId", (object?)companyId ?? DBNull.Value);
+                fallback.Parameters.AddWithValue("@CityId", (object?)cityId ?? DBNull.Value);
+                fallback.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
+                fallback.Parameters.AddWithValue("@CnicOrPassport", (object?)cnic ?? DBNull.Value);
+                fallback.Parameters.AddWithValue("@AvatarUrl", (object?)avatarUrl ?? DBNull.Value);
+                fallback.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
+                await fallback.ExecuteNonQueryAsync();
+            }
         }
 
         public async Task DeleteUserAsync(int id)
@@ -766,6 +788,16 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await using var cmd = SP("dbo.WN_Users_SetRole", c);
             cmd.Parameters.AddWithValue("@Id", id);
             cmd.Parameters.AddWithValue("@RoleId", roleId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("UPDATE dbo.WN_Users SET RoleId = @RoleId, LocationId = @LocationId WHERE Id = @Id", c);
+            cmd.Parameters.AddWithValue("@Id", id);
+            cmd.Parameters.AddWithValue("@RoleId", roleId);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -891,13 +923,14 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
 
 
-        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetBookingsAsync(int page, int limit, string? search)
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_GetList", c);
             cmd.Parameters.AddWithValue("@Page", page);
             cmd.Parameters.AddWithValue("@Limit", limit);
             cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             var rows = await ReadAll(r);
             int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;

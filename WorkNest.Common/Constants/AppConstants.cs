@@ -9,17 +9,17 @@ namespace WorkNest.Common.Constants
 
         public static class BookingStatus
         {
-            public const int Confirmed = 1;
-            public const int Cancelled = 2;
+            public const int Pending   = 5;
+            public const int Cancelled = 86;
             public const int Rejected  = 3;
-            public const int Completed = 4;
+            public const int Confirmed = 33;
 
             public static readonly Dictionary<string, int> Map = new()
             {
-                { "Confirmed", Confirmed },
+                { "Pending",   Pending },
                 { "Cancelled", Cancelled },
-                { "Rejected",  Rejected  },
-                { "Completed", Completed },
+                { "Rejected",  Rejected },
+                { "Confirmed", Confirmed },
             };
         }
 

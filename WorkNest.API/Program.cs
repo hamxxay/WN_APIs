@@ -122,9 +122,18 @@ try
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
 
-    // ── Path base for IIS sub-application (production only) ──────────────────
-    if (!app.Environment.IsDevelopment())
-        app.UsePathBase("/WorkNest");
+    // ── Path base for IIS sub-application (configurable via appsettings/env) ─
+    var pathBase = builder.Configuration["PathBase"];
+    if (!string.IsNullOrWhiteSpace(pathBase))
+    {
+        app.UsePathBase(pathBase);
+    }
+
+    // ── Forwarded Headers (for IIS / Reverse Proxy SSL offloading) ───────────
+    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+    });
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
     app.UseStaticFiles();
@@ -137,10 +146,7 @@ try
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
-        var swaggerPath = app.Environment.IsDevelopment()
-            ? "/swagger/v1/swagger.json"
-            : "/WorkNest/swagger/v1/swagger.json";
-        c.SwaggerEndpoint(swaggerPath, "WorkNest API v1");
+        c.SwaggerEndpoint("v1/swagger.json", "WorkNest API v1");
         c.RoutePrefix = "swagger";
     });
 

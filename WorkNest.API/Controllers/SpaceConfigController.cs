@@ -4,10 +4,14 @@ using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+
 namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize]
+    [ValidateLocationScope]
     public class SpaceConfigController : ControllerBase
     {
         private readonly ISpaceConfigService _config;
@@ -42,8 +46,18 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetV2(
             [FromQuery] int? companyId,
             [FromQuery] int? branchId,
-            [FromQuery] int? locationId) =>
-            Ok(await _config.GetSpaceConfigV2Async(companyId, branchId, locationId));
+            [FromQuery] int? locationId)
+        {
+            if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
+            {
+                var claimLocId = User.GetLocationId();
+                if (claimLocId.HasValue)
+                {
+                    locationId = claimLocId.Value;
+                }
+            }
+            return Ok(await _config.GetSpaceConfigV2Async(companyId, branchId, locationId));
+        }
 
         [HttpPost("api/space-config/v2")]
         public async Task<IActionResult> CreateV2(

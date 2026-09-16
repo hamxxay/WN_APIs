@@ -14,13 +14,14 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>?> GetUserByEmailAsync(string email);
         Task<IDictionary<string, object?>?> GetUserByIdAsync(int id);
         Task<IDictionary<string, object?>?> GetUserByPublicIdAsync(Guid publicId);
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetUsersAsync(int page, int limit, string? search);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetUserHistoryAsync(int userId);
-        Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById);
-        Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes);
+        Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById, int? locationId = null);
+        Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null);
         Task DeleteUserAsync(int id);
         Task SetUserStatusAsync(int id, bool isActive);
         Task SetUserRoleAsync(int id, int roleId);
+        Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId);
 
         // --- Space ---
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpacesAsync(int page, int limit, string? search);
@@ -34,7 +35,7 @@ namespace WorkNest.Application.Interfaces
         Task DeleteSpaceAsync(int id);
 
         // --- Booking ---
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetBookingsAsync(int page, int limit, string? search);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null);
         Task<IDictionary<string, object?>?> GetBookingByPublicIdAsync(Guid publicId, string? userEmail = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userEmail);
         Task<IEnumerable<IDictionary<string, object?>>> GetRecentBookingsAsync(int top = 10);
@@ -85,7 +86,8 @@ namespace WorkNest.Application.Interfaces
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationsAsync(
             int page,
             int limit,
-            string? search
+            string? search,
+            int? locationId = null
         );
 
         Task<IEnumerable<IDictionary<string, object?>>> GetQuotationHistoryAsync(

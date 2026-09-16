@@ -46,6 +46,7 @@ namespace WorkNest.Application.Services
             var row = await _db.GetUserByEmailAsync(request.Email);
             string? publicId;
             string role;
+            int? locationId = null;
 
             var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
 
@@ -62,6 +63,7 @@ namespace WorkNest.Application.Services
                     ? idg.ToString() 
                     : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
                 role = Roles.FromRow(row);
+                locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : (int?)null;
 
                 var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
                 var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
@@ -71,8 +73,8 @@ namespace WorkNest.Application.Services
                 await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
             }
 
-            var token = _jwt.GenerateToken(publicId ?? "", request.Email, role);
-            return ApiResponse.Ok(new { id = publicId, email = request.Email, roles = new[] { role }, token }, "Login successful.");
+            var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId);
+            return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Login successful.");
         }
 
         public async Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request)
@@ -82,6 +84,7 @@ namespace WorkNest.Application.Services
                 var row = await _db.GetUserByEmailAsync(request.Email);
                 string? publicId;
                 string role;
+                int? locationId = null;
 
                 var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
 
@@ -91,6 +94,7 @@ namespace WorkNest.Application.Services
                         ? idg.ToString() 
                         : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
                     role = Roles.FromRow(row);
+                    locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : (int?)null;
 
                     var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
                     var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
@@ -107,8 +111,8 @@ namespace WorkNest.Application.Services
                     await EnsureCustomerAsync(request.Email, name, null, newId);
                 }
 
-                var token = _jwt.GenerateToken(publicId ?? "", request.Email, role);
-                return ApiResponse.Ok(new { id = publicId, email = request.Email, roles = new[] { role }, token }, "Google login successful.");
+                var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId);
+                return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Google login successful.");
             }
             catch (Exception ex)
             {
@@ -127,6 +131,7 @@ namespace WorkNest.Application.Services
                 : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
 
             var role = Roles.FromRow(row);
+            var locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : (int?)null;
 
             return ApiResponse.Ok(new
             {
@@ -136,6 +141,7 @@ namespace WorkNest.Application.Services
                 phone      = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null,
                 role       = role,
                 roles      = new[] { role },
+                locationId = locationId,
                 customerId = row.TryGetValue("CustomerId",  out var c) ? c?.ToString() : null,
             });
         }

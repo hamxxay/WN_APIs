@@ -4,10 +4,14 @@ using WorkNest.Application.DTOs.Space;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+
 namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize]
+    [ValidateLocationScope]
     public class SpaceController : ControllerBase
     {
         private readonly ISpaceService _spaces;
@@ -73,6 +77,26 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? search = null)
         {
             var (items, total) = await _spaces.GetSpacesAsync(page, limit, search);
+            if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
+            {
+                var claimLocId = User.GetLocationId();
+                if (claimLocId.HasValue)
+                {
+                    var filtered = items.Where(s =>
+                    {
+                        if (s is IDictionary<string, object?> dict && dict.TryGetValue("LocationId", out var loc) && loc != null)
+                            return Convert.ToInt32(loc) == claimLocId.Value;
+                        var prop = s.GetType().GetProperty("LocationId") ?? s.GetType().GetProperty("locationId");
+                        if (prop != null)
+                        {
+                            var v = prop.GetValue(s);
+                            return v != null && Convert.ToInt32(v) == claimLocId.Value;
+                        }
+                        return true;
+                    }).ToList();
+                    return Ok(new PaginatedResponse<object> { Data = filtered, Total = filtered.Count });
+                }
+            }
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
