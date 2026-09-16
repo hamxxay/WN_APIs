@@ -134,9 +134,6 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        [HttpGet("api/invoice/by-customer/{customerId:int}")]
-        [HttpGet("api/invoice/customer/{customerId:int}")]
-        [HttpGet("api/customers/{customerId:int}/invoices")]
         [HttpGet("api/customer/{customerId:int}/invoices")]
         public async Task<IActionResult> GetInvoicesByCustomerId(
             int customerId,
