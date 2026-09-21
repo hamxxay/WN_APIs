@@ -35,6 +35,21 @@ namespace WorkNest.Application.Services
             _pdfMergeService = pdfMergeService;
         }
 
+        private static string NormalizeOperatingHours(string? opHours)
+        {
+            if (string.IsNullOrWhiteSpace(opHours)) return "24-by-7";
+            string raw = opHours.Trim();
+            if (raw == "1" || raw.Equals("24-by-7", StringComparison.OrdinalIgnoreCase) || raw.Equals("24/7", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("24/7", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("24-by-7", StringComparison.OrdinalIgnoreCase))
+                return "24-by-7";
+            if (raw == "2" || raw.IndexOf("Morning", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "morning 6am to 6pm";
+            if (raw == "3" || raw.IndexOf("Evening", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "evening 6pm to 6am";
+            if (raw == "4" || raw.IndexOf("Shift", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "Shift Access";
+            return raw;
+        }
+
         private static void ValidateAgreementData(SendAgreementRequest request)
         {
             if (request == null)
@@ -82,6 +97,25 @@ namespace WorkNest.Application.Services
                 request.SecpRegistrationNo
             );
 
+            // Fetch dynamic location & company details from Quotation Space -> Location -> Branch -> Company
+            var locComp = await _db.GetQuotationLocationAndCompanyDetailsDbAsync(q.Id);
+            if (locComp != null)
+            {
+                if (string.IsNullOrWhiteSpace(request.CenterName) && locComp.TryGetValue("CenterName", out var cn) && cn != null)
+                    request.CenterName = cn.ToString();
+                if (string.IsNullOrWhiteSpace(request.VendorLegalName) && locComp.TryGetValue("VendorLegalName", out var vn) && vn != null)
+                    request.VendorLegalName = vn.ToString();
+                if (string.IsNullOrWhiteSpace(request.VendorAddress) && locComp.TryGetValue("VendorAddress", out var va) && va != null)
+                    request.VendorAddress = va.ToString();
+                if (string.IsNullOrWhiteSpace(request.VendorPhone) && locComp.TryGetValue("VendorPhone", out var vp) && vp != null)
+                    request.VendorPhone = vp.ToString();
+                if (string.IsNullOrWhiteSpace(request.VendorNtn) && locComp.TryGetValue("VendorNtn", out var vntn) && vntn != null)
+                    request.VendorNtn = vntn.ToString();
+            }
+
+            string formattedOpHours = NormalizeOperatingHours(request.OperatingHours);
+            request.OperatingHours = formattedOpHours;
+
             // 2. Generate Page 1 (Dynamic Schedule & Preamble) via QuestPDF
             string qNum = q.QuotationNumber ?? $"QTN-{q.Id}";
             byte[] page1Pdf = _pdf.GenerateAgreementPdf(request, qNum);
@@ -100,7 +134,7 @@ namespace WorkNest.Application.Services
                 request.RefundDays,
                 request.FeeAmount > 0 ? request.FeeAmount : q.TotalAmount,
                 request.SecurityDeposit > 0 ? request.SecurityDeposit : q.SecurityDeposit,
-                request.OperatingHours ?? "24/7",
+                formattedOpHours,
                 request.FullName ?? q.CustomerName,
                 request.Cnic,
                 request.PhoneNumber,
@@ -202,10 +236,33 @@ namespace WorkNest.Application.Services
                 RefundDays = row.TryGetValue("RefundDays", out var rd) && rd != null ? Convert.ToInt32(rd) : 30,
                 FeeAmount = row.TryGetValue("FeeAmount", out var fa) && fa != null ? Convert.ToDecimal(fa) : 0,
                 SecurityDeposit = row.TryGetValue("SecurityDeposit", out var sd) && sd != null ? Convert.ToDecimal(sd) : 0,
-                OperatingHours = row.TryGetValue("OperatingHours", out var oh) && oh != null ? oh.ToString() : "24/7",
+                OperatingHours = NormalizeOperatingHours(row.TryGetValue("OperatingHours", out var oh) && oh != null ? oh.ToString() : "24/7"),
                 ContractStartDate = row.TryGetValue("StartDateTime", out var sdt) && sdt != null ? Convert.ToDateTime(sdt) : null,
-                ContractEndDate = row.TryGetValue("EndDateTime", out var edt) && edt != null ? Convert.ToDateTime(edt) : null
+                ContractEndDate = row.TryGetValue("EndDateTime", out var edt) && edt != null ? Convert.ToDateTime(edt) : null,
+                CenterName = row.TryGetValue("CenterName", out var cn) && cn != null ? cn.ToString() : null,
+                VendorLegalName = row.TryGetValue("VendorLegalName", out var vn) && vn != null ? vn.ToString() : null,
+                VendorAddress = row.TryGetValue("VendorAddress", out var va) && va != null ? va.ToString() : null,
+                VendorPhone = row.TryGetValue("VendorPhone", out var vp) && vp != null ? vp.ToString() : null,
+                VendorNtn = row.TryGetValue("VendorNtn", out var vntn) && vntn != null ? vntn.ToString() : null
             };
+
+            if (string.IsNullOrWhiteSpace(req.VendorLegalName) || string.IsNullOrWhiteSpace(req.VendorAddress))
+            {
+                var locComp = await _db.GetQuotationLocationAndCompanyDetailsDbAsync(req.QuotationId);
+                if (locComp != null)
+                {
+                    if (string.IsNullOrWhiteSpace(req.CenterName) && locComp.TryGetValue("CenterName", out var locCn) && locCn != null)
+                        req.CenterName = locCn.ToString();
+                    if (string.IsNullOrWhiteSpace(req.VendorLegalName) && locComp.TryGetValue("VendorLegalName", out var locVn) && locVn != null)
+                        req.VendorLegalName = locVn.ToString();
+                    if (string.IsNullOrWhiteSpace(req.VendorAddress) && locComp.TryGetValue("VendorAddress", out var locVa) && locVa != null)
+                        req.VendorAddress = locVa.ToString();
+                    if (string.IsNullOrWhiteSpace(req.VendorPhone) && locComp.TryGetValue("VendorPhone", out var locVp) && locVp != null)
+                        req.VendorPhone = locVp.ToString();
+                    if (string.IsNullOrWhiteSpace(req.VendorNtn) && locComp.TryGetValue("VendorNtn", out var locVntn) && locVntn != null)
+                        req.VendorNtn = locVntn.ToString();
+                }
+            }
 
             string qNum = row["QuotationNumber"]?.ToString() ?? $"QTN-{req.QuotationId}";
 

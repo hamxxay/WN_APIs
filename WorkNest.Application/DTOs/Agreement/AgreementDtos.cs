@@ -21,6 +21,12 @@ namespace WorkNest.Application.DTOs.Agreement
         public string? OperatingHours { get; set; } = "24/7";
         public string? BillingFrequency { get; set; }
         public string? OverrideEmail { get; set; }
+
+        public string? CenterName { get; set; }
+        public string? VendorLegalName { get; set; }
+        public string? VendorAddress { get; set; }
+        public string? VendorPhone { get; set; }
+        public string? VendorNtn { get; set; }
     }
 
     public class AgreementResponseDto

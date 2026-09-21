@@ -3000,14 +3000,53 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await using var c = await Open();
             string sql = @"
                 SELECT a.*, q.QuotationNumber, q.StartDateTime, q.EndDateTime,
-                       t.Name AS TemplateName, t.ContentHtml AS TemplateHtml
+                       t.Name AS TemplateName, t.ContentHtml AS TemplateHtml,
+                       COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
+                       COALESCE(comp.CompanyName, br.[Description], loc.Name, 'WorkNest (Pvt) Ltd') AS VendorLegalName,
+                       COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
+                       COALESCE(comp.Contact, '') AS VendorPhone,
+                       COALESCE(comp.NTN, '') AS VendorNtn,
+                       ISNULL(ot.[Description], a.OperatingHours) AS OfferingTypeDescription
                 FROM dbo.WN_Agreements a WITH (NOLOCK)
                 JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+                LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+                LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
+                LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId)
                 LEFT JOIN dbo.WN_LeaseTemplates t WITH (NOLOCK) ON t.Id = a.TemplateVersionId
+                LEFT JOIN dbo.WN_OfferingType ot WITH (NOLOCK) ON (TRY_CAST(a.OperatingHours AS INT) = ot.Id OR TRY_CAST(q.OfferingType AS INT) = ot.Id OR ot.[Description] = a.OperatingHours)
                 WHERE a.Id = @AgreementId;";
 
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+                return ToDict(r);
+
+            return null;
+        }
+
+        public async Task<IDictionary<string, object?>?> GetQuotationLocationAndCompanyDetailsDbAsync(int quotationId)
+        {
+            await using var c = await Open();
+            string sql = @"
+                SELECT TOP 1
+                    COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
+                    COALESCE(comp.CompanyName, br.[Description], loc.Name, 'WorkNest (Pvt) Ltd') AS VendorLegalName,
+                    COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
+                    COALESCE(comp.Contact, '') AS VendorPhone,
+                    COALESCE(comp.NTN, '') AS VendorNtn,
+                    ISNULL(ot.[Description], q.OfferingType) AS OfferingTypeDescription
+                FROM dbo.WN_Quotations q WITH (NOLOCK)
+                JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+                LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+                LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
+                LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId)
+                LEFT JOIN dbo.WN_OfferingType ot WITH (NOLOCK) ON (TRY_CAST(q.OfferingType AS INT) = ot.Id OR ot.[Description] = q.OfferingType)
+                WHERE q.Id = @QuotationId;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@QuotationId", quotationId);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
                 return ToDict(r);

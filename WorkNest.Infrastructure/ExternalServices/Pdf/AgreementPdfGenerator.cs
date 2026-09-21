@@ -64,13 +64,46 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             string endDateStr = req.ContractEndDate.HasValue ? req.ContractEndDate.Value.ToString("dd MMMM yyyy") : DateTime.Now.AddYears(1).ToString("dd MMMM yyyy");
             string agreementDateStr = DateTime.Now.ToString("dd MMMM yyyy");
             string billingPeriodStr = !string.IsNullOrWhiteSpace(req.BillingFrequency) ? req.BillingFrequency : "Monthly";
-            string opHoursStr = !string.IsNullOrWhiteSpace(req.OperatingHours) ? req.OperatingHours : "24/7 Access (Monday to Sunday)";
+            
+            string rawOp = (req.OperatingHours ?? "").Trim();
+            string opHoursStr;
+            if (rawOp == "1" || rawOp.Equals("24-by-7", StringComparison.OrdinalIgnoreCase) || rawOp.Equals("24/7", StringComparison.OrdinalIgnoreCase) || rawOp.StartsWith("24/7", StringComparison.OrdinalIgnoreCase) || rawOp.StartsWith("24-by-7", StringComparison.OrdinalIgnoreCase))
+            {
+                opHoursStr = "24-by-7";
+            }
+            else if (rawOp == "2" || rawOp.IndexOf("Morning", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                opHoursStr = "morning 6am to 6pm";
+            }
+            else if (rawOp == "3" || rawOp.IndexOf("Evening", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                opHoursStr = "evening 6pm to 6am";
+            }
+            else if (rawOp == "4" || rawOp.IndexOf("Shift", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                opHoursStr = "Shift Access";
+            }
+            else if (!string.IsNullOrWhiteSpace(rawOp))
+            {
+                opHoursStr = rawOp;
+            }
+            else
+            {
+                opHoursStr = "24-by-7";
+            }
+
             int refundDays = req.RefundDays > 0 ? req.RefundDays : 30;
 
             string customerDisplayName = SanitizeCustomerName(req.FullName);
             string idOrRegNumber = !string.IsNullOrWhiteSpace(req.Cnic) ? req.Cnic : (!string.IsNullOrWhiteSpace(req.SecpRegistrationNo) ? req.SecpRegistrationNo : (!string.IsNullOrWhiteSpace(req.Ntn) ? req.Ntn : "N/A"));
             string address = !string.IsNullOrWhiteSpace(req.Address) ? req.Address : "Islamabad, Pakistan";
             string companyName = !string.IsNullOrWhiteSpace(req.CompanyName) ? req.CompanyName : customerDisplayName;
+
+            string vendorLegalName = !string.IsNullOrWhiteSpace(req.VendorLegalName) ? req.VendorLegalName : "WorkNest (Pvt) Ltd";
+            string vendorAddress = !string.IsNullOrWhiteSpace(req.VendorAddress) ? req.VendorAddress : "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad";
+            string vendorPhone = !string.IsNullOrWhiteSpace(req.VendorPhone) ? req.VendorPhone : "+92 309 9771774 / +92 308 0256000";
+            string vendorNtn = !string.IsNullOrWhiteSpace(req.VendorNtn) ? req.VendorNtn : "7492018-3";
+            string centerName = !string.IsNullOrWhiteSpace(req.CenterName) ? req.CenterName : "WorkNest";
 
             var doc = Document.Create(container =>
             {
@@ -98,16 +131,25 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 }
                                 else
                                 {
-                                    c.Item().Text("WorkNest (Pvt) Ltd").FontSize(18).Bold().FontColor("#0f172a");
+                                    c.Item().Text(centerName).FontSize(18).Bold().FontColor("#0f172a");
                                 }
                             });
 
-                            row.ConstantItem(260).Column(c =>
+                            row.ConstantItem(280).Column(c =>
                             {
-                                c.Item().AlignRight().Text("WorkNest (Pvt) Ltd").Bold().FontSize(9).FontColor("#0f172a");
-                                c.Item().AlignRight().Text("3rd Floor EOBI Building-II, I-8 Markaz, Islamabad").FontSize(8).FontColor("#475569");
-                                c.Item().AlignRight().Text("Phone: +92 309 9771774 / +92 308 0256000").FontSize(8).FontColor("#475569");
-                                c.Item().AlignRight().Text("NTN: 7492018-3").FontSize(8).FontColor("#475569");
+                                c.Item().AlignRight().Text(vendorLegalName).Bold().FontSize(9).FontColor("#0f172a");
+                                if (!string.IsNullOrWhiteSpace(vendorAddress))
+                                {
+                                    c.Item().AlignRight().Text(vendorAddress).FontSize(8).FontColor("#475569");
+                                }
+                                if (!string.IsNullOrWhiteSpace(vendorPhone))
+                                {
+                                    c.Item().AlignRight().Text($"Phone: {vendorPhone}").FontSize(8).FontColor("#475569");
+                                }
+                                if (!string.IsNullOrWhiteSpace(vendorNtn))
+                                {
+                                    c.Item().AlignRight().Text($"NTN: {vendorNtn}").FontSize(8).FontColor("#475569");
+                                }
                             });
                         });
 
@@ -149,8 +191,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             pc.Item().PaddingLeft(8).Text(text =>
                             {
                                 text.Span("1. Provider: ").Bold().FontColor("#0f172a");
-                                text.Span("Work Nest (Pvt) Ltd").Bold().FontColor("#0f172a");
-                                text.Span(", having its principal place of business at 3rd Floor EOBI Plaza I-8 Markaz Islamabad (hereinafter referred to as the ");
+                                text.Span(vendorLegalName).Bold().FontColor("#0f172a");
+                                text.Span($", having its principal place of business at {vendorAddress} (hereinafter referred to as the ");
                                 text.Span("\"Provider\"").Bold().FontColor("#0f172a");
                                 text.Span("); AND\n");
 
@@ -240,7 +282,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                             table.Cell().Column(1).Row(1).Border(1).BorderColor("#0f172a").Padding(8).Column(sc =>
                             {
-                                sc.Item().Text("FOR WORK NEST (PVT) LTD (PROVIDER)").Bold().FontSize(8.5f).FontColor("#0f172a");
+                                sc.Item().Text($"FOR {vendorLegalName.ToUpperInvariant()} (PROVIDER)").Bold().FontSize(8.5f).FontColor("#0f172a");
                                 sc.Item().PaddingTop(18).Text("Authorized Signatory: ____________________________").FontSize(8f);
                                 sc.Item().PaddingTop(5).Text("Signature: _____________________________________").FontSize(8f);
                                 sc.Item().PaddingTop(5).Text($"Date: {agreementDateStr}").FontSize(8f);

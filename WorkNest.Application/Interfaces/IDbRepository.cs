@@ -244,6 +244,7 @@ namespace WorkNest.Application.Interfaces
         // --- Agreements & Lease Templates ---
         Task<int> InsertAgreementDbAsync(int quotationId, int customerId, string entityType, int refundDays, decimal feeAmount, decimal securityDeposit, string? opHours, string? custName, string? custCnic, string? custPhone, string? custAddress, string? compName, string? ntn, string? secp, int? userId, int? templateVersionId = null);
         Task<IDictionary<string, object?>?> GetAgreementByIdDbAsync(int agreementId);
+        Task<IDictionary<string, object?>?> GetQuotationLocationAndCompanyDetailsDbAsync(int quotationId);
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status);
         Task MarkAgreementSignedDbAsync(int agreementId, int? userId);
         Task UpdateCustomerAgreementDetailsDbAsync(int customerId, string? fullName, string? phone, string? cnic, string? address, string? company, string? ntn, string? secp);
