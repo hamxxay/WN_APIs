@@ -199,7 +199,7 @@ namespace WorkNest.Application.Services
                             var customerAddress = invResult.ContainsKey("CustomerAddress") ? Convert.ToString(invResult["CustomerAddress"]) : "";
                             var subTotalVal = invResult.ContainsKey("SubTotal") && invResult["SubTotal"] != null ? Convert.ToDecimal(invResult["SubTotal"]) : surcharge;
                             var taxRateVal = invResult.ContainsKey("TaxRate") && invResult["TaxRate"] != null ? Convert.ToDecimal(invResult["TaxRate"]) : 16.00m;
-                            var taxTotalVal = invResult.ContainsKey("TaxTotal") && invResult["TaxTotal"] != null ? Convert.ToDecimal(invResult["TaxTotal"]) : Math.Round(subTotalVal * (taxRateVal / 100m), 2);
+                            var taxTotalVal = invResult.ContainsKey("TaxTotal") && invResult["TaxTotal"] != null ? Convert.ToDecimal(invResult["TaxTotal"]) : Math.Round(Math.Round(subTotalVal * 0.10m, 2) * (taxRateVal / 100m), 2);
                             var grandTotalVal = invResult.ContainsKey("GrandTotal") && invResult["GrandTotal"] != null ? Convert.ToDecimal(invResult["GrandTotal"]) : (subTotalVal + taxTotalVal);
                             DateTime? billingStart = invResult.ContainsKey("BillingPeriodStart") && invResult["BillingPeriodStart"] != null ? Convert.ToDateTime(invResult["BillingPeriodStart"]) : (DateTime?)null;
                             DateTime? billingEnd = invResult.ContainsKey("BillingPeriodEnd") && invResult["BillingPeriodEnd"] != null ? Convert.ToDateTime(invResult["BillingPeriodEnd"]) : (DateTime?)null;

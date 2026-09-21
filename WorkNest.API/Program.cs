@@ -87,6 +87,8 @@ try
     builder.Services.AddScoped<IEncryptionService, EncryptionService>();
     builder.Services.AddScoped<IEmailService, EmailService>();
     builder.Services.AddScoped<IPdfService, PdfService>();
+    builder.Services.AddScoped<IHtmlToPdfService, HtmlToPdfService>();
+    builder.Services.AddScoped<IPdfMergeService, PdfMergeService>();
     builder.Services.AddScoped<IPayFastService, PayFastService>();
 
     // ── Application Services ──────────────────────────────────────────────────
@@ -111,6 +113,8 @@ try
     builder.Services.AddScoped<IAccountCoaService, AccountCoaService>();
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
     builder.Services.AddScoped<IQuotationService, QuotationService>();
+    builder.Services.AddScoped<IAgreementService, AgreementService>();
+    builder.Services.AddScoped<ILeaseTemplateService, LeaseTemplateService>();
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();
     builder.Services.AddScoped<IAttendantService, AttendantService>();
 

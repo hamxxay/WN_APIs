@@ -53,6 +53,22 @@ namespace WorkNest.API.Controllers
         }
 
         [AllowAnonymous]
+        [HttpGet("api/quotation/offering-types")]
+        [HttpGet("api/offering-types")]
+        public async Task<IActionResult> GetOfferingTypes()
+        {
+            try
+            {
+                var types = await _quotations.GetOfferingTypesAsync();
+                return Ok(ApiResponse.Ok(types));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ApiResponse.Fail(ex.Message));
+            }
+        }
+
+        [AllowAnonymous]
         [HttpGet("api/quotations")]
         [HttpGet("api/quotation/my")]
         public async Task<IActionResult> GetMyQuotations([FromHeader(Name = "x-user-email")] string? actorEmail)

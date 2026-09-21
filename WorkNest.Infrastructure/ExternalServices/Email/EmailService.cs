@@ -102,7 +102,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Your WorkNest Quotation - {quotationNumber}",
+                    Subject    = $"Your Work-Place Solution - {customerName}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -184,10 +184,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 if (taxAmount > 0)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
-                }
+                // {
+                //     sb.AppendLine();
+                //     sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
+                // }
 
                 sb.AppendLine();
                 sb.AppendLine("Please present this challan at the front desk or use it as a reference for your payment.");
@@ -292,11 +292,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     sb.AppendLine($"Balance Left            : PKR {balanceLeft:N2}");
                 }
 
-                if (taxAmount > 0)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
-                }
+                // if (taxAmount > 0)
+                // {
+                //     sb.AppendLine();
+                //     sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
+                // }
 
                 sb.AppendLine();
                 sb.AppendLine("Please find the booking confirmation PDF attached.");
@@ -311,7 +311,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail),
-                    Subject    = $"Booking Confirmation - {bookingNumber} | WorkNest",
+                    Subject    = $"Booking Confirmation - {spaceName} | WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -403,7 +403,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mail = new MailMessage();
                 mail.From = new MailAddress(fromEmail, "WorkNest Billing");
                 mail.To.Add(toEmail);
-                mail.Subject = $"WorkNest Custom Invoice #{invoiceNumber} — Capacity Overage Surcharge";
+                mail.Subject = $"WorkNest Custom Invoice — Capacity Overage Surcharge";
                 mail.IsBodyHtml = true;
 
                 string body = $@"
@@ -448,6 +448,60 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send custom surcharge invoice email #{InvoiceNumber} to {ToEmail}.", invoiceNumber, toEmail);
+            }
+        }
+
+        public async Task SendAgreementEmailAsync(string toEmail, string customerName, string quotationNumber, byte[] pdfBytes)
+        {
+            var fromEmail = _config["Email:FromEmail"];
+            var password  = _config["Email:GmailAppPassword"];
+
+            if (string.IsNullOrWhiteSpace(fromEmail) ||
+                string.IsNullOrWhiteSpace(toEmail) ||
+                string.IsNullOrWhiteSpace(password))
+            {
+                _logger.LogWarning("[EMAIL] Missing email credentials or recipient email. Agreement email skipped.");
+                return;
+            }
+
+            try
+            {
+                using var mail = new MailMessage();
+                mail.From = new MailAddress(fromEmail, "WorkNest Office Spaces");
+                mail.To.Add(new MailAddress(toEmail));
+                mail.Subject = $"WorkNest — Coworking Space Use Agreement ({customerName})";
+                mail.IsBodyHtml = true;
+
+                string body = $@"
+                <div style=""font-family: Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;"">
+                    <h2 style=""color: #2563eb; margin-top: 0;"">Coworking Space Use Agreement</h2>
+                    <p>Dear <strong>{customerName}</strong>,</p>
+                    <p>Please find attached your Coworking Space Use Agreement for quotation <strong>{quotationNumber}</strong>.</p>
+                    <p>Kindly review, sign, and return a copy to complete your workspace booking confirmation.</p>
+                    <p>Thank you for partnering with WorkNest.</p>
+                    <hr style=""border: none; border-top: 1px solid #e2e8f0; margin-top: 30px;"" />
+                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces • Automated System</p>
+                </div>";
+
+                mail.Body = body;
+
+                if (pdfBytes != null && pdfBytes.Length > 0)
+                {
+                    mail.Attachments.Add(new Attachment(new MemoryStream(pdfBytes), $"Agreement-{quotationNumber}.pdf", "application/pdf"));
+                }
+
+                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                {
+                    Credentials = new NetworkCredential(fromEmail, password),
+                    EnableSsl = true
+                };
+
+                await smtp.SendMailAsync(mail);
+                _logger.LogInformation("[EMAIL] Agreement PDF email for quotation #{QuotationNumber} sent successfully to {ToEmail}.", quotationNumber, toEmail);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[EMAIL] Failed to send agreement email for quotation #{QuotationNumber} to {ToEmail}.", quotationNumber, toEmail);
             }
         }
     }

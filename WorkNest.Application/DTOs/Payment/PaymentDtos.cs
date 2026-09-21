@@ -55,6 +55,7 @@ namespace WorkNest.Application.DTOs.Payment
     {
         public string? InvoiceNumber { get; set; }
         public DateTime IssuedOn { get; set; }
+        public DateTime? DueOn { get; set; }
         public string? CustomerName { get; set; }
         public string? CustomerEmail { get; set; }
         public string? CustomerCode { get; set; }
@@ -67,6 +68,9 @@ namespace WorkNest.Application.DTOs.Payment
         public decimal AdvanceRentTotal { get; set; }
         public int SecurityDepositMonths { get; set; }
         public decimal SecurityDepositTotal { get; set; }
+        public decimal SupportChargeTotal { get; set; }
+        public decimal AppliedTaxPercentage { get; set; } = 16.00m;
+        public decimal TaxTotal { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal TotalPayable { get; set; }
         public string? Notes { get; set; }

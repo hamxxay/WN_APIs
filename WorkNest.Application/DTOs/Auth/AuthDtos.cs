@@ -1,4 +1,4 @@
-﻿namespace WorkNest.Application.DTOs.Auth
+namespace WorkNest.Application.DTOs.Auth
 {
     public class UserSyncRequest
     {
@@ -31,6 +31,7 @@
         public string? Name { get; set; }
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
+        public int? CompanyId { get; set; }
     }
 
     public class GoogleLoginRequest
@@ -40,6 +41,7 @@
         public string? Name { get; set; }
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
+        public int? CompanyId { get; set; }
     }
 
     public class AuthResponse

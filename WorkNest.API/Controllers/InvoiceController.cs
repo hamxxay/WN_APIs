@@ -135,6 +135,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/customer/{customerId:int}/invoices")]
+        [HttpGet("api/customers/{customerId:int}/invoices")]
         public async Task<IActionResult> GetInvoicesByCustomerId(
             int customerId,
             [FromQuery] int page = 1,
@@ -230,6 +231,10 @@ namespace WorkNest.API.Controllers
                         string stInvoiceNumber = invNum.Replace("INV-", "ST-INV-");
                         decimal roomRentExcl = subTotal - discTotal;
                         decimal stTaxRate = taxTotal > 0 ? 16.00m : 0.00m;
+                        decimal serviceChargeAmount = taxTotal > 0 ? Math.Round(taxTotal / 0.16m, 2) : 0m;
+                        decimal roomRentAmount = Math.Max(0, roomRentExcl - serviceChargeAmount);
+                        decimal stSubTotal = serviceChargeAmount;
+                        decimal stGrandTotal = stSubTotal + taxTotal;
 
                         string insertStSql = @"
                             IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId OR PublicId = @PublicId)
@@ -256,12 +261,12 @@ namespace WorkNest.API.Controllers
                         stCmd.Parameters.AddWithValue("@PublicId", publicId);
                         stCmd.Parameters.AddWithValue("@InvoiceId", invId);
                         stCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
-                        stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentExcl);
-                        stCmd.Parameters.AddWithValue("@ServiceChargeAmount", roomRentExcl);
+                        stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
+                        stCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
                         stCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
-                        stCmd.Parameters.AddWithValue("@SubTotal", roomRentExcl);
+                        stCmd.Parameters.AddWithValue("@SubTotal", stSubTotal);
                         stCmd.Parameters.AddWithValue("@TaxAmount", taxTotal);
-                        stCmd.Parameters.AddWithValue("@GrandTotal", roomRentExcl + taxTotal);
+                        stCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
                         await stCmd.ExecuteNonQueryAsync();
 
                         dto = await _db.GetCustomerSTInvoiceByPublicIdAsync(publicId);
@@ -312,8 +317,6 @@ CREATE OR ALTER PROCEDURE dbo.WN_GetStatementInvoicePdfData
     @InvoiceId INT
 AS
 BEGIN
-    SET NOCOUNT ON;
-
     SELECT TOP 1
         i.Id,
         i.InvoiceNumber,
@@ -325,23 +328,33 @@ BEGIN
         COALESCE(i.BillingPeriodEnd, b.EndOn, i.DueOn) AS BillingPeriodEnd,
         ISNULL(i.GrandTotal, 0) AS GrandTotal,
         ISNULL(i.PaidTotal, 0) AS PaidTotal,
+        ISNULL(i.SubTotal, 0) AS SubTotal,
+        ISNULL(i.DiscountTotal, 0) AS DiscountTotal,
+        ISNULL(i.TaxTotal, 0) AS TaxTotal,
         ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
-        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ucomp.CompanyName)), ''), '-') AS AccountName,
-        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), ISNULL(u.Name, 'Valued Customer'))) AS AttnName,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AccountName,
+        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AttnName,
         COALESCE(NULLIF(LTRIM(RTRIM(c.Address)), ''), NULLIF(LTRIM(RTRIM(u.Address)), ''), '') AS BillingAddress,
-        ISNULL(NULLIF(LTRIM(RTRIM(c.Code)), ''), ISNULL(NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''), ISNULL(NULLIF(LTRIM(RTRIM(bd.CustomerCode)), ''), 'WN' + RIGHT('00000' + CAST(ISNULL(c.Id, i.UserId) AS VARCHAR(10)), 5)))) AS AccountNumber,
-        COALESCE(NULLIF(LTRIM(RTRIM(c.CnicOrPassport)), ''), NULLIF(LTRIM(RTRIM(ucomp.NTN)), ''), '') AS SntnNtnNic,
-        ISNULL(loc.Name, 'WorkNest') AS CenterName,
-        ISNULL(comp.CompanyName, 'WorkNest Coworking Spaces (Pvt) Ltd') AS VendorLegalName,
-        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), ISNULL(loc.Address, '3rd Floor EOBI Building-II, I-8 Markaz, Islamabad')) AS VendorAddress,
-        ISNULL(comp.Contact, '+92 309 9771774 / +92 308 0256000') AS VendorPhone,
-        ISNULL(comp.Fax, '+92 51 8439201') AS VendorFax,
-        ISNULL(comp.NTN, '7492018-3') AS VendorNtn,
-        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
-        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
-        ISNULL(bd.SupportChargeAmount, 0.00) AS SupportChargeAmount,
-        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Code)), ''), NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''), NULLIF(LTRIM(RTRIM(bd.CustomerCode)), ''), '') AS AccountNumber,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.CnicOrPassport)), ''), NULLIF(LTRIM(RTRIM(c.NTN)), ''), NULLIF(LTRIM(RTRIM(u.CnicOrPassport)), ''), '') AS SntnNtnNic,
+        COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
+        COALESCE(comp.CompanyName, br.[Description], loc.Name, '') AS VendorLegalName,
+        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
+        COALESCE(comp.Contact, '') AS VendorPhone,
+        COALESCE(comp.Fax, '') AS VendorFax,
+        COALESCE(comp.NTN, '') AS VendorNtn,
+        ISNULL(NULLIF(bd.AppliedChargePercentage, 0), 10.00) AS AppliedChargePercentage,
+        ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) AS AppliedTaxPercentage,
+        COALESCE(
+            NULLIF(st.ServiceChargeAmount, 0),
+            NULLIF(bd.SupportChargeAmount, 0),
+            CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
+        ) AS SupportChargeAmount,
+        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount,
+        st.PublicId AS STPublicId,
+        st.STInvoiceNumber
     FROM dbo.WN_Invoices i WITH (NOLOCK)
+    LEFT JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
@@ -351,10 +364,10 @@ BEGIN
         OR (i.UserId IS NOT NULL AND i.UserId > 0 AND c.UserId = i.UserId)
         OR (u.Email IS NOT NULL AND u.Email <> '' AND c.Email = u.Email)
     ) AND (c.IsActive = 1 OR c.IsActive IS NULL)
-    LEFT JOIN dbo.Company ucomp WITH (NOLOCK) ON ucomp.Id = u.CompanyId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
     LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
-    LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = ISNULL(NULLIF(loc.CompanyId, 0), 486)
+    LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
+    LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId, u.CompanyId)
     WHERE i.Id = @InvoiceId;
 
     SELECT 
@@ -413,6 +426,12 @@ END;";
                     dto.BillingPeriodStart = HasColumn(reader, "BillingPeriodStart") && !reader.IsDBNull(reader.GetOrdinal("BillingPeriodStart")) ? reader.GetDateTime(reader.GetOrdinal("BillingPeriodStart")) : (DateTime?)null;
                     dto.BillingPeriodEnd = HasColumn(reader, "BillingPeriodEnd") && !reader.IsDBNull(reader.GetOrdinal("BillingPeriodEnd")) ? reader.GetDateTime(reader.GetOrdinal("BillingPeriodEnd")) : (DateTime?)null;
                     dto.CurrentInvoiceTotal = reader.GetDecimal(reader.GetOrdinal("GrandTotal"));
+                    if (HasColumn(reader, "SubTotal") && !reader.IsDBNull(reader.GetOrdinal("SubTotal")))
+                        dto.SubTotal = reader.GetDecimal(reader.GetOrdinal("SubTotal"));
+                    if (HasColumn(reader, "DiscountTotal") && !reader.IsDBNull(reader.GetOrdinal("DiscountTotal")))
+                        dto.DiscountTotal = reader.GetDecimal(reader.GetOrdinal("DiscountTotal"));
+                    if (HasColumn(reader, "TaxTotal") && !reader.IsDBNull(reader.GetOrdinal("TaxTotal")))
+                        dto.TaxTotal = reader.GetDecimal(reader.GetOrdinal("TaxTotal"));
                     dto.CurrencyCode = reader.GetString(reader.GetOrdinal("CurrencyCode"));
                     dto.AccountName = reader.GetString(reader.GetOrdinal("AccountName"));
                     dto.AttnName = reader.IsDBNull(reader.GetOrdinal("AttnName")) ? "" : reader.GetString(reader.GetOrdinal("AttnName"));
@@ -433,6 +452,11 @@ END;";
                         dto.SupportChargeAmount = reader.GetDecimal(reader.GetOrdinal("SupportChargeAmount"));
                     if (HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount")))
                         dto.SecurityDepositAmount = reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"));
+                    if (HasColumn(reader, "STPublicId") && !reader.IsDBNull(reader.GetOrdinal("STPublicId")))
+                    {
+                        var stPublicId = reader.GetGuid(reader.GetOrdinal("STPublicId"));
+                        dto.SupportChargesInvoiceUrl = $"/api/invoice/sales-tax/{stPublicId}/pdf";
+                    }
                 }
                 else
                 {
@@ -538,9 +562,11 @@ END;";
             {
                 string stInvoiceNumber = dto.InvoiceNumber.Replace("INV-", "ST-INV-");
                 decimal roomRentExcl = dto.LineItems.Where(i => !i.IsDeposit).Sum(i => i.PriceExclVat);
-                decimal stSubTotal = roomRentExcl;
-                decimal stGrandTotal = stSubTotal + totalLineVat;
                 decimal stTaxRate = totalLineVat > 0 ? 16.00m : 0.00m;
+                decimal serviceChargeAmount = totalLineVat > 0 ? Math.Round(totalLineVat / 0.16m, 2) : 0m;
+                decimal roomRentAmount = Math.Max(0, roomRentExcl - serviceChargeAmount);
+                decimal stSubTotal = serviceChargeAmount;
+                decimal stGrandTotal = stSubTotal + totalLineVat;
 
                 string autoInsertSql = @"
                     IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId)
@@ -566,10 +592,10 @@ END;";
                 using var autoStCmd = new SqlCommand(autoInsertSql, conn);
                 autoStCmd.Parameters.AddWithValue("@InvoiceId", id);
                 autoStCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
-                autoStCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentExcl);
-                autoStCmd.Parameters.AddWithValue("@ServiceChargeAmount", roomRentExcl);
+                autoStCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
+                autoStCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
                 autoStCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
-                autoStCmd.Parameters.AddWithValue("@SubTotal", roomRentExcl);
+                autoStCmd.Parameters.AddWithValue("@SubTotal", stSubTotal);
                 autoStCmd.Parameters.AddWithValue("@TaxAmount", totalLineVat);
                 autoStCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
                 await autoStCmd.ExecuteNonQueryAsync();
@@ -762,9 +788,11 @@ END;";
 
                 string stInvoiceNumber = invoiceNumber.Replace("INV-", "ST-INV-");
                 decimal roomRentExcl = subTotal - discountTotal;
-                decimal stSubTotal = roomRentExcl;
-                decimal stGrandTotal = stSubTotal + taxTotal;
                 decimal stTaxRate = taxTotal > 0 ? 16.00m : 0.00m;
+                decimal serviceChargeAmount = taxTotal > 0 ? Math.Round(taxTotal / 0.16m, 2) : 0m;
+                decimal roomRentAmount = Math.Max(0, roomRentExcl - serviceChargeAmount);
+                decimal stSubTotal = serviceChargeAmount;
+                decimal stGrandTotal = stSubTotal + taxTotal;
 
                 string insertStSql = @"
                     IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId)
@@ -790,10 +818,10 @@ END;";
                 using var stCmd = new SqlCommand(insertStSql, conn);
                 stCmd.Parameters.AddWithValue("@InvoiceId", newInvoiceId);
                 stCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
-                stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentExcl);
-                stCmd.Parameters.AddWithValue("@ServiceChargeAmount", roomRentExcl);
+                stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
+                stCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
                 stCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
-                stCmd.Parameters.AddWithValue("@SubTotal", roomRentExcl);
+                stCmd.Parameters.AddWithValue("@SubTotal", stSubTotal);
                 stCmd.Parameters.AddWithValue("@TaxAmount", taxTotal);
                 stCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
                 await stCmd.ExecuteNonQueryAsync();
@@ -998,7 +1026,11 @@ END;";
                         b.SecurityDepositRequired,
                         COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(bd.SecurityDeposit, 0), 0) AS ResolvedSecurityDeposit,
                         u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
-                        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode
+                        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode,
+                        ISNULL(s.Capacity, 1) AS SpaceCapacity,
+                        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
+                        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
+                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate
                     FROM dbo.WN_Bookings b WITH (NOLOCK)
                     LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
                     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
@@ -1009,7 +1041,8 @@ END;";
 
                 int userId = 0;
                 decimal monthlyRent = 0, subtotalAmount = 0, totalAmount = 0, discountAmount = 0, discountPercentage = 0, secDepositReq = 0, resolvedSecDep = 0;
-                int billingMonths = 3, secMonths = 2;
+                int billingMonths = 3, secMonths = 2, spaceCapacity = 1;
+                decimal appliedTaxPercentage = 16.00m, appliedChargePercentage = 10.00m, perSeatSupportRate = 2000.00m;
                 string discountType = "Percentage";
                 DateTime? startOn = null, endOn = null;
                 string customerEmail = "", customerName = "", spaceName = "Workspace", spaceTypeName = "", categoryCode = "";
@@ -1038,6 +1071,10 @@ END;";
                         spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));
                         spaceTypeName = reader.IsDBNull(reader.GetOrdinal("SpaceTypeName")) ? "" : reader.GetString(reader.GetOrdinal("SpaceTypeName"));
                         categoryCode = reader.IsDBNull(reader.GetOrdinal("CategoryCode")) ? "" : reader.GetString(reader.GetOrdinal("CategoryCode"));
+                        spaceCapacity = HasColumn(reader, "SpaceCapacity") && !reader.IsDBNull(reader.GetOrdinal("SpaceCapacity")) ? Convert.ToInt32(reader["SpaceCapacity"]) : 1;
+                        appliedTaxPercentage = HasColumn(reader, "AppliedTaxPercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedTaxPercentage")) ? Convert.ToDecimal(reader["AppliedTaxPercentage"]) : 16.00m;
+                        appliedChargePercentage = HasColumn(reader, "AppliedChargePercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedChargePercentage")) ? Convert.ToDecimal(reader["AppliedChargePercentage"]) : 10.00m;
+                        perSeatSupportRate = HasColumn(reader, "PerSeatSupportRate") && !reader.IsDBNull(reader.GetOrdinal("PerSeatSupportRate")) ? Convert.ToDecimal(reader["PerSeatSupportRate"]) : 2000.00m;
                     }
                     else
                     {
@@ -1083,27 +1120,57 @@ END;";
                             monthlyRent = Math.Round(totalAmount / cMonths, 2);
                         }
                     }
-                    periodEnd = periodStart.AddMonths(billingMonths).AddDays(-1);
-                    grossAdvanceRent = monthlyRent * billingMonths;
-                    if (secDepositReq > 0)
+
+                    if (startOn.HasValue && startOn.Value.Day > 1 && monthlyRent > 0)
                     {
-                        securityDeposit = secDepositReq;
-                    }
-                    else if (secMonths > 0 && monthlyRent > 0)
-                    {
-                        securityDeposit = monthlyRent * secMonths;
-                    }
-                    else if (resolvedSecDep > 0)
-                    {
-                        securityDeposit = (secMonths > 1 && resolvedSecDep <= monthlyRent && monthlyRent > 0)
-                            ? (monthlyRent * secMonths)
-                            : resolvedSecDep;
+                        int startDay = startOn.Value.Day;
+                        int daysInMonth = DateTime.DaysInMonth(startOn.Value.Year, startOn.Value.Month);
+                        int remainingDays = daysInMonth - startDay + 1;
+                        decimal proratedCurrentMonth = Math.Round(((decimal)remainingDays / daysInMonth) * monthlyRent, 2);
+
+                        if (startDay < 15)
+                        {
+                            // Current month counts as first billing month: prorated current + (N - 1) full months
+                            int fullMonths = Math.Max(0, billingMonths - 1);
+                            grossAdvanceRent = proratedCurrentMonth + (fullMonths * monthlyRent);
+                            periodEnd = new DateTime(startOn.Value.Year, startOn.Value.Month, 1).AddMonths(billingMonths).AddDays(-1);
+                            mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy} ({remainingDays} days prorated + {fullMonths} Month(s))";
+                        }
+                        else
+                        {
+                            // Current month is a separate prorated period: prorated current + N full months
+                            grossAdvanceRent = proratedCurrentMonth + (billingMonths * monthlyRent);
+                            periodEnd = new DateTime(startOn.Value.Year, startOn.Value.Month, 1).AddMonths(billingMonths + 1).AddDays(-1);
+                            mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy} ({remainingDays} days prorated + {billingMonths} Month(s))";
+                        }
                     }
                     else
                     {
-                        securityDeposit = 0m;
+                        periodEnd = periodStart.AddMonths(billingMonths).AddDays(-1);
+                        grossAdvanceRent = monthlyRent * billingMonths;
+                        mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
                     }
-                    mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
+
+                    decimal baseSecurityDeposit = 0m;
+                    if (secDepositReq > 0)
+                    {
+                        baseSecurityDeposit = secDepositReq;
+                    }
+                    else if (secMonths > 0 && monthlyRent > 0)
+                    {
+                        baseSecurityDeposit = monthlyRent * secMonths;
+                    }
+                    else if (resolvedSecDep > 0)
+                    {
+                        baseSecurityDeposit = (secMonths > 1 && resolvedSecDep <= monthlyRent && monthlyRent > 0)
+                            ? (monthlyRent * secMonths)
+                            : resolvedSecDep;
+                    }
+
+                    decimal initialDiscountPct = discountPercentage > 0 ? discountPercentage : (grossAdvanceRent > 0 && discountAmount > 0 ? (discountAmount / grossAdvanceRent) * 100m : 0m);
+                    securityDeposit = baseSecurityDeposit > 0
+                        ? Math.Max(0, Math.Round(baseSecurityDeposit * (1 - (initialDiscountPct / 100.0m)), 2))
+                        : 0m;
                 }
 
                 int contractMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
@@ -1128,9 +1195,24 @@ END;";
                 }
 
                 decimal discountedBase = Math.Max(0, grossAdvanceRent - appliedDiscount);
-                decimal taxTotal = Math.Round(discountedBase * 0.016m, 2);
+                decimal supportCharge;
+                decimal taxRate = appliedTaxPercentage > 0 ? appliedTaxPercentage : 16.00m;
+                if (isMeetingRoom)
+                {
+                    supportCharge = Math.Round(discountedBase * 0.10m, 2);
+                }
+                else
+                {
+                    decimal rate = perSeatSupportRate > 0 ? perSeatSupportRate : 2000.00m;
+                    int cap = spaceCapacity > 0 ? spaceCapacity : 1;
+                    supportCharge = Math.Round(rate * cap * billingMonths, 2);
+                }
+                decimal taxTotal = Math.Round(supportCharge * (taxRate / 100.0m), 2);
                 decimal expectedSubtotal = grossAdvanceRent;
-                decimal expectedGrandTotal = grossAdvanceRent - appliedDiscount + taxTotal + securityDeposit;
+                decimal expectedGrandTotal = Math.Max(0, grossAdvanceRent - appliedDiscount + taxTotal + securityDeposit);
+                decimal effectiveTaxRateOnRent = (discountedBase > 0) 
+                    ? Math.Round(taxTotal / discountedBase, 6) 
+                    : 0m;
 
                 string checkSql = "SELECT TOP 1 Id, InvoiceNumber FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id ASC;";
                 int existingId = 0;
@@ -1156,6 +1238,7 @@ END;";
                             BillingPeriodEnd = @BillingPeriodEnd,
                             AdvanceRentMonths = @AdvanceRentMonths,
                             SecurityDepositAmount = @SecurityDepositAmount,
+                            DueOn = @DueOn,
                             UpdatedOn = SYSUTCDATETIME()
                         WHERE Id = @InvoiceId;";
                     using (var upCmd = new SqlCommand(updateSql, conn))
@@ -1169,6 +1252,7 @@ END;";
                         upCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
                         upCmd.Parameters.AddWithValue("@AdvanceRentMonths", billingMonths);
                         upCmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDeposit);
+                        upCmd.Parameters.AddWithValue("@DueOn", startOn.HasValue ? startOn.Value : DateTime.Today);
                         await upCmd.ExecuteNonQueryAsync();
                     }
 
@@ -1185,7 +1269,7 @@ END;";
                         )
                         VALUES (
                             @InvoiceId, 1, @Description, 1,
-                            @UnitPrice, @DiscountAmount, 0.016, 1
+                            @UnitPrice, @DiscountAmount, @TaxRate, 1
                         );";
                     using (var insCmd = new SqlCommand(insertLineSql, conn))
                     {
@@ -1193,6 +1277,7 @@ END;";
                         insCmd.Parameters.AddWithValue("@Description", mainLineDescription);
                         insCmd.Parameters.AddWithValue("@UnitPrice", grossAdvanceRent);
                         insCmd.Parameters.AddWithValue("@DiscountAmount", appliedDiscount);
+                        insCmd.Parameters.AddWithValue("@TaxRate", effectiveTaxRateOnRent);
                         await insCmd.ExecuteNonQueryAsync();
                     }
 
@@ -1225,7 +1310,8 @@ END;";
                     BookingId = bookingId,
                     UserId = userId,
                     IssuedOn = DateTime.Today,
-                    DueOn = DateTime.Today.AddDays(15),
+                    // Task 3: Initial invoice due date = agreement start date
+                    DueOn = startOn.HasValue ? startOn.Value : DateTime.Today,
                     Notes = $"Initial Payment Invoice for Booking #{bookingId} - {spaceName}",
                     SendEmail = true,
                     BillingPeriodStart = periodStart,
@@ -1243,7 +1329,7 @@ END;";
                         Quantity = 1,
                         UnitPrice = grossAdvanceRent,
                         DiscountAmount = appliedDiscount,
-                        TaxRate = 0.016m,
+                        TaxRate = effectiveTaxRateOnRent,
                         ChargeTypeId = 1
                     });
                 }
@@ -1294,18 +1380,25 @@ END;";
                         b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, b.MonthlyRent, b.SubtotalAmount, b.TotalAmount,
                         b.BillingPeriodMonths, b.DiscountAmount, b.DiscountPercentage, b.DiscountType,
                         u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
-                        s.Name AS SpaceName
+                        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode,
+                        ISNULL(s.Capacity, 1) AS SpaceCapacity,
+                        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
+                        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
+                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate
                     FROM dbo.WN_Bookings b WITH (NOLOCK)
+                    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
                     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
                     LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = b.UserId
                     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
                     WHERE b.Id = @BookingId;";
 
                 int userId = 0;
                 decimal monthlyRent = 0, subtotalAmount = 0, discountAmount = 0, discountPercentage = 0, totalAmount = 0;
-                int billingMonths = 3;
+                int billingMonths = 3, spaceCapacity = 1;
+                decimal appliedTaxPercentage = 16.00m, appliedChargePercentage = 10.00m, perSeatSupportRate = 2000.00m;
                 DateTime? startOn = null, endOn = null;
-                string customerEmail = "", customerName = "", spaceName = "Workspace";
+                string customerEmail = "", customerName = "", spaceName = "Workspace", spaceTypeName = "", categoryCode = "";
 
                 using (var bCmd = new SqlCommand(bookingSql, conn))
                 {
@@ -1325,12 +1418,25 @@ END;";
                         customerEmail = reader.IsDBNull(reader.GetOrdinal("CustomerEmail")) ? "" : reader.GetString(reader.GetOrdinal("CustomerEmail"));
                         customerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? "Valued Customer" : reader.GetString(reader.GetOrdinal("CustomerName"));
                         spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));
+                        spaceTypeName = reader.IsDBNull(reader.GetOrdinal("SpaceTypeName")) ? "" : reader.GetString(reader.GetOrdinal("SpaceTypeName"));
+                        categoryCode = reader.IsDBNull(reader.GetOrdinal("CategoryCode")) ? "" : reader.GetString(reader.GetOrdinal("CategoryCode"));
+                        spaceCapacity = HasColumn(reader, "SpaceCapacity") && !reader.IsDBNull(reader.GetOrdinal("SpaceCapacity")) ? Convert.ToInt32(reader["SpaceCapacity"]) : 1;
+                        appliedTaxPercentage = HasColumn(reader, "AppliedTaxPercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedTaxPercentage")) ? Convert.ToDecimal(reader["AppliedTaxPercentage"]) : 16.00m;
+                        appliedChargePercentage = HasColumn(reader, "AppliedChargePercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedChargePercentage")) ? Convert.ToDecimal(reader["AppliedChargePercentage"]) : 10.00m;
+                        perSeatSupportRate = HasColumn(reader, "PerSeatSupportRate") && !reader.IsDBNull(reader.GetOrdinal("PerSeatSupportRate")) ? Convert.ToDecimal(reader["PerSeatSupportRate"]) : 2000.00m;
                     }
                     else
                     {
                         return NotFound(new { isSuccessful = false, message = "Booking not found." });
                     }
                 }
+
+                bool isMeetingRoom = spaceTypeName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
+                                     spaceTypeName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
+                                     categoryCode.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
+                                     spaceName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
+                                     spaceName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
+                                     (billingMonths <= 0 && startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays < 20);
 
                 DateTime periodStart = DateTime.Today;
                 string lastEndSql = "SELECT TOP 1 BillingPeriodEnd FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id DESC;";
@@ -1387,6 +1493,24 @@ END;";
                     }
                 }
 
+                decimal discountedBase = Math.Max(0, grossAdvanceRent - appliedDiscount);
+                decimal supportCharge;
+                decimal taxRate = appliedTaxPercentage > 0 ? appliedTaxPercentage : 16.00m;
+                if (isMeetingRoom)
+                {
+                    supportCharge = Math.Round(discountedBase * 0.10m, 2);
+                }
+                else
+                {
+                    decimal rate = perSeatSupportRate > 0 ? perSeatSupportRate : 2000.00m;
+                    int cap = spaceCapacity > 0 ? spaceCapacity : 1;
+                    supportCharge = Math.Round(rate * cap * billingMonths, 2);
+                }
+                decimal taxTotal = Math.Round(supportCharge * (taxRate / 100.0m), 2);
+                decimal effectiveTaxRateOnRent = (discountedBase > 0) 
+                    ? Math.Round(taxTotal / discountedBase, 6) 
+                    : 0m;
+
                 decimal arrears = 0m;
                 string arrearsSql = "SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM dbo.WN_Invoices WHERE UserId = @UserId AND StatusId != 2;";
                 using (var arrCmd = new SqlCommand(arrearsSql, conn))
@@ -1399,12 +1523,16 @@ END;";
                     }
                 }
 
+                DateTime today = DateTime.Today;
+                // Recurring invoice due on the last day of the going month
+                DateTime recurringDueDate = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
+
                 var dto = new CreateCustomInvoiceDto
                 {
                     BookingId = bookingId,
                     UserId = userId,
-                    IssuedOn = DateTime.Today,
-                    DueOn = DateTime.Today.AddDays(15),
+                    IssuedOn = today,
+                    DueOn = recurringDueDate,
                     Notes = $"Cycle Billing Invoice for Booking #{bookingId} - {spaceName}",
                     SendEmail = true,
                     BillingPeriodStart = periodStart,
@@ -1422,7 +1550,7 @@ END;";
                         Quantity = 1,
                         UnitPrice = grossAdvanceRent,
                         DiscountAmount = appliedDiscount,
-                        TaxRate = 0.016m,
+                        TaxRate = effectiveTaxRateOnRent,
                         ChargeTypeId = 1
                     });
                 }

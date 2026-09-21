@@ -36,6 +36,8 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime? NextBillingDate { get; set; }
         public decimal BalanceLeft { get; set; }
         public decimal SecurityDeposit { get; set; }
+        public string? OfferingType { get; set; } = "24/7";
+        public decimal? PerSeatSupportRate { get; set; } = 2000.00m;
         public byte? SupportChargesId { get; set; }
         public decimal AppliedChargePercentage { get; set; }
         public decimal AppliedTaxPercentage { get; set; }
@@ -55,6 +57,8 @@ namespace WorkNest.Application.DTOs.Booking
         public int? UserId { get; set; }
         public string? SpaceIdGuid { get; set; }
         public int? SpaceId { get; set; }
+        public string? OfferingType { get; set; } = "24/7";
+        public decimal? PerSeatSupportRate { get; set; }
         public DateTime? StartDateTime { get; set; }
         public DateTime? EndDateTime { get; set; }
         public string? StartDate { get; set; }

@@ -72,8 +72,10 @@ namespace WorkNest.Application.Interfaces
             decimal? monthlyBasePrice = null,
             decimal? maxDiscountPercent = null,
             int? securityDepositMonths = null,
-            decimal? securityDeposit = null
+            decimal? securityDeposit = null,
+            string? offeringType = null
         );
+        Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync();
         Task<IDictionary<string, object?>?> GetQuotationByIdAsync(
             int quotationId,
             string? userEmail = null
@@ -238,6 +240,16 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerActiveSpacesDbAsync(int customerId);
         Task<IDictionary<string, object?>?> GetBookingDetailSummaryDbAsync(int bookingDetailId);
         Task<IDictionary<string, object?>> CreateSurchargeInvoiceSpAsync(int bookingDetailId, int personId, int customerId, decimal surchargeAmount, int excessSeatCount);
+
+        // --- Agreements & Lease Templates ---
+        Task<int> InsertAgreementDbAsync(int quotationId, int customerId, string entityType, int refundDays, decimal feeAmount, decimal securityDeposit, string? opHours, string? custName, string? custCnic, string? custPhone, string? custAddress, string? compName, string? ntn, string? secp, int? userId, int? templateVersionId = null);
+        Task<IDictionary<string, object?>?> GetAgreementByIdDbAsync(int agreementId);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status);
+        Task MarkAgreementSignedDbAsync(int agreementId, int? userId);
+        Task UpdateCustomerAgreementDetailsDbAsync(int customerId, string? fullName, string? phone, string? cnic, string? address, string? company, string? ntn, string? secp);
+        Task<IDictionary<string, object?>?> GetActiveLeaseTemplateByNameDbAsync(string name);
+        Task<IDictionary<string, object?>> PublishLeaseTemplateDbAsync(string name, string contentHtml, int? createdBy);
+        Task EnsureLeaseTemplateSchemaDbAsync();
     }
 }
 

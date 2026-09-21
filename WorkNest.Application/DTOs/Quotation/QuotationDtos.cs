@@ -4,6 +4,13 @@ using WorkNest.Application.DTOs.Booking;
 
 namespace WorkNest.Application.DTOs.Quotation
 {
+    public class OfferingTypeDto
+    {
+        public int Id { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public decimal DiscountCap { get; set; }
+    }
+
     public class QuotationRequest
     {
         public int CustomerId { get; set; }
@@ -20,6 +27,9 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal? SecurityDepositOverride { get; set; }
         public int? BillingPeriodMonths { get; set; }
         public int? SecurityDepositMonths { get; set; }
+        public int? OfferingTypeId { get; set; }
+        public string? OfferingType { get; set; } = "1";
+        public decimal? PerSeatSupportRate { get; set; }
         public int? FloorId { get; set; }
         public string? Remarks { get; set; }
         public DateTime ValidUntil { get; set; }
@@ -29,6 +39,10 @@ namespace WorkNest.Application.DTOs.Quotation
     {
         public int Id { get; set; }
         public string? Guid { get; set; }
+        public int? OfferingTypeId { get; set; }
+        public string? OfferingType { get; set; } = "1";
+        public string? OfferingTypeDescription { get; set; }
+        public decimal? OfferingTypeDiscountCap { get; set; }
         public string? QuotationNumber { get; set; }
         public DateTime QuotationDate { get; set; }
         public DateTime ValidUntil { get; set; }
@@ -63,6 +77,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal SecurityDeposit { get; set; }
         public decimal TotalAmount { get; set; }
         public byte? SupportChargesId { get; set; }
+        public decimal? PerSeatSupportRate { get; set; } = 2000.00m;
         public decimal AppliedChargePercentage { get; set; } = 10.00m;
         public decimal AppliedTaxPercentage { get; set; } = 16.00m;
         public decimal SupportChargeAmount { get; set; }

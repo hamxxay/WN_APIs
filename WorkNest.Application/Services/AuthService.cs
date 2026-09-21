@@ -23,7 +23,7 @@ namespace WorkNest.Application.Services
         {
             var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
             var roleId = request.RoleId ?? Roles.GeneralId;
-            var companyId = request.CompanyId ?? 484;
+            var companyId = request.CompanyId;
 
             var (id, publicId) = await _db.SyncUserAsync(request.Email, name, request.Phone, request.PasswordHash, roleId, companyId);
             await EnsureCustomerAsync(request.Email, name, request.Phone, id);
@@ -34,7 +34,7 @@ namespace WorkNest.Application.Services
         {
             var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
             var roleId = request.RoleId ?? Roles.GeneralId;
-            var companyId = request.CompanyId ?? 484;
+            var companyId = request.CompanyId;
 
             var (id, publicId) = await _db.SyncUserAsync(request.Email, name, request.Phone, request.Password, roleId, companyId);
             await EnsureCustomerAsync(request.Email, name, request.Phone, id);
@@ -52,7 +52,7 @@ namespace WorkNest.Application.Services
 
             if (row is null)
             {
-                var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, request.Password, Roles.GeneralId, 484);
+                var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, request.Password, Roles.GeneralId, request.CompanyId);
                 publicId = pid;
                 role = Roles.General;
                 await EnsureCustomerAsync(request.Email, name, null, newId);
@@ -69,7 +69,7 @@ namespace WorkNest.Application.Services
                 var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
                 var nameToUse = !string.IsNullOrWhiteSpace(existingName) ? existingName : name;
 
-                await _db.SyncUserAsync(request.Email, nameToUse, null, request.Password, null, null);
+                await _db.SyncUserAsync(request.Email, nameToUse, null, request.Password, null, request.CompanyId);
                 await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
             }
 
@@ -100,12 +100,12 @@ namespace WorkNest.Application.Services
                     var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
                     var nameToUse = !string.IsNullOrWhiteSpace(existingName) ? existingName : name;
 
-                    await _db.SyncUserAsync(request.Email, nameToUse, null, null, null, null);
+                    await _db.SyncUserAsync(request.Email, nameToUse, null, null, null, request.CompanyId);
                     await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
                 }
                 else
                 {
-                    var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, null, Roles.GeneralId, 484);
+                    var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, null, Roles.GeneralId, request.CompanyId);
                     publicId = pid;
                     role = Roles.General;
                     await EnsureCustomerAsync(request.Email, name, null, newId);

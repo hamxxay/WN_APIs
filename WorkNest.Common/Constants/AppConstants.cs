@@ -5,7 +5,7 @@ namespace WorkNest.Common.Constants
     /// </summary>
     public static class AppConstants
     {
-        public const int DefaultCompanyId = 484;
+        public const int DefaultCompanyId = 1;
 
         public static class BookingStatus
         {

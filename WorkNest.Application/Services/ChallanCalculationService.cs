@@ -45,6 +45,7 @@ namespace WorkNest.Application.Services
         public int ContractPeriodMonths { get; set; } = 12;
         public int BillingPeriodMonths { get; set; } = 3;
         public decimal SecurityDeposit { get; set; }
+        public decimal PerSeatSupportRate { get; set; } = 2000.00m;
         public decimal AppliedChargePercentage { get; set; } = 10.00m;
         public decimal AppliedTaxPercentage { get; set; } = 16.00m;
         public string DiscountType { get; set; } = "Percentage";
@@ -72,6 +73,7 @@ namespace WorkNest.Application.Services
         public int ContractPeriodMonths { get; set; }
         public int BillingPeriodMonths { get; set; }
         public decimal SecurityDeposit { get; set; }
+        public decimal PerSeatSupportRate { get; set; } = 2000.00m;
         public decimal AppliedChargePercentage { get; set; } = 10.00m;
         public decimal SupportChargeAmount { get; set; }
         public decimal AppliedTaxPercentage { get; set; } = 16.00m;
@@ -80,6 +82,8 @@ namespace WorkNest.Application.Services
         public decimal TaxAmountOnContract { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal TotalPayable { get; set; }
+        public bool IsProrated { get; set; }
+        public decimal ProratedCurrentMonthAmount { get; set; }
         public List<ChallanFieldDto> Fields { get; set; } = new();
     }
 
@@ -208,13 +212,42 @@ namespace WorkNest.Application.Services
                     ? input.TotalContractAmount
                     : (res.MonthlyRent * res.ContractPeriodMonths);
 
-                res.FirstCycleRent = (res.MonthlyRent > 0 && res.BillingPeriodMonths > 0)
-                    ? (res.MonthlyRent * res.BillingPeriodMonths)
-                    : (input.CurrentCycleAmount > 0 ? input.CurrentCycleAmount : res.MonthlyRent);
+                int capacity = input.Capacity > 0 ? input.Capacity : 1;
+                decimal supportRate = input.PerSeatSupportRate > 0 ? input.PerSeatSupportRate : 2000.00m;
+                res.PerSeatSupportRate = supportRate;
+
+                // Proration calculation (Task 7)
+                if (input.StartOn.HasValue && input.StartOn.Value.Day > 1)
+                {
+                    int startDay = input.StartOn.Value.Day;
+                    int daysInMonth = DateTime.DaysInMonth(input.StartOn.Value.Year, input.StartOn.Value.Month);
+                    int remainingDays = daysInMonth - startDay + 1;
+                    decimal proratedCurrentMonth = Math.Round(((decimal)remainingDays / daysInMonth) * res.MonthlyRent, 2);
+                    res.IsProrated = true;
+                    res.ProratedCurrentMonthAmount = proratedCurrentMonth;
+
+                    if (startDay < 15)
+                    {
+                        // Current month counts as first billing month: prorated current + (N - 1) full months
+                        int fullMonths = Math.Max(0, res.BillingPeriodMonths - 1);
+                        res.FirstCycleRent = proratedCurrentMonth + (fullMonths * res.MonthlyRent);
+                    }
+                    else
+                    {
+                        // Current month is a separate prorated period: prorated current + N full months
+                        res.FirstCycleRent = proratedCurrentMonth + (res.BillingPeriodMonths * res.MonthlyRent);
+                    }
+                }
+                else
+                {
+                    res.FirstCycleRent = (res.MonthlyRent > 0 && res.BillingPeriodMonths > 0)
+                        ? (res.MonthlyRent * res.BillingPeriodMonths)
+                        : (input.CurrentCycleAmount > 0 ? input.CurrentCycleAmount : res.MonthlyRent);
+                }
 
                 res.BaseRent = res.FirstCycleRent;
 
-                res.SecurityDeposit = (input.SecurityDeposit > 0 || res.SpaceType == "PrivateRoom") ? input.SecurityDeposit : 0;
+                decimal initialDeposit = (input.SecurityDeposit > 0 || res.SpaceType == "PrivateRoom") ? input.SecurityDeposit : 0;
 
                 decimal discountPct = input.DiscountPercentage > 0 ? input.DiscountPercentage :
                     (string.Equals(input.DiscountType, "Percentage", StringComparison.OrdinalIgnoreCase) ? input.DiscountValue : 0);
@@ -237,13 +270,23 @@ namespace WorkNest.Application.Services
                 }
 
                 decimal discountedRent = Math.Max(0, res.FirstCycleRent - discountOnRent);
-                decimal discountedDeposit = res.SecurityDeposit;
 
+                // Task 1: Security Deposit Discount Mirroring
+                decimal depositDiscountPct = discountPct > 0 ? discountPct :
+                    (res.FirstCycleRent > 0 && discountOnRent > 0 ? (discountOnRent / res.FirstCycleRent) * 100m : 0m);
+
+                decimal discountedDeposit = initialDeposit > 0
+                    ? Math.Max(0, Math.Round(initialDeposit * (1 - (depositDiscountPct / 100.0m)), 2))
+                    : 0m;
+
+                res.SecurityDeposit = discountedDeposit;
                 res.DiscountAmount = discountOnRent;
-                res.SupportChargeAmount = Math.Round(discountedRent * (res.AppliedChargePercentage / 100.0m), 2);
+
+                // Task 2: Flat Per-Seat Support Charge based on room total seat capacity
+                res.SupportChargeAmount = Math.Round(supportRate * capacity * res.BillingPeriodMonths, 2);
                 res.TaxAmount = Math.Round(res.SupportChargeAmount * (res.AppliedTaxPercentage / 100.0m), 2);
                 res.TaxAmountOnAdvanceRent = res.TaxAmount;
-                res.TaxAmountOnContract = Math.Round(Math.Max(0, res.TotalContractRent - (discountOnRent * (res.ContractPeriodMonths / Math.Max(1, res.BillingPeriodMonths)))) * (res.AppliedChargePercentage / 100.0m) * (res.AppliedTaxPercentage / 100.0m), 2);
+                res.TaxAmountOnContract = Math.Round(supportRate * capacity * res.ContractPeriodMonths * (res.AppliedTaxPercentage / 100.0m), 2);
 
                 res.TotalPayable = Math.Max(0, discountedRent + discountedDeposit + res.TaxAmount);
             }
@@ -408,6 +451,8 @@ namespace WorkNest.Application.Services
                 CurrentCycleAmount = effectiveSubtotal,
                 ContractPeriodMonths = q.Contract?.NumberOfMonths > 0 ? q.Contract.NumberOfMonths : 12,
                 BillingPeriodMonths = q.BillingPeriodMonths > 0 ? q.BillingPeriodMonths : 3,
+                Capacity = q.Capacity ?? 1,
+                PerSeatSupportRate = q.PerSeatSupportRate ?? 2000.00m,
                 SecurityDeposit = secDeposit,
                 AppliedChargePercentage = q.AppliedChargePercentage > 0 ? q.AppliedChargePercentage : 10.00m,
                 AppliedTaxPercentage = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 16.00m,
@@ -428,6 +473,7 @@ namespace WorkNest.Application.Services
             q.MonthlyRent = calc.MonthlyRent;
             q.CurrentCycleAmount = calc.FirstCycleRent;
             q.SecurityDeposit = calc.SecurityDeposit;
+            q.PerSeatSupportRate = calc.PerSeatSupportRate;
             q.AppliedChargePercentage = calc.AppliedChargePercentage;
             q.SupportChargeAmount = calc.SupportChargeAmount;
             q.AppliedTaxPercentage = calc.AppliedTaxPercentage;
@@ -479,6 +525,7 @@ namespace WorkNest.Application.Services
                 AppliedTaxPercentage = c.AppliedTaxPercentage > 0 ? c.AppliedTaxPercentage : 16.00m,
                 DiscountPercentage = c.DiscountPercentage,
                 DiscountAmount = c.DiscountAmount,
+                Capacity = c.SpaceCapacity > 0 ? c.SpaceCapacity : 1,
                 SeatPrice = c.SeatPrice,
                 RoomPrice = c.RoomPrice,
                 ExplicitBillingType = c.BillingType,

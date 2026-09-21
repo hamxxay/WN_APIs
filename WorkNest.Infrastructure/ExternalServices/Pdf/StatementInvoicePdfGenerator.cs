@@ -29,6 +29,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public decimal CurrentInvoiceTotal { get; set; } = 287500.00m;
         public decimal TotalOutstandingDue => PreviousOutstandingBalance - PaymentReceived + CurrentInvoiceTotal;
 
+        public decimal SubTotal { get; set; }
+        public decimal DiscountTotal { get; set; }
+        public decimal TaxTotal { get; set; }
+
         public decimal VatRate { get; set; } = 0.16m;
         public decimal SupportChargeRate { get; set; } = 0.10m;
         public decimal? SupportChargeAmount { get; set; }
@@ -290,31 +294,45 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal depositTotal = data.LineItems.Where(i => IsDepositItem(i)).Sum(i => i.PriceExclVat);
             decimal rentTotal = totalExclVat - depositTotal;
             decimal totalLineVat = data.LineItems.Sum(i => i.VatAmount);
+            decimal effectiveTaxTotal = data.TaxTotal > 0 ? data.TaxTotal : totalLineVat;
+
+            decimal taxPercentage = data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0
+                ? data.AppliedTaxPercentage.Value
+                : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
 
             bool isExplicitlyNoTax = (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value == 0m)
                                   && (data.AppliedChargePercentage.HasValue && data.AppliedChargePercentage.Value == 0m);
 
             bool hasTax = !isExplicitlyNoTax && (
-                totalLineVat > 0
+                effectiveTaxTotal > 0
                 || (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0)
                 || (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
             );
 
             if (hasTax)
             {
-                decimal chargePercentage = data.AppliedChargePercentage ?? (data.SupportChargeRate > 0 ? data.SupportChargeRate * 100m : 10m);
-                decimal supportCharges = data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0
-                    ? data.SupportChargeAmount.Value
-                    : (rentTotal > 0 ? Math.Round(rentTotal * (chargePercentage / 100m), 2) : 0m);
+                decimal supportCharges = 0m;
+                decimal totalVat = 0m;
 
-                decimal taxPercentage = data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0
-                    ? data.AppliedTaxPercentage.Value
-                    : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
+                if (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
+                {
+                    supportCharges = data.SupportChargeAmount.Value;
+                    totalVat = effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round(supportCharges * (taxPercentage / 100m), 2);
+                }
+                else if (effectiveTaxTotal > 0 && taxPercentage > 0)
+                {
+                    totalVat = effectiveTaxTotal;
+                    supportCharges = Math.Round(totalVat / (taxPercentage / 100m), 2);
+                }
+                else if (rentTotal > 0 && (data.AppliedChargePercentage ?? 10m) > 0)
+                {
+                    supportCharges = Math.Round(rentTotal * ((data.AppliedChargePercentage ?? 10m) / 100m), 2);
+                    totalVat = Math.Round(supportCharges * (taxPercentage / 100m), 2);
+                }
 
-                decimal totalVat = totalLineVat > 0 ? totalLineVat : Math.Round(supportCharges * (taxPercentage / 100m), 2);
                 decimal grandTotal = data.CurrentInvoiceTotal > 0
                     ? data.CurrentInvoiceTotal
-                    : (totalExclVat + supportCharges + totalVat);
+                    : (totalExclVat + totalVat);
 
                 col.Item().PaddingTop(10).AlignRight().Column(c =>
                 {
@@ -328,8 +346,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
                     }
 
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"Support Charges ({chargePercentage:G29}%):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Charges):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Support Services Portion (incl. in rent):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Services):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });
                     c.Item().PaddingTop(4).Row(r =>
                     {
                         r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(10).FontColor("#000000");
@@ -340,7 +358,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     {
                         c.Item().PaddingTop(6).AlignRight().Text(tx =>
                         {
-                            tx.Hyperlink("  invoice for support charges", data.SupportChargesInvoiceUrl)
+                            tx.Hyperlink("View Sales Tax Invoice for Support Services", data.SupportChargesInvoiceUrl)
                               .Bold().FontSize(9).FontColor("#1d4ed8").Underline();
                         });
                     }
@@ -398,16 +416,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 }
 
                 tc.Item().Text($"And send the receipt on +923201809696").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid for 5 days after due date ").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid within 5 days after due date ").FontSize(7.5f).FontColor("#000000");
 
 
                 tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial Sales Tax (PST) on support services.").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. Payment is due on or before the due date specified on this invoice.").FontSize(7.5f).FontColor("#000000");
-                if (depositTotal > 0 || data.SecurityDepositAmount > 0)
-                {
-                    tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(7.5f).FontColor("#000000");
-                }
-                tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(7.5f).FontColor("#000000");
             });
         }

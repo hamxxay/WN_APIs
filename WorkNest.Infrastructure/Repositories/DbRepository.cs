@@ -164,7 +164,6 @@ namespace WorkNest.Infrastructure.Repositories
                 : (!string.IsNullOrWhiteSpace(email) ? email.Split('@')[0] : "User");
             var userName = resolvedName;
             var finalRoleId = roleId ?? WorkNest.Common.Constants.Roles.GeneralId;
-            var finalCompanyId = companyId ?? 484;
 
             if (await r.ReadAsync())
             {
@@ -181,13 +180,13 @@ namespace WorkNest.Infrastructure.Repositories
                 var nameToSet = !string.IsNullOrWhiteSpace(existingName) ? existingName : resolvedName;
                 var userNameToSet = !string.IsNullOrWhiteSpace(existingUserName) ? existingUserName : userName;
                 var roleToSet = existingRoleId ?? finalRoleId;
-                var companyToSet = existingCompanyId ?? finalCompanyId;
+                var companyToSet = companyId ?? existingCompanyId;
 
                 await using var upd = SP("dbo.WN_Users_Update", c);
                 upd.Parameters.AddWithValue("@Id", id);
                 upd.Parameters.AddWithValue("@Name", (object?)nameToSet ?? DBNull.Value);
                 upd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
-                upd.Parameters.AddWithValue("@CompanyId", companyToSet);
+                upd.Parameters.AddWithValue("@CompanyId", (object?)companyToSet ?? DBNull.Value);
                 upd.Parameters.AddWithValue("@CityId", DBNull.Value);
                 upd.Parameters.AddWithValue("@Address", DBNull.Value);
                 upd.Parameters.AddWithValue("@CnicOrPassport", DBNull.Value);
@@ -195,10 +194,10 @@ namespace WorkNest.Infrastructure.Repositories
                 upd.Parameters.AddWithValue("@Notes", DBNull.Value);
                 await upd.ExecuteNonQueryAsync();
 
-                await using var rawCmd = new SqlCommand("UPDATE dbo.WN_Users SET RoleId = ISNULL(RoleId, @RoleId), UserName = ISNULL(UserName, @UserName), CompanyId = ISNULL(CompanyId, @CompanyId) WHERE Id = @Id", c);
-                rawCmd.Parameters.AddWithValue("@RoleId", roleToSet);
-                rawCmd.Parameters.AddWithValue("@UserName", userNameToSet);
-                rawCmd.Parameters.AddWithValue("@CompanyId", companyToSet);
+                await using var rawCmd = new SqlCommand("UPDATE dbo.WN_Users SET RoleId = ISNULL(RoleId, @RoleId), UserName = ISNULL(UserName, @UserName), CompanyId = COALESCE(@CompanyId, CompanyId) WHERE Id = @Id", c);
+                rawCmd.Parameters.AddWithValue("@RoleId", (object?)roleToSet ?? DBNull.Value);
+                rawCmd.Parameters.AddWithValue("@UserName", (object?)userNameToSet ?? DBNull.Value);
+                rawCmd.Parameters.AddWithValue("@CompanyId", (object?)companyToSet ?? DBNull.Value);
                 rawCmd.Parameters.AddWithValue("@Id", id);
                 await rawCmd.ExecuteNonQueryAsync();
 
@@ -211,8 +210,8 @@ namespace WorkNest.Infrastructure.Repositories
             ins.Parameters.AddWithValue("@PasswordHash", (object?)passwordHash ?? DBNull.Value);
             ins.Parameters.AddWithValue("@Name", (object?)resolvedName ?? DBNull.Value);
             ins.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
-            ins.Parameters.AddWithValue("@RoleId", finalRoleId);
-            ins.Parameters.AddWithValue("@CompanyId", finalCompanyId);
+            ins.Parameters.AddWithValue("@RoleId", (object?)finalRoleId ?? DBNull.Value);
+            ins.Parameters.AddWithValue("@CompanyId", (object?)companyId ?? DBNull.Value);
             ins.Parameters.AddWithValue("@CityId", DBNull.Value);
             ins.Parameters.AddWithValue("@Address", DBNull.Value);
             ins.Parameters.AddWithValue("@CnicOrPassport", DBNull.Value);
@@ -229,10 +228,10 @@ namespace WorkNest.Infrastructure.Repositories
 
                 if (insertedId.HasValue)
                 {
-                    await using var rawCmd = new SqlCommand("UPDATE dbo.WN_Users SET UserName = ISNULL(UserName, @UserName), RoleId = ISNULL(RoleId, @RoleId), CompanyId = ISNULL(CompanyId, @CompanyId) WHERE Id = @Id", c);
-                    rawCmd.Parameters.AddWithValue("@UserName", userName);
-                    rawCmd.Parameters.AddWithValue("@RoleId", finalRoleId);
-                    rawCmd.Parameters.AddWithValue("@CompanyId", finalCompanyId);
+                    await using var rawCmd = new SqlCommand("UPDATE dbo.WN_Users SET UserName = ISNULL(UserName, @UserName), RoleId = ISNULL(RoleId, @RoleId), CompanyId = COALESCE(@CompanyId, CompanyId) WHERE Id = @Id", c);
+                    rawCmd.Parameters.AddWithValue("@UserName", (object?)userName ?? DBNull.Value);
+                    rawCmd.Parameters.AddWithValue("@RoleId", (object?)finalRoleId ?? DBNull.Value);
+                    rawCmd.Parameters.AddWithValue("@CompanyId", (object?)companyId ?? DBNull.Value);
                     rawCmd.Parameters.AddWithValue("@Id", insertedId.Value);
                     await rawCmd.ExecuteNonQueryAsync();
                 }
@@ -262,7 +261,8 @@ namespace WorkNest.Infrastructure.Repositories
             decimal? monthlyBasePrice = null,
             decimal? maxDiscountPercent = null,
             int? securityDepositMonths = null,
-            decimal? securityDeposit = null)
+            decimal? securityDeposit = null,
+            string? offeringType = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_Insert", c);
@@ -308,6 +308,7 @@ namespace WorkNest.Infrastructure.Repositories
                 if (capacity.HasValue) updateParts.Add("Capacity = @CAP");
                 if (monthlyBasePrice.HasValue) updateParts.Add("MonthlyBasePrice = @MBP");
                 if (maxDiscountPercent.HasValue) updateParts.Add("MaxDiscountPercent = @MDP");
+                if (!string.IsNullOrWhiteSpace(offeringType)) updateParts.Add("OfferingType = @OT");
 
                 var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
                 await using var upd = new SqlCommand(updateSql, c);
@@ -322,6 +323,7 @@ namespace WorkNest.Infrastructure.Repositories
                 if (capacity.HasValue) upd.Parameters.AddWithValue("@CAP", capacity.Value);
                 if (monthlyBasePrice.HasValue) upd.Parameters.AddWithValue("@MBP", monthlyBasePrice.Value);
                 if (maxDiscountPercent.HasValue) upd.Parameters.AddWithValue("@MDP", maxDiscountPercent.Value);
+                if (!string.IsNullOrWhiteSpace(offeringType)) upd.Parameters.AddWithValue("@OT", offeringType);
 
                 await upd.ExecuteNonQueryAsync();
 
@@ -334,9 +336,18 @@ namespace WorkNest.Infrastructure.Repositories
                 if (capacity.HasValue) result["Capacity"] = capacity.Value;
                 if (monthlyBasePrice.HasValue) result["MonthlyBasePrice"] = monthlyBasePrice.Value;
                 if (maxDiscountPercent.HasValue) result["MaxDiscountPercent"] = maxDiscountPercent.Value;
+                if (!string.IsNullOrWhiteSpace(offeringType)) result["OfferingType"] = offeringType;
             }
 
             return result;
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT Id, Description, DiscountCap FROM dbo.WN_OfferingType ORDER BY Id ASC", c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
         }
         public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationHistoryAsync(
             int quotationId,
@@ -2892,9 +2903,13 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             };
 
             // Single line item: Service Charges, Tax on it, and Total
-            decimal serviceChargeExclusive = dto.ServiceChargeAmount > 0 ? dto.ServiceChargeAmount : dto.SubTotal;
-            decimal serviceChargeTaxRate = dto.ServiceChargeTaxRate;
+            decimal serviceChargeTaxRate = dto.ServiceChargeTaxRate > 0 ? dto.ServiceChargeTaxRate : (dto.TaxTotal > 0 ? 16m : 0m);
             decimal serviceChargeTaxAmount = dto.ServiceChargeTaxAmount > 0 ? dto.ServiceChargeTaxAmount : dto.TaxTotal;
+            decimal serviceChargeExclusive = dto.ServiceChargeAmount > 0
+                ? dto.ServiceChargeAmount
+                : (serviceChargeTaxAmount > 0 && serviceChargeTaxRate > 0
+                    ? Math.Round(serviceChargeTaxAmount / (serviceChargeTaxRate / 100m), 2)
+                    : dto.SubTotal);
 
             dto.LineItems.Add(new CustomerSTInvoiceLineDto
             {
@@ -2938,6 +2953,226 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     return true;
             }
             return false;
+        }
+
+        public async Task<int> InsertAgreementDbAsync(int quotationId, int customerId, string entityType, int refundDays, decimal feeAmount, decimal securityDeposit, string? opHours, string? custName, string? custCnic, string? custPhone, string? custAddress, string? compName, string? ntn, string? secp, int? userId, int? templateVersionId = null)
+        {
+            await using var c = await Open();
+            string sql = @"
+                INSERT INTO dbo.WN_Agreements (
+                    QuotationId, CustomerId, EntityType, Status, SentDate,
+                    RefundDays, FeeAmount, SecurityDeposit, OperatingHours,
+                    CustomerName, CustomerCnic, CustomerPhone, CustomerAddress,
+                    CompanyName, Ntn, SecpRegistrationNo, CreatedById, TemplateVersionId, CreatedOn
+                )
+                OUTPUT INSERTED.Id
+                VALUES (
+                    @QuotationId, @CustomerId, @EntityType, 'AgreementSent', SYSUTCDATETIME(),
+                    @RefundDays, @FeeAmount, @SecurityDeposit, @OperatingHours,
+                    @CustomerName, @CustomerCnic, @CustomerPhone, @CustomerAddress,
+                    @CompanyName, @Ntn, @SecpRegistrationNo, @CreatedById, @TemplateVersionId, SYSUTCDATETIME()
+                );";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@EntityType", entityType);
+            cmd.Parameters.AddWithValue("@RefundDays", refundDays > 0 ? refundDays : 30);
+            cmd.Parameters.AddWithValue("@FeeAmount", feeAmount);
+            cmd.Parameters.AddWithValue("@SecurityDeposit", securityDeposit);
+            cmd.Parameters.AddWithValue("@OperatingHours", (object?)opHours ?? "24/7");
+            cmd.Parameters.AddWithValue("@CustomerName", (object?)custName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerCnic", (object?)custCnic ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerPhone", (object?)custPhone ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerAddress", (object?)custAddress ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CompanyName", (object?)compName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Ntn", (object?)ntn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecpRegistrationNo", (object?)secp ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedById", (object?)userId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@TemplateVersionId", (object?)templateVersionId ?? DBNull.Value);
+
+            var res = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(res);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetAgreementByIdDbAsync(int agreementId)
+        {
+            await using var c = await Open();
+            string sql = @"
+                SELECT a.*, q.QuotationNumber, q.StartDateTime, q.EndDateTime,
+                       t.Name AS TemplateName, t.ContentHtml AS TemplateHtml
+                FROM dbo.WN_Agreements a WITH (NOLOCK)
+                JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+                LEFT JOIN dbo.WN_LeaseTemplates t WITH (NOLOCK) ON t.Id = a.TemplateVersionId
+                WHERE a.Id = @AgreementId;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+                return ToDict(r);
+
+            return null;
+        }
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Agreements_GetList", c);
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+
+            int total = 0;
+            var list = new List<IDictionary<string, object?>>();
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+                total = r.GetInt32(0);
+
+            if (await r.NextResultAsync())
+            {
+                while (await r.ReadAsync())
+                    list.Add(ToDict(r));
+            }
+
+            return (list, total);
+        }
+
+        public async Task MarkAgreementSignedDbAsync(int agreementId, int? userId)
+        {
+            await using var c = await Open();
+            string sql = @"
+                UPDATE dbo.WN_Agreements
+                SET Status = 'Signed', SignedDate = SYSUTCDATETIME(), UpdatedOn = SYSUTCDATETIME()
+                WHERE Id = @AgreementId;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task UpdateCustomerAgreementDetailsDbAsync(int customerId, string? fullName, string? phone, string? cnic, string? address, string? company, string? ntn, string? secp)
+        {
+            await using var c = await Open();
+            string sql = @"
+                UPDATE dbo.WN_Customers
+                SET FirstName = ISNULL(@FirstName, FirstName),
+                    PhoneNumber = ISNULL(@PhoneNumber, PhoneNumber),
+                    CnicOrPassport = ISNULL(@Cnic, CnicOrPassport),
+                    Address = ISNULL(@Address, Address),
+                    Company = ISNULL(@CompanyName, Company),
+                    NTN = ISNULL(@NTN, NTN),
+                    SecpRegistrationNo = ISNULL(@SecpRegistrationNo, SecpRegistrationNo),
+                    UpdatedAt = SYSUTCDATETIME()
+                WHERE Id = @CustomerId;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@FirstName", (object?)fullName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Cnic", (object?)cnic ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CompanyName", (object?)company ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@NTN", (object?)ntn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecpRegistrationNo", (object?)secp ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<IDictionary<string, object?>?> GetActiveLeaseTemplateByNameDbAsync(string name)
+        {
+            await using var c = await Open();
+            string sql = @"
+                SELECT TOP 1 
+                    t.Id,
+                    t.Name,
+                    t.ContentHtml,
+                    t.IsActive,
+                    t.CreatedAt,
+                    t.CreatedBy,
+                    ISNULL(u.Name, u.Email) AS CreatedByName
+                FROM dbo.WN_LeaseTemplates t WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = t.CreatedBy
+                WHERE t.Name = @Name AND t.IsActive = 1
+                ORDER BY t.Id DESC;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Name", name);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+                return ToDict(r);
+
+            return null;
+        }
+
+        public async Task<IDictionary<string, object?>> PublishLeaseTemplateDbAsync(string name, string contentHtml, int? createdBy)
+        {
+            await using var c = await Open();
+            string sql = @"
+                BEGIN TRANSACTION;
+                BEGIN TRY
+                    UPDATE dbo.WN_LeaseTemplates
+                    SET IsActive = 0
+                    WHERE Name = @Name AND IsActive = 1;
+
+                    INSERT INTO dbo.WN_LeaseTemplates (
+                        Name, ContentHtml, IsActive, CreatedAt, CreatedBy
+                    )
+                    OUTPUT 
+                        INSERTED.Id,
+                        INSERTED.Name,
+                        INSERTED.ContentHtml,
+                        INSERTED.IsActive,
+                        INSERTED.CreatedAt,
+                        INSERTED.CreatedBy
+                    VALUES (
+                        @Name, @ContentHtml, 1, SYSUTCDATETIME(), @CreatedBy
+                    );
+
+                    COMMIT TRANSACTION;
+                END TRY
+                BEGIN CATCH
+                    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+                    THROW;
+                END CATCH;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Name", name);
+            cmd.Parameters.AddWithValue("@ContentHtml", contentHtml);
+            cmd.Parameters.AddWithValue("@CreatedBy", (object?)createdBy ?? DBNull.Value);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+                return ToDict(r);
+
+            throw new InvalidOperationException("Failed to publish lease template.");
+        }
+
+        public async Task EnsureLeaseTemplateSchemaDbAsync()
+        {
+            await using var c = await Open();
+            string sql = @"
+                IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WN_LeaseTemplates')
+                BEGIN
+                    CREATE TABLE dbo.WN_LeaseTemplates (
+                        Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY CLUSTERED,
+                        Name NVARCHAR(100) NOT NULL,
+                        ContentHtml NVARCHAR(MAX) NOT NULL,
+                        IsActive BIT NOT NULL DEFAULT 1,
+                        CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                        CreatedBy INT NULL
+                    );
+                    CREATE INDEX IX_WN_LeaseTemplates_Name_IsActive ON dbo.WN_LeaseTemplates(Name, IsActive);
+                END;
+
+                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Agreements') AND name = 'TemplateVersionId')
+                BEGIN
+                    ALTER TABLE dbo.WN_Agreements ADD TemplateVersionId INT NULL;
+                END;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            await cmd.ExecuteNonQueryAsync();
         }
     }
 }

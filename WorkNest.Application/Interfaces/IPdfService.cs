@@ -10,5 +10,6 @@ namespace WorkNest.Application.Interfaces
         byte[] GenerateBookingConfirmationPdf(ChallanResponseDto challan);
         byte[] GenerateAdvanceInvoicePdf(WorkNest.Application.DTOs.Payment.AdvanceInvoicePdfDto inv);
         byte[] GenerateSalesTaxInvoicePdf(CustomerSTInvoiceDto dto);
+        byte[] GenerateAgreementPdf(WorkNest.Application.DTOs.Agreement.SendAgreementRequest request, string quotationNumber);
     }
 }

@@ -295,6 +295,7 @@ namespace WorkNest.Application.Services
             var spaceNum = header.TryGetValue("SpaceNumber", out var sn) && sn != null ? sn.ToString() : (header["SpaceCode"]?.ToString() ?? header["SpaceName"]?.ToString());
             var monthlyRent = header.TryGetValue("MonthlyRent", out var mr) && mr != null ? Convert.ToDecimal(mr) : 0m;
             var billingPeriodMonths = header.TryGetValue("BillingPeriodMonths", out var bpm) && bpm != null ? Convert.ToInt32(bpm) : 1;
+            var billingPeriod = header.TryGetValue("BillingPeriod", out var bp) && bp != null ? bp.ToString() : (header.TryGetValue("BillingPeriodLabel", out var bpl) && bpl != null ? bpl.ToString() : $"{billingPeriodMonths} Month(s)");
             var numberOfMonths = header.TryGetValue("NumberOfMonths", out var nom) && nom != null ? Convert.ToInt32(nom) : 1;
             var currentCycleAmount = header.TryGetValue("CurrentCycleAmount", out var cca) && cca != null ? Convert.ToDecimal(cca) : 0m;
             var totalContractAmount = header.TryGetValue("TotalContractAmount", out var tca) && tca != null ? Convert.ToDecimal(tca) : 0m;
@@ -312,7 +313,30 @@ namespace WorkNest.Application.Services
             var totalPaidAmount = header.TryGetValue("TotalPaidAmount", out var tpa) && tpa != null ? Convert.ToDecimal(tpa) : 0m;
             var nextBillDueDate = ParseDateSafely(header.TryGetValue("NextBillDueDate", out var nbdd) ? nbdd : null);
             var nextBillingDate = ParseDateSafely(header.TryGetValue("NextBillingDate", out var nbd) ? nbd : nextBillDueDate);
-            var billingPeriod = header.TryGetValue("BillingPeriod", out var bp) && bp != null ? bp.ToString() : (header["BillingPeriodLabel"]?.ToString() ?? header["BillingPeriodCode"]?.ToString());
+            var calcInput = new ChallanCalculationInput
+            {
+                SpaceTypeName = header["SpaceTypeName"]?.ToString(),
+                SpaceCode = header["SpaceCode"]?.ToString(),
+                SpaceName = header["SpaceName"]?.ToString(),
+                Capacity = header.TryGetValue("SpaceCapacity", out var scVal) && scVal != null ? Convert.ToInt32(scVal) : 1,
+                StartOn = contractStart ?? startOn,
+                EndOn = contractEnd ?? endOn,
+                MonthlyRent = monthlyRent,
+                CurrentCycleAmount = currentCycleAmount,
+                TotalContractAmount = totalContractAmount,
+                BillingPeriodMonths = billingPeriodMonths,
+                ContractPeriodMonths = numberOfMonths,
+                SecurityDeposit = securityDeposit,
+                DiscountPercentage = header.TryGetValue("DiscountPercentage", out var dp) && dp != null ? Convert.ToDecimal(dp) : 0m,
+                DiscountAmount = header.TryGetValue("DiscountAmount", out var da) && da != null ? Convert.ToDecimal(da) : 0m,
+                AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp != null ? Convert.ToDecimal(atp) : 16.00m,
+                PerSeatSupportRate = header.TryGetValue("PerSeatSupportRate", out var pssr) && pssr != null ? Convert.ToDecimal(pssr) : 2000.00m
+            };
+            var calcResult = ChallanCalculationService.Calculate(calcInput);
+
+            decimal supportTaxOnCycle = calcResult.TaxAmount;
+            decimal totalPayableInitial = calcResult.TotalPayable;
+            securityDeposit = calcResult.SecurityDeposit;
 
             var contractObj = new ContractDetailsDto
             {
@@ -329,9 +353,6 @@ namespace WorkNest.Application.Services
                 SecurityDeposit = securityDeposit,
                 SpaceNumber = spaceNum
             };
-
-            decimal supportTaxOnCycle = Math.Round(Math.Round(currentCycleAmount * 0.10m, 2) * 0.16m, 2);
-            decimal totalPayableInitial = Math.Max(0, currentCycleAmount + securityDeposit + supportTaxOnCycle);
 
             var result = new BookingDetailsResponseDto
             {
@@ -566,21 +587,84 @@ namespace WorkNest.Application.Services
             var challanResult = await GetChallanAsync(bookingId);
             var dto = challanResult.IsSuccessful ? (ChallanResponseDto)challanResult.Data! : null;
 
-            var advTotal = monthlyRate * advanceMonths;
-            var secTotal = monthlyRate * secDepositMonths;
-            var totalPay = advTotal + secTotal - discountAmount;
-
             var start = dto?.StartOn ?? DateTime.UtcNow;
             var months = new List<AdvanceInvoiceMonthDto>();
-            for (int i = 0; i < advanceMonths; i++)
+            decimal advTotal = 0m;
+
+            if (start.Day > 1 && monthlyRate > 0)
             {
-                var d = start.AddMonths(i);
+                int startDay = start.Day;
+                int daysInMonth = DateTime.DaysInMonth(start.Year, start.Month);
+                int remainingDays = daysInMonth - startDay + 1;
+                decimal proratedMonth1 = Math.Round(((decimal)remainingDays / daysInMonth) * monthlyRate, 2);
+
                 months.Add(new AdvanceInvoiceMonthDto
                 {
-                    MonthName = d.ToString("MMMM yyyy"),
-                    Amount    = monthlyRate
+                    MonthName = $"{start:MMMM yyyy} (Prorated: {remainingDays}/{daysInMonth} days)",
+                    Amount    = proratedMonth1
                 });
+
+                if (startDay < 15)
+                {
+                    // Current month counts as first billing month: 1 prorated + (advanceMonths - 1) full months
+                    int fullMonths = Math.Max(0, advanceMonths - 1);
+                    for (int i = 1; i <= fullMonths; i++)
+                    {
+                        var d = new DateTime(start.Year, start.Month, 1).AddMonths(i);
+                        months.Add(new AdvanceInvoiceMonthDto
+                        {
+                            MonthName = d.ToString("MMMM yyyy"),
+                            Amount    = monthlyRate
+                        });
+                    }
+                    advTotal = proratedMonth1 + (fullMonths * monthlyRate);
+                }
+                else
+                {
+                    // Current month is separate prorated period: 1 prorated + advanceMonths full months
+                    for (int i = 1; i <= advanceMonths; i++)
+                    {
+                        var d = new DateTime(start.Year, start.Month, 1).AddMonths(i);
+                        months.Add(new AdvanceInvoiceMonthDto
+                        {
+                            MonthName = d.ToString("MMMM yyyy"),
+                            Amount    = monthlyRate
+                        });
+                    }
+                    advTotal = proratedMonth1 + (advanceMonths * monthlyRate);
+                }
             }
+            else
+            {
+                for (int i = 0; i < advanceMonths; i++)
+                {
+                    var d = start.AddMonths(i);
+                    months.Add(new AdvanceInvoiceMonthDto
+                    {
+                        MonthName = d.ToString("MMMM yyyy"),
+                        Amount    = monthlyRate
+                    });
+                }
+                advTotal = monthlyRate * advanceMonths;
+            }
+
+            // Task 1: Mirror discount to security deposit
+            decimal baseSecTotal = monthlyRate * secDepositMonths;
+            decimal depositDiscountPct = (advTotal > 0 && discountAmount > 0)
+                ? Math.Min(100m, (discountAmount / advTotal) * 100m)
+                : (dto?.DiscountPercentage ?? 0m);
+            decimal secTotal = baseSecTotal > 0
+                ? Math.Max(0, Math.Round(baseSecTotal * (1 - (depositDiscountPct / 100.0m)), 2))
+                : 0m;
+
+            // Task 2: Support charge and PST
+            int capacity = dto?.SpaceCapacity > 0 ? dto.SpaceCapacity : 1;
+            decimal perSeatSupportRate = 2000.00m;
+            decimal taxPercentage = dto?.AppliedTaxPercentage > 0 ? dto.AppliedTaxPercentage : 16.00m;
+            decimal supportChargeTotal = Math.Round(perSeatSupportRate * capacity * advanceMonths, 2);
+            decimal taxTotal = Math.Round(supportChargeTotal * (taxPercentage / 100.0m), 2);
+
+            decimal totalPay = Math.Max(0, advTotal + secTotal + taxTotal - discountAmount);
 
             var invDto = new AdvanceInvoicePdfDto
             {
@@ -592,10 +676,14 @@ namespace WorkNest.Application.Services
                 LocationName          = dto?.LocationName ?? "",
                 StartOn               = dto?.StartOn ?? DateTime.UtcNow,
                 EndOn                 = dto?.EndOn ?? DateTime.UtcNow,
+                DueOn                 = dto?.StartOn ?? DateTime.UtcNow,
                 AdvanceRentMonths     = advanceMonths,
                 SecurityDepositMonths = secDepositMonths,
                 AdvanceRentTotal      = advTotal,
                 SecurityDepositTotal  = secTotal,
+                SupportChargeTotal    = supportChargeTotal,
+                AppliedTaxPercentage  = taxPercentage,
+                TaxTotal              = taxTotal,
                 DiscountAmount        = discountAmount,
                 TotalPayable          = totalPay,
                 MonthsBreakdown       = months,
@@ -657,7 +745,7 @@ namespace WorkNest.Application.Services
             decimal quantity = dto.IsMeetingRoom ? (decimal)(durationHours >= 24 ? Math.Ceiling(durationHours / 24.0) : Math.Ceiling(durationHours)) : dto.BillingPeriodMonths;
             if (quantity <= 0) quantity = 1;
             decimal unitPrice = dto.SubtotalAmount > 0 && quantity > 0 ? Math.Round(dto.SubtotalAmount / quantity, 2) : dto.SubtotalAmount;
-            decimal supportAmt = Math.Round(dto.SubtotalAmount * 0.10m, 2);
+            decimal supportAmt = dto.SupportChargeAmount > 0 ? dto.SupportChargeAmount : (dto.IsMeetingRoom ? Math.Round(dto.SubtotalAmount * 0.10m, 2) : Math.Round(2000.00m * (dto.SpaceCapacity > 0 ? dto.SpaceCapacity : 1) * dto.BillingPeriodMonths, 2));
 
             var breakdown = new
             {

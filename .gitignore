@@ -32,3 +32,4 @@ appsettings.*.json
 **/WorkNest.Tests/
 
 scratch/*
+.dotnet/*

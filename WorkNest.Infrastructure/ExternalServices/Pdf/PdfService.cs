@@ -665,6 +665,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             row.ConstantItem(160).Column(c =>
                             {
                                 c.Item().AlignRight().Text($"Issued: {inv.IssuedOn:dd MMM yyyy}").FontColor("#555555");
+                                c.Item().AlignRight().Text($"Due Date: {(inv.DueOn.HasValue ? inv.DueOn.Value : inv.StartOn):dd MMM yyyy}").Bold().FontColor("#1a1a2e");
                                 c.Item().AlignRight().Text($"Advance Months: {inv.AdvanceRentMonths}").FontColor("#555555");
                                 if (inv.SecurityDepositMonths > 0)
                                     c.Item().AlignRight().Text($"Security Deposit Months: {inv.SecurityDepositMonths}").FontColor("#555555");
@@ -721,7 +722,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 foreach (var m in inv.MonthsBreakdown)
                                 {
                                     var bg = alt ? "#f9f9f9" : "#ffffff";
-                                    table.Cell().Background(bg).Padding(6).Text($"Advance Rent “ {m.MonthName}");
+                                    table.Cell().Background(bg).Padding(6).Text($"Advance Rent - {m.MonthName}");
                                     table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {m.Amount:N2}");
                                     alt = !alt;
                                 }
@@ -757,6 +758,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 {
                                     r.ConstantItem(160).AlignRight().Text("Security Deposit:");
                                     r.ConstantItem(120).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N2}");
+                                });
+                            }
+                            if (inv.TaxTotal > 0)
+                            {
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(160).AlignRight().Text($"Provincial Sales Tax ({inv.AppliedTaxPercentage:G29}%):").FontColor("#15803d");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.TaxTotal:N2}").FontColor("#15803d");
                                 });
                             }
                             if (inv.DiscountAmount > 0)
@@ -873,6 +882,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public byte[] GenerateSalesTaxInvoicePdf(WorkNest.Application.DTOs.Payment.CustomerSTInvoiceDto dto)
         {
             return SalesTaxInvoicePdfGenerator.GeneratePdf(dto);
+        }
+
+        public byte[] GenerateAgreementPdf(WorkNest.Application.DTOs.Agreement.SendAgreementRequest request, string quotationNumber)
+        {
+            return AgreementPdfGenerator.Generate(request, quotationNumber);
         }
     }
 }

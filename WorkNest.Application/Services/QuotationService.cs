@@ -100,20 +100,47 @@ namespace WorkNest.Application.Services
             var discountType = string.IsNullOrWhiteSpace(request.DiscountType) ? "Percentage" : request.DiscountType;
             var discountValue = request.DiscountValue > 0 ? request.DiscountValue : request.DiscountPercentage;
 
-            if (discountValue < 0)
-                throw new ArgumentException("Discount value cannot be negative.");
+            // Lookup offering type dynamically from dbo.WN_OfferingType
+            var offeringTypes = (await _db.GetOfferingTypesAsync()).ToList();
+            IDictionary<string, object?>? matchedOt = null;
+            if (request.OfferingTypeId.HasValue && request.OfferingTypeId.Value > 0)
+            {
+                matchedOt = offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == request.OfferingTypeId.Value);
+            }
+            if (matchedOt == null && !string.IsNullOrWhiteSpace(request.OfferingType))
+            {
+                if (int.TryParse(request.OfferingType, out int parsedOtId))
+                {
+                    matchedOt = offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == parsedOtId);
+                }
+                if (matchedOt == null)
+                {
+                    matchedOt = offeringTypes.FirstOrDefault(o => string.Equals(o["Description"]?.ToString(), request.OfferingType, StringComparison.OrdinalIgnoreCase));
+                }
+                if (matchedOt == null)
+                {
+                    matchedOt = offeringTypes.FirstOrDefault(o => (o["Description"]?.ToString() ?? "").StartsWith(request.OfferingType, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            if (matchedOt == null && offeringTypes.Any())
+            {
+                matchedOt = offeringTypes.First();
+            }
 
-            // Server-side Discount Cap Validation
+            int resolvedOfferingTypeId = matchedOt != null ? Convert.ToInt32(matchedOt["Id"]) : 1;
+            decimal maxDiscountCap = matchedOt != null ? Convert.ToDecimal(matchedOt["DiscountCap"]) : 10.00m;
+            string offeringTypeDbValue = resolvedOfferingTypeId.ToString();
+
             if (discountType == "Percentage" || discountType == "Percent")
             {
-                if (discountValue > spaceDetails.MaxDiscountPercent)
-                    throw new ArgumentException($"Discount percentage ({discountValue}%) exceeds maximum allowed discount cap of {spaceDetails.MaxDiscountPercent}%.");
+                if (discountValue > maxDiscountCap)
+                    discountValue = maxDiscountCap;
             }
             else if (discountType == "Fixed" || discountType == "Amount")
             {
-                decimal maxAllowedFixed = Math.Round(monthlyBasePrice * (spaceDetails.MaxDiscountPercent / 100m), 2);
+                decimal maxAllowedFixed = Math.Round(monthlyBasePrice * (maxDiscountCap / 100m), 2);
                 if (discountValue > maxAllowedFixed)
-                    throw new ArgumentException($"Fixed monthly discount (PKR {discountValue:N2}) exceeds maximum allowed discount cap of {spaceDetails.MaxDiscountPercent}% (PKR {maxAllowedFixed:N2} per month).");
+                    discountValue = maxAllowedFixed;
             }
 
             // For backward compat: if DiscountType is Percentage, keep discountPercentage
@@ -121,6 +148,11 @@ namespace WorkNest.Application.Services
 
             decimal subtotal = 0;
             var details = new List<QuotationDetailDto>();
+
+            // Calculate effective rent discount percentage for mirroring to deposit (Task 1)
+            decimal rentDiscountPct = (discountType == "Amount" || discountType == "Fixed")
+                ? (monthlyBasePrice > 0 ? (discountValue / monthlyBasePrice) * 100m : 0m)
+                : discountPercentage;
 
             if (spaceDetails.Category == "MeetingRoom")
             {
@@ -180,21 +212,25 @@ namespace WorkNest.Application.Services
                     Amount = rentAmount
                 });
 
-                // Security deposit: use override if provided, else default to (monthlyRentOfRoom * secMonths)
+                // Security deposit (Task 1: discount mirroring applied live)
                 int secMonths = request.SecurityDepositMonths.HasValue && request.SecurityDepositMonths.Value > 0
                     ? request.SecurityDepositMonths.Value
                     : 1;
-                decimal secDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+                decimal baseSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
                     ? request.SecurityDepositOverride.Value
                     : (monthlyRentOfRoom * secMonths);
+
+                decimal discountedSecDeposit = baseSecDeposit > 0
+                    ? Math.Max(0, Math.Round(baseSecDeposit * (1 - (rentDiscountPct / 100m)), 2))
+                    : 0m;
 
                 details.Add(new QuotationDetailDto
                 {
                     FeeType = "SecurityDeposit",
                     Description = $"Security Deposit ({secMonths} Month{(secMonths > 1 ? "s" : "")}) (Refundable)",
                     Quantity = secMonths,
-                    UnitPrice = monthlyRentOfRoom,
-                    Amount = secDeposit
+                    UnitPrice = secMonths > 0 ? Math.Round(discountedSecDeposit / secMonths, 2) : discountedSecDeposit,
+                    Amount = discountedSecDeposit
                 });
             }
             else // SharedSpace
@@ -235,9 +271,13 @@ namespace WorkNest.Application.Services
                 ? request.SecurityDepositMonths.Value
                 : 1;
 
-            decimal calculatedSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+            decimal baseDepositForInsert = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
                 ? request.SecurityDepositOverride.Value
                 : (spaceDetails.Category == "PrivateOffice" ? monthlyBasePrice * securityDepositMonths : 0);
+
+            decimal calculatedSecDeposit = baseDepositForInsert > 0
+                ? Math.Max(0, Math.Round(baseDepositForInsert * (1 - (rentDiscountPct / 100m)), 2))
+                : 0m;
 
             var result = await _db.InsertQuotationAsync(
                 quotationNumber,
@@ -258,9 +298,10 @@ namespace WorkNest.Application.Services
                 perSeatBasePrice,
                 capacity,
                 monthlyBasePrice,
-                spaceDetails.MaxDiscountPercent,
+                maxDiscountCap,
                 securityDepositMonths,
-                calculatedSecDeposit
+                calculatedSecDeposit,
+                offeringTypeDbValue
             );
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -292,6 +333,10 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             {
                 Id = Convert.ToInt32(header["Id"]),
                 Guid = header["Guid"]?.ToString(),
+                OfferingTypeId = header.TryGetValue("OfferingTypeId", out var otid) && otid is not null ? Convert.ToInt32(otid) : (header.TryGetValue("OfferingType", out var otv) && int.TryParse(otv?.ToString(), out var pOtId) ? pOtId : 1),
+                OfferingType = header.TryGetValue("OfferingType", out var otStr) && otStr is not null ? otStr.ToString() : "1",
+                OfferingTypeDescription = header.TryGetValue("OfferingTypeDescription", out var otd) && otd is not null ? otd.ToString() : (header.TryGetValue("OfferingType", out var otStr2) ? otStr2?.ToString() : "24-by-7"),
+                OfferingTypeDiscountCap = header.TryGetValue("OfferingTypeDiscountCap", out var otdc) && otdc is not null ? Convert.ToDecimal(otdc) : 10.00m,
                 QuotationNumber = header["QuotationNumber"]?.ToString() ?? "",
                 QuotationDate = Convert.ToDateTime(header["QuotationDate"]),
                 ValidUntil = Convert.ToDateTime(header["ValidUntil"]),
@@ -313,7 +358,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 PerSeatBasePrice = header.TryGetValue("PerSeatBasePrice", out var psbp) && psbp is not null ? Convert.ToDecimal(psbp) : null,
                 Capacity = header.TryGetValue("Capacity", out var cap) && cap is not null ? Convert.ToInt32(cap) : null,
                 MonthlyBasePrice = header.TryGetValue("MonthlyBasePrice", out var mbp) && mbp is not null ? Convert.ToDecimal(mbp) : null,
-                MaxDiscountPercent = header.TryGetValue("MaxDiscountPercent", out var mdp) && mdp is not null ? Convert.ToDecimal(mdp) : null,
+                MaxDiscountPercent = header.TryGetValue("OfferingTypeDiscountCap", out var otdc2) && otdc2 is not null && Convert.ToDecimal(otdc2) > 0 ? Convert.ToDecimal(otdc2) : (header.TryGetValue("MaxDiscountPercent", out var mdp) && mdp is not null ? Convert.ToDecimal(mdp) : 10.00m),
                 DiscountType = header.TryGetValue("DiscountType", out var dt) && dt is not null ? dt.ToString()! : "Percentage",
                 DiscountPercentage = Convert.ToDecimal(header["DiscountPercentage"]),
                 DiscountValue = header.TryGetValue("DiscountType", out var dt2) && dt2?.ToString() == "Amount"
@@ -340,44 +385,19 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 TotalContractAmount = header.TryGetValue("TotalContractAmount", out var tca) && tca is not null ? Convert.ToDecimal(tca) : Convert.ToDecimal(header["TotalAmount"])
             };
 
-            bool isMeetingRoom = string.Equals(dto.SpaceType, "MeetingRoom", StringComparison.OrdinalIgnoreCase) ||
-                (dto.SpaceTypeName != null && (dto.SpaceTypeName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) || dto.SpaceTypeName.Contains("Conference", StringComparison.OrdinalIgnoreCase))) ||
-                (dto.BillingPeriodMonths <= 0 && dto.TotalContractAmount <= 0);
-
-            if (isMeetingRoom)
+            foreach (var row in detailsRows)
             {
-                dto.SpaceType = "MeetingRoom";
-                dto.MonthlyRent = 0;
-                dto.BillingPeriodMonths = 1;
-                dto.SecurityDeposit = 0;
-                dto.CurrentCycleAmount = dto.SubtotalAmount;
-                dto.TotalContractAmount = dto.SubtotalAmount;
-                decimal supportCharge = Math.Round(dto.SubtotalAmount * 0.10m, 2);
-                dto.SupportChargeAmount = supportCharge;
-                dto.TaxAmountOnAdvanceRent = Math.Round(supportCharge * (dto.AppliedTaxPercentage / 100.0m), 2);
-                dto.TaxAmountOnContract = dto.TaxAmountOnAdvanceRent;
-                dto.TaxAmount = dto.TaxAmountOnAdvanceRent;
-                dto.TotalPayable = Math.Max(0, dto.SubtotalAmount + dto.TaxAmountOnAdvanceRent - dto.DiscountAmount);
-            }
-            else
-            {
-                decimal totalContractRent = dto.TotalContractAmount > 0 ? dto.TotalContractAmount : dto.SubtotalAmount;
-                decimal firstCycleRent = dto.CurrentCycleAmount > 0 ? dto.CurrentCycleAmount : (dto.MonthlyRent * dto.BillingPeriodMonths);
-                if (firstCycleRent <= 0 && totalContractRent > 0 && dto.BillingPeriodMonths > 0)
+                dto.Details.Add(new QuotationDetailDto
                 {
-                    int cMonths = ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month;
-                    if (cMonths <= 0) cMonths = 12;
-                    decimal mRent = dto.MonthlyRent > 0 ? dto.MonthlyRent : (totalContractRent / cMonths);
-                    firstCycleRent = mRent * dto.BillingPeriodMonths;
-                }
-
-                dto.CurrentCycleAmount = firstCycleRent;
-                dto.TotalContractAmount = totalContractRent;
-                dto.TaxAmountOnContract = Math.Round(Math.Round(totalContractRent * 0.10m, 2) * (dto.AppliedTaxPercentage / 100.0m), 2);
-                dto.TaxAmountOnAdvanceRent = Math.Round(Math.Round(firstCycleRent * 0.10m, 2) * (dto.AppliedTaxPercentage / 100.0m), 2);
-                dto.TaxAmount = dto.TaxAmountOnAdvanceRent;
-                dto.TotalPayable = Math.Max(0, firstCycleRent + dto.SecurityDeposit + dto.TaxAmountOnAdvanceRent - dto.DiscountAmount);
+                    FeeType = row["FeeType"]?.ToString() ?? "",
+                    Description = row["Description"]?.ToString() ?? "",
+                    Quantity = Convert.ToDecimal(row["Quantity"]),
+                    UnitPrice = Convert.ToDecimal(row["UnitPrice"]),
+                    Amount = Convert.ToDecimal(row["Amount"])
+                });
             }
+
+            ChallanCalculationService.ApplyToQuotation(dto);
 
             dto.CanRespond = string.Equals(dto.Status, "Sent", StringComparison.OrdinalIgnoreCase);
 
@@ -401,18 +421,6 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 TaxAmountOnAdvanceRent = dto.TaxAmountOnAdvanceRent,
                 TaxAmountOnContract = dto.TaxAmountOnContract
             };
-
-            foreach (var row in detailsRows)
-            {
-                dto.Details.Add(new QuotationDetailDto
-                {
-                    FeeType = row["FeeType"]?.ToString() ?? "",
-                    Description = row["Description"]?.ToString() ?? "",
-                    Quantity = Convert.ToDecimal(row["Quantity"]),
-                    UnitPrice = Convert.ToDecimal(row["UnitPrice"]),
-                    Amount = Convert.ToDecimal(row["Amount"])
-                });
-            }
 
             try
             {
@@ -439,7 +447,6 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             }
             catch { }
 
-            WorkNest.Application.Helpers.ChallanFieldBuilder.BuildForQuotation(dto);
             return dto;
         }
 
@@ -652,6 +659,17 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
         public async Task SendQuotationAsync(int quotationId, int? userId)
         {
             await _db.SendQuotationStatusAsync(quotationId, "Sent", userId);
+        }
+
+        public async Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync()
+        {
+            var rows = await _db.GetOfferingTypesAsync();
+            return rows.Select(r => new OfferingTypeDto
+            {
+                Id = Convert.ToInt32(r["Id"]),
+                Description = r["Description"]?.ToString() ?? "",
+                DiscountCap = Convert.ToDecimal(r["DiscountCap"])
+            }).ToList();
         }
     }
 }
