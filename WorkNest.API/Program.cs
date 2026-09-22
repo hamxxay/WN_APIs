@@ -11,6 +11,7 @@ using WorkNest.API.Services;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
 using WorkNest.Application.Validators;
+using WorkNest.Common.Configurations;
 using WorkNest.Infrastructure.ExternalServices.Email;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
 using WorkNest.Infrastructure.ExternalServices.PayFast;
@@ -52,9 +53,11 @@ try
     builder.Services.AddSwaggerConfiguration();
     builder.Services.AddEndpointsApiExplorer();
 
-    // ── JWT Settings ──────────────────────────────────────────────────────────
+    // ── Settings ──────────────────────────────────────────────────────────────
     builder.Services.Configure<JwtSettings>(
         builder.Configuration.GetSection("JwtSettings"));
+    builder.Services.Configure<FileStorageSettings>(
+        builder.Configuration.GetSection("FileStorage"));
 
     // ── JWT Authentication ────────────────────────────────────────────────────
     var jwtSection = builder.Configuration.GetSection("JwtSettings");
@@ -162,6 +165,19 @@ try
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
+
+    using (var scope = app.Services.CreateScope())
+    {
+        try
+        {
+            var dbRepo = scope.ServiceProvider.GetRequiredService<IDbRepository>();
+            await dbRepo.EnsureLeaseTemplateSchemaDbAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Failed to run startup database migrations for lease templates/agreements.");
+        }
+    }
 
     Log.Information("WorkNest API starting on {Env}", app.Environment.EnvironmentName);
     await app.RunAsync();

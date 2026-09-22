@@ -55,6 +55,8 @@ namespace WorkNest.Application.DTOs.Agreement
         public string? SecpRegistrationNo { get; set; }
         public int? TemplateVersionId { get; set; }
         public string? TemplateName { get; set; }
+        public string? SignedPdfPath { get; set; }
+        public DateTime? SignedPdfUploadedAt { get; set; }
         public DateTime CreatedOn { get; set; }
     }
 

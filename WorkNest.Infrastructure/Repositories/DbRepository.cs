@@ -3188,6 +3188,51 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             throw new InvalidOperationException("Failed to publish lease template.");
         }
 
+        public async Task UpdateAgreementSignedPdfDbAsync(int agreementId, string signedPdfPath, DateTime uploadedAt)
+        {
+            await using var c = await Open();
+            string sql = @"
+                UPDATE dbo.WN_Agreements
+                SET SignedPdfPath = @SignedPdfPath,
+                    SignedPdfUploadedAt = @SignedPdfUploadedAt,
+                    UpdatedOn = SYSUTCDATETIME()
+                WHERE Id = @AgreementId;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            cmd.Parameters.AddWithValue("@SignedPdfPath", signedPdfPath);
+            cmd.Parameters.AddWithValue("@SignedPdfUploadedAt", uploadedAt);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task ClearAgreementSignedPdfDbAsync(int agreementId)
+        {
+            await using var c = await Open();
+            string sql = @"
+                UPDATE dbo.WN_Agreements
+                SET SignedPdfPath = NULL,
+                    SignedPdfUploadedAt = NULL,
+                    UpdatedOn = SYSUTCDATETIME()
+                WHERE Id = @AgreementId;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<bool> DeleteAgreementDbAsync(int agreementId)
+        {
+            await using var c = await Open();
+            string sql = @"
+                DELETE FROM dbo.WN_Agreements
+                WHERE Id = @AgreementId;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            int rowsAffected = await cmd.ExecuteNonQueryAsync();
+            return rowsAffected > 0;
+        }
+
         public async Task EnsureLeaseTemplateSchemaDbAsync()
         {
             await using var c = await Open();
@@ -3208,6 +3253,16 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Agreements') AND name = 'TemplateVersionId')
                 BEGIN
                     ALTER TABLE dbo.WN_Agreements ADD TemplateVersionId INT NULL;
+                END;
+
+                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Agreements') AND name = 'SignedPdfPath')
+                BEGIN
+                    ALTER TABLE dbo.WN_Agreements ADD SignedPdfPath NVARCHAR(500) NULL;
+                END;
+
+                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Agreements') AND name = 'SignedPdfUploadedAt')
+                BEGIN
+                    ALTER TABLE dbo.WN_Agreements ADD SignedPdfUploadedAt DATETIME2 NULL;
                 END;";
 
             await using var cmd = new SqlCommand(sql, c);

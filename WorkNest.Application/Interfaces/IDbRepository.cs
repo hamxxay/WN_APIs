@@ -247,6 +247,9 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>?> GetQuotationLocationAndCompanyDetailsDbAsync(int quotationId);
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status);
         Task MarkAgreementSignedDbAsync(int agreementId, int? userId);
+        Task UpdateAgreementSignedPdfDbAsync(int agreementId, string signedPdfPath, DateTime uploadedAt);
+        Task ClearAgreementSignedPdfDbAsync(int agreementId);
+        Task<bool> DeleteAgreementDbAsync(int agreementId);
         Task UpdateCustomerAgreementDetailsDbAsync(int customerId, string? fullName, string? phone, string? cnic, string? address, string? company, string? ntn, string? secp);
         Task<IDictionary<string, object?>?> GetActiveLeaseTemplateByNameDbAsync(string name);
         Task<IDictionary<string, object?>> PublishLeaseTemplateDbAsync(string name, string contentHtml, int? createdBy);

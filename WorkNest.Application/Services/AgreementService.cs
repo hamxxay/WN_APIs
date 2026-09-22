@@ -286,6 +286,79 @@ namespace WorkNest.Application.Services
             return page1Pdf;
         }
 
+        private static string? GetString(IDictionary<string, object?> r, string key)
+        {
+            return r.TryGetValue(key, out var val) && val != null && val != DBNull.Value ? val.ToString() : null;
+        }
+
+        private static int GetInt(IDictionary<string, object?> r, string key, int defaultVal = 0)
+        {
+            if (r.TryGetValue(key, out var val) && val != null && val != DBNull.Value && int.TryParse(val.ToString(), out var i))
+                return i;
+            return defaultVal;
+        }
+
+        private static int? GetNullableInt(IDictionary<string, object?> r, string key)
+        {
+            if (r.TryGetValue(key, out var val) && val != null && val != DBNull.Value && int.TryParse(val.ToString(), out var i))
+                return i;
+            return null;
+        }
+
+        private static decimal GetDecimal(IDictionary<string, object?> r, string key, decimal defaultVal = 0)
+        {
+            if (r.TryGetValue(key, out var val) && val != null && val != DBNull.Value && decimal.TryParse(val.ToString(), out var d))
+                return d;
+            return defaultVal;
+        }
+
+        private static DateTime GetDateTime(IDictionary<string, object?> r, string key, DateTime defaultVal = default)
+        {
+            if (r.TryGetValue(key, out var val) && val != null && val != DBNull.Value && DateTime.TryParse(val.ToString(), out var dt))
+                return dt;
+            return defaultVal;
+        }
+
+        private static DateTime? GetNullableDateTime(IDictionary<string, object?> r, string key)
+        {
+            if (r.TryGetValue(key, out var val) && val != null && val != DBNull.Value && DateTime.TryParse(val.ToString(), out var dt))
+                return dt;
+            return null;
+        }
+
+        private static AgreementResponseDto MapToAgreementDto(IDictionary<string, object?> r)
+        {
+            return new AgreementResponseDto
+            {
+                Id = GetInt(r, "Id"),
+                Guid = GetString(r, "Guid"),
+                QuotationId = GetInt(r, "QuotationId"),
+                QuotationNumber = GetString(r, "QuotationNumber") ?? "",
+                BookingId = GetNullableInt(r, "BookingId"),
+                CustomerId = GetInt(r, "CustomerId"),
+                EntityType = GetString(r, "EntityType") ?? "Individual",
+                Status = GetString(r, "Status") ?? "AgreementSent",
+                SentDate = GetDateTime(r, "SentDate", DateTime.UtcNow),
+                SignedDate = GetNullableDateTime(r, "SignedDate"),
+                RefundDays = GetInt(r, "RefundDays", 30),
+                FeeAmount = GetDecimal(r, "FeeAmount"),
+                SecurityDeposit = GetDecimal(r, "SecurityDeposit"),
+                OperatingHours = GetString(r, "OperatingHours"),
+                CustomerName = GetString(r, "CustomerName"),
+                CustomerCnic = GetString(r, "CustomerCnic"),
+                CustomerPhone = GetString(r, "CustomerPhone"),
+                CustomerAddress = GetString(r, "CustomerAddress"),
+                CompanyName = GetString(r, "CompanyName"),
+                Ntn = GetString(r, "Ntn"),
+                SecpRegistrationNo = GetString(r, "SecpRegistrationNo"),
+                TemplateVersionId = GetNullableInt(r, "TemplateVersionId"),
+                TemplateName = GetString(r, "TemplateName"),
+                SignedPdfPath = GetString(r, "SignedPdfPath"),
+                SignedPdfUploadedAt = GetNullableDateTime(r, "SignedPdfUploadedAt"),
+                CreatedOn = GetDateTime(r, "CreatedOn", DateTime.UtcNow)
+            };
+        }
+
         public async Task<(IEnumerable<AgreementResponseDto> Rows, int Total)> GetAgreementsListAsync(int page, int limit, string? search, string? status)
         {
             var (rows, total) = await _db.GetAgreementsListDbAsync(page, limit, search, status);
@@ -293,35 +366,23 @@ namespace WorkNest.Application.Services
 
             foreach (var r in rows)
             {
-                list.Add(new AgreementResponseDto
-                {
-                    Id = Convert.ToInt32(r["Id"]),
-                    Guid = r["Guid"]?.ToString(),
-                    QuotationId = Convert.ToInt32(r["QuotationId"]),
-                    QuotationNumber = r.TryGetValue("QuotationNumber", out var qn) && qn != null ? qn.ToString() : "",
-                    BookingId = r.TryGetValue("BookingId", out var bi) && bi != null && bi != DBNull.Value ? Convert.ToInt32(bi) : null,
-                    CustomerId = Convert.ToInt32(r["CustomerId"]),
-                    EntityType = r["EntityType"]?.ToString() ?? "Individual",
-                    Status = r["Status"]?.ToString() ?? "AgreementSent",
-                    SentDate = Convert.ToDateTime(r["SentDate"]),
-                    SignedDate = r.TryGetValue("SignedDate", out var sdate) && sdate != null && sdate != DBNull.Value ? Convert.ToDateTime(sdate) : null,
-                    RefundDays = r.TryGetValue("RefundDays", out var rd) && rd != null ? Convert.ToInt32(rd) : 30,
-                    FeeAmount = r.TryGetValue("FeeAmount", out var fa) && fa != null ? Convert.ToDecimal(fa) : 0,
-                    SecurityDeposit = r.TryGetValue("SecurityDeposit", out var sd) && sd != null ? Convert.ToDecimal(sd) : 0,
-                    OperatingHours = r.TryGetValue("OperatingHours", out var oh) && oh != null ? oh.ToString() : null,
-                    CustomerName = r["CustomerName"]?.ToString(),
-                    CustomerCnic = r["CustomerCnic"]?.ToString(),
-                    CustomerPhone = r["CustomerPhone"]?.ToString(),
-                    CustomerAddress = r["CustomerAddress"]?.ToString(),
-                    CompanyName = r["CompanyName"]?.ToString(),
-                    Ntn = r["Ntn"]?.ToString(),
-                    SecpRegistrationNo = r["SecpRegistrationNo"]?.ToString(),
-                    TemplateVersionId = r.TryGetValue("TemplateVersionId", out var tId) && tId != null && tId != DBNull.Value ? Convert.ToInt32(tId) : null,
-                    CreatedOn = Convert.ToDateTime(r["CreatedOn"])
-                });
+                list.Add(MapToAgreementDto(r));
             }
 
             return (list, total);
+        }
+
+        public async Task<AgreementResponseDto?> GetAgreementByIdAsync(int agreementId)
+        {
+            var r = await _db.GetAgreementByIdDbAsync(agreementId);
+            if (r == null) return null;
+
+            return MapToAgreementDto(r);
+        }
+
+        public async Task UpdateSignedPdfInfoAsync(int agreementId, string path, DateTime uploadedAtUtc)
+        {
+            await _db.UpdateAgreementSignedPdfDbAsync(agreementId, path, uploadedAtUtc);
         }
 
         public async Task<AgreementResponseDto> MarkAgreementSignedAsync(int agreementId, int? userId, string? note)
@@ -348,6 +409,33 @@ namespace WorkNest.Application.Services
             var (rows, _) = await GetAgreementsListAsync(1, 1, null, null);
             var updated = rows.FirstOrDefault(r => r.Id == agreementId);
             return updated ?? throw new InvalidOperationException("Failed to retrieve updated agreement.");
+        }
+
+        public async Task<bool> DeleteAgreementAsync(int agreementId)
+        {
+            var agreement = await GetAgreementByIdAsync(agreementId);
+            if (agreement == null) return false;
+
+            if (!string.IsNullOrWhiteSpace(agreement.SignedPdfPath) && File.Exists(agreement.SignedPdfPath))
+            {
+                try { File.Delete(agreement.SignedPdfPath); } catch { }
+            }
+
+            return await _db.DeleteAgreementDbAsync(agreementId);
+        }
+
+        public async Task<bool> DeleteSignedPdfAsync(int agreementId)
+        {
+            var agreement = await GetAgreementByIdAsync(agreementId);
+            if (agreement == null) return false;
+
+            if (!string.IsNullOrWhiteSpace(agreement.SignedPdfPath) && File.Exists(agreement.SignedPdfPath))
+            {
+                try { File.Delete(agreement.SignedPdfPath); } catch { }
+            }
+
+            await _db.ClearAgreementSignedPdfDbAsync(agreementId);
+            return true;
         }
     }
 }
