@@ -23,7 +23,9 @@ namespace WorkNest.Application.Services
             var name = !string.IsNullOrWhiteSpace(request.Name) ? request.Name : request.Description ?? string.Empty;
             var desc = !string.IsNullOrWhiteSpace(request.Description) ? request.Description : name;
             var (id, publicId) = await _db.InsertSpaceTypeAsync(
-                name, desc, request.CategoryId, request.Capacity, request.HourlyAllowed, actorId);
+                name, desc, request.CategoryId, request.Capacity, request.HourlyAllowed,
+                request.AccountReceivableId, request.RentAccountId, request.ServicesIncomeId, request.SalesTaxId, request.SecurityReceivedId,
+                actorId);
             return ApiResponse.Ok(new { id, publicId }, "Space type created.");
         }
 
@@ -32,7 +34,9 @@ namespace WorkNest.Application.Services
             var name = !string.IsNullOrWhiteSpace(request.Name) ? request.Name : request.Description;
             var desc = !string.IsNullOrWhiteSpace(request.Description) ? request.Description : name;
             await _db.UpdateSpaceTypeAsync(id, name, desc,
-                request.CategoryId, request.Capacity, request.HourlyAllowed, actorId);
+                request.CategoryId, request.Capacity, request.HourlyAllowed,
+                request.AccountReceivableId, request.RentAccountId, request.ServicesIncomeId, request.SalesTaxId, request.SecurityReceivedId,
+                actorId);
             return ApiResponse.Ok($"Space type #{id} updated.");
         }
 

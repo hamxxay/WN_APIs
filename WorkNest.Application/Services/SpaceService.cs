@@ -15,18 +15,18 @@ namespace WorkNest.Application.Services
             return (rows.Cast<object>(), total);
         }
 
-        public async Task<IEnumerable<object>> GetAvailableSpacesAsync() =>
-            (await _db.GetAvailableSpacesAsync()).Cast<object>();
+        public async Task<IEnumerable<object>> GetAvailableSpacesAsync(string? shiftType = "24_7") =>
+            (await _db.GetAvailableSpacesAsync(shiftType)).Cast<object>();
 
-        public async Task<ApiResponse> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn)
+        public async Task<ApiResponse> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn, string? shiftType = "24_7")
         {
-            var result = await _db.GetAvailableSpacesByTypeAsync(spaceTypeId, startOn, endOn);
+            var result = await _db.GetAvailableSpacesByTypeAsync(spaceTypeId, startOn, endOn, shiftType);
             return ApiResponse.Ok(result);
         }
 
-        public async Task<ApiResponse> GetAvailabilityCountsAsync()
+        public async Task<ApiResponse> GetAvailabilityCountsAsync(string? shiftType = "24_7")
         {
-            var result = await _db.GetAvailabilityCountsAsync();
+            var result = await _db.GetAvailabilityCountsAsync(shiftType);
             return ApiResponse.Ok(result);
         }
 

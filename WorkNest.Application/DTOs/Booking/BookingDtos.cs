@@ -37,6 +37,7 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal BalanceLeft { get; set; }
         public decimal SecurityDeposit { get; set; }
         public string? OfferingType { get; set; } = "24/7";
+        public string? ShiftType { get; set; } = "24_7";
         public decimal? PerSeatSupportRate { get; set; } = 2000.00m;
         public byte? SupportChargesId { get; set; }
         public decimal AppliedChargePercentage { get; set; }
@@ -58,6 +59,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? SpaceIdGuid { get; set; }
         public int? SpaceId { get; set; }
         public string? OfferingType { get; set; } = "24/7";
+        public string? ShiftType { get; set; }
         public decimal? PerSeatSupportRate { get; set; }
         public DateTime? StartDateTime { get; set; }
         public DateTime? EndDateTime { get; set; }
@@ -98,6 +100,8 @@ namespace WorkNest.Application.DTOs.Booking
         public string? Address { get; set; }
         public int? CityId { get; set; }
         public byte? SupportChargesId { get; set; }
+        public string? ShiftType { get; set; } = "24_7";
+        public string? OfferingType { get; set; } = "24/7";
     }
 
     public class SmartBookingRequest
@@ -113,6 +117,8 @@ namespace WorkNest.Application.DTOs.Booking
         public string? CnicOrPassport { get; set; }
         public string? Address { get; set; }
         public int? CityId { get; set; }
+        public string? ShiftType { get; set; } = "24_7";
+        public string? OfferingType { get; set; } = "24/7";
     }
 
     public class ReassignBookingRequest
@@ -143,5 +149,6 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime StartOn { get; set; }
         public DateTime EndOn { get; set; }
         public int? Capacity { get; set; }
+        public string? ShiftType { get; set; } = "24_7";
     }
 }

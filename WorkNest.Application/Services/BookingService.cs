@@ -46,21 +46,21 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new { bookedDates, bookings = result });
         }
 
-        public async Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity)
+        public async Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7")
         {
-            var result = await _db.GetAvailableSpacesForBookingAsync(spaceTypeId, startOn, endOn, capacity);
+            var result = await _db.GetAvailableSpacesForBookingAsync(spaceTypeId, startOn, endOn, capacity, shiftType);
             return ApiResponse.Ok(result);
         }
 
-        public async Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId)
+        public async Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7")
         {
-            var result = await _db.GetAvailableSpacesForReassignmentAsync(spaceTypeId, startOn, endOn, excludeBookingId);
+            var result = await _db.GetAvailableSpacesForReassignmentAsync(spaceTypeId, startOn, endOn, excludeBookingId, shiftType);
             return ApiResponse.Ok(result);
         }
 
-        public async Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity)
+        public async Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7")
         {
-            var result = await _db.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity);
+            var result = await _db.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType);
             return ApiResponse.Ok(result);
         }
 
@@ -88,6 +88,8 @@ namespace WorkNest.Application.Services
             var pricingId = await ResolvePricingIdAsync(request.SpaceId ?? 0);
             // pricingId may be 0; WN_Bookings_Insert handles category fallback
 
+            var shiftType = !string.IsNullOrWhiteSpace(request.ShiftType) ? request.ShiftType : (!string.IsNullOrWhiteSpace(request.OfferingType) ? request.OfferingType : "24_7");
+
             var result = await _db.InsertBookingAsync(
                 userId.Value, request.SpaceId ?? 0, pricingId,
                 request.StartDateTime, request.EndDateTime,
@@ -95,7 +97,8 @@ namespace WorkNest.Application.Services
                 request.FirstName != null ? userEmail : null,
                 request.FirstName, request.LastName, request.PhoneNumber,
                 request.CnicOrPassport, request.Address, request.CityId,
-                "Created during self-booking");
+                "Created during self-booking",
+                0, "Percentage", 0, null, null, null, null, null, shiftType);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 return ApiResponse.Fail(err.ToString() ?? "An error occurred");
@@ -199,6 +202,8 @@ namespace WorkNest.Application.Services
                 if (parts.Length > 1) lastName = parts[1];
             }
 
+            var shiftType = !string.IsNullOrWhiteSpace(request.ShiftType) ? request.ShiftType : (!string.IsNullOrWhiteSpace(request.OfferingType) ? request.OfferingType : "24_7");
+
             var result = await _db.InsertBookingAsync(
                 userId, spaceId, pricingId,
                 startOn, endOn,
@@ -207,7 +212,8 @@ namespace WorkNest.Application.Services
                 null, null, null, "Created by administrator",
                 discountType == "Percentage" ? discountValue : 0,
                 discountType, discountValue,
-                request.SecurityDepositOverride, request.FloorId, request.BillingPeriodMonths, request.SecurityDepositMonths, request.AdvanceRentMonths);
+                request.SecurityDepositOverride, request.FloorId, request.BillingPeriodMonths, request.SecurityDepositMonths, request.AdvanceRentMonths,
+                shiftType);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 return ApiResponse.Fail(err.ToString() ?? "An error occurred");
@@ -236,6 +242,8 @@ namespace WorkNest.Application.Services
                 }
             }
 
+            var smartShiftType = !string.IsNullOrWhiteSpace(request.ShiftType) ? request.ShiftType : (!string.IsNullOrWhiteSpace(request.OfferingType) ? request.OfferingType : "24_7");
+
             var result = await _db.InsertSmartBookingAsync(
                 userEmail, request.CategoryCode,
                 request.StartDateTime, request.EndDateTime,
@@ -243,7 +251,8 @@ namespace WorkNest.Application.Services
                 request.FirstName != null ? userEmail : null,
                 request.FirstName, request.LastName, request.PhoneNumber,
                 request.CnicOrPassport, request.Address, request.CityId,
-                "Created during self-booking");
+                "Created during self-booking",
+                smartShiftType);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 return ApiResponse.Fail(err.ToString() ?? "An error occurred");

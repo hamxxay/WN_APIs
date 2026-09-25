@@ -28,17 +28,17 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("api/space/available")]
         [AllowAnonymous]
-        public async Task<IActionResult> Available()
+        public async Task<IActionResult> Available([FromQuery] string? shiftType = "24_7")
         {
-            var items = await _spaces.GetAvailableSpacesAsync();
+            var items = await _spaces.GetAvailableSpacesAsync(shiftType);
             return Ok(ApiResponse.Ok(items));
         }
 
         [HttpGet("api/space/available-grouped")]
         [AllowAnonymous]
-        public async Task<IActionResult> AvailableGrouped()
+        public async Task<IActionResult> AvailableGrouped([FromQuery] string? shiftType = "24_7")
         {
-            var items = (await _spaces.GetAvailableSpacesAsync())
+            var items = (await _spaces.GetAvailableSpacesAsync(shiftType))
                 .Cast<IDictionary<string, object?>>()
                 .GroupBy(s => s.TryGetValue("CategoryCode", out var c) ? c?.ToString() ?? "Other" : "Other")
                 .Select(g => new
@@ -55,18 +55,19 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> AvailableByType(
             [FromQuery] int spaceTypeId,
             [FromQuery] DateTime startOn,
-            [FromQuery] DateTime endOn) =>
-            Ok(await _spaces.GetAvailableSpacesByTypeAsync(spaceTypeId, startOn, endOn));
+            [FromQuery] DateTime endOn,
+            [FromQuery] string? shiftType = "24_7") =>
+            Ok(await _spaces.GetAvailableSpacesByTypeAsync(spaceTypeId, startOn, endOn, shiftType));
 
         [HttpGet("api/space/availability-counts")]
         [AllowAnonymous]
-        public async Task<IActionResult> AvailabilityCounts() =>
-            Ok(await _spaces.GetAvailabilityCountsAsync());
+        public async Task<IActionResult> AvailabilityCounts([FromQuery] string? shiftType = "24_7") =>
+            Ok(await _spaces.GetAvailabilityCountsAsync(shiftType));
 
         [HttpGet("api/space/vacant")]
-        public async Task<IActionResult> Vacant()
+        public async Task<IActionResult> Vacant([FromQuery] string? shiftType = "24_7")
         {
-            var items = await _spaces.GetAvailableSpacesAsync();
+            var items = await _spaces.GetAvailableSpacesAsync(shiftType);
             return Ok(ApiResponse.Ok(items));
         }
 

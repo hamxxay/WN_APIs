@@ -5,6 +5,7 @@ using System.Data;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
+using WorkNest.Application.DTOs.Announcement;
 
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
@@ -262,7 +263,8 @@ namespace WorkNest.Infrastructure.Repositories
             decimal? maxDiscountPercent = null,
             int? securityDepositMonths = null,
             decimal? securityDeposit = null,
-            string? offeringType = null)
+            string? offeringType = null,
+            decimal? withholdingTaxRate = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_Insert", c);
@@ -309,6 +311,7 @@ namespace WorkNest.Infrastructure.Repositories
                 if (monthlyBasePrice.HasValue) updateParts.Add("MonthlyBasePrice = @MBP");
                 if (maxDiscountPercent.HasValue) updateParts.Add("MaxDiscountPercent = @MDP");
                 if (!string.IsNullOrWhiteSpace(offeringType)) updateParts.Add("OfferingType = @OT");
+                if (withholdingTaxRate.HasValue) updateParts.Add("WithholdingTaxRate = @WTR");
 
                 var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
                 await using var upd = new SqlCommand(updateSql, c);
@@ -324,6 +327,7 @@ namespace WorkNest.Infrastructure.Repositories
                 if (monthlyBasePrice.HasValue) upd.Parameters.AddWithValue("@MBP", monthlyBasePrice.Value);
                 if (maxDiscountPercent.HasValue) upd.Parameters.AddWithValue("@MDP", maxDiscountPercent.Value);
                 if (!string.IsNullOrWhiteSpace(offeringType)) upd.Parameters.AddWithValue("@OT", offeringType);
+                if (withholdingTaxRate.HasValue) upd.Parameters.AddWithValue("@WTR", withholdingTaxRate.Value);
 
                 await upd.ExecuteNonQueryAsync();
 
@@ -337,15 +341,22 @@ namespace WorkNest.Infrastructure.Repositories
                 if (monthlyBasePrice.HasValue) result["MonthlyBasePrice"] = monthlyBasePrice.Value;
                 if (maxDiscountPercent.HasValue) result["MaxDiscountPercent"] = maxDiscountPercent.Value;
                 if (!string.IsNullOrWhiteSpace(offeringType)) result["OfferingType"] = offeringType;
+                if (withholdingTaxRate.HasValue) result["WithholdingTaxRate"] = withholdingTaxRate.Value;
             }
 
             return result;
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync()
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null)
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT Id, Description, DiscountCap FROM dbo.WN_OfferingType ORDER BY Id ASC", c);
+            string sql = "SELECT Id, Description, DiscountCap, ISNULL(Status, 1) AS Status FROM dbo.WN_OfferingType";
+            if (activeOnly.HasValue)
+            {
+                sql += activeOnly.Value ? " WHERE ISNULL(Status, 1) = 1" : " WHERE ISNULL(Status, 1) = 0";
+            }
+            sql += " ORDER BY Id ASC";
+            await using var cmd = new SqlCommand(sql, c);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -844,15 +855,16 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return rows.FirstOrDefault(row => row.TryGetValue("Id", out var rid) && Convert.ToInt32(rid) == id);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync()
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Spaces_GetAvailable", c);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn, string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_GetAvailableSpaces", c);
@@ -860,14 +872,16 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@StartOn", startOn);
             cmd.Parameters.AddWithValue("@EndOn", endOn);
             cmd.Parameters.AddWithValue("@Capacity", DBNull.Value);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailabilityCountsAsync()
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailabilityCountsAsync(string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Spaces_GetAvailabilityCounts", c);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -987,7 +1001,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_GetAvailableSpaces", c);
@@ -995,11 +1009,12 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@StartOn", startOn);
             cmd.Parameters.AddWithValue("@EndOn", endOn);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_GetAvailableSpacesForReassignment", c);
@@ -1007,11 +1022,12 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@StartOn", startOn);
             cmd.Parameters.AddWithValue("@EndOn", endOn);
             cmd.Parameters.AddWithValue("@ExcludeBookingId", excludeBookingId);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_GetSmartAvailable", c);
@@ -1019,6 +1035,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@StartOn", startOn);
             cmd.Parameters.AddWithValue("@EndOn", endOn);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -1028,7 +1045,8 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null,
             string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
             decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0,
-            decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null)
+            decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null,
+            string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_Insert", c);
@@ -1052,6 +1070,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@BillingPeriodMonths", (object?)billingPeriodMonths ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)securityDepositMonths ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@AdvanceRentMonths", (object?)advanceRentMonths ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             IDictionary<string, object?> result = new Dictionary<string, object?>();
             if (await r.ReadAsync()) result = ToDict(r);
@@ -1102,6 +1121,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 if (billingPeriodMonths.HasValue) updateParts.Add("BillingPeriodMonths = @BPM");
                 if (securityDepositOverride.HasValue) updateParts.Add("SecurityDepositOverride = @SDO");
                 if (floorId.HasValue) updateParts.Add("FloorId = @FID");
+                if (!string.IsNullOrWhiteSpace(shiftType)) updateParts.Add("ShiftType = @ST");
 
                 var updateSql = $@"
                     UPDATE dbo.WN_Bookings 
@@ -1143,6 +1163,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 if (billingPeriodMonths.HasValue) upd.Parameters.AddWithValue("@BPM", billingPeriodMonths.Value);
                 if (securityDepositOverride.HasValue) upd.Parameters.AddWithValue("@SDO", securityDepositOverride.Value);
                 if (floorId.HasValue) upd.Parameters.AddWithValue("@FID", floorId.Value);
+                if (!string.IsNullOrWhiteSpace(shiftType)) upd.Parameters.AddWithValue("@ST", shiftType);
                 await upd.ExecuteNonQueryAsync();
 
                 result["DiscountType"] = discountType;
@@ -1151,6 +1172,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 result["SecurityDepositMonths"] = secDepM;
                 result["SecurityDepositRequired"] = secDepReq;
                 result["SecurityDepositPaid"] = 0.00m;
+                if (!string.IsNullOrWhiteSpace(shiftType)) result["ShiftType"] = shiftType;
                 if (result.TryGetValue("TotalAmount", out var curTotalObj) && curTotalObj is not null)
                 {
                     decimal sub = result.TryGetValue("SubtotalAmount", out var saVal) && saVal is not null ? Convert.ToDecimal(saVal) : 0m;
@@ -1252,7 +1274,8 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<IDictionary<string, object?>> InsertSmartBookingAsync(
             string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById,
             string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null,
-            string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null)
+            string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
+            string? shiftType = "24_7")
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_InsertSmart", c);
@@ -1271,6 +1294,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@CustomerAddress", (object?)customerAddress ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CustomerCityId", (object?)customerCityId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CustomerNotes", (object?)customerNotes ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return ToDict(r);
             return new Dictionary<string, object?>();
@@ -1729,7 +1753,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return (rows, total);
         }
 
-        public async Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? createdById)
+        public async Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_SpaceTypes_Insert", c);
@@ -1738,6 +1762,11 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@CategoryId", (object?)categoryId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed ? 1 : 0);
+            cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
@@ -1749,7 +1778,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return (null, null);
         }
 
-        public async Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? updatedById)
+        public async Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_SpaceTypes_Update", c);
@@ -1759,6 +1788,11 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@CategoryId", (object?)categoryId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed.HasValue ? (object)(hourlyAllowed.Value ? 1 : 0) : DBNull.Value);
+            cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -3267,6 +3301,278 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
             await using var cmd = new SqlCommand(sql, c);
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        // --- Announcements & Alerts Implementations ---
+
+        public async Task<AnnouncementDetailDto?> CreateAnnouncementAsync(
+            string title, string body, string type, string targetScope,
+            int? locationId, int? spaceId, IEnumerable<int>? customUserIds,
+            DateTime? scheduledAt, int createdById)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_Create", c);
+            cmd.Parameters.AddWithValue("@Title", title);
+            cmd.Parameters.AddWithValue("@Body", body);
+            cmd.Parameters.AddWithValue("@Type", type);
+            cmd.Parameters.AddWithValue("@TargetScope", targetScope);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceId", (object?)spaceId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomUserIds", customUserIds != null ? (object)string.Join(",", customUserIds) : DBNull.Value);
+            cmd.Parameters.AddWithValue("@ScheduledAt", (object?)scheduledAt ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedBy", createdById);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            AnnouncementDetailDto? dto = null;
+
+            if (await r.ReadAsync())
+            {
+                dto = MapAnnouncementDetail(r);
+            }
+
+            if (dto != null && await r.NextResultAsync())
+            {
+                while (await r.ReadAsync())
+                {
+                    dto.Recipients.Add(MapAnnouncementRecipient(r));
+                }
+            }
+
+            return dto;
+        }
+
+        public async Task<(IEnumerable<AnnouncementSummaryDto> Rows, int Total)> GetAnnouncementsAsync(int page = 1, int limit = 20, string? search = null)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_GetList", c);
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+
+            var list = new List<AnnouncementSummaryDto>();
+            int total = 0;
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                list.Add(MapAnnouncementSummary(r));
+                if (total == 0 && !r.IsDBNull(r.GetOrdinal("TotalRecords")))
+                {
+                    total = Convert.ToInt32(r["TotalRecords"]);
+                }
+            }
+
+            return (list, total > 0 ? total : list.Count);
+        }
+
+        public async Task<AnnouncementDetailDto?> GetAnnouncementByIdAsync(Guid id)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_GetById", c);
+            cmd.Parameters.AddWithValue("@AnnouncementId", id);
+
+            AnnouncementDetailDto? dto = null;
+            await using var r = await cmd.ExecuteReaderAsync();
+
+            if (await r.ReadAsync())
+            {
+                dto = MapAnnouncementDetail(r);
+            }
+
+            if (dto != null && await r.NextResultAsync())
+            {
+                while (await r.ReadAsync())
+                {
+                    dto.Recipients.Add(MapAnnouncementRecipient(r));
+                }
+            }
+
+            return dto;
+        }
+
+        public async Task<(IEnumerable<UserAnnouncementDto> Rows, int Total)> GetUserAnnouncementsAsync(int userId, int page = 1, int limit = 20)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_GetForUser", c);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+
+            var list = new List<UserAnnouncementDto>();
+            int total = 0;
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                list.Add(new UserAnnouncementDto
+                {
+                    Id = r.GetGuid(r.GetOrdinal("Id")),
+                    Title = r.GetString(r.GetOrdinal("Title")),
+                    Body = r.GetString(r.GetOrdinal("Body")),
+                    Type = r.GetString(r.GetOrdinal("Type")),
+                    TargetScope = r.GetString(r.GetOrdinal("TargetScope")),
+                    ScheduledAt = r.IsDBNull(r.GetOrdinal("ScheduledAt")) ? null : r.GetDateTime(r.GetOrdinal("ScheduledAt")),
+                    SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : r.GetDateTime(r.GetOrdinal("SentAt")),
+                    CreatedAt = r.GetDateTime(r.GetOrdinal("CreatedAt")),
+                    IsRead = !r.IsDBNull(r.GetOrdinal("IsRead")) && Convert.ToBoolean(r["IsRead"]),
+                    ReadAt = r.IsDBNull(r.GetOrdinal("ReadAt")) ? null : r.GetDateTime(r.GetOrdinal("ReadAt"))
+                });
+
+                if (total == 0 && !r.IsDBNull(r.GetOrdinal("TotalRecords")))
+                {
+                    total = Convert.ToInt32(r["TotalRecords"]);
+                }
+            }
+
+            return (list, total > 0 ? total : list.Count);
+        }
+
+        public async Task<bool> MarkAnnouncementReadAsync(Guid announcementId, int userId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_MarkRead", c);
+            cmd.Parameters.AddWithValue("@AnnouncementId", announcementId);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result) > 0;
+        }
+
+        public async Task<IEnumerable<PendingDeliveryItemDto>> GetPendingAnnouncementDeliveriesAsync(int batchSize = 200)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_GetPendingDeliveries", c);
+            cmd.Parameters.AddWithValue("@BatchSize", batchSize);
+
+            var list = new List<PendingDeliveryItemDto>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                list.Add(new PendingDeliveryItemDto
+                {
+                    RecipientId = r.GetInt64(r.GetOrdinal("RecipientId")),
+                    AnnouncementId = r.GetGuid(r.GetOrdinal("AnnouncementId")),
+                    UserId = r.GetInt32(r.GetOrdinal("UserId")),
+                    Channel = r.GetString(r.GetOrdinal("Channel")),
+                    RetryCount = r.GetInt32(r.GetOrdinal("RetryCount")),
+                    Title = r.GetString(r.GetOrdinal("Title")),
+                    Body = r.GetString(r.GetOrdinal("Body")),
+                    Type = r.GetString(r.GetOrdinal("Type")),
+                    UserEmail = r.IsDBNull(r.GetOrdinal("UserEmail")) ? null : r.GetString(r.GetOrdinal("UserEmail")),
+                    UserName = r.IsDBNull(r.GetOrdinal("UserName")) ? null : r.GetString(r.GetOrdinal("UserName"))
+                });
+            }
+
+            return list;
+        }
+
+        public async Task UpdateAnnouncementDeliveryStatusAsync(long recipientId, string status, int retryCount)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_UpdateDeliveryStatus", c);
+            cmd.Parameters.AddWithValue("@RecipientId", recipientId);
+            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@RetryCount", retryCount);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task CheckAndUpdateAnnouncementTerminalStatusAsync(Guid announcementId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Announcements_CheckTerminalStatus", c);
+            cmd.Parameters.AddWithValue("@AnnouncementId", announcementId);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task RegisterDeviceTokenAsync(int userId, string token, string platform)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_DeviceTokens_Upsert", c);
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@Token", token);
+            cmd.Parameters.AddWithValue("@Platform", platform);
+
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        private static AnnouncementSummaryDto MapAnnouncementSummary(SqlDataReader r)
+        {
+            return new AnnouncementSummaryDto
+            {
+                Id = r.GetGuid(r.GetOrdinal("Id")),
+                Title = r.GetString(r.GetOrdinal("Title")),
+                Body = r.GetString(r.GetOrdinal("Body")),
+                Type = r.GetString(r.GetOrdinal("Type")),
+                TargetScope = r.GetString(r.GetOrdinal("TargetScope")),
+                LocationId = r.IsDBNull(r.GetOrdinal("LocationId")) ? null : r.GetInt32(r.GetOrdinal("LocationId")),
+                LocationName = r.IsDBNull(r.GetOrdinal("LocationName")) ? null : r.GetString(r.GetOrdinal("LocationName")),
+                SpaceId = r.IsDBNull(r.GetOrdinal("SpaceId")) ? null : r.GetInt32(r.GetOrdinal("SpaceId")),
+                SpaceName = r.IsDBNull(r.GetOrdinal("SpaceName")) ? null : r.GetString(r.GetOrdinal("SpaceName")),
+                ScheduledAt = r.IsDBNull(r.GetOrdinal("ScheduledAt")) ? null : r.GetDateTime(r.GetOrdinal("ScheduledAt")),
+                SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : r.GetDateTime(r.GetOrdinal("SentAt")),
+                Status = r.GetString(r.GetOrdinal("Status")),
+                CreatedBy = r.GetInt32(r.GetOrdinal("CreatedBy")),
+                CreatedByName = r.IsDBNull(r.GetOrdinal("CreatedByName")) ? null : r.GetString(r.GetOrdinal("CreatedByName")),
+                CreatedAt = r.GetDateTime(r.GetOrdinal("CreatedAt")),
+                TotalRecipients = r.IsDBNull(r.GetOrdinal("TotalRecipients")) ? 0 : Convert.ToInt32(r["TotalRecipients"]),
+                TotalUsers = r.IsDBNull(r.GetOrdinal("TotalUsers")) ? 0 : Convert.ToInt32(r["TotalUsers"]),
+                SentCount = r.IsDBNull(r.GetOrdinal("SentCount")) ? 0 : Convert.ToInt32(r["SentCount"]),
+                FailedCount = r.IsDBNull(r.GetOrdinal("FailedCount")) ? 0 : Convert.ToInt32(r["FailedCount"]),
+                ReadCount = r.IsDBNull(r.GetOrdinal("ReadCount")) ? 0 : Convert.ToInt32(r["ReadCount"]),
+                PendingCount = r.IsDBNull(r.GetOrdinal("PendingCount")) ? 0 : Convert.ToInt32(r["PendingCount"]),
+                PushSentCount = r.IsDBNull(r.GetOrdinal("PushSentCount")) ? 0 : Convert.ToInt32(r["PushSentCount"]),
+                EmailSentCount = r.IsDBNull(r.GetOrdinal("EmailSentCount")) ? 0 : Convert.ToInt32(r["EmailSentCount"])
+            };
+        }
+
+        private static AnnouncementDetailDto MapAnnouncementDetail(SqlDataReader r)
+        {
+            var summary = MapAnnouncementSummary(r);
+            return new AnnouncementDetailDto
+            {
+                Id = summary.Id,
+                Title = summary.Title,
+                Body = summary.Body,
+                Type = summary.Type,
+                TargetScope = summary.TargetScope,
+                LocationId = summary.LocationId,
+                LocationName = summary.LocationName,
+                SpaceId = summary.SpaceId,
+                SpaceName = summary.SpaceName,
+                ScheduledAt = summary.ScheduledAt,
+                SentAt = summary.SentAt,
+                Status = summary.Status,
+                CreatedBy = summary.CreatedBy,
+                CreatedByName = summary.CreatedByName,
+                CreatedAt = summary.CreatedAt,
+                TotalRecipients = summary.TotalRecipients,
+                TotalUsers = summary.TotalUsers,
+                SentCount = summary.SentCount,
+                FailedCount = summary.FailedCount,
+                ReadCount = summary.ReadCount,
+                PendingCount = summary.PendingCount,
+                PushSentCount = summary.PushSentCount,
+                EmailSentCount = summary.EmailSentCount,
+                Recipients = new List<AnnouncementRecipientDto>()
+            };
+        }
+
+        private static AnnouncementRecipientDto MapAnnouncementRecipient(SqlDataReader r)
+        {
+            return new AnnouncementRecipientDto
+            {
+                Id = r.GetInt64(r.GetOrdinal("Id")),
+                AnnouncementId = r.GetGuid(r.GetOrdinal("AnnouncementId")),
+                UserId = r.GetInt32(r.GetOrdinal("UserId")),
+                UserName = r.IsDBNull(r.GetOrdinal("UserName")) ? null : r.GetString(r.GetOrdinal("UserName")),
+                UserEmail = r.IsDBNull(r.GetOrdinal("UserEmail")) ? null : r.GetString(r.GetOrdinal("UserEmail")),
+                Channel = r.GetString(r.GetOrdinal("Channel")),
+                Status = r.GetString(r.GetOrdinal("Status")),
+                RetryCount = r.GetInt32(r.GetOrdinal("RetryCount")),
+                SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : r.GetDateTime(r.GetOrdinal("SentAt"))
+            };
         }
     }
 }

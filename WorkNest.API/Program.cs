@@ -120,11 +120,13 @@ try
     builder.Services.AddScoped<ILeaseTemplateService, LeaseTemplateService>();
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();
     builder.Services.AddScoped<IAttendantService, AttendantService>();
+    builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
 
     // ── Background Hosted Services ────────────────────────────────────────────
     builder.Services.AddHostedService<BillingAutomationService>();
     builder.Services.AddHostedService<InvoiceDeliveryRetryService>();
     builder.Services.AddHostedService<AccessCardRestrictionService>();
+    builder.Services.AddHostedService<AnnouncementDeliveryService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();

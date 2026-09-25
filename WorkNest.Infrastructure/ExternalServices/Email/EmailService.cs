@@ -504,5 +504,67 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 _logger.LogError(ex, "[EMAIL] Failed to send agreement email for quotation #{QuotationNumber} to {ToEmail}.", quotationNumber, toEmail);
             }
         }
+
+        public async Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type)
+        {
+            var fromEmail = _config["Email:FromEmail"];
+            var password  = _config["Email:GmailAppPassword"];
+
+            if (string.IsNullOrWhiteSpace(fromEmail) ||
+                string.IsNullOrWhiteSpace(toEmail) ||
+                string.IsNullOrWhiteSpace(password))
+            {
+                _logger.LogWarning("[EMAIL] Missing email credentials or recipient email. Announcement email skipped for {ToEmail}.", toEmail);
+                return;
+            }
+
+            try
+            {
+                using var mail = new MailMessage();
+                mail.From = new MailAddress(fromEmail, "WorkNest Operations");
+                mail.To.Add(new MailAddress(toEmail));
+
+                bool isAlert = string.Equals(type, "Alert", StringComparison.OrdinalIgnoreCase);
+                mail.Subject = isAlert ? $"[URGENT ALERT] {title} — WorkNest" : $"{title} — WorkNest Announcement";
+                mail.IsBodyHtml = true;
+
+                string badgeColor = isAlert ? "#ef4444" : "#2563eb";
+                string badgeBg = isAlert ? "#fef2f2" : "#eff6ff";
+                string badgeBorder = isAlert ? "#fca5a5" : "#bfdbfe";
+                string headerTitle = isAlert ? "IMPORTANT ALERT" : "ANNOUNCEMENT";
+                string formattedBody = System.Web.HttpUtility.HtmlEncode(body).Replace("\n", "<br/>");
+
+                string html = $@"
+                <div style=""font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; max-width: 620px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;"">
+                    <div style=""display: inline-block; padding: 4px 12px; border-radius: 9999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: {badgeColor}; background-color: {badgeBg}; border: 1px solid {badgeBorder}; margin-bottom: 12px;"">
+                        {headerTitle}
+                    </div>
+                    <h1 style=""color: #0f172a; font-size: 20px; font-weight: 700; margin-top: 0; margin-bottom: 16px; line-height: 1.3;"">{System.Web.HttpUtility.HtmlEncode(title)}</h1>
+                    <p style=""font-size: 14px; color: #475569; margin-bottom: 20px;"">Hello <strong>{System.Web.HttpUtility.HtmlEncode(recipientName)}</strong>,</p>
+                    <div style=""font-size: 15px; line-height: 1.6; color: #334155; padding: 16px; background-color: #f8fafc; border-left: 4px solid {badgeColor}; border-radius: 4px; margin-bottom: 24px;"">
+                        {formattedBody}
+                    </div>
+                    <p style=""font-size: 13px; color: #64748b; margin-bottom: 4px;"">Need assistance? Reach out to our community operations desk or reply to this email.</p>
+                    <hr style=""border: none; border-top: 1px solid #e2e8f0; margin: 24px 0 16px 0;"" />
+                    <p style=""font-size: 12px; color: #94a3b8; text-align: center; margin: 0;"">WorkNest Operations & Control Center • Sent automatically</p>
+                </div>";
+
+                mail.Body = html;
+
+                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                {
+                    Credentials = new NetworkCredential(fromEmail, password),
+                    EnableSsl = true
+                };
+
+                await smtp.SendMailAsync(mail);
+                _logger.LogInformation("[EMAIL] Announcement email '{Title}' sent successfully to {ToEmail}.", title, toEmail);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[EMAIL] Failed to send announcement email '{Title}' to {ToEmail}.", title, toEmail);
+                throw;
+            }
+        }
     }
 }

@@ -9,6 +9,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public int Id { get; set; }
         public string Description { get; set; } = string.Empty;
         public decimal DiscountCap { get; set; }
+        public bool Status { get; set; } = true;
     }
 
     public class QuotationRequest
@@ -31,6 +32,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public string? OfferingType { get; set; } = "1";
         public decimal? PerSeatSupportRate { get; set; }
         public int? FloorId { get; set; }
+        public decimal? WithholdingTaxRate { get; set; } = 15.00m;
         public string? Remarks { get; set; }
         public DateTime ValidUntil { get; set; }
     }
@@ -84,6 +86,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal TaxAmount { get; set; }
         public decimal TaxAmountOnAdvanceRent { get; set; }
         public decimal TaxAmountOnContract { get; set; }
+        public decimal WithholdingTaxRate { get; set; } = 15.00m;
         public decimal TotalPayable { get; set; }
         public string? Remarks { get; set; }
         public string? Status { get; set; }

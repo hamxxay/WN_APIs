@@ -55,11 +55,11 @@ namespace WorkNest.API.Controllers
         [AllowAnonymous]
         [HttpGet("api/quotation/offering-types")]
         [HttpGet("api/offering-types")]
-        public async Task<IActionResult> GetOfferingTypes()
+        public async Task<IActionResult> GetOfferingTypes([FromQuery] bool? activeOnly = null)
         {
             try
             {
-                var types = await _quotations.GetOfferingTypesAsync();
+                var types = await _quotations.GetOfferingTypesAsync(activeOnly);
                 return Ok(ApiResponse.Ok(types));
             }
             catch (Exception ex)

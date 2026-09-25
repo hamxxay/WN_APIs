@@ -20,6 +20,6 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<QuotationResponse>> GetVersionsAsync(int quotationId);
         Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit);
         Task SendQuotationAsync(int quotationId, int? userId);
-        Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync();
+        Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync(bool? activeOnly = null);
     }
 }

@@ -33,5 +33,5 @@ appsettings.*.json
 
 scratch/*
 .dotnet/*
-
+.dotnet_temp/*
 **/App_Data/

@@ -41,8 +41,9 @@ namespace WorkNest.API.Controllers
             [FromQuery] int spaceTypeId,
             [FromQuery] DateTime startOn,
             [FromQuery] DateTime endOn,
-            [FromQuery] int? capacity) =>
-            Ok(await _bookings.GetAvailableSpacesForBookingAsync(spaceTypeId, startOn, endOn, capacity));
+            [FromQuery] int? capacity,
+            [FromQuery] string? shiftType = "24_7") =>
+            Ok(await _bookings.GetAvailableSpacesForBookingAsync(spaceTypeId, startOn, endOn, capacity, shiftType));
 
         [HttpGet("api/booking/available-spaces-reassignment")]
         [AllowAnonymous]
@@ -50,8 +51,9 @@ namespace WorkNest.API.Controllers
             [FromQuery] int spaceTypeId,
             [FromQuery] DateTime startOn,
             [FromQuery] DateTime endOn,
-            [FromQuery] int excludeBookingId) =>
-            Ok(await _bookings.GetAvailableSpacesForReassignmentAsync(spaceTypeId, startOn, endOn, excludeBookingId));
+            [FromQuery] int excludeBookingId,
+            [FromQuery] string? shiftType = "24_7") =>
+            Ok(await _bookings.GetAvailableSpacesForReassignmentAsync(spaceTypeId, startOn, endOn, excludeBookingId, shiftType));
 
         [HttpGet("api/booking/smart/available")]
         [AllowAnonymous]
@@ -59,8 +61,9 @@ namespace WorkNest.API.Controllers
             [FromQuery] string categoryCode,
             [FromQuery] DateTime startOn,
             [FromQuery] DateTime endOn,
-            [FromQuery] int? capacity) =>
-            Ok(await _bookings.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity));
+            [FromQuery] int? capacity,
+            [FromQuery] string? shiftType = "24_7") =>
+            Ok(await _bookings.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType));
 
         [HttpGet("api/booking/my")]
         public async Task<IActionResult> MyBookings([FromHeader(Name = "x-user-email")] string? userEmail)

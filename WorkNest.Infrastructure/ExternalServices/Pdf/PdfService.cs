@@ -110,8 +110,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         int contractMonths = q.Contract?.NumberOfMonths > 0 ? q.Contract.NumberOfMonths : (int)Math.Max(1, Math.Round((q.EndDateTime - q.StartDateTime).TotalDays / 30));
                         int billingMonths = q.BillingPeriodMonths > 0 ? q.BillingPeriodMonths : 3;
                         decimal totalContract = q.TotalContractAmount > 0 ? q.TotalContractAmount : q.TotalAmount;
-                        decimal monthlyRent = q.MonthlyRent > 0 ? q.MonthlyRent : (contractMonths > 0 ? totalContract / contractMonths : totalContract);
-                        decimal firstCycleRent = q.CurrentCycleAmount > 0 ? q.CurrentCycleAmount : (monthlyRent * billingMonths);
+                        var rentDetail = q.Details?.FirstOrDefault(d => string.Equals(d.FeeType, "RoomRent", StringComparison.OrdinalIgnoreCase) || (!string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) && d.Description != null && !d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase)));
+                        decimal monthlyRent = rentDetail != null && rentDetail.UnitPrice > 0 
+                            ? rentDetail.UnitPrice 
+                            : (q.MonthlyRent > 0 ? q.MonthlyRent : (contractMonths > 0 ? totalContract / contractMonths : totalContract));
+                        decimal firstCycleRent = monthlyRent * billingMonths;
                         
                         decimal secDeposit = q.SecurityDeposit;
                         if (secDeposit <= 0 && q.Details != null && q.Details.Count > 0)
@@ -146,9 +149,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             discountAmount = firstCycleRent;
                         }
 
-                        decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 16.00m;
-                        decimal taxOnAdvanceRent = q.TaxAmountOnAdvanceRent > 0 ? q.TaxAmountOnAdvanceRent : Math.Round(Math.Round(firstCycleRent * 0.10m, 2) * (taxPct / 100.0m), 2);
-                        decimal initialPayable = q.TotalPayable > 0 ? q.TotalPayable : Math.Max(0, firstCycleRent + (spaceType == "PrivateRoom" ? secDeposit : 0) + taxOnAdvanceRent - discountAmount);
+                        decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 15.00m;
+                        decimal taxOnAdvanceRent = q.TaxAmountOnAdvanceRent > 0 
+                            ? q.TaxAmountOnAdvanceRent 
+                            : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(Math.Round(firstCycleRent * 0.10m, 2) * (taxPct / 100.0m), 2));
+                        decimal initialPayable = Math.Max(0, (spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) + secDeposit + taxOnAdvanceRent - discountAmount);
 
                         // Dynamic Summary Ribbon
                         col.Item().Background("#f8fafc").Border(1).BorderColor("#e2e8f0").Padding(8).Row(row =>
@@ -344,27 +349,27 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 });
                             }
 
-                            if (q.TaxAmount > 0)
+                            if (taxOnAdvanceRent > 0)
                             {
-                                // c.Item().Row(r =>
-                                // {
-                                //     r.ConstantItem(220).AlignRight().Text($"Provincial Sales Tax ({taxPct:G29}%):").FontColor("#15803d");
-                                //     r.ConstantItem(120).AlignRight().Text($"PKR {q.TaxAmount:N2}").FontColor("#15803d");
-                                // });
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(220).AlignRight().Text($"Provincial Sales Tax ({taxPct:G29}%):").FontColor("#15803d");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {taxOnAdvanceRent:N2}").FontColor("#15803d");
+                                });
                             }
-                            if (q.DiscountAmount > 0)
+                            if (discountAmount > 0)
                             {
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text("Discount:").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {q.DiscountAmount:N2}").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"- PKR {discountAmount:N2}").FontColor("#e74c3c");
                                 });
                             }
                             c.Item().LineHorizontal(1).LineColor("#1a1a2e");
                             c.Item().Row(r =>
                             {
                                 r.ConstantItem(220).AlignRight().Text("TOTAL INITIAL AMOUNT PAYABLE:").Bold().FontSize(11);
-                                r.ConstantItem(120).AlignRight().Text($"PKR {q.TotalPayable:N2}").Bold().FontSize(11).FontColor("#1d4ed8");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {initialPayable:N2}").Bold().FontSize(11).FontColor("#1d4ed8");
                             });
                         });
 
@@ -396,6 +401,28 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             }
                             tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
+
+                            decimal? SecurityDeposit = secDeposit > 0 ? secDeposit : null;
+                            decimal serviceChargeAmount = q.SupportChargeAmount > 0 
+                                ? q.SupportChargeAmount 
+                                : Math.Round(((spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) - discountAmount) * ((q.AppliedChargePercentage > 0 ? q.AppliedChargePercentage : 10.00m) / 100.0m), 2);
+                            decimal ServiceCharges = serviceChargeAmount;
+                            decimal RoomRent = Math.Max(0, ((spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) - discountAmount) - ServiceCharges);
+                            decimal SalesTax = taxOnAdvanceRent > 0 ? taxOnAdvanceRent : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(ServiceCharges * (taxPct / 100.0m), 2));
+                            decimal rawWht = q.WithholdingTaxRate > 0 ? q.WithholdingTaxRate : 15.00m;
+                            decimal WithholdingTaxRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
+
+                            decimal securityDeposit = SecurityDeposit ?? 0m;
+                            decimal taxableBase = RoomRent + ServiceCharges + SalesTax;
+                            decimal grossedUpRent = WithholdingTaxRate < 1m ? taxableBase / (1 - WithholdingTaxRate) : taxableBase;
+                            decimal grossedUpTotal = grossedUpRent + securityDeposit;
+                            decimal baseAmount = taxableBase + securityDeposit;
+
+                            tc.Item().Text($"{itemNum++}. In case the customer withholds tax on this invoice, the customer is to pay PKR {grossedUpTotal:N2} instead of the base invoice amount of PKR {baseAmount:N2}.").FontSize(8).Bold().FontColor("#495057");
+                            if (SecurityDeposit.HasValue && securityDeposit > 0)
+                            {
+                                tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                            }
                         });
                     });
 

@@ -26,9 +26,9 @@ namespace WorkNest.Application.Interfaces
         // --- Space ---
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpacesAsync(int page, int limit, string? search);
         Task<IDictionary<string, object?>?> GetSpaceSummaryAsync(int id);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailabilityCountsAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7");
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn, string? shiftType = "24_7");
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailabilityCountsAsync(string? shiftType = "24_7");
         Task<(int? Id, string? PublicId)> InsertSpaceAsync(string name, int locationId, int spaceTypeId, string? code, string? description, int? floorId, string? imageUrl, int capacity, int? createdById, decimal? price = null, byte? billingPeriodId = null);
         Task UpdateSpaceAsync(int id, string? name, int? locationId, int? spaceTypeId, string? code, string? description, int? floorId, string? imageUrl, int? capacity, int? updatedById, decimal? price = null, byte? billingPeriodId = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetBillingPeriodsAsync();
@@ -40,11 +40,11 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetMyBookingsAsync(string userEmail);
         Task<IEnumerable<IDictionary<string, object?>>> GetRecentBookingsAsync(int top = 10);
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingCalendarAsync(int spaceId, int year, int month);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId);
-        Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null);
-        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null);
-        Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null);
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7");
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7");
+        Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7");
+        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null, string? shiftType = "24_7");
+        Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, string? shiftType = "24_7");
         Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
         Task CancelBookingAsync(int id, string? userEmail, string? cancelReason, int? updatedById);
@@ -73,9 +73,10 @@ namespace WorkNest.Application.Interfaces
             decimal? maxDiscountPercent = null,
             int? securityDepositMonths = null,
             decimal? securityDeposit = null,
-            string? offeringType = null
+            string? offeringType = null,
+            decimal? withholdingTaxRate = null
         );
-        Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null);
         Task<IDictionary<string, object?>?> GetQuotationByIdAsync(
             int quotationId,
             string? userEmail = null
@@ -160,8 +161,8 @@ namespace WorkNest.Application.Interfaces
         // --- Space ---
         Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync();
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit);
-        Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? createdById);
-        Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? updatedById);
+        Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById);
+        Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById);
         Task DeleteSpaceTypeAsync(int id);
 
         // --- Space ---
@@ -254,6 +255,17 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>?> GetActiveLeaseTemplateByNameDbAsync(string name);
         Task<IDictionary<string, object?>> PublishLeaseTemplateDbAsync(string name, string contentHtml, int? createdBy);
         Task EnsureLeaseTemplateSchemaDbAsync();
+
+        // --- Announcements & Alerts ---
+        Task<WorkNest.Application.DTOs.Announcement.AnnouncementDetailDto?> CreateAnnouncementAsync(string title, string body, string type, string targetScope, int? locationId, int? spaceId, IEnumerable<int>? customUserIds, DateTime? scheduledAt, int createdById);
+        Task<(IEnumerable<WorkNest.Application.DTOs.Announcement.AnnouncementSummaryDto> Rows, int Total)> GetAnnouncementsAsync(int page = 1, int limit = 20, string? search = null);
+        Task<WorkNest.Application.DTOs.Announcement.AnnouncementDetailDto?> GetAnnouncementByIdAsync(Guid id);
+        Task<(IEnumerable<WorkNest.Application.DTOs.Announcement.UserAnnouncementDto> Rows, int Total)> GetUserAnnouncementsAsync(int userId, int page = 1, int limit = 20);
+        Task<bool> MarkAnnouncementReadAsync(Guid announcementId, int userId);
+        Task<IEnumerable<WorkNest.Application.DTOs.Announcement.PendingDeliveryItemDto>> GetPendingAnnouncementDeliveriesAsync(int batchSize = 200);
+        Task UpdateAnnouncementDeliveryStatusAsync(long recipientId, string status, int retryCount);
+        Task CheckAndUpdateAnnouncementTerminalStatusAsync(Guid announcementId);
+        Task RegisterDeviceTokenAsync(int userId, string token, string platform);
     }
 }
 

@@ -301,7 +301,8 @@ namespace WorkNest.Application.Services
                 maxDiscountCap,
                 securityDepositMonths,
                 calculatedSecDeposit,
-                offeringTypeDbValue
+                offeringTypeDbValue,
+                request.WithholdingTaxRate ?? 15.00m
             );
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -372,6 +373,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp is not null ? Convert.ToDecimal(atp) : 16.00m,
                 SupportChargeAmount = header.TryGetValue("SupportChargeAmount", out var sca) && sca is not null ? Convert.ToDecimal(sca) : Math.Round((Convert.ToDecimal(header["SubtotalAmount"]) - Convert.ToDecimal(header["DiscountAmount"])) * 0.10m, 2),
                 TaxAmount = header.TryGetValue("TaxAmount", out var ta) && ta is not null ? Convert.ToDecimal(ta) : Math.Round(Math.Round((Convert.ToDecimal(header["SubtotalAmount"]) - Convert.ToDecimal(header["DiscountAmount"])) * 0.10m, 2) * 0.16m, 2),
+                WithholdingTaxRate = header.TryGetValue("WithholdingTaxRate", out var wtr) && wtr is not null && Convert.ToDecimal(wtr) > 0 ? Convert.ToDecimal(wtr) : 15.00m,
                 Remarks = header["Remarks"]?.ToString(),
                 Status = header["Status"]?.ToString(),
                 Version = Convert.ToInt32(header["Version"]),
@@ -661,14 +663,17 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             await _db.SendQuotationStatusAsync(quotationId, "Sent", userId);
         }
 
-        public async Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync()
+        public async Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync(bool? activeOnly = null)
         {
-            var rows = await _db.GetOfferingTypesAsync();
+            var rows = await _db.GetOfferingTypesAsync(activeOnly);
             return rows.Select(r => new OfferingTypeDto
             {
                 Id = Convert.ToInt32(r["Id"]),
                 Description = r["Description"]?.ToString() ?? "",
-                DiscountCap = Convert.ToDecimal(r["DiscountCap"])
+                DiscountCap = Convert.ToDecimal(r["DiscountCap"]),
+                Status = r.ContainsKey("Status") && r["Status"] != null && r["Status"] != DBNull.Value
+                    ? Convert.ToBoolean(r["Status"])
+                    : true
             }).ToList();
         }
     }
