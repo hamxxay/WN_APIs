@@ -6,6 +6,7 @@ using WorkNest.Application.Interfaces;
 using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.DTOs.Announcement;
+using WorkNest.Application.DTOs.HikDevice;
 
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
@@ -3573,6 +3574,112 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 RetryCount = r.GetInt32(r.GetOrdinal("RetryCount")),
                 SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : r.GetDateTime(r.GetOrdinal("SentAt"))
             };
+        }
+
+        // --- Hikvision Devices & Cache Snapshots Implementation ---
+
+        public async Task<IEnumerable<HikDeviceDto>> GetHikDevicesAsync(string? location = null)
+        {
+            await using var conn = await Open();
+            var sql = @"SELECT id, name, grp, code, location, online, last_seen
+                        FROM dbo.WN_HIK_Devices WITH (NOLOCK)";
+            if (!string.IsNullOrWhiteSpace(location))
+            {
+                sql += " WHERE location = @Location";
+            }
+            sql += " ORDER BY name";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            if (!string.IsNullOrWhiteSpace(location))
+            {
+                cmd.Parameters.AddWithValue("@Location", location);
+            }
+
+            var devices = new List<HikDeviceDto>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                devices.Add(new HikDeviceDto
+                {
+                    Id = r.GetInt32(r.GetOrdinal("id")),
+                    Name = r.GetString(r.GetOrdinal("name")),
+                    Grp = r.IsDBNull(r.GetOrdinal("grp")) ? null : r.GetString(r.GetOrdinal("grp")),
+                    Code = r.IsDBNull(r.GetOrdinal("code")) ? null : r.GetString(r.GetOrdinal("code")),
+                    Location = r.IsDBNull(r.GetOrdinal("location")) ? null : r.GetString(r.GetOrdinal("location")),
+                    Online = !r.IsDBNull(r.GetOrdinal("online")) && r.GetBoolean(r.GetOrdinal("online")) ? 1 : 0,
+                    LastSeen = r.IsDBNull(r.GetOrdinal("last_seen")) ? null : r.GetDateTime(r.GetOrdinal("last_seen")).ToString("yyyy-MM-ddTHH:mm:ss")
+                });
+            }
+            return devices;
+        }
+
+        public async Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null)
+        {
+            await using var conn = await Open();
+            var sql = @"SELECT d.id, c.roster
+                        FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
+                        LEFT JOIN dbo.WN_HIK_DevCache c WITH (NOLOCK) ON c.device_id = d.id";
+            if (!string.IsNullOrWhiteSpace(location))
+            {
+                sql += " WHERE d.location = @Location";
+            }
+
+            await using var cmd = new SqlCommand(sql, conn);
+            if (!string.IsNullOrWhiteSpace(location))
+            {
+                cmd.Parameters.AddWithValue("@Location", location);
+            }
+
+            var list = new List<(int DeviceId, string? RosterJson)>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var deviceId = r.GetInt32(0);
+                var rosterJson = r.IsDBNull(1) ? null : r.GetString(1);
+                list.Add((deviceId, rosterJson));
+            }
+            return list;
+        }
+
+        public async Task<Dictionary<string, string>> GetHikCnicMapAsync()
+        {
+            await using var conn = await Open();
+            var cnics = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            await using var cmd = new SqlCommand(
+                @"SELECT employee_no, name, cnic 
+                  FROM dbo.WN_HIK_Users WITH (NOLOCK)
+                  WHERE cnic IS NOT NULL AND cnic <> ''", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var empNo = r.GetString(0);
+                var name = r.GetString(1).Trim().ToLowerInvariant();
+                var cnic = r.GetString(2);
+                cnics[$"{empNo}||{name}"] = cnic;
+            }
+            return cnics;
+        }
+
+        public async Task<string?> GetHikDeviceSnapshotByIdAsync(int deviceId)
+        {
+            await using var conn = await Open();
+            await using var cmd = new SqlCommand(
+                "SELECT roster FROM dbo.WN_HIK_DevCache WITH (NOLOCK) WHERE device_id = @id", conn);
+            cmd.Parameters.AddWithValue("@id", deviceId);
+            var result = await cmd.ExecuteScalarAsync();
+            return result is string s ? s : null;
+        }
+
+        public async Task<int> GetNextHikEmployeeNoAsync()
+        {
+            await using var conn = await Open();
+            await using var cmd = new SqlCommand(
+                @"SELECT MAX(n) FROM (
+                    SELECT TRY_CAST(employee_no AS INT) AS n FROM dbo.WN_HIK_Users WITH (NOLOCK)
+                  ) t WHERE n IS NOT NULL AND n < 8500", conn);
+            var max = await cmd.ExecuteScalarAsync();
+            var next = (max is int m ? m : 999) + 1;
+            return next;
         }
     }
 }

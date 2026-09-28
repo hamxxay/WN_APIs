@@ -121,6 +121,7 @@ try
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();
     builder.Services.AddScoped<IAttendantService, AttendantService>();
     builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
+    builder.Services.AddScoped<IHikDeviceService, HikDeviceService>();
 
     // ── Background Hosted Services ────────────────────────────────────────────
     builder.Services.AddHostedService<BillingAutomationService>();

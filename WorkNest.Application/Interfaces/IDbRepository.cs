@@ -266,6 +266,13 @@ namespace WorkNest.Application.Interfaces
         Task UpdateAnnouncementDeliveryStatusAsync(long recipientId, string status, int retryCount);
         Task CheckAndUpdateAnnouncementTerminalStatusAsync(Guid announcementId);
         Task RegisterDeviceTokenAsync(int userId, string token, string platform);
+
+        // --- Hikvision Devices & Cache Snapshots ---
+        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceDto>> GetHikDevicesAsync(string? location = null);
+        Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null);
+        Task<Dictionary<string, string>> GetHikCnicMapAsync();
+        Task<string?> GetHikDeviceSnapshotByIdAsync(int deviceId);
+        Task<int> GetNextHikEmployeeNoAsync();
     }
 }
 

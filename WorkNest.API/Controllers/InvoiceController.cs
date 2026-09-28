@@ -719,6 +719,10 @@ END;";
                 }
 
                 decimal grandTotal = subTotal - discountTotal + taxTotal;
+                decimal roomRentExcl = subTotal - discountTotal;
+                decimal serviceChargeAmount = req.ServiceCharges ?? (taxTotal > 0 ? Math.Round(taxTotal / 0.16m, 4) : 0m);
+                decimal roomRentAmount = req.RoomRentExclTax ?? Math.Max(0, roomRentExcl - serviceChargeAmount);
+                decimal taxOnServiceCharges = req.TaxOnServiceCharges ?? taxTotal;
 
                 using var cmd = new SqlCommand("dbo.WN_CreateCustomInvoice", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
@@ -732,6 +736,20 @@ END;";
                 cmd.Parameters.AddWithValue("@DiscountTotal", discountTotal);
                 cmd.Parameters.AddWithValue("@TaxTotal", taxTotal);
                 cmd.Parameters.AddWithValue("@GrandTotal", grandTotal);
+                cmd.Parameters.AddWithValue("@AdvanceRentMonths", (object?)req.AdvanceRentMonths ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)req.SecurityDepositMonths ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SecurityDepositAmount", req.SecurityDepositAmount ?? 0m);
+                cmd.Parameters.AddWithValue("@BillingPeriodStart", (object?)req.BillingPeriodStart ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@BillingPeriodEnd", (object?)req.BillingPeriodEnd ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)req.AccountReceivableId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@RentAccountId", (object?)req.RentAccountId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)req.ServicesIncomeId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SalesTaxId", (object?)req.SalesTaxId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)req.SecurityReceivedId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@AccountsCoaId", (object?)req.AccountsCoaId ?? (object?)req.RentAccountId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@RoomRentExclTax", roomRentAmount);
+                cmd.Parameters.AddWithValue("@ServiceCharges", serviceChargeAmount);
+                cmd.Parameters.AddWithValue("@TaxOnServiceCharges", taxOnServiceCharges);
 
                 var pInvoiceId = new SqlParameter("@InvoiceId", SqlDbType.Int) { Direction = ParameterDirection.Output };
                 var pInvoiceNumber = new SqlParameter("@InvoiceNumber", SqlDbType.NVarChar, 50) { Direction = ParameterDirection.Output };
@@ -774,7 +792,17 @@ END;";
                     SET BillingPeriodStart = @BillingPeriodStart,
                         BillingPeriodEnd = @BillingPeriodEnd,
                         AdvanceRentMonths = @AdvanceRentMonths,
+                        SecurityDepositMonths = @SecurityDepositMonths,
                         SecurityDepositAmount = @SecurityDepositAmount,
+                        RoomRentExclTax = @RoomRentExclTax,
+                        ServiceCharges = @ServiceCharges,
+                        TaxOnServiceCharges = @TaxOnServiceCharges,
+                        RentAccountId = COALESCE(@RentAccountId, RentAccountId),
+                        SecurityReceivedId = COALESCE(@SecurityReceivedId, SecurityReceivedId),
+                        ServicesIncomeId = COALESCE(@ServicesIncomeId, ServicesIncomeId),
+                        SalesTaxId = COALESCE(@SalesTaxId, SalesTaxId),
+                        AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
+                        AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
                         SubTotal = @SubTotal
                     WHERE Id = @InvoiceId;";
                 using var updateCmd = new SqlCommand(updateHeaderSql, conn);
@@ -782,15 +810,22 @@ END;";
                 updateCmd.Parameters.AddWithValue("@BillingPeriodStart", (object?)req.BillingPeriodStart ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@BillingPeriodEnd", (object?)req.BillingPeriodEnd ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@AdvanceRentMonths", (object?)req.AdvanceRentMonths ?? DBNull.Value);
+                updateCmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)req.SecurityDepositMonths ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@SecurityDepositAmount", req.SecurityDepositAmount ?? 0m);
+                updateCmd.Parameters.AddWithValue("@RoomRentExclTax", roomRentAmount);
+                updateCmd.Parameters.AddWithValue("@ServiceCharges", serviceChargeAmount);
+                updateCmd.Parameters.AddWithValue("@TaxOnServiceCharges", taxOnServiceCharges);
+                updateCmd.Parameters.AddWithValue("@RentAccountId", (object?)req.RentAccountId ?? DBNull.Value);
+                updateCmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)req.SecurityReceivedId ?? DBNull.Value);
+                updateCmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)req.ServicesIncomeId ?? DBNull.Value);
+                updateCmd.Parameters.AddWithValue("@SalesTaxId", (object?)req.SalesTaxId ?? DBNull.Value);
+                updateCmd.Parameters.AddWithValue("@AccountReceivableId", (object?)req.AccountReceivableId ?? DBNull.Value);
+                updateCmd.Parameters.AddWithValue("@AccountsCoaId", (object?)req.AccountsCoaId ?? (object?)req.RentAccountId ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@SubTotal", subTotal - discountTotal);
                 await updateCmd.ExecuteNonQueryAsync();
 
                 string stInvoiceNumber = invoiceNumber.Replace("INV-", "ST-INV-");
-                decimal roomRentExcl = subTotal - discountTotal;
                 decimal stTaxRate = taxTotal > 0 ? 16.00m : 0.00m;
-                decimal serviceChargeAmount = taxTotal > 0 ? Math.Round(taxTotal / 0.16m, 2) : 0m;
-                decimal roomRentAmount = Math.Max(0, roomRentExcl - serviceChargeAmount);
                 decimal stSubTotal = serviceChargeAmount;
                 decimal stGrandTotal = stSubTotal + taxTotal;
 
@@ -1030,7 +1065,12 @@ END;";
                         ISNULL(s.Capacity, 1) AS SpaceCapacity,
                         ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
                         ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
-                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate
+                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate,
+                        COALESCE(b.RentAccountId, bd.RentAccountId, 2852) AS RentAccountId,
+                        COALESCE(b.SecurityReceivedId, bd.SecurityReceivedId, 76) AS SecurityReceivedId,
+                        COALESCE(b.ServicesIncomeId, bd.ServicesIncomeId, 2853) AS ServicesIncomeId,
+                        COALESCE(b.SalesTaxId, bd.SalesTaxId, 2854) AS SalesTaxId,
+                        COALESCE(b.AccountReceivableId, bd.AccountReceivableId, 2855) AS AccountReceivableId
                     FROM dbo.WN_Bookings b WITH (NOLOCK)
                     LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
                     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
@@ -1043,6 +1083,7 @@ END;";
                 decimal monthlyRent = 0, subtotalAmount = 0, totalAmount = 0, discountAmount = 0, discountPercentage = 0, secDepositReq = 0, resolvedSecDep = 0;
                 int billingMonths = 3, secMonths = 2, spaceCapacity = 1;
                 decimal appliedTaxPercentage = 16.00m, appliedChargePercentage = 10.00m, perSeatSupportRate = 2000.00m;
+                int? rentAccountId = null, securityReceivedId = null, servicesIncomeId = null, salesTaxId = null, accountReceivableId = null;
                 string discountType = "Percentage";
                 DateTime? startOn = null, endOn = null;
                 string customerEmail = "", customerName = "", spaceName = "Workspace", spaceTypeName = "", categoryCode = "";
@@ -1075,6 +1116,11 @@ END;";
                         appliedTaxPercentage = HasColumn(reader, "AppliedTaxPercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedTaxPercentage")) ? Convert.ToDecimal(reader["AppliedTaxPercentage"]) : 16.00m;
                         appliedChargePercentage = HasColumn(reader, "AppliedChargePercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedChargePercentage")) ? Convert.ToDecimal(reader["AppliedChargePercentage"]) : 10.00m;
                         perSeatSupportRate = HasColumn(reader, "PerSeatSupportRate") && !reader.IsDBNull(reader.GetOrdinal("PerSeatSupportRate")) ? Convert.ToDecimal(reader["PerSeatSupportRate"]) : 2000.00m;
+                        rentAccountId = HasColumn(reader, "RentAccountId") && !reader.IsDBNull(reader.GetOrdinal("RentAccountId")) ? (int?)Convert.ToInt32(reader["RentAccountId"]) : null;
+                        securityReceivedId = HasColumn(reader, "SecurityReceivedId") && !reader.IsDBNull(reader.GetOrdinal("SecurityReceivedId")) ? (int?)Convert.ToInt32(reader["SecurityReceivedId"]) : null;
+                        servicesIncomeId = HasColumn(reader, "ServicesIncomeId") && !reader.IsDBNull(reader.GetOrdinal("ServicesIncomeId")) ? (int?)Convert.ToInt32(reader["ServicesIncomeId"]) : null;
+                        salesTaxId = HasColumn(reader, "SalesTaxId") && !reader.IsDBNull(reader.GetOrdinal("SalesTaxId")) ? (int?)Convert.ToInt32(reader["SalesTaxId"]) : null;
+                        accountReceivableId = HasColumn(reader, "AccountReceivableId") && !reader.IsDBNull(reader.GetOrdinal("AccountReceivableId")) ? (int?)Convert.ToInt32(reader["AccountReceivableId"]) : null;
                     }
                     else
                     {
@@ -1208,6 +1254,7 @@ END;";
                     supportCharge = Math.Round(rate * cap * billingMonths, 2);
                 }
                 decimal taxTotal = Math.Round(supportCharge * (taxRate / 100.0m), 2);
+                decimal roomRentExclusive = Math.Max(0, discountedBase - supportCharge);
                 decimal expectedSubtotal = grossAdvanceRent;
                 decimal expectedGrandTotal = Math.Max(0, grossAdvanceRent - appliedDiscount + taxTotal + securityDeposit);
                 decimal effectiveTaxRateOnRent = (discountedBase > 0) 
@@ -1237,7 +1284,17 @@ END;";
                             BillingPeriodStart = @BillingPeriodStart,
                             BillingPeriodEnd = @BillingPeriodEnd,
                             AdvanceRentMonths = @AdvanceRentMonths,
+                            SecurityDepositMonths = @SecurityDepositMonths,
                             SecurityDepositAmount = @SecurityDepositAmount,
+                            RoomRentExclTax = @RoomRentExclTax,
+                            ServiceCharges = @ServiceCharges,
+                            TaxOnServiceCharges = @TaxOnServiceCharges,
+                            RentAccountId = COALESCE(@RentAccountId, RentAccountId),
+                            SecurityReceivedId = COALESCE(@SecurityReceivedId, SecurityReceivedId),
+                            ServicesIncomeId = COALESCE(@ServicesIncomeId, ServicesIncomeId),
+                            SalesTaxId = COALESCE(@SalesTaxId, SalesTaxId),
+                            AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
+                            AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
                             DueOn = @DueOn,
                             UpdatedOn = SYSUTCDATETIME()
                         WHERE Id = @InvoiceId;";
@@ -1251,7 +1308,17 @@ END;";
                         upCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
                         upCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
                         upCmd.Parameters.AddWithValue("@AdvanceRentMonths", billingMonths);
+                        upCmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)secMonths ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDeposit);
+                        upCmd.Parameters.AddWithValue("@RoomRentExclTax", roomRentExclusive);
+                        upCmd.Parameters.AddWithValue("@ServiceCharges", supportCharge);
+                        upCmd.Parameters.AddWithValue("@TaxOnServiceCharges", taxTotal);
+                        upCmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
+                        upCmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
+                        upCmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
+                        upCmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
+                        upCmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
+                        upCmd.Parameters.AddWithValue("@AccountsCoaId", (object?)rentAccountId ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@DueOn", startOn.HasValue ? startOn.Value : DateTime.Today);
                         await upCmd.ExecuteNonQueryAsync();
                     }
@@ -1317,7 +1384,17 @@ END;";
                     BillingPeriodStart = periodStart,
                     BillingPeriodEnd = periodEnd,
                     AdvanceRentMonths = billingMonths,
+                    SecurityDepositMonths = secMonths,
                     SecurityDepositAmount = securityDeposit,
+                    RoomRentExclTax = roomRentExclusive,
+                    ServiceCharges = supportCharge,
+                    TaxOnServiceCharges = taxTotal,
+                    RentAccountId = rentAccountId,
+                    SecurityReceivedId = securityReceivedId,
+                    ServicesIncomeId = servicesIncomeId,
+                    SalesTaxId = salesTaxId,
+                    AccountReceivableId = accountReceivableId,
+                    AccountsCoaId = rentAccountId,
                     Lines = new List<CreateCustomInvoiceLineDto>()
                 };
 
@@ -1378,13 +1455,18 @@ END;";
                 string bookingSql = @"
                     SELECT TOP 1 
                         b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, b.MonthlyRent, b.SubtotalAmount, b.TotalAmount,
-                        b.BillingPeriodMonths, b.DiscountAmount, b.DiscountPercentage, b.DiscountType,
+                        b.BillingPeriodMonths, b.SecurityDepositMonths, b.DiscountAmount, b.DiscountPercentage, b.DiscountType,
                         u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
                         s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode,
                         ISNULL(s.Capacity, 1) AS SpaceCapacity,
                         ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
                         ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
-                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate
+                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate,
+                        COALESCE(b.RentAccountId, bd.RentAccountId, 2852) AS RentAccountId,
+                        COALESCE(b.SecurityReceivedId, bd.SecurityReceivedId, 76) AS SecurityReceivedId,
+                        COALESCE(b.ServicesIncomeId, bd.ServicesIncomeId, 2853) AS ServicesIncomeId,
+                        COALESCE(b.SalesTaxId, bd.SalesTaxId, 2854) AS SalesTaxId,
+                        COALESCE(b.AccountReceivableId, bd.AccountReceivableId, 2855) AS AccountReceivableId
                     FROM dbo.WN_Bookings b WITH (NOLOCK)
                     LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
                     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
@@ -1395,8 +1477,9 @@ END;";
 
                 int userId = 0;
                 decimal monthlyRent = 0, subtotalAmount = 0, discountAmount = 0, discountPercentage = 0, totalAmount = 0;
-                int billingMonths = 3, spaceCapacity = 1;
+                int billingMonths = 3, secMonths = 2, spaceCapacity = 1;
                 decimal appliedTaxPercentage = 16.00m, appliedChargePercentage = 10.00m, perSeatSupportRate = 2000.00m;
+                int? rentAccountId = null, securityReceivedId = null, servicesIncomeId = null, salesTaxId = null, accountReceivableId = null;
                 DateTime? startOn = null, endOn = null;
                 string customerEmail = "", customerName = "", spaceName = "Workspace", spaceTypeName = "", categoryCode = "";
 
@@ -1415,6 +1498,7 @@ END;";
                         discountAmount = reader.IsDBNull(reader.GetOrdinal("DiscountAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountAmount"));
                         discountPercentage = reader.IsDBNull(reader.GetOrdinal("DiscountPercentage")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountPercentage"));
                         billingMonths = reader.IsDBNull(reader.GetOrdinal("BillingPeriodMonths")) ? 3 : reader.GetInt32(reader.GetOrdinal("BillingPeriodMonths"));
+                        secMonths = HasColumn(reader, "SecurityDepositMonths") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositMonths")) ? Convert.ToInt32(reader["SecurityDepositMonths"]) : 2;
                         customerEmail = reader.IsDBNull(reader.GetOrdinal("CustomerEmail")) ? "" : reader.GetString(reader.GetOrdinal("CustomerEmail"));
                         customerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? "Valued Customer" : reader.GetString(reader.GetOrdinal("CustomerName"));
                         spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));
@@ -1424,6 +1508,11 @@ END;";
                         appliedTaxPercentage = HasColumn(reader, "AppliedTaxPercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedTaxPercentage")) ? Convert.ToDecimal(reader["AppliedTaxPercentage"]) : 16.00m;
                         appliedChargePercentage = HasColumn(reader, "AppliedChargePercentage") && !reader.IsDBNull(reader.GetOrdinal("AppliedChargePercentage")) ? Convert.ToDecimal(reader["AppliedChargePercentage"]) : 10.00m;
                         perSeatSupportRate = HasColumn(reader, "PerSeatSupportRate") && !reader.IsDBNull(reader.GetOrdinal("PerSeatSupportRate")) ? Convert.ToDecimal(reader["PerSeatSupportRate"]) : 2000.00m;
+                        rentAccountId = HasColumn(reader, "RentAccountId") && !reader.IsDBNull(reader.GetOrdinal("RentAccountId")) ? (int?)Convert.ToInt32(reader["RentAccountId"]) : null;
+                        securityReceivedId = HasColumn(reader, "SecurityReceivedId") && !reader.IsDBNull(reader.GetOrdinal("SecurityReceivedId")) ? (int?)Convert.ToInt32(reader["SecurityReceivedId"]) : null;
+                        servicesIncomeId = HasColumn(reader, "ServicesIncomeId") && !reader.IsDBNull(reader.GetOrdinal("ServicesIncomeId")) ? (int?)Convert.ToInt32(reader["ServicesIncomeId"]) : null;
+                        salesTaxId = HasColumn(reader, "SalesTaxId") && !reader.IsDBNull(reader.GetOrdinal("SalesTaxId")) ? (int?)Convert.ToInt32(reader["SalesTaxId"]) : null;
+                        accountReceivableId = HasColumn(reader, "AccountReceivableId") && !reader.IsDBNull(reader.GetOrdinal("AccountReceivableId")) ? (int?)Convert.ToInt32(reader["AccountReceivableId"]) : null;
                     }
                     else
                     {
@@ -1507,6 +1596,7 @@ END;";
                     supportCharge = Math.Round(rate * cap * billingMonths, 2);
                 }
                 decimal taxTotal = Math.Round(supportCharge * (taxRate / 100.0m), 2);
+                decimal roomRentExclusive = Math.Max(0, discountedBase - supportCharge);
                 decimal effectiveTaxRateOnRent = (discountedBase > 0) 
                     ? Math.Round(taxTotal / discountedBase, 6) 
                     : 0m;
@@ -1538,7 +1628,17 @@ END;";
                     BillingPeriodStart = periodStart,
                     BillingPeriodEnd = periodEnd,
                     AdvanceRentMonths = billingMonths,
+                    SecurityDepositMonths = secMonths,
                     SecurityDepositAmount = 0m,
+                    RoomRentExclTax = roomRentExclusive,
+                    ServiceCharges = supportCharge,
+                    TaxOnServiceCharges = taxTotal,
+                    RentAccountId = rentAccountId,
+                    SecurityReceivedId = securityReceivedId,
+                    ServicesIncomeId = servicesIncomeId,
+                    SalesTaxId = salesTaxId,
+                    AccountReceivableId = accountReceivableId,
+                    AccountsCoaId = rentAccountId,
                     Lines = new List<CreateCustomInvoiceLineDto>()
                 };
 
@@ -1617,7 +1717,17 @@ END;";
         public DateTime? BillingPeriodStart { get; set; }
         public DateTime? BillingPeriodEnd { get; set; }
         public int? AdvanceRentMonths { get; set; }
+        public int? SecurityDepositMonths { get; set; }
         public decimal? SecurityDepositAmount { get; set; }
+        public decimal? RoomRentExclTax { get; set; }
+        public decimal? ServiceCharges { get; set; }
+        public decimal? TaxOnServiceCharges { get; set; }
+        public int? AccountReceivableId { get; set; }
+        public int? RentAccountId { get; set; }
+        public int? ServicesIncomeId { get; set; }
+        public int? SalesTaxId { get; set; }
+        public int? SecurityReceivedId { get; set; }
+        public int? AccountsCoaId { get; set; }
         public List<CreateCustomInvoiceLineDto> Lines { get; set; } = new();
     }
 
