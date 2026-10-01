@@ -21,6 +21,7 @@ Logs/
 .vscode/
 SQL/
 schema.sql
+Sp.sql
 
 publish/appsettings.json
 WorkNest.API/appsettings.json
