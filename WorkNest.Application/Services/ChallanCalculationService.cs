@@ -179,7 +179,21 @@ namespace WorkNest.Application.Services
             {
                 res.BillingType = "Monthly";
                 res.BillingBasis = "Per Month";
-                res.ContractPeriodMonths = input.ContractPeriodMonths > 0 ? input.ContractPeriodMonths : 12;
+
+                int contractMonths = input.ContractPeriodMonths > 0 ? input.ContractPeriodMonths : 0;
+                if (contractMonths <= 0 && input.StartOn.HasValue && input.EndOn.HasValue && input.EndOn.Value > input.StartOn.Value)
+                {
+                    int m = ((input.EndOn.Value.Year - input.StartOn.Value.Year) * 12) + input.EndOn.Value.Month - input.StartOn.Value.Month;
+                    if (m <= 0)
+                    {
+                        var days = (input.EndOn.Value - input.StartOn.Value).TotalDays;
+                        m = Math.Max(1, (int)Math.Round(days / 30.0));
+                    }
+                    contractMonths = Math.Max(1, m);
+                }
+                if (contractMonths <= 0) contractMonths = input.BillingPeriodMonths > 0 ? input.BillingPeriodMonths : 1;
+
+                res.ContractPeriodMonths = contractMonths;
                 res.BillingPeriodMonths = input.BillingPeriodMonths > 0 ? input.BillingPeriodMonths : 3;
 
                 if (input.MonthlyRent > 0)
@@ -208,9 +222,7 @@ namespace WorkNest.Application.Services
                     res.MonthlyRent = input.SubtotalAmount / res.ContractPeriodMonths;
                 }
 
-                res.TotalContractRent = (input.TotalContractAmount > 0 && input.TotalContractAmount >= (res.MonthlyRent * res.ContractPeriodMonths))
-                    ? input.TotalContractAmount
-                    : (res.MonthlyRent * res.ContractPeriodMonths);
+                res.TotalContractRent = res.MonthlyRent * res.ContractPeriodMonths;
 
                 int capacity = input.Capacity > 0 ? input.Capacity : 1;
                 decimal supportRate = input.PerSeatSupportRate > 0 ? input.PerSeatSupportRate : 2000.00m;
@@ -437,6 +449,26 @@ namespace WorkNest.Application.Services
                 secDeposit = q.Contract.SecurityDeposit;
             }
 
+            int qContractMonths = 0;
+            if (q.EndDateTime > q.StartDateTime)
+            {
+                int m = ((q.EndDateTime.Year - q.StartDateTime.Year) * 12) + q.EndDateTime.Month - q.StartDateTime.Month;
+                if (m <= 0)
+                {
+                    var days = (q.EndDateTime - q.StartDateTime).TotalDays;
+                    m = Math.Max(1, (int)Math.Round(days / 30.0));
+                }
+                qContractMonths = Math.Max(1, m);
+            }
+            else if (q.Contract?.NumberOfMonths > 0)
+            {
+                qContractMonths = q.Contract.NumberOfMonths;
+            }
+            else if (q.BillingPeriodMonths > 0)
+            {
+                qContractMonths = q.BillingPeriodMonths;
+            }
+
             var input = new ChallanCalculationInput
             {
                 SpaceTypeName = q.SpaceTypeName,
@@ -449,7 +481,7 @@ namespace WorkNest.Application.Services
                 TotalContractAmount = q.TotalContractAmount > 0 ? q.TotalContractAmount : effectiveSubtotal,
                 MonthlyRent = q.MonthlyRent,
                 CurrentCycleAmount = effectiveSubtotal,
-                ContractPeriodMonths = q.Contract?.NumberOfMonths > 0 ? q.Contract.NumberOfMonths : 12,
+                ContractPeriodMonths = qContractMonths,
                 BillingPeriodMonths = q.BillingPeriodMonths > 0 ? q.BillingPeriodMonths : 3,
                 Capacity = q.Capacity ?? 1,
                 PerSeatSupportRate = q.PerSeatSupportRate ?? 2000.00m,

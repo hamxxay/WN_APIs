@@ -406,20 +406,34 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
 
             dto.CanRespond = string.Equals(dto.Status, "Sent", StringComparison.OrdinalIgnoreCase);
 
+            int qMonths = 1;
+            if (dto.EndDateTime > dto.StartDateTime)
+            {
+                int m = ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month;
+                if (m <= 0)
+                {
+                    var days = (dto.EndDateTime - dto.StartDateTime).TotalDays;
+                    m = Math.Max(1, (int)Math.Round(days / 30.0));
+                }
+                qMonths = Math.Max(1, m);
+            }
+            else if (dto.BillingPeriodMonths > 0)
+            {
+                qMonths = dto.BillingPeriodMonths;
+            }
+
             dto.Contract = new WorkNest.Application.DTOs.Booking.ContractDetailsDto
             {
                 SpaceNumber = dto.SpaceCode ?? dto.SpaceName,
                 BillingPeriod = dto.BillingPeriod,
                 ContractStartDate = dto.StartDateTime,
                 ContractEndDate = dto.EndDateTime,
-                NumberOfMonths = ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month > 0
-                    ? ((dto.EndDateTime.Year - dto.StartDateTime.Year) * 12) + dto.EndDateTime.Month - dto.StartDateTime.Month
-                    : 1,
-                MonthlyRent = dto.MonthlyRent > 0 ? dto.MonthlyRent : dto.SubtotalAmount,
+                NumberOfMonths = qMonths,
+                MonthlyRent = dto.MonthlyRent > 0 ? dto.MonthlyRent : (qMonths > 0 ? dto.SubtotalAmount / qMonths : dto.SubtotalAmount),
                 CurrentCycleAmount = dto.CurrentCycleAmount,
                 TotalContractAmount = dto.TotalContractAmount,
                 SecurityDeposit = dto.SecurityDeposit,
-                BalanceLeft = dto.TotalContractAmount,
+                BalanceLeft = Math.Max(0, dto.TotalContractAmount - dto.CurrentCycleAmount),
                 NextBillDueDate = dto.StartDateTime,
                 AppliedTaxPercentage = dto.AppliedTaxPercentage,
                 TaxAmount = dto.TaxAmountOnAdvanceRent,
