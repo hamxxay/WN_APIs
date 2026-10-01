@@ -213,25 +213,28 @@ namespace WorkNest.Application.Services
                 });
 
                 // Security deposit (discount applied once)
-                int secMonths = request.SecurityDepositMonths.HasValue && request.SecurityDepositMonths.Value > 0
+                int secMonths = request.SecurityDepositMonths.HasValue
                     ? request.SecurityDepositMonths.Value
-                    : 1;
-                decimal baseSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+                    : (request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value == 0 ? 0 : 1);
+                decimal baseSecDeposit = request.SecurityDepositOverride.HasValue
                     ? request.SecurityDepositOverride.Value
                     : (monthlyRentOfRoom * secMonths);
 
-                decimal discountedSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+                decimal discountedSecDeposit = request.SecurityDepositOverride.HasValue
                     ? request.SecurityDepositOverride.Value
                     : (baseSecDeposit > 0 ? Math.Max(0, Math.Round(baseSecDeposit * (1 - (rentDiscountPct / 100m)), 2)) : 0m);
 
-                details.Add(new QuotationDetailDto
+                if (discountedSecDeposit > 0 && secMonths > 0)
                 {
-                    FeeType = "SecurityDeposit",
-                    Description = $"Security Deposit ({secMonths} Month{(secMonths > 1 ? "s" : "")}) (Refundable)",
-                    Quantity = secMonths,
-                    UnitPrice = secMonths > 0 ? Math.Round(discountedSecDeposit / secMonths, 2) : discountedSecDeposit,
-                    Amount = discountedSecDeposit
-                });
+                    details.Add(new QuotationDetailDto
+                    {
+                        FeeType = "SecurityDeposit",
+                        Description = $"Security Deposit ({secMonths} Month{(secMonths > 1 ? "s" : "")}) (Refundable)",
+                        Quantity = secMonths,
+                        UnitPrice = secMonths > 0 ? Math.Round(discountedSecDeposit / secMonths, 2) : discountedSecDeposit,
+                        Amount = discountedSecDeposit
+                    });
+                }
             }
             else // SharedSpace
             {
@@ -267,15 +270,15 @@ namespace WorkNest.Application.Services
                 ? request.BillingPeriodMonths.Value
                 : (spaceDetails.Category == "MeetingRoom" ? 1 : 3);
 
-            int securityDepositMonths = request.SecurityDepositMonths.HasValue && request.SecurityDepositMonths.Value > 0
+            int securityDepositMonths = request.SecurityDepositMonths.HasValue
                 ? request.SecurityDepositMonths.Value
-                : 1;
+                : (request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value == 0 ? 0 : 1);
 
-            decimal baseDepositForInsert = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+            decimal baseDepositForInsert = request.SecurityDepositOverride.HasValue
                 ? request.SecurityDepositOverride.Value
                 : (spaceDetails.Category == "PrivateOffice" ? monthlyBasePrice * securityDepositMonths : 0);
 
-            decimal calculatedSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+            decimal calculatedSecDeposit = request.SecurityDepositOverride.HasValue
                 ? request.SecurityDepositOverride.Value
                 : (baseDepositForInsert > 0 ? Math.Max(0, Math.Round(baseDepositForInsert * (1 - (rentDiscountPct / 100m)), 2)) : 0m);
 
@@ -379,7 +382,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 Version = Convert.ToInt32(header["Version"]),
                 IsActive = Convert.ToBoolean(header["IsActive"]),
                 BillingPeriodMonths = header.TryGetValue("BillingPeriodMonths", out var bpm) && bpm is not null ? Convert.ToInt32(bpm) : 3,
-                SecurityDepositMonths = header.TryGetValue("SecurityDepositMonths", out var sdm) && sdm is not null ? Convert.ToInt32(sdm) : 1,
+                SecurityDepositMonths = header.TryGetValue("SecurityDepositMonths", out var sdm) && sdm is not null && sdm != DBNull.Value ? Convert.ToInt32(sdm) : 0,
                 BillingPeriod = header.TryGetValue("BillingPeriod", out var bp) && bp is not null ? bp.ToString() : "3 Months (Quarterly)",
                 BillingPeriodLabel = header.TryGetValue("BillingPeriodLabel", out var bpl) && bpl is not null ? bpl.ToString() : "3 Months (Quarterly)",
                 MonthlyRent = header.TryGetValue("MonthlyRent", out var mr) && mr is not null ? Convert.ToDecimal(mr) : 0,

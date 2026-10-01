@@ -1,4 +1,4 @@
-﻿USE [SAC400]
+USE [SAC400]
 GO
 /****** Object:  StoredProcedure [dbo].[WN_AccessCards_Delete]    Script Date: 30/09/2026 1:23:18 pm ******/
 SET ANSI_NULLS ON
@@ -6791,7 +6791,7 @@ BEGIN
     -- 5. Default GrandTotal calculation if omitted
     IF @GrandTotal IS NULL
     BEGIN
-        SET @GrandTotal = (@SubTotal - @DiscountTotal) + @TaxTotal;
+        SET @GrandTotal = (@SubTotal - @DiscountTotal) + @TaxTotal + ISNULL(@SecurityDepositAmount, 0.0000);
     END
 
     -- 6. Default Currency
@@ -6870,13 +6870,15 @@ BEGIN
     DECLARE @NetBase DECIMAL(18, 4) = 0.0000;
     DECLARE @SecAmt  DECIMAL(18, 4) = ISNULL(@SecurityDepositAmount, 0.0000);
 
-    IF ABS((@SubTotal - @DiscountTotal + @TaxTotal) - @GrandTotal) <= 1.00
+    IF @GrandTotal IS NOT NULL AND @GrandTotal > 0
     BEGIN
-        SET @NetBase = (@SubTotal - @DiscountTotal) - @TaxTotal;
+        SET @NetBase = @GrandTotal - @SecAmt - @TaxTotal;
     END
     ELSE
     BEGIN
-        SET @NetBase = (@SubTotal - @DiscountTotal) - @SecAmt;
+        SET @NetBase = (@SubTotal - @DiscountTotal);
+        IF @NetBase < 0 SET @NetBase = 0.0000;
+        SET @GrandTotal = @NetBase + @TaxTotal + @SecAmt;
     END
 
     IF @NetBase < 0 SET @NetBase = 0.0000;
