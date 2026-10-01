@@ -212,7 +212,7 @@ namespace WorkNest.Application.Services
                     Amount = rentAmount
                 });
 
-                // Security deposit (Task 1: discount mirroring applied live)
+                // Security deposit (discount applied once)
                 int secMonths = request.SecurityDepositMonths.HasValue && request.SecurityDepositMonths.Value > 0
                     ? request.SecurityDepositMonths.Value
                     : 1;
@@ -220,9 +220,9 @@ namespace WorkNest.Application.Services
                     ? request.SecurityDepositOverride.Value
                     : (monthlyRentOfRoom * secMonths);
 
-                decimal discountedSecDeposit = baseSecDeposit > 0
-                    ? Math.Max(0, Math.Round(baseSecDeposit * (1 - (rentDiscountPct / 100m)), 2))
-                    : 0m;
+                decimal discountedSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+                    ? request.SecurityDepositOverride.Value
+                    : (baseSecDeposit > 0 ? Math.Max(0, Math.Round(baseSecDeposit * (1 - (rentDiscountPct / 100m)), 2)) : 0m);
 
                 details.Add(new QuotationDetailDto
                 {
@@ -275,9 +275,9 @@ namespace WorkNest.Application.Services
                 ? request.SecurityDepositOverride.Value
                 : (spaceDetails.Category == "PrivateOffice" ? monthlyBasePrice * securityDepositMonths : 0);
 
-            decimal calculatedSecDeposit = baseDepositForInsert > 0
-                ? Math.Max(0, Math.Round(baseDepositForInsert * (1 - (rentDiscountPct / 100m)), 2))
-                : 0m;
+            decimal calculatedSecDeposit = request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value > 0
+                ? request.SecurityDepositOverride.Value
+                : (baseDepositForInsert > 0 ? Math.Max(0, Math.Round(baseDepositForInsert * (1 - (rentDiscountPct / 100m)), 2)) : 0m);
 
             var result = await _db.InsertQuotationAsync(
                 quotationNumber,

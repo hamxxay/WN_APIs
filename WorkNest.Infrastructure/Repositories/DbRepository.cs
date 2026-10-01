@@ -3581,13 +3581,20 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<IEnumerable<HikDeviceDto>> GetHikDevicesAsync(string? location = null)
         {
             await using var conn = await Open();
-            var sql = @"SELECT id, name, grp, code, location, online, last_seen
-                        FROM dbo.WN_HIK_Devices WITH (NOLOCK)";
+            var sql = @"SELECT 
+                            d.Id AS id, 
+                            d.Device_Name AS name, 
+                            g.Name AS grp, 
+                            d.Location AS location, 
+                            d.Online AS online, 
+                            d.Last_seen AS last_seen
+                        FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
+                        LEFT JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id";
             if (!string.IsNullOrWhiteSpace(location))
             {
-                sql += " WHERE location = @Location";
+                sql += " WHERE d.Location = @Location";
             }
-            sql += " ORDER BY name";
+            sql += " ORDER BY d.Device_Name";
 
             await using var cmd = new SqlCommand(sql, conn);
             if (!string.IsNullOrWhiteSpace(location))
@@ -3604,7 +3611,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     Id = r.GetInt32(r.GetOrdinal("id")),
                     Name = r.GetString(r.GetOrdinal("name")),
                     Grp = r.IsDBNull(r.GetOrdinal("grp")) ? null : r.GetString(r.GetOrdinal("grp")),
-                    Code = r.IsDBNull(r.GetOrdinal("code")) ? null : r.GetString(r.GetOrdinal("code")),
+                    Code = null,
                     Location = r.IsDBNull(r.GetOrdinal("location")) ? null : r.GetString(r.GetOrdinal("location")),
                     Online = !r.IsDBNull(r.GetOrdinal("online")) && r.GetBoolean(r.GetOrdinal("online")) ? 1 : 0,
                     LastSeen = r.IsDBNull(r.GetOrdinal("last_seen")) ? null : r.GetDateTime(r.GetOrdinal("last_seen")).ToString("yyyy-MM-ddTHH:mm:ss")
@@ -3616,13 +3623,23 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null)
         {
             await using var conn = await Open();
-            var sql = @"SELECT d.id, c.roster
+            var sql = @"SELECT 
+                            d.Id AS device_id,
+                            e.employee_no,
+                            e.name,
+                            e.card_no,
+                            e.valid_begin,
+                            e.valid_end,
+                            e.status,
+                            e.kind
                         FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
-                        LEFT JOIN dbo.WN_HIK_DevCache c WITH (NOLOCK) ON c.device_id = d.id";
+                        LEFT JOIN dbo.WN_HIK_AccessGrants g WITH (NOLOCK) ON g.device_id = d.Id
+                        LEFT JOIN dbo.WN_HIK_Employees e WITH (NOLOCK) ON e.id = g.employee_id";
             if (!string.IsNullOrWhiteSpace(location))
             {
-                sql += " WHERE d.location = @Location";
+                sql += " WHERE d.Location = @Location";
             }
+            sql += " ORDER BY d.Id, e.employee_no";
 
             await using var cmd = new SqlCommand(sql, conn);
             if (!string.IsNullOrWhiteSpace(location))
@@ -3630,15 +3647,43 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 cmd.Parameters.AddWithValue("@Location", location);
             }
 
-            var list = new List<(int DeviceId, string? RosterJson)>();
+            var deviceMap = new Dictionary<int, List<object>>();
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
-                var deviceId = r.GetInt32(0);
-                var rosterJson = r.IsDBNull(1) ? null : r.GetString(1);
-                list.Add((deviceId, rosterJson));
+                var deviceId = r.GetInt32(r.GetOrdinal("device_id"));
+                if (!deviceMap.ContainsKey(deviceId))
+                {
+                    deviceMap[deviceId] = new List<object>();
+                }
+
+                if (!r.IsDBNull(r.GetOrdinal("employee_no")))
+                {
+                    var empNo = r.GetString(r.GetOrdinal("employee_no"));
+                    var name = r.IsDBNull(r.GetOrdinal("name")) ? "" : r.GetString(r.GetOrdinal("name"));
+                    var cardNo = r.IsDBNull(r.GetOrdinal("card_no")) ? null : r.GetString(r.GetOrdinal("card_no"));
+                    var validBegin = r.IsDBNull(r.GetOrdinal("valid_begin")) ? (DateTime?)null : r.GetDateTime(r.GetOrdinal("valid_begin"));
+                    var validEnd = r.IsDBNull(r.GetOrdinal("valid_end")) ? (DateTime?)null : r.GetDateTime(r.GetOrdinal("valid_end"));
+                    var status = r.IsDBNull(r.GetOrdinal("status")) ? "active" : r.GetString(r.GetOrdinal("status"));
+                    var kind = r.IsDBNull(r.GetOrdinal("kind")) ? "normal" : r.GetString(r.GetOrdinal("kind"));
+
+                    deviceMap[deviceId].Add(new
+                    {
+                        employeeNo = empNo,
+                        name = name,
+                        userType = kind == "admin" ? "admin" : "normal",
+                        numOfCard = string.IsNullOrEmpty(cardNo) ? 0 : 1,
+                        Valid = new
+                        {
+                            enable = status == "active",
+                            beginTime = validBegin?.ToString("yyyy-MM-ddTHH:mm:ss"),
+                            endTime = validEnd?.ToString("yyyy-MM-ddTHH:mm:ss")
+                        }
+                    });
+                }
             }
-            return list;
+
+            return deviceMap.Select(kv => (kv.Key, (string?)System.Text.Json.JsonSerializer.Serialize(kv.Value)));
         }
 
         public async Task<Dictionary<string, string>> GetHikCnicMapAsync()
@@ -3646,28 +3691,24 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await using var conn = await Open();
             var cnics = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             await using var cmd = new SqlCommand(
-                @"SELECT employee_no, name, cnic 
-                  FROM dbo.WN_HIK_Users WITH (NOLOCK)
-                  WHERE cnic IS NOT NULL AND cnic <> ''", conn);
+                @"SELECT employee_no, name 
+                  FROM dbo.WN_HIK_Employees WITH (NOLOCK)
+                  WHERE employee_no IS NOT NULL", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
                 var empNo = r.GetString(0);
-                var name = r.GetString(1).Trim().ToLowerInvariant();
-                var cnic = r.GetString(2);
-                cnics[$"{empNo}||{name}"] = cnic;
+                var name = r.IsDBNull(1) ? "" : r.GetString(1).Trim().ToLowerInvariant();
+                cnics[$"{empNo}||{name}"] = "";
             }
             return cnics;
         }
 
         public async Task<string?> GetHikDeviceSnapshotByIdAsync(int deviceId)
         {
-            await using var conn = await Open();
-            await using var cmd = new SqlCommand(
-                "SELECT roster FROM dbo.WN_HIK_DevCache WITH (NOLOCK) WHERE device_id = @id", conn);
-            cmd.Parameters.AddWithValue("@id", deviceId);
-            var result = await cmd.ExecuteScalarAsync();
-            return result is string s ? s : null;
+            var snapshots = await GetHikDeviceSnapshotsAsync();
+            var match = snapshots.FirstOrDefault(s => s.DeviceId == deviceId);
+            return match.RosterJson;
         }
 
         public async Task<int> GetNextHikEmployeeNoAsync()
@@ -3675,7 +3716,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await using var conn = await Open();
             await using var cmd = new SqlCommand(
                 @"SELECT MAX(n) FROM (
-                    SELECT TRY_CAST(employee_no AS INT) AS n FROM dbo.WN_HIK_Users WITH (NOLOCK)
+                    SELECT TRY_CAST(employee_no AS INT) AS n FROM dbo.WN_HIK_Employees WITH (NOLOCK)
                   ) t WHERE n IS NOT NULL AND n < 8500", conn);
             var max = await cmd.ExecuteScalarAsync();
             var next = (max is int m ? m : 999) + 1;
