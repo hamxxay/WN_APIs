@@ -495,6 +495,7 @@ END;";
 
                         decimal qty = HasColumn(reader, "Quantity") && !reader.IsDBNull(reader.GetOrdinal("Quantity")) ? Convert.ToDecimal(reader.GetValue(reader.GetOrdinal("Quantity"))) : 1m;
                         decimal unitPrice = HasColumn(reader, "UnitPrice") && !reader.IsDBNull(reader.GetOrdinal("UnitPrice")) ? Convert.ToDecimal(reader.GetValue(reader.GetOrdinal("UnitPrice"))) : 0m;
+                        
                         decimal priceExcl = reader.IsDBNull(reader.GetOrdinal("PriceExclVat")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriceExclVat"));
                         if (unitPrice == 0 && qty > 0) unitPrice = priceExcl / qty;
 
@@ -708,21 +709,50 @@ END;";
                 decimal subTotal = 0;
                 decimal discountTotal = 0;
                 decimal taxTotal = 0;
+                decimal securityDepositAmount = req.SecurityDepositAmount ?? 0m;
 
                 foreach (var line in req.Lines)
                 {
-                    decimal lineNet = (line.Quantity * line.UnitPrice) - line.DiscountAmount;
-                    decimal lineTax = Math.Round(lineNet * line.TaxRate, 4);
-                    subTotal += (line.Quantity * line.UnitPrice);
-                    discountTotal += line.DiscountAmount;
-                    taxTotal += lineTax;
+                    if (line.ChargeTypeId == 2 || (!string.IsNullOrWhiteSpace(line.Description) && line.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        if (!req.SecurityDepositAmount.HasValue || req.SecurityDepositAmount == 0)
+                        {
+                            securityDepositAmount += (line.Quantity * line.UnitPrice);
+                        }
+                    }
+                    else
+                    {
+                        decimal lineNet = (line.Quantity * line.UnitPrice) - line.DiscountAmount;
+                        decimal lineTax = Math.Round(lineNet * line.TaxRate, 2, MidpointRounding.AwayFromZero);
+                        subTotal += (line.Quantity * line.UnitPrice);
+                        discountTotal += line.DiscountAmount;
+                        taxTotal += lineTax;
+                    }
                 }
 
-                decimal grandTotal = subTotal - discountTotal + taxTotal;
-                decimal roomRentExcl = subTotal - discountTotal;
-                decimal serviceChargeAmount = req.ServiceCharges ?? (taxTotal > 0 ? Math.Round(taxTotal / 0.16m, 4) : 0m);
-                decimal roomRentAmount = req.RoomRentExclTax ?? Math.Max(0, roomRentExcl - serviceChargeAmount);
+                if (req.TaxOnServiceCharges.HasValue && req.TaxOnServiceCharges.Value > 0 && taxTotal == 0)
+                {
+                    taxTotal = req.TaxOnServiceCharges.Value;
+                }
+                else if (req.TaxTotal.HasValue && req.TaxTotal.Value > 0 && taxTotal == 0)
+                {
+                    taxTotal = req.TaxTotal.Value;
+                }
+
+                if (req.SubTotal.HasValue && req.SubTotal.Value > 0 && subTotal == 0)
+                {
+                    subTotal = req.SubTotal.Value;
+                }
+
+                if (req.DiscountTotal.HasValue && req.DiscountTotal.Value > 0 && discountTotal == 0)
+                {
+                    discountTotal = req.DiscountTotal.Value;
+                }
+
+                decimal serviceChargeAmount = req.ServiceCharges ?? (taxTotal > 0 ? Math.Round(taxTotal / 0.16m, 2, MidpointRounding.AwayFromZero) : 0m);
+                decimal roomRentAmount = req.RoomRentExclTax ?? Math.Max(0m, (subTotal - discountTotal) - serviceChargeAmount);
                 decimal taxOnServiceCharges = req.TaxOnServiceCharges ?? taxTotal;
+                decimal grandTotal = req.GrandTotal ?? Math.Round((subTotal - discountTotal) + taxTotal + securityDepositAmount, 2, MidpointRounding.AwayFromZero);
 
                 using var cmd = new SqlCommand("dbo.WN_CreateCustomInvoice", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
@@ -738,7 +768,7 @@ END;";
                 cmd.Parameters.AddWithValue("@GrandTotal", grandTotal);
                 cmd.Parameters.AddWithValue("@AdvanceRentMonths", (object?)req.AdvanceRentMonths ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)req.SecurityDepositMonths ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@SecurityDepositAmount", req.SecurityDepositAmount ?? 0m);
+                cmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDepositAmount);
                 cmd.Parameters.AddWithValue("@BillingPeriodStart", (object?)req.BillingPeriodStart ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@BillingPeriodEnd", (object?)req.BillingPeriodEnd ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)req.AccountReceivableId ?? DBNull.Value);
@@ -1065,7 +1095,7 @@ END;";
                         ISNULL(s.Capacity, 1) AS SpaceCapacity,
                         ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
                         ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
-                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate,
+                        COALESCE(bd.PerSeatSupportRate, (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 AND (StartDate IS NULL OR StartDate <= b.StartOn) AND (EndDate IS NULL OR EndDate >= b.StartOn) ORDER BY StartDate DESC), (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 ORDER BY StartDate DESC), 2000.00) AS PerSeatSupportRate,
                         COALESCE(b.RentAccountId, bd.RentAccountId, 2852) AS RentAccountId,
                         COALESCE(b.SecurityReceivedId, bd.SecurityReceivedId, 76) AS SecurityReceivedId,
                         COALESCE(b.ServicesIncomeId, bd.ServicesIncomeId, 2853) AS ServicesIncomeId,
@@ -1128,138 +1158,58 @@ END;";
                     }
                 }
 
-                bool isMeetingRoom = spaceTypeName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
-                                     spaceTypeName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
-                                     categoryCode.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
-                                     spaceName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
-                                     spaceName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
-                                     (billingMonths <= 0 && startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays < 20);
-
-                DateTime periodStart = startOn ?? DateTime.Today;
-                DateTime periodEnd;
-                decimal grossAdvanceRent;
-                decimal securityDeposit = 0m;
-                string mainLineDescription;
-
-                if (isMeetingRoom)
-                {
-                    periodEnd = endOn ?? periodStart;
-                    grossAdvanceRent = subtotalAmount > 0 ? subtotalAmount : totalAmount;
-                    secMonths = 0;
-                    securityDeposit = 0m;
-                    billingMonths = 1;
-                    mainLineDescription = $"Meeting Room Booking Rent ({spaceName})";
-                }
-                else
-                {
-                    int cMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
-                        ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
-                        : 12;
-                    if (monthlyRent <= 0)
-                    {
-                        if (subtotalAmount > 0 && cMonths > 0)
-                        {
-                            monthlyRent = Math.Round(subtotalAmount / cMonths, 2);
-                        }
-                        else if (totalAmount > 0 && cMonths > 0)
-                        {
-                            monthlyRent = Math.Round(totalAmount / cMonths, 2);
-                        }
-                    }
-
-                    if (startOn.HasValue && startOn.Value.Day > 1 && monthlyRent > 0)
-                    {
-                        int startDay = startOn.Value.Day;
-                        int daysInMonth = DateTime.DaysInMonth(startOn.Value.Year, startOn.Value.Month);
-                        int remainingDays = daysInMonth - startDay + 1;
-                        decimal proratedCurrentMonth = Math.Round(((decimal)remainingDays / daysInMonth) * monthlyRent, 2);
-
-                        if (startDay < 15)
-                        {
-                            // Current month counts as first billing month: prorated current + (N - 1) full months
-                            int fullMonths = Math.Max(0, billingMonths - 1);
-                            grossAdvanceRent = proratedCurrentMonth + (fullMonths * monthlyRent);
-                            periodEnd = new DateTime(startOn.Value.Year, startOn.Value.Month, 1).AddMonths(billingMonths).AddDays(-1);
-                            mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy} ({remainingDays} days prorated + {fullMonths} Month(s))";
-                        }
-                        else
-                        {
-                            // Current month is a separate prorated period: prorated current + N full months
-                            grossAdvanceRent = proratedCurrentMonth + (billingMonths * monthlyRent);
-                            periodEnd = new DateTime(startOn.Value.Year, startOn.Value.Month, 1).AddMonths(billingMonths + 1).AddDays(-1);
-                            mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy} ({remainingDays} days prorated + {billingMonths} Month(s))";
-                        }
-                    }
-                    else
-                    {
-                        periodEnd = periodStart.AddMonths(billingMonths).AddDays(-1);
-                        grossAdvanceRent = monthlyRent * billingMonths;
-                        mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
-                    }
-
-                    decimal baseSecurityDeposit = 0m;
-                    if (secDepositReq > 0)
-                    {
-                        baseSecurityDeposit = secDepositReq;
-                    }
-                    else if (secMonths > 0 && monthlyRent > 0)
-                    {
-                        baseSecurityDeposit = monthlyRent * secMonths;
-                    }
-                    else if (resolvedSecDep > 0)
-                    {
-                        baseSecurityDeposit = (secMonths > 1 && resolvedSecDep <= monthlyRent && monthlyRent > 0)
-                            ? (monthlyRent * secMonths)
-                            : resolvedSecDep;
-                    }
-
-                    decimal initialDiscountPct = discountPercentage > 0 ? discountPercentage : (grossAdvanceRent > 0 && discountAmount > 0 ? (discountAmount / grossAdvanceRent) * 100m : 0m);
-                    securityDeposit = baseSecurityDeposit > 0
-                        ? Math.Max(0, Math.Round(baseSecurityDeposit * (1 - (initialDiscountPct / 100.0m)), 2))
-                        : 0m;
-                }
-
                 int contractMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
                     ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
                     : 12;
 
-                decimal appliedDiscount = 0m;
-                if (discountPercentage > 0)
+                var calcReq = new WorkNest.Application.Services.InvoiceCalculationRequest
                 {
-                    appliedDiscount = Math.Round(grossAdvanceRent * (discountPercentage / 100.0m), 2);
-                }
-                else if (discountAmount > 0)
-                {
-                    if (!isMeetingRoom && discountAmount > grossAdvanceRent && contractMonths > billingMonths)
-                    {
-                        appliedDiscount = Math.Round(discountAmount * ((decimal)billingMonths / contractMonths), 2);
-                    }
-                    else
-                    {
-                        appliedDiscount = discountAmount;
-                    }
-                }
+                    SpaceTypeName = spaceTypeName,
+                    CategoryCode = categoryCode,
+                    Capacity = spaceCapacity,
+                    MonthlyRent = monthlyRent,
+                    SubtotalAmount = subtotalAmount,
+                    CurrentCycleAmount = subtotalAmount > 0 ? subtotalAmount : totalAmount,
+                    BillingPeriodMonths = billingMonths,
+                    ContractPeriodMonths = contractMonths,
+                    SecurityDeposit = secDepositReq > 0 ? secDepositReq : resolvedSecDep,
+                    SecurityDepositMonths = secMonths,
+                    PerSeatSupportRate = perSeatSupportRate,
+                    AppliedTaxPercentage = appliedTaxPercentage,
+                    DiscountType = discountType,
+                    DiscountPercentage = discountPercentage,
+                    DiscountAmount = discountAmount,
+                    StartOn = startOn,
+                    EndOn = endOn
+                };
 
-                decimal discountedBase = Math.Max(0, grossAdvanceRent - appliedDiscount);
-                decimal supportCharge;
-                decimal taxRate = appliedTaxPercentage > 0 ? appliedTaxPercentage : 16.00m;
-                if (isMeetingRoom)
+                var calc = WorkNest.Application.Services.InvoiceCalculationEngine.CalculateInvoice(calcReq);
+
+                DateTime periodStart = calc.BillingPeriodStart;
+                DateTime periodEnd = calc.BillingPeriodEnd;
+                decimal grossAdvanceRent = calc.Rent;
+                decimal appliedDiscount = calc.Discount;
+                decimal taxTotal = calc.Tax;
+                decimal supportCharge = calc.ServiceCharge;
+                decimal securityDeposit = calc.DepositFirstInstallment;
+                decimal roomRentExclusive = calc.RoomRentExclTax;
+                decimal expectedSubtotal = calc.Rent;
+                decimal expectedGrandTotal = calc.GrandTotal;
+
+                string mainLineDescription;
+                if (calc.IsMeetingRoom)
                 {
-                    supportCharge = Math.Round(discountedBase * 0.10m, 2);
+                    mainLineDescription = $"Meeting Room Booking Rent ({spaceName})";
+                }
+                else if (calc.IsProrated)
+                {
+                    int fullMonths = (startOn.HasValue && startOn.Value.Day < 15) ? Math.Max(0, calc.BillingPeriodMonths - 1) : calc.BillingPeriodMonths;
+                    mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy} ({calc.ProratedDays} days prorated + {fullMonths} Month(s))";
                 }
                 else
                 {
-                    decimal rate = perSeatSupportRate > 0 ? perSeatSupportRate : 2000.00m;
-                    int cap = spaceCapacity > 0 ? spaceCapacity : 1;
-                    supportCharge = Math.Round(rate * cap * billingMonths, 2);
+                    mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
                 }
-                decimal taxTotal = Math.Round(supportCharge * (taxRate / 100.0m), 2);
-                decimal roomRentExclusive = Math.Max(0, discountedBase - supportCharge);
-                decimal expectedSubtotal = grossAdvanceRent;
-                decimal expectedGrandTotal = Math.Max(0, grossAdvanceRent - appliedDiscount + taxTotal + securityDeposit);
-                decimal effectiveTaxRateOnRent = (discountedBase > 0) 
-                    ? Math.Round(taxTotal / discountedBase, 6) 
-                    : 0m;
 
                 string checkSql = "SELECT TOP 1 Id, InvoiceNumber FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id ASC;";
                 int existingId = 0;
@@ -1307,7 +1257,7 @@ END;";
                         upCmd.Parameters.AddWithValue("@GrandTotal", expectedGrandTotal);
                         upCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
                         upCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
-                        upCmd.Parameters.AddWithValue("@AdvanceRentMonths", billingMonths);
+                        upCmd.Parameters.AddWithValue("@AdvanceRentMonths", calc.BillingPeriodMonths);
                         upCmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)secMonths ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDeposit);
                         upCmd.Parameters.AddWithValue("@RoomRentExclTax", roomRentExclusive);
@@ -1344,7 +1294,7 @@ END;";
                         insCmd.Parameters.AddWithValue("@Description", mainLineDescription);
                         insCmd.Parameters.AddWithValue("@UnitPrice", grossAdvanceRent);
                         insCmd.Parameters.AddWithValue("@DiscountAmount", appliedDiscount);
-                        insCmd.Parameters.AddWithValue("@TaxRate", effectiveTaxRateOnRent);
+                        insCmd.Parameters.AddWithValue("@TaxRate", 0m);
                         await insCmd.ExecuteNonQueryAsync();
                     }
 
@@ -1364,7 +1314,7 @@ END;";
                             depCmd.Parameters.AddWithValue("@InvoiceId", existingId);
                             depCmd.Parameters.AddWithValue("@Description", $"Security Deposit ({secMonths} Month(s) Refundable - {spaceName})");
                             depCmd.Parameters.AddWithValue("@Quantity", secMonths > 0 ? secMonths : 1);
-                            depCmd.Parameters.AddWithValue("@UnitPrice", secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2) : securityDeposit);
+                            depCmd.Parameters.AddWithValue("@UnitPrice", secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2, MidpointRounding.AwayFromZero) : securityDeposit);
                             await depCmd.ExecuteNonQueryAsync();
                         }
                     }
@@ -1377,18 +1327,21 @@ END;";
                     BookingId = bookingId,
                     UserId = userId,
                     IssuedOn = DateTime.Today,
-                    // Task 3: Initial invoice due date = agreement start date
                     DueOn = startOn.HasValue ? startOn.Value : DateTime.Today,
                     Notes = $"Initial Payment Invoice for Booking #{bookingId} - {spaceName}",
                     SendEmail = true,
                     BillingPeriodStart = periodStart,
                     BillingPeriodEnd = periodEnd,
-                    AdvanceRentMonths = billingMonths,
+                    AdvanceRentMonths = calc.BillingPeriodMonths,
                     SecurityDepositMonths = secMonths,
                     SecurityDepositAmount = securityDeposit,
                     RoomRentExclTax = roomRentExclusive,
                     ServiceCharges = supportCharge,
                     TaxOnServiceCharges = taxTotal,
+                    SubTotal = expectedSubtotal,
+                    DiscountTotal = appliedDiscount,
+                    TaxTotal = taxTotal,
+                    GrandTotal = expectedGrandTotal,
                     RentAccountId = rentAccountId,
                     SecurityReceivedId = securityReceivedId,
                     ServicesIncomeId = servicesIncomeId,
@@ -1406,7 +1359,7 @@ END;";
                         Quantity = 1,
                         UnitPrice = grossAdvanceRent,
                         DiscountAmount = appliedDiscount,
-                        TaxRate = effectiveTaxRateOnRent,
+                        TaxRate = 0m,
                         ChargeTypeId = 1
                     });
                 }
@@ -1417,7 +1370,7 @@ END;";
                     {
                         Description = $"Security Deposit ({secMonths} Month(s) Refundable - {spaceName})",
                         Quantity = secMonths > 0 ? secMonths : 1,
-                        UnitPrice = secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2) : securityDeposit,
+                        UnitPrice = secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2, MidpointRounding.AwayFromZero) : securityDeposit,
                         DiscountAmount = 0,
                         TaxRate = 0,
                         ChargeTypeId = 2
@@ -1432,7 +1385,7 @@ END;";
                         Quantity = 1,
                         UnitPrice = totalAmount > 0 ? totalAmount : 50000,
                         DiscountAmount = 0,
-                        TaxRate = 0.016m,
+                        TaxRate = 0m,
                         ChargeTypeId = 1
                     });
                 }
@@ -1633,6 +1586,10 @@ END;";
                     RoomRentExclTax = roomRentExclusive,
                     ServiceCharges = supportCharge,
                     TaxOnServiceCharges = taxTotal,
+                    SubTotal = grossAdvanceRent,
+                    DiscountTotal = appliedDiscount,
+                    TaxTotal = taxTotal,
+                    GrandTotal = Math.Round(grossAdvanceRent - appliedDiscount + taxTotal + arrears, 2, MidpointRounding.AwayFromZero),
                     RentAccountId = rentAccountId,
                     SecurityReceivedId = securityReceivedId,
                     ServicesIncomeId = servicesIncomeId,
@@ -1722,6 +1679,10 @@ END;";
         public decimal? RoomRentExclTax { get; set; }
         public decimal? ServiceCharges { get; set; }
         public decimal? TaxOnServiceCharges { get; set; }
+        public decimal? SubTotal { get; set; }
+        public decimal? DiscountTotal { get; set; }
+        public decimal? TaxTotal { get; set; }
+        public decimal? GrandTotal { get; set; }
         public int? AccountReceivableId { get; set; }
         public int? RentAccountId { get; set; }
         public int? ServicesIncomeId { get; set; }

@@ -91,217 +91,57 @@ namespace WorkNest.Application.Services
     {
         public static ChallanCalculationResult Calculate(ChallanCalculationInput input)
         {
-            var res = new ChallanCalculationResult();
-
-            string stName = input.SpaceTypeName ?? "";
-            string catCode = input.CategoryCode ?? "";
-            bool isMeetingRoom = stName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
-                                 stName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
-                                 catCode.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
-                                 (input.BillingPeriodMonths <= 0 && input.TotalContractAmount <= 0);
-
-            bool isPrivate = stName.Contains("Private", StringComparison.OrdinalIgnoreCase) ||
-                             stName.Contains("Office", StringComparison.OrdinalIgnoreCase) ||
-                             stName.Contains("Room", StringComparison.OrdinalIgnoreCase) ||
-                             catCode.Contains("Private", StringComparison.OrdinalIgnoreCase) ||
-                             input.SpaceTypeId == 1;
-
-            if (isMeetingRoom)
+            var req = new InvoiceCalculationRequest
             {
-                res.SpaceType = "MeetingRoom";
-            }
-            else if (isPrivate)
+                SpaceTypeName = input.SpaceTypeName,
+                CategoryCode = input.CategoryCode,
+                SpaceTypeId = input.SpaceTypeId,
+                Capacity = input.Capacity,
+                MonthlyRent = input.MonthlyRent,
+                SeatPrice = input.SeatPrice,
+                RoomPrice = input.RoomPrice,
+                SubtotalAmount = input.SubtotalAmount,
+                CurrentCycleAmount = input.CurrentCycleAmount,
+                BillingPeriodMonths = input.BillingPeriodMonths,
+                ContractPeriodMonths = input.ContractPeriodMonths,
+                SecurityDeposit = input.SecurityDeposit,
+                PerSeatSupportRate = input.PerSeatSupportRate,
+                AppliedTaxPercentage = input.AppliedTaxPercentage,
+                DiscountType = input.DiscountType,
+                DiscountPercentage = input.DiscountPercentage,
+                DiscountAmount = input.DiscountAmount,
+                DiscountValue = input.DiscountValue,
+                StartOn = input.StartOn,
+                EndOn = input.EndOn,
+                ExplicitBillingType = input.ExplicitBillingType
+            };
+
+            var engineResult = InvoiceCalculationEngine.CalculateInvoice(req);
+
+            var res = new ChallanCalculationResult
             {
-                res.SpaceType = "PrivateRoom";
-            }
-            else
-            {
-                res.SpaceType = "SharedSpace";
-            }
-
-            res.AppliedChargePercentage = input.AppliedChargePercentage > 0 ? input.AppliedChargePercentage : 10.00m;
-            res.AppliedTaxPercentage = input.AppliedTaxPercentage > 0 ? input.AppliedTaxPercentage : 16.00m;
-
-            if (res.SpaceType == "MeetingRoom")
-            {
-                double totalHours = 0;
-                if (input.StartOn.HasValue && input.EndOn.HasValue)
-                {
-                    totalHours = Math.Ceiling((input.EndOn.Value - input.StartOn.Value).TotalHours);
-                }
-                if (totalHours <= 0) totalHours = 1;
-
-                if (!string.IsNullOrWhiteSpace(input.ExplicitBillingType))
-                {
-                    res.BillingType = input.ExplicitBillingType;
-                }
-                else if (totalHours >= 24 || (input.DailyRate > 0 && input.HourlyRate == 0))
-                {
-                    res.BillingType = "Daily";
-                }
-                else
-                {
-                    res.BillingType = "Hourly";
-                }
-
-                if (res.BillingType == "Daily")
-                {
-                    res.BillingBasis = "Per Day";
-                }
-                else if (res.BillingType == "Hourly")
-                {
-                    res.BillingBasis = "Per Hour";
-                }
-                else
-                {
-                    res.BillingBasis = "Per Booking Slot";
-                }
-
-                res.MonthlyRent = 0;
-                res.ContractPeriodMonths = 1;
-                res.BillingPeriodMonths = 1;
-                res.SecurityDeposit = 0;
-
-                res.BaseRent = input.SubtotalAmount > 0 ? input.SubtotalAmount : input.CurrentCycleAmount;
-                res.FirstCycleRent = res.BaseRent;
-                res.TotalContractRent = res.BaseRent;
-
-                res.DiscountAmount = input.DiscountAmount;
-                decimal discountedMeetingBase = Math.Max(0, res.BaseRent - res.DiscountAmount);
-                res.SupportChargeAmount = Math.Round(discountedMeetingBase * (res.AppliedChargePercentage / 100.0m), 2);
-                res.TaxAmount = Math.Round(res.SupportChargeAmount * (res.AppliedTaxPercentage / 100.0m), 2);
-                res.TaxAmountOnAdvanceRent = res.TaxAmount;
-                res.TaxAmountOnContract = res.TaxAmount;
-
-                res.TotalPayable = Math.Max(0, res.BaseRent + res.TaxAmount - res.DiscountAmount);
-            }
-            else
-            {
-                res.BillingType = "Monthly";
-                res.BillingBasis = "Per Month";
-
-                int contractMonths = input.ContractPeriodMonths > 0 ? input.ContractPeriodMonths : 0;
-                if (contractMonths <= 0 && input.StartOn.HasValue && input.EndOn.HasValue && input.EndOn.Value > input.StartOn.Value)
-                {
-                    int m = ((input.EndOn.Value.Year - input.StartOn.Value.Year) * 12) + input.EndOn.Value.Month - input.StartOn.Value.Month;
-                    if (m <= 0)
-                    {
-                        var days = (input.EndOn.Value - input.StartOn.Value).TotalDays;
-                        m = Math.Max(1, (int)Math.Round(days / 30.0));
-                    }
-                    contractMonths = Math.Max(1, m);
-                }
-                if (contractMonths <= 0) contractMonths = input.BillingPeriodMonths > 0 ? input.BillingPeriodMonths : 1;
-
-                res.ContractPeriodMonths = contractMonths;
-                res.BillingPeriodMonths = input.BillingPeriodMonths > 0 ? input.BillingPeriodMonths : 3;
-
-                if (input.MonthlyRent > 0)
-                {
-                    res.MonthlyRent = input.MonthlyRent;
-                }
-                else
-                {
-                    decimal price = input.Price > 0 ? input.Price :
-                        (input.RoomPrice > 0 ? input.RoomPrice :
-                        (input.SeatPrice > 0 ? input.SeatPrice : 0));
-                    int cap = input.Capacity > 0 ? input.Capacity : 1;
-
-                    if (res.SpaceType == "PrivateRoom" || input.SpaceTypeId == 1)
-                    {
-                        res.MonthlyRent = price * cap;
-                    }
-                    else
-                    {
-                        res.MonthlyRent = price;
-                    }
-                }
-
-                if (res.MonthlyRent == 0 && input.SubtotalAmount > 0 && res.ContractPeriodMonths > 0)
-                {
-                    res.MonthlyRent = input.SubtotalAmount / res.ContractPeriodMonths;
-                }
-
-                res.TotalContractRent = res.MonthlyRent * res.ContractPeriodMonths;
-
-                int capacity = input.Capacity > 0 ? input.Capacity : 1;
-                decimal supportRate = input.PerSeatSupportRate > 0 ? input.PerSeatSupportRate : 2000.00m;
-                res.PerSeatSupportRate = supportRate;
-
-                // Proration calculation (Task 7)
-                if (input.StartOn.HasValue && input.StartOn.Value.Day > 1)
-                {
-                    int startDay = input.StartOn.Value.Day;
-                    int daysInMonth = DateTime.DaysInMonth(input.StartOn.Value.Year, input.StartOn.Value.Month);
-                    int remainingDays = daysInMonth - startDay + 1;
-                    decimal proratedCurrentMonth = Math.Round(((decimal)remainingDays / daysInMonth) * res.MonthlyRent, 2);
-                    res.IsProrated = true;
-                    res.ProratedCurrentMonthAmount = proratedCurrentMonth;
-
-                    if (startDay < 15)
-                    {
-                        // Current month counts as first billing month: prorated current + (N - 1) full months
-                        int fullMonths = Math.Max(0, res.BillingPeriodMonths - 1);
-                        res.FirstCycleRent = proratedCurrentMonth + (fullMonths * res.MonthlyRent);
-                    }
-                    else
-                    {
-                        // Current month is a separate prorated period: prorated current + N full months
-                        res.FirstCycleRent = proratedCurrentMonth + (res.BillingPeriodMonths * res.MonthlyRent);
-                    }
-                }
-                else
-                {
-                    res.FirstCycleRent = (res.MonthlyRent > 0 && res.BillingPeriodMonths > 0)
-                        ? (res.MonthlyRent * res.BillingPeriodMonths)
-                        : (input.CurrentCycleAmount > 0 ? input.CurrentCycleAmount : res.MonthlyRent);
-                }
-
-                res.BaseRent = res.FirstCycleRent;
-
-                decimal initialDeposit = (input.SecurityDeposit > 0 || res.SpaceType == "PrivateRoom") ? input.SecurityDeposit : 0;
-
-                decimal discountPct = input.DiscountPercentage > 0 ? input.DiscountPercentage :
-                    (string.Equals(input.DiscountType, "Percentage", StringComparison.OrdinalIgnoreCase) ? input.DiscountValue : 0);
-
-                decimal discountOnRent = 0m;
-
-                if (discountPct > 0)
-                {
-                    discountOnRent = Math.Round(res.FirstCycleRent * (discountPct / 100.0m), 2);
-                }
-                else
-                {
-                    decimal fixedVal = input.DiscountAmount > 0 ? input.DiscountAmount :
-                        ((string.Equals(input.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(input.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) ? input.DiscountValue : 0m);
-
-                    if (fixedVal > 0)
-                    {
-                        discountOnRent = Math.Min(fixedVal, res.FirstCycleRent);
-                    }
-                }
-
-                decimal discountedRent = Math.Max(0, res.FirstCycleRent - discountOnRent);
-
-                // Task 1: Security Deposit Discount Mirroring
-                decimal depositDiscountPct = discountPct > 0 ? discountPct :
-                    (res.FirstCycleRent > 0 && discountOnRent > 0 ? (discountOnRent / res.FirstCycleRent) * 100m : 0m);
-
-                decimal discountedDeposit = initialDeposit > 0
-                    ? Math.Max(0, Math.Round(initialDeposit * (1 - (depositDiscountPct / 100.0m)), 2))
-                    : 0m;
-
-                res.SecurityDeposit = discountedDeposit;
-                res.DiscountAmount = discountOnRent;
-
-                // Task 2: Flat Per-Seat Support Charge based on room total seat capacity
-                res.SupportChargeAmount = Math.Round(supportRate * capacity * res.BillingPeriodMonths, 2);
-                res.TaxAmount = Math.Round(res.SupportChargeAmount * (res.AppliedTaxPercentage / 100.0m), 2);
-                res.TaxAmountOnAdvanceRent = res.TaxAmount;
-                res.TaxAmountOnContract = Math.Round(supportRate * capacity * res.ContractPeriodMonths * (res.AppliedTaxPercentage / 100.0m), 2);
-
-                res.TotalPayable = Math.Max(0, discountedRent + discountedDeposit + res.TaxAmount);
-            }
+                SpaceType = engineResult.SpaceType,
+                BillingType = engineResult.BillingType,
+                BillingBasis = engineResult.BillingBasis,
+                BaseRent = engineResult.Rent,
+                FirstCycleRent = engineResult.Rent,
+                TotalContractRent = engineResult.MonthlyRent * engineResult.ContractPeriodMonths,
+                MonthlyRent = engineResult.MonthlyRent,
+                ContractPeriodMonths = engineResult.ContractPeriodMonths,
+                BillingPeriodMonths = engineResult.BillingPeriodMonths,
+                SecurityDeposit = engineResult.DepositAfterDiscount,
+                PerSeatSupportRate = req.PerSeatSupportRate,
+                AppliedChargePercentage = input.AppliedChargePercentage > 0 ? input.AppliedChargePercentage : 10.00m,
+                SupportChargeAmount = engineResult.ServiceCharge,
+                AppliedTaxPercentage = req.AppliedTaxPercentage,
+                TaxAmount = engineResult.Tax,
+                TaxAmountOnAdvanceRent = engineResult.Tax,
+                TaxAmountOnContract = Math.Round(req.PerSeatSupportRate * (req.Capacity > 0 ? req.Capacity : 1) * engineResult.ContractPeriodMonths * (req.AppliedTaxPercentage / 100.0m), 2, MidpointRounding.AwayFromZero),
+                DiscountAmount = engineResult.Discount,
+                TotalPayable = engineResult.GrandTotal,
+                IsProrated = engineResult.IsProrated,
+                ProratedCurrentMonthAmount = engineResult.ProratedCurrentMonthAmount
+            };
 
             BuildFields(res, input);
             return res;

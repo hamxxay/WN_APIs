@@ -283,6 +283,9 @@ namespace WorkNest.Application.Interfaces
         Task<(IEnumerable<WorkNest.Application.DTOs.Kyc.KycCustomerListItemViewModel> Rows, int Total)> GetCustomersKycListDbAsync(int page, int limit, string? search, int? locationId = null);
         Task<IDictionary<string, object?>?> GetCustomerByIdOrGuidDbAsync(string idOrGuid);
         Task<bool> CustomerBelongsToLocationDbAsync(int customerId, int locationId);
+
+        // --- Invoice Calculation SP ---
+        Task<WorkNest.Application.Services.InvoiceCalculationResult> CalculateInvoiceAmountsDbAsync(WorkNest.Application.Services.InvoiceCalculationRequest request);
     }
 }
 

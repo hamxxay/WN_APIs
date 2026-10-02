@@ -17,6 +17,7 @@ using WorkNest.Infrastructure.ExternalServices.Email;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
 using WorkNest.Infrastructure.ExternalServices.PayFast;
 using WorkNest.Infrastructure.ExternalServices.FileStorage;
+using WorkNest.Infrastructure.ExternalServices.Reports;
 using WorkNest.Infrastructure.Repositories;
 using WorkNest.Infrastructure.Security.Encryption;
 using WorkNest.Infrastructure.Security.JWT;
@@ -183,6 +184,7 @@ try
     builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
     builder.Services.AddScoped<IHikDeviceService, HikDeviceService>();
     builder.Services.AddScoped<IKycService, KycService>();
+    builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();
 
 
     // ── Background Hosted Services ────────────────────────────────────────────

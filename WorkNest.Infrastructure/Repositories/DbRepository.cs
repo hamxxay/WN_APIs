@@ -4021,6 +4021,86 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             var res = await cmd.ExecuteScalarAsync();
             return res != null && res != DBNull.Value;
         }
+
+        public async Task<WorkNest.Application.Services.InvoiceCalculationResult> CalculateInvoiceAmountsDbAsync(WorkNest.Application.Services.InvoiceCalculationRequest request)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_CalculateInvoiceAmounts", c);
+            
+            decimal monthlyRent = request.MonthlyRent;
+            if (monthlyRent <= 0)
+            {
+                if (request.RoomPrice > 0) monthlyRent = request.RoomPrice;
+                else if (request.SeatPrice > 0) monthlyRent = request.SeatPrice * (request.Capacity > 0 ? request.Capacity : 1);
+                else if (request.SubtotalAmount > 0 && request.BillingPeriodMonths > 0) monthlyRent = request.SubtotalAmount / request.BillingPeriodMonths;
+            }
+
+            decimal discountPct = request.DiscountPercentage > 0 ? request.DiscountPercentage :
+                (string.Equals(request.DiscountType, "Percentage", StringComparison.OrdinalIgnoreCase) ? request.DiscountValue : 0m);
+
+            decimal discountAmt = request.DiscountAmount > 0 ? request.DiscountAmount :
+                (!string.Equals(request.DiscountType, "Percentage", StringComparison.OrdinalIgnoreCase) ? request.DiscountValue : 0m);
+
+            cmd.Parameters.AddWithValue("@MonthlyRent", monthlyRent);
+            cmd.Parameters.AddWithValue("@SeatCapacity", (decimal)(request.Capacity > 0 ? request.Capacity : 1));
+            cmd.Parameters.AddWithValue("@BillingMonths", request.BillingPeriodMonths > 0 ? request.BillingPeriodMonths : 1);
+            cmd.Parameters.AddWithValue("@DiscountPercentage", discountPct);
+            cmd.Parameters.AddWithValue("@DiscountAmount", discountAmt);
+            cmd.Parameters.AddWithValue("@SecurityDepositMonths", request.SecurityDepositMonths);
+            cmd.Parameters.AddWithValue("@SecurityDepositOverride", request.SecurityDeposit > 0 ? (object)request.SecurityDeposit : DBNull.Value);
+            cmd.Parameters.AddWithValue("@StartDateTime", (object?)request.StartOn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@IsDepositInstallmentEnabled", request.SecurityDepositInstallments > 1);
+            cmd.Parameters.AddWithValue("@DepositInstallmentsCount", request.SecurityDepositInstallments > 0 ? request.SecurityDepositInstallments : 1);
+            cmd.Parameters.AddWithValue("@ReturnResultSet", true);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                int proratedDays = Convert.ToInt32(r.GetValue(r.GetOrdinal("ProrationDays")));
+                int daysInMonth = Convert.ToInt32(r.GetValue(r.GetOrdinal("TotalDaysInStartMonth")));
+
+                DateTime pStart = request.StartOn ?? DateTime.Today;
+                int bMonths = request.BillingPeriodMonths > 0 ? request.BillingPeriodMonths : 1;
+                DateTime pEnd;
+                if (proratedDays > 0)
+                {
+                    int startDay = pStart.Day;
+                    if (startDay < 15)
+                        pEnd = new DateTime(pStart.Year, pStart.Month, 1).AddMonths(bMonths).AddDays(-1);
+                    else
+                        pEnd = new DateTime(pStart.Year, pStart.Month, 1).AddMonths(bMonths + 1).AddDays(-1);
+                }
+                else
+                {
+                    pEnd = pStart.AddMonths(bMonths).AddDays(-1);
+                }
+
+                return new WorkNest.Application.Services.InvoiceCalculationResult
+                {
+                    MonthlyRent = monthlyRent,
+                    BillingPeriodMonths = bMonths,
+                    ContractPeriodMonths = request.ContractPeriodMonths > 0 ? request.ContractPeriodMonths : 12,
+                    BillingPeriodStart = pStart,
+                    BillingPeriodEnd = pEnd,
+                    Rent = Convert.ToDecimal(r.GetValue(r.GetOrdinal("Rent"))),
+                    Discount = Convert.ToDecimal(r.GetValue(r.GetOrdinal("Discount"))),
+                    ServiceCharge = Convert.ToDecimal(r.GetValue(r.GetOrdinal("ServiceCharges"))),
+                    Tax = Convert.ToDecimal(r.GetValue(r.GetOrdinal("TaxOnServiceCharges"))),
+                    DepositBase = Convert.ToDecimal(r.GetValue(r.GetOrdinal("BaseDeposit"))),
+                    DepositDiscount = Convert.ToDecimal(r.GetValue(r.GetOrdinal("DepositDiscount"))),
+                    DepositAfterDiscount = Convert.ToDecimal(r.GetValue(r.GetOrdinal("DepositAfterDiscount"))),
+                    DepositFirstInstallment = Convert.ToDecimal(r.GetValue(r.GetOrdinal("FirstInvoiceDeposit"))),
+                    DepositInstallments = request.SecurityDepositInstallments,
+                    GrandTotal = Convert.ToDecimal(r.GetValue(r.GetOrdinal("GrandTotal"))),
+                    IsProrated = proratedDays > 0,
+                    ProratedDays = proratedDays,
+                    DaysInStartMonth = daysInMonth,
+                    ProratedCurrentMonthAmount = proratedDays > 0 && daysInMonth > 0 ? Math.Round(((decimal)proratedDays / daysInMonth) * monthlyRent, 2, MidpointRounding.AwayFromZero) : 0m
+                };
+            }
+
+            return WorkNest.Application.Services.InvoiceCalculationEngine.CalculateInvoice(request);
+        }
     }
 }
 
