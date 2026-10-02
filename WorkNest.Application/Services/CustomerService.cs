@@ -28,6 +28,28 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(result);
         }
 
+        private static string? ResolveCompany(string? customerType, string? company)
+        {
+            if (!string.IsNullOrWhiteSpace(company))
+            {
+                if (string.Equals(customerType, "Individual", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(company.Trim(), "Individual", StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+                return company.Trim();
+            }
+
+            if (string.Equals(customerType, "Company", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(customerType, "Business", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(customerType, "AOP", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Company";
+            }
+
+            return null;
+        }
+
         public async Task<ApiResponse> CreateCustomerAsync(CustomerRequest request, string? createdBy)
         {
             var existing = await _db.GetCustomerByEmailAsync(request.Email);
@@ -38,13 +60,15 @@ namespace WorkNest.Application.Services
                 $"{request.FirstName} {request.LastName}".Trim(),
                 request.PhoneNumber);
 
+            string? companyValue = ResolveCompany(request.CustomerType, request.Company);
+
             IDictionary<string, object?> result;
             try
             {
                 result = await _db.CreateCustomerAsync(
                     request.FirstName, request.LastName, request.Email,
                     request.PhoneNumber, request.CnicOrPassport, request.Address,
-                    request.CityId, request.Notes, createdBy, userId, request.Company);
+                    request.CityId, request.Notes, createdBy, userId, companyValue);
             }
             catch (Exception ex) when (ex.Message.Contains("UQ_WN_Customers") || ex.Message.Contains("duplicate key"))
             {
@@ -59,9 +83,11 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> UpdateCustomerAsync(string id, CustomerRequest request)
         {
+            string? companyValue = ResolveCompany(request.CustomerType, request.Company);
+
             var updated = await _db.UpdateCustomerAsync(id, request.FirstName, request.LastName, request.Email,
                 request.PhoneNumber, request.CnicOrPassport, request.Address,
-                request.CityId, request.Notes, request.IsActive, request.Company);
+                request.CityId, request.Notes, request.IsActive, companyValue);
             if (updated is null)
                 return ApiResponse.Fail("Customer not found or update failed.");
             return ApiResponse.Ok(updated, "Customer updated successfully.");

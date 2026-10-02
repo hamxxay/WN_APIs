@@ -12,9 +12,11 @@ using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
 using WorkNest.Application.Validators;
 using WorkNest.Common.Configurations;
+using WorkNest.Common.Constants;
 using WorkNest.Infrastructure.ExternalServices.Email;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
 using WorkNest.Infrastructure.ExternalServices.PayFast;
+using WorkNest.Infrastructure.ExternalServices.FileStorage;
 using WorkNest.Infrastructure.Repositories;
 using WorkNest.Infrastructure.Security.Encryption;
 using WorkNest.Infrastructure.Security.JWT;
@@ -58,6 +60,8 @@ try
         builder.Configuration.GetSection("JwtSettings"));
     builder.Services.Configure<FileStorageSettings>(
         builder.Configuration.GetSection("FileStorage"));
+    builder.Services.Configure<KycStorageSettings>(
+        builder.Configuration.GetSection("KycStorage"));
 
     // ── JWT Authentication ────────────────────────────────────────────────────
     var jwtSection = builder.Configuration.GetSection("JwtSettings");
@@ -79,9 +83,64 @@ try
                 RoleClaimType           = ClaimTypes.Role,
                 NameClaimType           = ClaimTypes.NameIdentifier
             };
+
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    var accessToken = context.Request.Query["token"].ToString();
+                    if (string.IsNullOrEmpty(accessToken))
+                    {
+                        accessToken = context.Request.Query["access_token"].ToString();
+                    }
+                    if (!string.IsNullOrEmpty(accessToken))
+                    {
+                        context.Token = accessToken;
+                    }
+                    return Task.CompletedTask;
+                }
+            };
         });
 
-    builder.Services.AddAuthorization();
+    builder.Services.AddAuthorization(options =>
+    {
+        // Allowed roles: super_admin, admin, sales_executive
+        options.AddPolicy("KycAccessPolicy", policy =>
+            policy.RequireAssertion(ctx =>
+            {
+                var roleClaim = ctx.User.FindFirst(ClaimTypes.Role)?.Value 
+                             ?? ctx.User.FindFirst("role")?.Value;
+                if (string.IsNullOrWhiteSpace(roleClaim)) return false;
+
+                var role = roleClaim.Trim().ToLowerInvariant();
+                return role == Roles.SuperAdmin ||
+                       role == Roles.Admin ||
+                       role == Roles.SalesExecutive ||
+                       role == "superadmin" ||
+                       role == "administrator" ||
+                       role == "salesexecutive" ||
+                       role == "1" ||
+                       role == "2" ||
+                       role == "16";
+            }));
+
+        // Verify and Reject: admin and super_admin only
+        options.AddPolicy("KycVerifyPolicy", policy =>
+            policy.RequireAssertion(ctx =>
+            {
+                var roleClaim = ctx.User.FindFirst(ClaimTypes.Role)?.Value 
+                             ?? ctx.User.FindFirst("role")?.Value;
+                if (string.IsNullOrWhiteSpace(roleClaim)) return false;
+
+                var role = roleClaim.Trim().ToLowerInvariant();
+                return role == Roles.SuperAdmin ||
+                       role == Roles.Admin ||
+                       role == "superadmin" ||
+                       role == "administrator" ||
+                       role == "1" ||
+                       role == "2";
+            }));
+    });
 
     // ── Infrastructure Services ───────────────────────────────────────────────
     builder.Services.AddHttpContextAccessor();
@@ -93,6 +152,7 @@ try
     builder.Services.AddScoped<IHtmlToPdfService, HtmlToPdfService>();
     builder.Services.AddScoped<IPdfMergeService, PdfMergeService>();
     builder.Services.AddScoped<IPayFastService, PayFastService>();
+    builder.Services.AddScoped<IKycFileStorage, LocalKycFileStorage>();
 
     // ── Application Services ──────────────────────────────────────────────────
     builder.Services.AddScoped<IAuthService, AuthService>();
@@ -122,6 +182,8 @@ try
     builder.Services.AddScoped<IAttendantService, AttendantService>();
     builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
     builder.Services.AddScoped<IHikDeviceService, HikDeviceService>();
+    builder.Services.AddScoped<IKycService, KycService>();
+
 
     // ── Background Hosted Services ────────────────────────────────────────────
     builder.Services.AddHostedService<BillingAutomationService>();

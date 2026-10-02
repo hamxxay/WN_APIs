@@ -273,6 +273,17 @@ namespace WorkNest.Application.Interfaces
         Task<Dictionary<string, string>> GetHikCnicMapAsync();
         Task<string?> GetHikDeviceSnapshotByIdAsync(int deviceId);
         Task<int> GetNextHikEmployeeNoAsync();
+
+        // --- KYC Portal ---
+        Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null);
+        Task<IEnumerable<WorkNest.Domain.Entities.CustomerKYCDocument>> GetCustomerKycDocumentsDbAsync(int customerId, bool includeInactive = false);
+        Task<int> InsertOrReplaceCustomerKycDocumentDbAsync(int customerId, string folderName, int documentTypeId, byte slotNo, string? holderName, string storedPath, string originalFileName, string fileHash, DateTime? expiryDate, int uploadedBy);
+        Task SetCustomerKycDocumentStatusDbAsync(int documentId, byte status, string? remarks, int verifiedBy);
+        Task<WorkNest.Domain.Entities.CustomerKYCDocument?> GetCustomerKycDocumentByIdDbAsync(int documentId);
+        Task<(IEnumerable<WorkNest.Application.DTOs.Kyc.KycCustomerListItemViewModel> Rows, int Total)> GetCustomersKycListDbAsync(int page, int limit, string? search, int? locationId = null);
+        Task<IDictionary<string, object?>?> GetCustomerByIdOrGuidDbAsync(string idOrGuid);
+        Task<bool> CustomerBelongsToLocationDbAsync(int customerId, int locationId);
     }
 }
+
 

@@ -3722,8 +3722,308 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             var next = (max is int m ? m : 999) + 1;
             return next;
         }
+
+        // --- KYC Portal ---
+
+        public async Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null)
+        {
+            await using var conn = await Open();
+            await using var cmd = SP("dbo.WN_KYCDocumentTypes_GetActive", conn);
+            cmd.Parameters.AddWithValue("@Category", (object?)category ?? DBNull.Value);
+
+            var list = new List<WorkNest.Domain.Entities.KYCDocumentType>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                list.Add(new WorkNest.Domain.Entities.KYCDocumentType
+                {
+                    Id = r.GetInt32(r.GetOrdinal("Id")),
+                    Code = r.GetString(r.GetOrdinal("Code")),
+                    Name = r.GetString(r.GetOrdinal("Name")),
+                    IndividualRequirement = r.GetByte(r.GetOrdinal("IndividualRequirement")),
+                    BusinessRequirement = r.GetByte(r.GetOrdinal("BusinessRequirement")),
+                    GroupCode = r.IsDBNull(r.GetOrdinal("GroupCode")) ? null : r.GetString(r.GetOrdinal("GroupCode")),
+                    AlternativeCode = r.IsDBNull(r.GetOrdinal("AlternativeCode")) ? null : r.GetString(r.GetOrdinal("AlternativeCode")),
+                    AllowMultiple = r.GetBoolean(r.GetOrdinal("AllowMultiple")),
+                    RequiresHolderName = r.GetBoolean(r.GetOrdinal("RequiresHolderName")),
+                    RequiresExpiry = r.GetBoolean(r.GetOrdinal("RequiresExpiry")),
+                    SortOrder = r.GetInt32(r.GetOrdinal("SortOrder")),
+                    IsActive = r.GetBoolean(r.GetOrdinal("IsActive"))
+                });
+            }
+            return list;
+        }
+
+        public async Task<IEnumerable<WorkNest.Domain.Entities.CustomerKYCDocument>> GetCustomerKycDocumentsDbAsync(int customerId, bool includeInactive = false)
+        {
+            await using var conn = await Open();
+            await using var cmd = SP("dbo.WN_CustomerKYCDocuments_GetByCustomerId", conn);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@IncludeInactive", includeInactive ? 1 : 0);
+
+            var list = new List<WorkNest.Domain.Entities.CustomerKYCDocument>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                list.Add(new WorkNest.Domain.Entities.CustomerKYCDocument
+                {
+                    Id = r.GetInt32(r.GetOrdinal("Id")),
+                    CustomerId = r.GetInt32(r.GetOrdinal("CustomerId")),
+                    FolderName = r.GetString(r.GetOrdinal("FolderName")),
+                    DocumentTypeId = r.GetInt32(r.GetOrdinal("DocumentTypeId")),
+                    DocumentTypeCode = r.IsDBNull(r.GetOrdinal("DocumentTypeCode")) ? null : r.GetString(r.GetOrdinal("DocumentTypeCode")),
+                    DocumentTypeName = r.IsDBNull(r.GetOrdinal("DocumentTypeName")) ? null : r.GetString(r.GetOrdinal("DocumentTypeName")),
+                    GroupCode = r.IsDBNull(r.GetOrdinal("GroupCode")) ? null : r.GetString(r.GetOrdinal("GroupCode")),
+                    AlternativeCode = r.IsDBNull(r.GetOrdinal("AlternativeCode")) ? null : r.GetString(r.GetOrdinal("AlternativeCode")),
+                    AllowMultiple = !r.IsDBNull(r.GetOrdinal("AllowMultiple")) && r.GetBoolean(r.GetOrdinal("AllowMultiple")),
+                    RequiresHolderName = !r.IsDBNull(r.GetOrdinal("RequiresHolderName")) && r.GetBoolean(r.GetOrdinal("RequiresHolderName")),
+                    RequiresExpiry = !r.IsDBNull(r.GetOrdinal("RequiresExpiry")) && r.GetBoolean(r.GetOrdinal("RequiresExpiry")),
+                    SlotNo = r.GetByte(r.GetOrdinal("SlotNo")),
+                    HolderName = r.IsDBNull(r.GetOrdinal("HolderName")) ? null : r.GetString(r.GetOrdinal("HolderName")),
+                    StoredPath = r.GetString(r.GetOrdinal("StoredPath")),
+                    OriginalFileName = r.GetString(r.GetOrdinal("OriginalFileName")),
+                    FileHash = r.GetString(r.GetOrdinal("FileHash")).Trim(),
+                    ExpiryDate = r.IsDBNull(r.GetOrdinal("ExpiryDate")) ? null : r.GetDateTime(r.GetOrdinal("ExpiryDate")),
+                    VersionNo = r.GetInt32(r.GetOrdinal("VersionNo")),
+                    IsActive = r.GetBoolean(r.GetOrdinal("IsActive")),
+                    Status = r.GetByte(r.GetOrdinal("Status")),
+                    Remarks = r.IsDBNull(r.GetOrdinal("Remarks")) ? null : r.GetString(r.GetOrdinal("Remarks")),
+                    VerifiedBy = r.IsDBNull(r.GetOrdinal("VerifiedBy")) ? null : r.GetInt32(r.GetOrdinal("VerifiedBy")),
+                    VerifiedByName = r.IsDBNull(r.GetOrdinal("VerifiedByName")) ? null : r.GetString(r.GetOrdinal("VerifiedByName")),
+                    VerifiedOn = r.IsDBNull(r.GetOrdinal("VerifiedOn")) ? null : r.GetDateTime(r.GetOrdinal("VerifiedOn")),
+                    UploadedBy = r.GetInt32(r.GetOrdinal("UploadedBy")),
+                    UploadedByName = r.IsDBNull(r.GetOrdinal("UploadedByName")) ? null : r.GetString(r.GetOrdinal("UploadedByName")),
+                    UploadedOn = r.GetDateTime(r.GetOrdinal("UploadedOn")),
+                    ReplacedBy = r.IsDBNull(r.GetOrdinal("ReplacedBy")) ? null : r.GetInt32(r.GetOrdinal("ReplacedBy")),
+                    ReplacedOn = r.IsDBNull(r.GetOrdinal("ReplacedOn")) ? null : r.GetDateTime(r.GetOrdinal("ReplacedOn"))
+                });
+            }
+            return list;
+        }
+
+        public async Task<int> InsertOrReplaceCustomerKycDocumentDbAsync(
+            int customerId,
+            string folderName,
+            int documentTypeId,
+            byte slotNo,
+            string? holderName,
+            string storedPath,
+            string originalFileName,
+            string fileHash,
+            DateTime? expiryDate,
+            int uploadedBy)
+        {
+            await using var conn = await Open();
+            await using var cmd = SP("dbo.WN_CustomerKYCDocuments_InsertOrReplace", conn);
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@FolderName", folderName);
+            cmd.Parameters.AddWithValue("@DocumentTypeId", documentTypeId);
+            cmd.Parameters.AddWithValue("@SlotNo", slotNo);
+            cmd.Parameters.AddWithValue("@HolderName", (object?)holderName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@StoredPath", storedPath);
+            cmd.Parameters.AddWithValue("@OriginalFileName", originalFileName);
+            cmd.Parameters.AddWithValue("@FileHash", fileHash);
+            cmd.Parameters.AddWithValue("@ExpiryDate", (object?)expiryDate?.Date ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UploadedBy", uploadedBy);
+
+            var outParam = new SqlParameter("@NewDocId", System.Data.SqlDbType.Int)
+            {
+                Direction = System.Data.ParameterDirection.Output
+            };
+            cmd.Parameters.Add(outParam);
+
+            await cmd.ExecuteNonQueryAsync();
+            return (int)(outParam.Value ?? 0);
+        }
+
+        public async Task SetCustomerKycDocumentStatusDbAsync(int documentId, byte status, string? remarks, int verifiedBy)
+        {
+            await using var conn = await Open();
+            await using var cmd = SP("dbo.WN_CustomerKYCDocuments_SetStatus", conn);
+            cmd.Parameters.AddWithValue("@DocumentId", documentId);
+            cmd.Parameters.AddWithValue("@Status", status);
+            cmd.Parameters.AddWithValue("@Remarks", (object?)remarks ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@VerifiedBy", verifiedBy);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<WorkNest.Domain.Entities.CustomerKYCDocument?> GetCustomerKycDocumentByIdDbAsync(int documentId)
+        {
+            await using var conn = await Open();
+            await using var cmd = SP("dbo.WN_CustomerKYCDocuments_GetById", conn);
+            cmd.Parameters.AddWithValue("@Id", documentId);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                return new WorkNest.Domain.Entities.CustomerKYCDocument
+                {
+                    Id = r.GetInt32(r.GetOrdinal("Id")),
+                    CustomerId = r.GetInt32(r.GetOrdinal("CustomerId")),
+                    FolderName = r.GetString(r.GetOrdinal("FolderName")),
+                    DocumentTypeId = r.GetInt32(r.GetOrdinal("DocumentTypeId")),
+                    DocumentTypeCode = r.IsDBNull(r.GetOrdinal("DocumentTypeCode")) ? null : r.GetString(r.GetOrdinal("DocumentTypeCode")),
+                    DocumentTypeName = r.IsDBNull(r.GetOrdinal("DocumentTypeName")) ? null : r.GetString(r.GetOrdinal("DocumentTypeName")),
+                    GroupCode = r.IsDBNull(r.GetOrdinal("GroupCode")) ? null : r.GetString(r.GetOrdinal("GroupCode")),
+                    AlternativeCode = r.IsDBNull(r.GetOrdinal("AlternativeCode")) ? null : r.GetString(r.GetOrdinal("AlternativeCode")),
+                    AllowMultiple = !r.IsDBNull(r.GetOrdinal("AllowMultiple")) && r.GetBoolean(r.GetOrdinal("AllowMultiple")),
+                    RequiresHolderName = !r.IsDBNull(r.GetOrdinal("RequiresHolderName")) && r.GetBoolean(r.GetOrdinal("RequiresHolderName")),
+                    RequiresExpiry = !r.IsDBNull(r.GetOrdinal("RequiresExpiry")) && r.GetBoolean(r.GetOrdinal("RequiresExpiry")),
+                    SlotNo = r.GetByte(r.GetOrdinal("SlotNo")),
+                    HolderName = r.IsDBNull(r.GetOrdinal("HolderName")) ? null : r.GetString(r.GetOrdinal("HolderName")),
+                    StoredPath = r.GetString(r.GetOrdinal("StoredPath")),
+                    OriginalFileName = r.GetString(r.GetOrdinal("OriginalFileName")),
+                    FileHash = r.GetString(r.GetOrdinal("FileHash")).Trim(),
+                    ExpiryDate = r.IsDBNull(r.GetOrdinal("ExpiryDate")) ? null : r.GetDateTime(r.GetOrdinal("ExpiryDate")),
+                    VersionNo = r.GetInt32(r.GetOrdinal("VersionNo")),
+                    IsActive = r.GetBoolean(r.GetOrdinal("IsActive")),
+                    Status = r.GetByte(r.GetOrdinal("Status")),
+                    Remarks = r.IsDBNull(r.GetOrdinal("Remarks")) ? null : r.GetString(r.GetOrdinal("Remarks")),
+                    VerifiedBy = r.IsDBNull(r.GetOrdinal("VerifiedBy")) ? null : r.GetInt32(r.GetOrdinal("VerifiedBy")),
+                    VerifiedOn = r.IsDBNull(r.GetOrdinal("VerifiedOn")) ? null : r.GetDateTime(r.GetOrdinal("VerifiedOn")),
+                    UploadedBy = r.GetInt32(r.GetOrdinal("UploadedBy")),
+                    UploadedOn = r.GetDateTime(r.GetOrdinal("UploadedOn")),
+                    ReplacedBy = r.IsDBNull(r.GetOrdinal("ReplacedBy")) ? null : r.GetInt32(r.GetOrdinal("ReplacedBy")),
+                    ReplacedOn = r.IsDBNull(r.GetOrdinal("ReplacedOn")) ? null : r.GetDateTime(r.GetOrdinal("ReplacedOn"))
+                };
+            }
+            return null;
+        }
+
+        public async Task<(IEnumerable<WorkNest.Application.DTOs.Kyc.KycCustomerListItemViewModel> Rows, int Total)> GetCustomersKycListDbAsync(int page, int limit, string? search, int? locationId = null)
+        {
+            await using var conn = await Open();
+            await using var cmd = SP("dbo.WN_Customers_GetKycList", conn);
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+
+            var list = new List<WorkNest.Application.DTOs.Kyc.KycCustomerListItemViewModel>();
+            int total = 0;
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                if (total == 0 && !r.IsDBNull(r.GetOrdinal("TotalRecords")))
+                {
+                    total = r.GetInt32(r.GetOrdinal("TotalRecords"));
+                }
+
+                var company = r.IsDBNull(r.GetOrdinal("Company")) ? null : r.GetString(r.GetOrdinal("Company"));
+                var (category, _, _) = WorkNest.Application.DTOs.Kyc.KycCategoryMapper.ResolveCategory(company);
+                var totalDocs = r.GetInt32(r.GetOrdinal("TotalActiveDocs"));
+                var verifiedDocs = r.GetInt32(r.GetOrdinal("VerifiedDocsCount"));
+                var pendingDocs = r.GetInt32(r.GetOrdinal("PendingDocsCount"));
+                var rejectedDocs = r.GetInt32(r.GetOrdinal("RejectedDocsCount"));
+
+                string overallStatus = "Not Uploaded";
+                string badgeClass = "badge-secondary";
+
+                if (totalDocs > 0)
+                {
+                    if (rejectedDocs > 0)
+                    {
+                        overallStatus = "Action Required";
+                        badgeClass = "badge-danger";
+                    }
+                    else if (pendingDocs > 0)
+                    {
+                        overallStatus = "Under Review";
+                        badgeClass = "badge-warning";
+                    }
+                    else if (verifiedDocs > 0)
+                    {
+                        overallStatus = "Verified";
+                        badgeClass = "badge-success";
+                    }
+                }
+
+                list.Add(new WorkNest.Application.DTOs.Kyc.KycCustomerListItemViewModel
+                {
+                    Id = r.GetInt32(r.GetOrdinal("Id")),
+                    IdGUID = r.GetGuid(r.GetOrdinal("IdGUID")),
+                    Code = r.GetString(r.GetOrdinal("Code")),
+                    FullName = r.GetString(r.GetOrdinal("FullName")),
+                    Company = company,
+                    Email = r.GetString(r.GetOrdinal("Email")),
+                    PhoneNumber = r.IsDBNull(r.GetOrdinal("PhoneNumber")) ? null : r.GetString(r.GetOrdinal("PhoneNumber")),
+                    Category = category,
+                    TotalActiveDocs = totalDocs,
+                    VerifiedDocsCount = verifiedDocs,
+                    PendingDocsCount = pendingDocs,
+                    RejectedDocsCount = rejectedDocs,
+                    OverallStatus = overallStatus,
+                    OverallBadgeClass = badgeClass,
+                    CreatedAt = r.GetDateTime(r.GetOrdinal("CreatedAt"))
+                });
+            }
+
+            return (list, total);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetCustomerByIdOrGuidDbAsync(string idOrGuid)
+        {
+            await using var conn = await Open();
+            await using var cmd = new SqlCommand(@"
+                SELECT 
+                    c.Id, 
+                    c.IdGUID, 
+                    c.Code, 
+                    c.FirstName, 
+                    c.LastName, 
+                    LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))) AS FullName,
+                    c.Company, 
+                    c.Email, 
+                    c.PhoneNumber, 
+                    c.CnicOrPassport, 
+                    c.Address, 
+                    c.CityId, 
+                    ci.Description AS CityName,
+                    c.IsActive, 
+                    c.Notes, 
+                    c.CreatedAt,
+                    c.UserId
+                FROM dbo.WN_Customers c WITH (NOLOCK)
+                LEFT JOIN dbo.City ci WITH (NOLOCK) ON ci.Id = c.CityId
+                WHERE (@IsGuid = 1 AND c.IdGUID = @GuidVal)
+                   OR (@IsInt = 1 AND c.Id = @IntVal)
+                   OR (c.Code = @CodeVal)", conn);
+
+            bool isGuid = Guid.TryParse(idOrGuid, out var g);
+            bool isInt = int.TryParse(idOrGuid, out var id);
+
+            cmd.Parameters.AddWithValue("@IsGuid", isGuid ? 1 : 0);
+            cmd.Parameters.AddWithValue("@GuidVal", isGuid ? g : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@IsInt", isInt ? 1 : 0);
+            cmd.Parameters.AddWithValue("@IntVal", isInt ? id : (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@CodeVal", idOrGuid);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        public async Task<bool> CustomerBelongsToLocationDbAsync(int customerId, int locationId)
+        {
+            await using var conn = await Open();
+            await using var cmd = new SqlCommand(@"
+                SELECT TOP 1 1
+                FROM dbo.WN_Customers c WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = c.UserId
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.CustomerCode = c.Code OR (c.UserId IS NOT NULL AND b.UserId = c.UserId)
+                LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId
+                WHERE c.Id = @CustomerId
+                  AND (sb.LocationId = @LocationId OR u.LocationId = @LocationId)", conn);
+
+            cmd.Parameters.AddWithValue("@CustomerId", customerId);
+            cmd.Parameters.AddWithValue("@LocationId", locationId);
+
+            var res = await cmd.ExecuteScalarAsync();
+            return res != null && res != DBNull.Value;
+        }
     }
 }
+
 
 
 
