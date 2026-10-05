@@ -6,6 +6,6 @@ namespace WorkNest.Application.Interfaces
     public interface IDashboardService
     {
         Task<ApiResponse> GetSummaryAsync();
-        Task<DashboardOverviewDto> GetOverviewAsync(int? locationId);
+        Task<DashboardOverviewDto> GetOverviewAsync(int? locationId, string? period = null);
     }
 }

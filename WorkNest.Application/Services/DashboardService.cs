@@ -22,13 +22,15 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(results);
         }
 
-        public async Task<DashboardOverviewDto> GetOverviewAsync(int? locationId)
+        public async Task<DashboardOverviewDto> GetOverviewAsync(int? locationId, string? period = null)
         {
+            period = (period ?? "month").Trim().ToLowerInvariant();
+            if (period is not ("month" or "quarter" or "year")) period = "month";
             var st = await _orderStatus.GetInvoiceStatusesAsync();
             // Open = still owed (Unpaid / Partial / Overdue, legacy + OrderStatus); void = legacy 5 + OrderStatus Cancelled.
             var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue);
             var voids = st.Cancelled.Append(5);
-            var sets = await _db.GetDashboardOverviewDbAsync(locationId, EndingSoonDays, open, st.Paid, voids);
+            var sets = await _db.GetDashboardOverviewDbAsync(locationId, EndingSoonDays, open, st.Paid, voids, period);
 
             var k = sets.Count > 0 ? sets[0].FirstOrDefault() : null;
             int Int(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) && v != null ? Convert.ToInt32(v) : 0;
@@ -47,8 +49,10 @@ namespace WorkNest.Application.Services
                 OutstandingCount = Int(k, "OutstandingCount"),
                 OverdueAmount = Math.Round(Dec(k, "OverdueAmount"), 2),
                 OverdueCount = Int(k, "OverdueCount"),
-                InvoicedThisMonth = Math.Round(Dec(k, "InvoicedThisMonth"), 2),
-                InvoicedLastMonth = Math.Round(Dec(k, "InvoicedLastMonth"), 2),
+                Period = period,
+                InvoicedThisPeriod = Math.Round(Dec(k, "InvoicedThisMonth"), 2),
+                InvoicedPrevPeriod = Math.Round(Dec(k, "InvoicedLastMonth"), 2),
+                PaidThisPeriod = Math.Round(Dec(k, "PaidThisPeriod"), 2),
                 LeasesEndingSoon = Int(k, "LeasesEndingSoon"),
                 EndingSoonDays = EndingSoonDays,
                 GeneratedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss")

@@ -2216,18 +2216,27 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         /// Live bookings = BookingStatusId 1, 2, 5, 33 (old + WN_BookingStatuses pending / confirmed).
         /// </summary>
         public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(int? locationId, int endingSoonDays,
-            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds)
+            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month")
         {
+            // Period: this month / quarter / year (calendar, to date). Comparisons are against the previous period;
+            // trend charts cover 6 / 12 / 24 months and lease expiries look 3 / 6 / 12 months ahead.
+            var months = period == "year" ? 12 : period == "quarter" ? 3 : 1;
+            var seriesMonths = period == "year" ? 24 : period == "quarter" ? 12 : 6;
+            var aheadMonths = period == "year" ? 12 : period == "quarter" ? 6 : 3;
             // Status IDs are ints from code (OrderStatus lookups), never user input.
             static string List(IEnumerable<int> ids) { var l = ids.Distinct().ToList(); return l.Count == 0 ? "-1" : string.Join(",", l); }
             var open = List(openInvoiceStatusIds); var paid = List(paidStatusIds); var voids = List(voidStatusIds);
             await using var c = await Open();
             var sql = $@"
                 DECLARE @Now DATETIME2(0) = SYSDATETIME();
-                DECLARE @MonthAgo DATETIME2(0) = DATEADD(MONTH, -1, @Now);
+                DECLARE @MonthAgo DATETIME2(0) = DATEADD(MONTH, -@PMonths, @Now);   -- same point, one period ago
                 DECLARE @Today DATE = CAST(@Now AS DATE);
                 DECLARE @MonthStart DATE = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
-                DECLARE @PrevMonthStart DATE = DATEADD(MONTH, -1, @MonthStart);
+                DECLARE @PStart DATE = CASE @PMonths
+                    WHEN 12 THEN DATEFROMPARTS(YEAR(@Today), 1, 1)
+                    WHEN 3  THEN DATEFROMPARTS(YEAR(@Today), ((MONTH(@Today) - 1) / 3) * 3 + 1, 1)
+                    ELSE @MonthStart END;
+                DECLARE @PrevMonthStart DATE = DATEADD(MONTH, -@PMonths, @PStart);
                 DECLARE @SoonEnd DATETIME2(0) = DATEADD(DAY, @Days, @Now);
 
                 DECLARE @Spaces TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200));
@@ -2263,13 +2272,16 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open})) AS OutstandingCount,
                     (SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueAmount,
                     (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueCount,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @MonthStart) AS InvoicedThisMonth,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < @MonthStart) AS InvoicedLastMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart) AS InvoicedThisMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevMonthStart)) AS InvoicedLastMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND StatusId IN ({paid})) AS PaidThisPeriod,
                     (SELECT COUNT(*) FROM @Live WHERE StatusId IN (2, 33) AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
 
                 -- [1] last 12 months (occupancy measured at month end, or now for the current month)
                 ;WITH m AS (
-                    SELECT n, DATEADD(MONTH, -n, @MonthStart) AS MStart FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
+                    SELECT n, DATEADD(MONTH, -n, @MonthStart) AS MStart
+                      FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12),(13),(14),(15),(16),(17),(18),(19),(20),(21),(22),(23)) v(n)
+                     WHERE n < @Series
                 )
                 SELECT CONVERT(VARCHAR(7), m.MStart, 126) AS Month,
                        (SELECT COUNT(*) FROM dbo.WN_Bookings nb WITH (NOLOCK)
@@ -2355,14 +2367,14 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                          OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
                                         FROM dbo.WN_Customers cu WITH (NOLOCK)
                                        WHERE cu.Code = b.CustomerCode OR cu.UserId = ISNULL(b.UserId, i.UserId)) cust
-                         WHERE i.IssuedOn >= DATEADD(MONTH, -11, @MonthStart)
+                         WHERE i.IssuedOn >= @PStart
                   ) t
                  GROUP BY t.Customer
                  ORDER BY SUM(t.GrandTotal) DESC;
 
                 -- [8] leases expiring, next 6 months
                 ;WITH f AS (
-                    SELECT n, DATEADD(MONTH, n, @MonthStart) AS MStart FROM (VALUES (0),(1),(2),(3),(4),(5)) v(n)
+                    SELECT n, DATEADD(MONTH, n, @MonthStart) AS MStart FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n) WHERE n < @Ahead
                 )
                 SELECT CONVERT(VARCHAR(7), f.MStart, 126) AS Month,
                        (SELECT COUNT(*) FROM @Live l WHERE l.EndOn >= f.MStart AND l.EndOn < DATEADD(MONTH, 1, f.MStart) AND l.EndOn >= @Now) AS Leases,
@@ -2372,6 +2384,9 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await using var cmd = new SqlCommand(sql, c) { CommandTimeout = 60 };
             cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
             cmd.Parameters.Add("@Days", SqlDbType.Int).Value = endingSoonDays;
+            cmd.Parameters.Add("@PMonths", SqlDbType.Int).Value = months;
+            cmd.Parameters.Add("@Series", SqlDbType.Int).Value = seriesMonths;
+            cmd.Parameters.Add("@Ahead", SqlDbType.Int).Value = aheadMonths;
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadResultSets(r);
         }

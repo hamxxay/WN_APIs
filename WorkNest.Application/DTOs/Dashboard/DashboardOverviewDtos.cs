@@ -15,8 +15,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int OutstandingCount { get; set; }
         public decimal OverdueAmount { get; set; }
         public int OverdueCount { get; set; }
-        public decimal InvoicedThisMonth { get; set; }
-        public decimal InvoicedLastMonth { get; set; }
+        /// <summary>Selected period: month | quarter | year (calendar, to date).</summary>
+        public string Period { get; set; } = "month";
+        /// <summary>Invoiced in the selected period so far / the same span of the previous period.</summary>
+        public decimal InvoicedThisPeriod { get; set; }
+        public decimal InvoicedPrevPeriod { get; set; }
+        /// <summary>Invoiced in the selected period and now Paid.</summary>
+        public decimal PaidThisPeriod { get; set; }
         public int LeasesEndingSoon { get; set; }
         public int EndingSoonDays { get; set; }
         public List<DashboardMonthDto> Months { get; set; } = new();

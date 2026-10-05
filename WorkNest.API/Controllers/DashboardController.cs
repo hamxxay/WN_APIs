@@ -22,10 +22,10 @@ namespace WorkNest.API.Controllers
         /// </summary>
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
         [HttpGet("api/dashboard/overview")]
-        public async Task<IActionResult> Overview([FromQuery] int? locationId)
+        public async Task<IActionResult> Overview([FromQuery] int? locationId, [FromQuery] string? period)
         {
             var scope = User.IsSuperAdmin() ? (locationId > 0 ? locationId : null) : User.GetLocationId();
-            return Ok(await _dashboard.GetOverviewAsync(scope));
+            return Ok(await _dashboard.GetOverviewAsync(scope, period));
         }
 
         [HttpGet("/")]
