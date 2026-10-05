@@ -111,7 +111,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("{id:int}/mark-signed")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // creates a booking: same as sign / upload-signed
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // creates a booking: staff incl. sales executives
         public async Task<IActionResult> MarkSigned(int id, [FromBody] MarkAgreementSignedRequest? req)
         {
             try
@@ -232,7 +232,7 @@ namespace WorkNest.API.Controllers
         /// (POST api/booking/{bookingId}/send-initial-invoice?issuedOn=yyyy-MM-dd).
         /// </summary>
         [HttpPost("{id:int}/sign")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
         [RequestSizeLimit(10 * 1024 * 1024)]
         public async Task<IActionResult> SignAgreement(int id, IFormFile? file, [FromForm] DateTime? signedDate, [FromForm] string? note)
         {
@@ -307,7 +307,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("{id:int}/upload-signed")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
         [RequestSizeLimit(10 * 1024 * 1024)]
         public async Task<IActionResult> UploadSignedAgreement(int id, IFormFile? file)
         {
@@ -394,7 +394,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("{id:int}/signed-pdf")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
         public async Task<IActionResult> DownloadSignedAgreementPdf(int id)
         {
             try
