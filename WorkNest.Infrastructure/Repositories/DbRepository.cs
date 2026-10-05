@@ -2803,13 +2803,13 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     i.InvoiceTypeId,
                     i.Notes,
                     i.CreatedOn,
-                    CASE i.StatusId 
-                        WHEN 1 THEN 'Unpaid' 
-                        WHEN 2 THEN 'Paid' 
-                        WHEN 3 THEN 'Partial' 
-                        WHEN 4 THEN 'Overdue' 
-                        ELSE 'Unknown' 
-                    END AS StatusLabel
+                    COALESCE(
+                        -- legacy values on older rows
+                        CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
+                        -- OrderStatus IDs (looked up, not hard-coded)
+                        (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
+                           FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
+                        'Unknown') AS StatusLabel
                 FROM dbo.WN_Invoices i WITH (NOLOCK)
                 LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                 {whereClause}
@@ -3996,6 +3996,49 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // --- dbo.OrderStatus (status lookup by description) ---
+
+        public async Task<IReadOnlyDictionary<int, string>> GetOrderStatusesDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT Id, Description FROM dbo.OrderStatus WITH (NOLOCK) WHERE ISNULL(Status, 1) = 1;", c);
+            var map = new Dictionary<int, string>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) map[Convert.ToInt32(r.GetValue(0))] = r.IsDBNull(1) ? "" : Convert.ToString(r.GetValue(1)) ?? "";
+            return map;
+        }
+
+        // --- Challan Validity Extension (existing WN_Challan_* procedures) ---
+
+        public async Task<IDictionary<string, object?>?> SearchChallanDbAsync(string query)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Challan_Search", c);
+            cmd.Parameters.Add("@Query", SqlDbType.NVarChar, 100).Value = query;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        /// <summary>Returns the procedure's validation message (RAISERROR) as an error instead of throwing.</summary>
+        public async Task<(bool Ok, string? Error)> ExtendChallanValidityDbAsync(int bookingId, DateTime newExpiryDate, string updatedBy, string? remarks)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Challan_ExtendValidity", c);
+                cmd.Parameters.AddWithValue("@BookingId", bookingId);
+                cmd.Parameters.Add("@NewExpiryDate", SqlDbType.Date).Value = newExpiryDate.Date;
+                cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value = updatedBy;
+                cmd.Parameters.Add("@Remarks", SqlDbType.NVarChar, 500).Value = (object?)remarks ?? DBNull.Value;
+                await cmd.ExecuteNonQueryAsync();
+                return (true, null);
+            }
+            catch (SqlException ex) when (ex.Class == 16)
+            {
+                return (false, ex.Message); // e.g. "New expiry date must be after the current expiry date."
+            }
+        }
+
         // --- Hikvision challan-based access suspension (WN_HIK_AccessSuspension_* SPs) ---
 
         public async Task<IEnumerable<HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync()
@@ -4078,6 +4121,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 ORDER BY i.IssuedOn DESC, i.Id DESC;
 
                 SELECT c.Id, c.ChallanNumber, c.IssuedOn, c.ValidUntil, c.StatusId AS ChallanStatusId,
+                       (SELECT bk.ValidityDate FROM dbo.WN_Bookings bk WITH (NOLOCK) WHERE bk.Id = c.BookingId) AS BookingValidityDate,
                        v.CurrentCycleAmount, v.TotalContractAmount, v.TotalPaidAmount, v.BalanceLeft,
                        p.StatusId AS PaymentStatusId, p.Amount AS VoucherAmount
                 FROM dbo.WN_Challans c WITH (NOLOCK)

@@ -188,6 +188,8 @@ try
     builder.Services.AddScoped<IHikEnrollmentService, HikEnrollmentService>();
     builder.Services.AddScoped<IHikStaffService, HikEnrollmentService>();
     builder.Services.AddScoped<IHikAccessSuspensionService, HikEnrollmentService>();
+    builder.Services.AddScoped<IChallanService, ChallanService>();
+    builder.Services.AddScoped<IOrderStatusService, OrderStatusService>();
     builder.Services.AddScoped<IHikAccessService, HikAccessService>();
     builder.Services.AddScoped<IKycService, KycService>();
     builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();

@@ -16,12 +16,14 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IHikIsapiClient _isapi;
         private readonly ILogger<HikEnrollmentService> _logger;
+        private readonly IOrderStatusService _orderStatus;
 
-        public HikEnrollmentService(IDbRepository db, IHikIsapiClient isapi, ILogger<HikEnrollmentService> logger)
+        public HikEnrollmentService(IDbRepository db, IHikIsapiClient isapi, ILogger<HikEnrollmentService> logger, IOrderStatusService orderStatus)
         {
             _db = db;
             _isapi = isapi;
             _logger = logger;
+            _orderStatus = orderStatus;
         }
 
         public async Task<HikEnrollResultDto> EnrollFingerprintAsync(int bookingDetailId, int personId, HikEnrollRequest request)

@@ -285,6 +285,13 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceConnection>> GetHikDeviceConnectionsDbAsync(IEnumerable<int> deviceIds);
         Task<IEnumerable<int>> GetHikEntranceDeviceIdsDbAsync();
 
+        // --- dbo.OrderStatus (status lookup by description) ---
+        Task<IReadOnlyDictionary<int, string>> GetOrderStatusesDbAsync();
+
+        // --- Challan Validity Extension (existing WN_Challan_* procedures) ---
+        Task<IDictionary<string, object?>?> SearchChallanDbAsync(string query);
+        Task<(bool Ok, string? Error)> ExtendChallanValidityDbAsync(int bookingId, DateTime newExpiryDate, string updatedBy, string? remarks);
+
         // --- Hikvision challan-based access suspension (WN_HIK_AccessSuspension_* SPs) ---
         Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync();
         Task SetHikAccessSuspensionAppliedDbAsync(int suspensionId, bool machinesBlocked);

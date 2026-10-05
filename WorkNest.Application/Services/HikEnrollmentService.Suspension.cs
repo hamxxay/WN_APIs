@@ -80,14 +80,15 @@ namespace WorkNest.Application.Services
             result.ChallanValidUntil = (booking["ValidityDate"] as DateTime?)?.ToString("yyyy-MM-dd");
 
             var today = DateTime.Today;
+            var st = await _orderStatus.GetInvoiceStatusesAsync(); // OrderStatus IDs + legacy values
             foreach (var r in sets.Count > 1 ? sets[1] : new List<IDictionary<string, object?>>())
             {
                 var statusId = r["StatusId"] != null ? Convert.ToInt32(r["StatusId"]) : 0;
                 var due = r["DueOn"] as DateTime?;
                 var total = Convert.ToDecimal(r["GrandTotal"]);
                 var paid = Convert.ToDecimal(r["PaidTotal"]);
-                // Same rule as WN_HIK_AccessSuspension_Run: Unpaid (1) / Overdue (4) past the due date.
-                var overdue = (statusId == 1 || statusId == 4) && due.HasValue && due.Value.Date < today;
+                // Same rule as WN_HIK_AccessSuspension_Run: Unpaid / Overdue past the due date.
+                var overdue = (st.IsUnpaid(statusId) || st.IsOverdue(statusId)) && due.HasValue && due.Value.Date < today;
                 var typeId = r["InvoiceTypeId"] != null ? Convert.ToInt32(r["InvoiceTypeId"]) : 0;
 
                 result.Challans.Add(new HikChallanDto
@@ -102,7 +103,7 @@ namespace WorkNest.Application.Services
                     GrandTotal = total,
                     PaidTotal = paid,
                     BalanceDue = Math.Max(0, total - paid),
-                    Status = overdue ? "Overdue" : statusId switch { 2 => "Paid", 3 => "Partial", 4 => "Overdue", _ => "Unpaid" },
+                    Status = overdue ? "Overdue" : st.Label(statusId),
                     IsOverdue = overdue
                 });
             }
@@ -113,15 +114,21 @@ namespace WorkNest.Application.Services
                 decimal Dec(string k) => r.TryGetValue(k, out var v) && v != null ? Convert.ToDecimal(v) : 0m;
                 var challanStatus = r["ChallanStatusId"] != null ? Convert.ToInt32(r["ChallanStatusId"]) : 1;
                 var paymentStatus = r["PaymentStatusId"] != null ? Convert.ToInt32(r["PaymentStatusId"]) : 1;
-                var validUntil = r["ValidUntil"] as DateTime?;
+                // Effective expiry: the later of WN_Challans.ValidUntil and WN_Bookings.ValidityDate (the date
+                // the Challan Validity page extends) — same rule as WN_HIK_AccessSuspension_Run (v3).
+                var challanValid = r["ValidUntil"] as DateTime?;
+                var bookingValid = r.TryGetValue("BookingValidityDate", out var bv) ? bv as DateTime? : null;
+                var validUntil = challanValid.HasValue && bookingValid.HasValue
+                    ? (challanValid.Value > bookingValid.Value ? challanValid : bookingValid)
+                    : challanValid ?? bookingValid;
                 var total = Dec("TotalContractAmount") > 0 ? Dec("TotalContractAmount") : Dec("VoucherAmount");
                 var paid = Dec("TotalPaidAmount");
                 var balance = r["BalanceLeft"] != null ? Math.Max(0, Dec("BalanceLeft")) : Math.Max(0, total - paid);
 
                 string status;
-                if (challanStatus is 3 or 4 || paymentStatus == 5) status = "Cancelled";
-                else if (paymentStatus == 2 || (total > 0 && balance == 0)) status = "Paid";
-                else if (paymentStatus == 3 || paid > 0) status = "Partial";
+                if (challanStatus is 3 or 4 || st.IsCancelled(paymentStatus)) status = "Cancelled";
+                else if (st.IsPaid(paymentStatus) || (total > 0 && balance == 0)) status = "Paid";
+                else if (paid > 0 || (st.PartialId.HasValue && paymentStatus == st.PartialId)) status = "Partial";
                 else if (validUntil.HasValue && validUntil.Value.Date < today) status = "Expired";
                 else status = "Unpaid";
 
