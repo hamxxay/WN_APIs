@@ -188,7 +188,7 @@ BEGIN
         FROM dbo.WN_AccessCards ac
         JOIN dbo.WN_Bookings b ON b.Id = ac.BookingId
         WHERE ac.BookingId = @TargetBookingId
-          AND (b.IsDeleted = 1 OR b.BookingStatusId IN (3, 4));
+          AND (b.IsDeleted = 1 OR b.BookingStatusId IN (3, 4, 6, 86));
     END;
 
     -- Update existing access cards with correct invoice rent period start/end dates and status
@@ -274,7 +274,7 @@ BEGIN
     ) inv
     CROSS JOIN Numbers n
     WHERE b.IsDeleted = 0
-      AND b.BookingStatusId NOT IN (3, 4) -- Exclude Cancelled (3) and Rejected (4)
+      AND b.BookingStatusId NOT IN (3, 4, 6, 86) -- Exclude Cancelled (3) and Rejected (4)
       AND (@TargetBookingId IS NULL OR b.Id = @TargetBookingId)
       AND n.Seq <= (ISNULL(NULLIF(s.Capacity, 0), 1) + 1)
       AND NOT EXISTS (
@@ -1172,7 +1172,7 @@ BEGIN
         ORDER BY i.BillingPeriodEnd DESC, i.Id DESC
     ) latestInv
     WHERE b.IsDeleted = 0
-      AND b.BookingStatusId IN (1, 2)
+      AND b.BookingStatusId IN (1, 2, 5, 33)
       AND latestInv.BillingPeriodEnd IS NOT NULL
       AND latestInv.BillingPeriodEnd < b.EndOn
       AND (
@@ -1245,7 +1245,7 @@ BEGIN
       AND NOT EXISTS (
             SELECT 1 FROM dbo.WN_Bookings bk
             WHERE bk.SpaceId = s.Id
-              AND bk.BookingStatusId IN (1,4)
+              AND bk.BookingStatusId IN (1, 2, 5, 33)
               AND @StartDT < bk.EndOn
               AND @EndDT   > bk.StartOn
           )
@@ -1278,7 +1278,7 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM dbo.WN_Bookings bk
         WHERE bk.SpaceId = @SpaceNumericId
-          AND bk.BookingStatusId IN (1,4)
+          AND bk.BookingStatusId IN (1, 2, 5, 33)
           AND (@ExcludeBookingId IS NULL OR bk.Id != @ExcludeBookingId)
           AND @StartDT < bk.EndOn
           AND @EndDT   > bk.StartOn
@@ -1400,7 +1400,7 @@ BEGIN
       AND NOT EXISTS (
             SELECT 1 FROM dbo.WN_Bookings bk
             WHERE bk.SpaceId = s.Id
-              AND bk.BookingStatusId IN (5, 33)
+              AND bk.BookingStatusId IN (1, 2, 5, 33)
               AND bk.IsDeleted = 0
               AND @StartDT < bk.EndOn
               AND @EndDT   > bk.StartOn
@@ -1547,7 +1547,7 @@ BEGIN
       AND NOT EXISTS (
             SELECT 1 FROM dbo.WN_Bookings bk
             WHERE bk.SpaceId = s.Id
-              AND bk.BookingStatusId IN (5, 33)
+              AND bk.BookingStatusId IN (1, 2, 5, 33)
               AND bk.IsDeleted = 0
               AND @StartDT < bk.EndOn
               AND @EndDT   > bk.StartOn
@@ -2248,7 +2248,7 @@ BEGIN
     END
 
     UPDATE dbo.WN_Bookings SET
-        BookingStatusId = 3,
+        BookingStatusId = 86,
         CancelReason    = @CancelReason,
         UpdatedOn       = SYSUTCDATETIME(),
         UpdatedById     = @UpdatedById
@@ -2276,7 +2276,7 @@ BEGIN
     BEGIN TRY
         -- Update Booking Status to Cancelled (3)
         UPDATE dbo.WN_Bookings
-        SET BookingStatusId = 3, -- Cancelled
+        SET BookingStatusId = 86, -- Cancelled
             CancelReason = @CancelReason,
             UpdatedOn = SYSUTCDATETIME(),
             UpdatedById = @UpdatedById
@@ -2338,7 +2338,7 @@ BEGIN
         SELECT 1 FROM dbo.WN_Bookings
         WHERE SpaceId         = @SpaceId
           AND IsDeleted       = 0
-          AND BookingStatusId IN (5, 33)
+          AND BookingStatusId IN (1, 2, 5, 33)
           AND (@ExcludeBookingId IS NULL OR Id <> @ExcludeBookingId)
           AND @StartOn        < EndOn
           AND @EndOn          > StartOn
@@ -2407,7 +2407,7 @@ BEGIN
           SELECT 1 FROM dbo.WN_Bookings bk
           WHERE bk.SpaceId         = s.Id
             AND bk.IsDeleted       = 0
-            AND bk.BookingStatusId IN (5, 33)
+            AND bk.BookingStatusId IN (1, 2, 5, 33)
             AND @StartOn           < bk.EndOn
             AND @EndOn             > bk.StartOn
             AND (
@@ -2457,7 +2457,7 @@ BEGIN
           SELECT 1 FROM dbo.WN_Bookings bk
           WHERE bk.SpaceId         = s.Id
             AND bk.IsDeleted       = 0
-            AND bk.BookingStatusId IN (1, 2)
+            AND bk.BookingStatusId IN (1, 2, 5, 33)
             AND bk.Id             <> @ExcludeBookingId
             AND @StartOn           < bk.EndOn
             AND @EndOn             > bk.StartOn
@@ -2807,7 +2807,7 @@ BEGIN
           SELECT 1 FROM dbo.WN_Bookings bk
           WHERE bk.SpaceId         = s.Id
             AND bk.IsDeleted       = 0
-            AND bk.BookingStatusId IN (1, 2)
+            AND bk.BookingStatusId IN (1, 2, 5, 33)
             AND @StartOn           < bk.EndOn
             AND @EndOn             > bk.StartOn
       )
@@ -2871,7 +2871,7 @@ BEGIN
             SELECT 1 FROM dbo.WN_Bookings bk WITH (UPDLOCK, HOLDLOCK)
             WHERE bk.SpaceId = @SpaceId
               AND bk.IsDeleted = 0
-              AND bk.BookingStatusId IN (5, 33)
+              AND bk.BookingStatusId IN (1, 2, 5, 33)
               AND @StartOn < bk.EndOn
               AND @EndOn > bk.StartOn
               AND (
@@ -3164,7 +3164,7 @@ BEGIN
             @RentAccountId, @SecurityReceivedId, @SecurityReceivedId, @AccountReceivableId, @ServicesIncomeId, @SalesTaxId,
             @Notes, NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME(),
             @ChallanNum, @ChallanValidUntil, @UserId, @SpaceId, @ResolvedPricingId,
-            @StartOn, @EndOn, 1, NULL, 0, @CreatedById, NULL,
+            @StartOn, @EndOn, 5, NULL, 0, @CreatedById, NULL,
             @DiscountPercentage, @TotalDiscountAmount, ISNULL(@DiscountType, 'Percentage'), @RentAmount, @TotalAmount,
             @MonthlyRent, @BillPeriodMonths, @AdvMonths, @SecMonths, @SecurityDeposit, 0.00,
             @NormalizedShift
@@ -3392,7 +3392,7 @@ BEGIN
             SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK)
             WHERE SpaceId         = @SpaceId
               AND IsDeleted       = 0
-              AND BookingStatusId IN (5, 33)
+              AND BookingStatusId IN (1, 2, 5, 33)
               AND @StartOn        < EndOn
               AND @EndOn          > StartOn
         )
@@ -3537,7 +3537,7 @@ BEGIN
               SELECT 1 FROM dbo.WN_Bookings bk
               WHERE bk.SpaceId         = s.Id
                 AND bk.IsDeleted       = 0
-                AND bk.BookingStatusId IN (5, 33)
+                AND bk.BookingStatusId IN (1, 2, 5, 33)
                 AND @StartOn           < bk.EndOn
                 AND @EndOn             > bk.StartOn
                 AND (
@@ -3641,7 +3641,7 @@ BEGIN
             SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK)
             WHERE SpaceId         = @NewSpaceId
               AND IsDeleted       = 0
-              AND BookingStatusId IN (1, 2)
+              AND BookingStatusId IN (1, 2, 5, 33)
               AND Id             <> @Id
               AND @StartOn        < EndOn
               AND @EndOn          > StartOn
@@ -4176,6 +4176,8 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_CreateAdvanceInvoice]
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- New invoices use dbo.OrderStatus IDs (looked up by description, not hard-coded).
+    DECLARE @UnPaidStatusId TINYINT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id);
     BEGIN TRANSACTION;
     BEGIN TRY
 
@@ -4244,7 +4246,7 @@ BEGIN
             @DiscountTotal          = @CalcDiscount,
             @TaxTotal               = @CalcTax,
             @GrandTotal             = @TotalPayable,
-            @StatusId               = NULL, -- OrderStatus 'Un Paid' (resolved in WN_Invoices_Insert)
+            @StatusId               = @UnPaidStatusId, -- OrderStatus 'Un Paid'
             @Notes                  = @Notes,
             @IssuedOn               = NULL, -- Defaults to today
             @DueOn                  = NULL, -- Defaults to today + 7 days
@@ -4360,7 +4362,7 @@ BEGIN
               AND s.Id NOT IN (
                     SELECT DISTINCT b.SpaceId
                     FROM dbo.WN_Bookings b WITH (NOLOCK)
-                    WHERE b.BookingStatusId IN (1, 4)
+                    WHERE b.BookingStatusId IN (1, 2, 5, 33)
                       AND (
                             (@StartDateTime >= b.StartOn AND @StartDateTime <  b.EndOn) OR
                             (@EndDateTime   >  b.StartOn AND @EndDateTime   <= b.EndOn) OR
@@ -4384,7 +4386,7 @@ BEGIN
         ) VALUES (
             @BookingGuid, GETDATE(), @UserId, @SpaceId,
             @StartDateTime, @EndDateTime, @Notes, @TotalAmount,
-            1, GETDATE(), @UserId
+            5, GETDATE(), @UserId
         );
 
         SET @BookingId       = SCOPE_IDENTITY();
@@ -4511,6 +4513,8 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_CreateSurchargeInvoice]
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- New invoices use dbo.OrderStatus IDs (looked up by description, not hard-coded).
+    DECLARE @UnPaidStatusId TINYINT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id);
     SET XACT_ABORT ON;
 
     BEGIN TRANSACTION;
@@ -4594,7 +4598,7 @@ BEGIN
             @GrandTotal             = @GrandTotal,
             @PaidTotal              = 0.00,
             @CurrencyCode           = 'PKR',
-            @StatusId               = NULL, -- OrderStatus 'Un Paid' (resolved in WN_Invoices_Insert)
+            @StatusId               = @UnPaidStatusId, -- OrderStatus 'Un Paid'
             @Notes                  = @Notes,
             @InvoiceTypeId          = 1, -- Custom/Surcharge
             @SecurityDepositAmount  = 0.00,
@@ -5126,7 +5130,7 @@ BEGIN
     SELECT @OccupiedNow = COUNT(DISTINCT SpaceId)
     FROM dbo.WN_Bookings
     WHERE IsDeleted       = 0
-      AND BookingStatusId IN (1, 2)
+      AND BookingStatusId IN (1, 2, 5, 33)
       AND StartOn         <= SYSUTCDATETIME()
       AND EndOn           >= SYSUTCDATETIME();
 
@@ -5450,7 +5454,7 @@ BEGIN
     INNER JOIN dbo.WN_Locations l WITH(NOLOCK) ON s.LocationId = l.Id
     WHERE s.SpaceTypeId = @STId AND s.Status = 1 AND s.Id NOT IN (
         SELECT DISTINCT b.SpaceId FROM dbo.WN_Bookings b WITH(NOLOCK) 
-        WHERE b.BookingStatusId IN (1,4) 
+        WHERE b.BookingStatusId IN (1, 2, 5, 33) 
           AND ((@StartDateTime >= b.StartOn AND @StartDateTime < b.EndOn) 
             OR (@EndDateTime > b.StartOn AND @EndDateTime <= b.EndOn) 
             OR (@StartDateTime <= b.StartOn AND @EndDateTime >= b.EndOn))
@@ -6363,6 +6367,8 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Invoice_CreateRecurring]
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- New invoices use dbo.OrderStatus IDs (looked up by description, not hard-coded).
+    DECLARE @UnPaidStatusId TINYINT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id);
     SET XACT_ABORT ON;
 
     BEGIN TRANSACTION;
@@ -6384,7 +6390,7 @@ BEGIN
             @BookingGuid = b.IdGUID,
             @RentAccountId = ISNULL(b.RentAccountId, 2852)
         FROM dbo.WN_Bookings b WITH (NOLOCK)
-        WHERE b.Id = @BookingId AND b.BookingStatusId = 5; -- Active
+        WHERE b.Id = @BookingId AND b.BookingStatusId IN (1, 2, 5, 33); -- Active
 
         IF @UserId IS NULL
         BEGIN
@@ -6471,7 +6477,7 @@ BEGIN
             @GrandTotal             = @GrandTotal,
             @PaidTotal              = 0.00,
             @CurrencyCode           = 'PKR',
-            @StatusId               = NULL, -- OrderStatus 'Un Paid' (resolved in WN_Invoices_Insert)
+            @StatusId               = @UnPaidStatusId, -- OrderStatus 'Un Paid'
             @Notes                  = @InvoiceNotes,
             @InvoiceTypeId          = 2, -- Recurring/Advance
             @AdvanceRentMonths      = @BillingPeriodMonths,
@@ -9431,7 +9437,7 @@ BEGIN
         b.CreatedById, ISNULL(b.RentAccountId, 2852)
     FROM dbo.WN_Bookings b WITH (NOLOCK)
     WHERE b.IsDeleted = 0
-      AND b.BookingStatusId IN (1, 5, 33)
+      AND b.BookingStatusId IN (1, 2, 5, 33)
       AND b.StartOn <= @RunDate
       AND b.EndOn >= @RunDate;
 
@@ -9807,7 +9813,7 @@ BEGIN
         SELECT 1 FROM dbo.WN_Bookings b
         WHERE b.SpaceId = ts.Id 
           AND b.IsDeleted = 0 
-          AND b.BookingStatusId IN (1, 2) 
+          AND b.BookingStatusId IN (1, 2, 5, 33) 
           AND b.EndOn > SYSUTCDATETIME()
     );
 
@@ -10072,7 +10078,7 @@ BEGIN
             SELECT 1 FROM dbo.WN_Bookings b
             WHERE b.SpaceId = s.Id
               AND (b.IsDeleted = 0 OR b.IsDeleted IS NULL)
-              AND b.BookingStatusId IN (1, 2)
+              AND b.BookingStatusId IN (1, 2, 5, 33)
               AND b.StartOn <= SYSUTCDATETIME()
               AND b.EndOn >= SYSUTCDATETIME()
         ) THEN 1 ELSE 0 END AS HasBookings
@@ -10344,7 +10350,7 @@ BEGIN
         SELECT 1 FROM dbo.WN_Bookings
         WHERE SpaceId = @Id 
           AND IsDeleted = 0 
-          AND BookingStatusId IN (1, 2)
+          AND BookingStatusId IN (1, 2, 5, 33)
           AND EndOn > SYSUTCDATETIME()
     )
     BEGIN
@@ -10470,7 +10476,7 @@ BEGIN
             CASE WHEN EXISTS (
                 SELECT 1 FROM dbo.WN_Bookings bk
                 WHERE bk.SpaceId = s.Id AND bk.IsDeleted = 0
-                  AND bk.BookingStatusId IN (5, 33)
+                  AND bk.BookingStatusId IN (1, 2, 5, 33)
                   AND SYSUTCDATETIME() < bk.EndOn
                   AND SYSUTCDATETIME() >= bk.StartOn
                   AND (
@@ -10541,7 +10547,7 @@ BEGIN
       AND NOT EXISTS (
           SELECT 1 FROM dbo.WN_Bookings bk
           WHERE bk.SpaceId = s.Id AND bk.IsDeleted = 0
-            AND bk.BookingStatusId IN (5, 33)
+            AND bk.BookingStatusId IN (1, 2, 5, 33)
             AND SYSUTCDATETIME() < bk.EndOn
             AND SYSUTCDATETIME() >= bk.StartOn
             AND (
@@ -10605,7 +10611,7 @@ BEGIN
       AND NOT EXISTS (
           SELECT 1 FROM dbo.WN_Bookings bk
           WHERE bk.SpaceId = s.Id AND bk.IsDeleted = 0
-            AND bk.BookingStatusId IN (5, 33)
+            AND bk.BookingStatusId IN (1, 2, 5, 33)
             AND (@ExcludeBookingId IS NULL OR bk.Id <> @ExcludeBookingId)
             AND @StartOn < bk.EndOn AND @EndOn > bk.StartOn
             AND (
@@ -10722,7 +10728,7 @@ BEGIN
             WHEN EXISTS (
                 SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
                 WHERE b.SpaceId = s.Id
-                  AND b.BookingStatusId IN (1, 2)
+                  AND b.BookingStatusId IN (1, 2, 5, 33)
                   AND b.EndOn >= SYSUTCDATETIME()
                   AND (b.IsDeleted IS NULL OR b.IsDeleted = 0)
             ) THEN 'Booked'
@@ -10732,7 +10738,7 @@ BEGIN
             SELECT MAX(b.EndOn)
             FROM dbo.WN_Bookings b WITH (NOLOCK)
             WHERE b.SpaceId = s.Id
-              AND b.BookingStatusId IN (1, 2)
+              AND b.BookingStatusId IN (1, 2, 5, 33)
               AND b.EndOn >= SYSUTCDATETIME()
               AND (b.IsDeleted IS NULL OR b.IsDeleted = 0)
         ) AS BookedTill,
@@ -10779,7 +10785,7 @@ BEGIN
       AND NOT EXISTS (
           SELECT 1 FROM dbo.WN_Bookings b 
           WHERE b.SpaceId = s.Id 
-            AND b.BookingStatusId = 1 
+            AND b.BookingStatusId IN (1, 2, 5, 33) 
             AND b.StartOn <= GETDATE() 
             AND b.EndOn >= GETDATE()
       )
@@ -11505,7 +11511,7 @@ BEGIN
     SET NOCOUNT ON;
     SET @Today = ISNULL(@Today, CAST(GETDATE() AS DATE));
     -- Status IDs from dbo.OrderStatus (old invoices keep legacy 1/2/4, so both are accepted)
-    DECLARE @UnPaid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), @Overdue INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id),
+    DECLARE @UnPaid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), @ChallanExpire INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id),
             @Paid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), @Partial INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id);
     -- Bookings with something overdue right now
     DECLARE @Overdue TABLE (BookingId INT PRIMARY KEY, InvoiceId INT NULL, Reason NVARCHAR(200));
@@ -11514,7 +11520,7 @@ BEGIN
     SELECT i.BookingId, MIN(i.Id),
            CONCAT('Challan ', MIN(i.InvoiceNumber), ' overdue (due ', CONVERT(VARCHAR(10), MIN(i.DueOn), 23), ')')
       FROM SAC400.dbo.WN_Invoices i WITH (NOLOCK)
-     WHERE i.StatusId IN (1, 4, @UnPaid, @Overdue) AND i.BookingId IS NOT NULL
+     WHERE i.StatusId IN (1, 4, @UnPaid, @ChallanExpire) AND i.BookingId IS NOT NULL
        AND i.DueOn IS NOT NULL AND i.DueOn < @Today
      GROUP BY i.BookingId;
     -- b) Booking challans past their expiry with nothing paid. Expiry = later of WN_Challans.ValidUntil

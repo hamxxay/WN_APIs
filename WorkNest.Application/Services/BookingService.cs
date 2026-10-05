@@ -2,6 +2,7 @@ using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
+using WorkNest.Domain.Enums;
 
 namespace WorkNest.Application.Services
 {
@@ -10,7 +11,22 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IEmailService _email;
         private readonly IPdfService _pdf;
-        public BookingService(IDbRepository db, IEmailService email, IPdfService pdf) { _db = db; _email = email; _pdf = pdf; }
+        private readonly IOrderStatusService _orderStatus;
+        public BookingService(IDbRepository db, IEmailService email, IPdfService pdf, IOrderStatusService orderStatus) { _db = db; _email = email; _pdf = pdf; _orderStatus = orderStatus; }
+
+        // Booking statuses (WN_BookingStatuses): 5 Pending, 33 Confirmed. 1 is an older "pending" value still
+        // written on new bookings (it has no WN_BookingStatuses row), so it counts as pending too.
+        private static readonly int[] PendingBookingStatusIds = { 1, (int)BookingStatus.Pending };
+
+        public async Task<List<int>> ConfirmPaidBookingsAsync()
+        {
+            var st = await _orderStatus.GetInvoiceStatusesAsync(); // Paid = legacy 2 + OrderStatus 'Paid'
+            var voids = st.Cancelled.Append(5); // legacy void + OrderStatus 'Cancelled'
+            var ids = await _db.GetPendingBookingsWithPaidFirstInvoiceDbAsync(PendingBookingStatusIds, st.Paid, voids);
+            foreach (var id in ids)
+                await _db.UpdateBookingStatusAsync(id, (byte)BookingStatus.Confirmed, null);
+            return ids;
+        }
 
         public async Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null)
         {

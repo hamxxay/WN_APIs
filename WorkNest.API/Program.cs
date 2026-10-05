@@ -201,6 +201,7 @@ try
     builder.Services.AddHostedService<AccessCardRestrictionService>();
     builder.Services.AddHostedService<AnnouncementDeliveryService>();
     builder.Services.AddHostedService<ChallanAccessSuspensionService>();
+    builder.Services.AddHostedService<BookingAutoConfirmService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
