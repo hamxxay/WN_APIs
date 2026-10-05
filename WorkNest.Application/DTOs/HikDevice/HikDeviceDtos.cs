@@ -54,6 +54,29 @@ namespace WorkNest.Application.DTOs.HikDevice
 
         [JsonPropertyName("cnics")]
         public Dictionary<string, string> Cnics { get; set; } = new();
+
+        /// <summary>employeeNo → active booked rooms (attendants enrolled from Attendants &amp; Access).</summary>
+        [JsonPropertyName("bookings")]
+        public Dictionary<string, List<HikBookedRoomDto>> Bookings { get; set; } = new();
+
+        /// <summary>employeeNo → job tag (staff: Janitor, Office Boy, …).</summary>
+        [JsonPropertyName("tags")]
+        public Dictionary<string, string> Tags { get; set; } = new();
+    }
+
+    public class HikBookedRoomDto
+    {
+        [JsonPropertyName("space")]
+        public string Space { get; set; } = string.Empty;
+
+        [JsonPropertyName("space_code")]
+        public string? SpaceCode { get; set; }
+
+        [JsonPropertyName("customer")]
+        public string? Customer { get; set; }
+
+        [JsonPropertyName("booking_end")]
+        public string? BookingEnd { get; set; }
     }
 
     public class HikDeviceUsersResponseDto

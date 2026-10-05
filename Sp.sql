@@ -1168,7 +1168,7 @@ BEGIN
             i.BillingPeriodEnd
         FROM dbo.WN_Invoices i WITH (NOLOCK)
         WHERE i.BookingId = b.Id
-          AND i.StatusId != 5
+          AND i.StatusId NOT IN (5, ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5)) -- void: old 5 / OrderStatus 'Cancelled'
         ORDER BY i.BillingPeriodEnd DESC, i.Id DESC
     ) latestInv
     WHERE b.IsDeleted = 0
@@ -1185,10 +1185,9 @@ BEGIN
           FROM dbo.WN_Invoices nextInv WITH (NOLOCK)
           WHERE nextInv.BookingId = b.Id
             AND nextInv.BillingPeriodStart > latestInv.BillingPeriodEnd
-            AND nextInv.StatusId != 5
+            AND nextInv.StatusId NOT IN (5, ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5))
       );
 END;
-
 GO
 /****** Object:  StoredProcedure [dbo].[WN_BillingPeriods_GetList]    Script Date: 30/09/2026 1:23:18 pm ******/
 SET ANSI_NULLS ON
@@ -4245,7 +4244,7 @@ BEGIN
             @DiscountTotal          = @CalcDiscount,
             @TaxTotal               = @CalcTax,
             @GrandTotal             = @TotalPayable,
-            @StatusId               = 1, -- 1: Pending
+            @StatusId               = NULL, -- OrderStatus 'Un Paid' (resolved in WN_Invoices_Insert)
             @Notes                  = @Notes,
             @IssuedOn               = NULL, -- Defaults to today
             @DueOn                  = NULL, -- Defaults to today + 7 days
@@ -4595,7 +4594,7 @@ BEGIN
             @GrandTotal             = @GrandTotal,
             @PaidTotal              = 0.00,
             @CurrencyCode           = 'PKR',
-            @StatusId               = 1, -- Unpaid
+            @StatusId               = NULL, -- OrderStatus 'Un Paid' (resolved in WN_Invoices_Insert)
             @Notes                  = @Notes,
             @InvoiceTypeId          = 1, -- Custom/Surcharge
             @SecurityDepositAmount  = 0.00,
@@ -5696,13 +5695,13 @@ BEGIN
         s.Code AS SpaceCode,
         ISNULL(b.MonthlyRent, 0) AS MonthlyRent,
         ISNULL(b.BillingPeriodMonths, 1) AS BillingPeriodMonths,
-        CASE i.StatusId 
-            WHEN 1 THEN 'Unpaid' 
-            WHEN 2 THEN 'Paid' 
-            WHEN 3 THEN 'Partial' 
-            WHEN 4 THEN 'Overdue' 
-            ELSE 'Unknown' 
-        END AS StatusLabel
+        COALESCE(
+            -- existing invoices keep their old values
+            CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
+            -- new invoices: label from dbo.OrderStatus
+            (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
+               FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
+            'Unknown') AS StatusLabel
     FROM dbo.WN_Invoices i WITH (NOLOCK)
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = i.UserId
@@ -6341,7 +6340,7 @@ BEGIN
         WHERE BookingId = @BookingId
           AND BillingPeriodStart = @BillingPeriodStart
           AND BillingPeriodEnd = @BillingPeriodEnd
-          AND StatusId != 3
+          AND StatusId NOT IN (5, ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5)) -- was != 3 (Partial) by mistake; void = old 5 / 'Cancelled'
     )
         SELECT 1 AS AlreadyExists;
     ELSE
@@ -6472,7 +6471,7 @@ BEGIN
             @GrandTotal             = @GrandTotal,
             @PaidTotal              = 0.00,
             @CurrencyCode           = 'PKR',
-            @StatusId               = 1, -- Unpaid
+            @StatusId               = NULL, -- OrderStatus 'Un Paid' (resolved in WN_Invoices_Insert)
             @Notes                  = @InvoiceNotes,
             @InvoiceTypeId          = 2, -- Recurring/Advance
             @AdvanceRentMonths      = @BillingPeriodMonths,
@@ -6631,7 +6630,7 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Invoices_Insert]
     @GrandTotal             DECIMAL(18, 4)      = NULL,
     @PaidTotal              DECIMAL(18, 4)      = 0.0000,
     @CurrencyCode           NVARCHAR(10)        = 'PKR',
-    @StatusId               TINYINT             = 1, -- 1: Pending / Unpaid
+    @StatusId               TINYINT             = NULL, -- NULL = OrderStatus 'Un Paid' (looked up below)
     @Notes                  NVARCHAR(MAX)       = NULL,
     @InvoiceTypeId          INT                 = 1, -- 1: Standard, 2: Advance, 3: Recurring, 4: Custom, 5: Surcharge
     @AdvanceRentMonths      INT                 = NULL,
@@ -6669,6 +6668,8 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Invoices_Insert]
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- New invoices use dbo.OrderStatus IDs (looked up by description, not hard-coded).
+    IF @StatusId IS NULL SET @StatusId = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id);
 
     -- 1. Default PublicId
     IF @PublicId IS NULL
@@ -9342,7 +9343,7 @@ BEGIN
     END;
 
     DECLARE @NewPaidTotal DECIMAL(18,4) = @CurrentPaid + @PaidAmount;
-    DECLARE @NewStatusId TINYINT = 61; -- 1 = Unpaid 
+    DECLARE @NewStatusId TINYINT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id); -- OrderStatus 'Un Paid' 
     DECLARE @MonthsCovered INT = 0;
 
     IF @MonthlyRent > 0
@@ -9350,7 +9351,7 @@ BEGIN
 
     IF @NewPaidTotal >= @GrandTotal
     BEGIN
-        SET @NewStatusId = 2; -- 2 = Paid
+        SET @NewStatusId = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id); -- OrderStatus 'Paid'
         IF @BookingId IS NOT NULL AND @BookingId > 0
         BEGIN
             UPDATE dbo.WN_AccessCards
@@ -9362,7 +9363,7 @@ BEGIN
     END
     ELSE IF @NewPaidTotal > 0
     BEGIN
-        SET @NewStatusId = 3; -- 3 = Partial
+        SET @NewStatusId = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id); -- OrderStatus 'Partial'
         IF @MonthsCovered >= 1 AND @BookingId IS NOT NULL AND @BookingId > 0
         BEGIN
             DECLARE @AccessValidUntil DATETIME2 = DATEADD(month, @MonthsCovered, ISNULL(@BillingPeriodStart, SYSUTCDATETIME()));
@@ -11490,4 +11491,139 @@ BEGIN
     WHERE Id = @Id;
     SELECT @@ROWCOUNT AS AffectedRows;
 END;
+GO
+
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Run]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_Run
+    @Today DATE = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @Today = ISNULL(@Today, CAST(GETDATE() AS DATE));
+    -- Status IDs from dbo.OrderStatus (old invoices keep legacy 1/2/4, so both are accepted)
+    DECLARE @UnPaid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), @Overdue INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id),
+            @Paid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), @Partial INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id);
+    -- Bookings with something overdue right now
+    DECLARE @Overdue TABLE (BookingId INT PRIMARY KEY, InvoiceId INT NULL, Reason NVARCHAR(200));
+    -- a) Unpaid / Overdue invoices past their due date
+    INSERT INTO @Overdue (BookingId, InvoiceId, Reason)
+    SELECT i.BookingId, MIN(i.Id),
+           CONCAT('Challan ', MIN(i.InvoiceNumber), ' overdue (due ', CONVERT(VARCHAR(10), MIN(i.DueOn), 23), ')')
+      FROM SAC400.dbo.WN_Invoices i WITH (NOLOCK)
+     WHERE i.StatusId IN (1, 4, @UnPaid, @Overdue) AND i.BookingId IS NOT NULL
+       AND i.DueOn IS NOT NULL AND i.DueOn < @Today
+     GROUP BY i.BookingId;
+    -- b) Booking challans past their expiry with nothing paid. Expiry = later of WN_Challans.ValidUntil
+    --    and WN_Bookings.ValidityDate (extended on the Challan Validity page).
+    INSERT INTO @Overdue (BookingId, InvoiceId, Reason)
+    SELECT c.BookingId, NULL,
+           CONCAT('Booking challan ', MIN(c.ChallanNumber), ' expired (valid until ', CONVERT(VARCHAR(10), MAX(x.Expiry), 23), ')')
+      FROM SAC400.dbo.WN_Challans c WITH (NOLOCK)
+      LEFT JOIN SAC400.dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = c.BookingId
+      LEFT JOIN SAC400.dbo.WN_vw_BookingSummary v WITH (NOLOCK) ON v.BookingId = c.BookingId
+      CROSS APPLY (SELECT CAST(CASE WHEN b.ValidityDate > c.ValidUntil OR c.ValidUntil IS NULL THEN b.ValidityDate ELSE c.ValidUntil END AS DATE) AS Expiry) x
+     WHERE c.BookingId IS NOT NULL
+       AND ISNULL(c.StatusId, 1) NOT IN (3, 4)
+       AND x.Expiry IS NOT NULL AND x.Expiry < @Today
+       AND ISNULL(v.TotalPaidAmount, 0) = 0
+       AND NOT EXISTS (SELECT 1 FROM SAC400.dbo.WN_Payments p WITH (NOLOCK)
+                        WHERE (p.TransactionRef = c.ChallanNumber OR p.BookingIdInt = c.BookingId)
+                          AND p.StatusId IN (2, @Paid, @Partial))
+       AND NOT EXISTS (SELECT 1 FROM @Overdue o WHERE o.BookingId = c.BookingId)
+     GROUP BY c.BookingId;
+    -- 1) Open a suspension for overdue bookings with none open yet
+    INSERT INTO SAC400.dbo.WN_HIK_BookingAccessSuspensions (BookingId, InvoiceId, Reason)
+    SELECT o.BookingId, o.InvoiceId, o.Reason
+      FROM @Overdue o
+     WHERE NOT EXISTS (SELECT 1 FROM SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+                        WHERE s.BookingId = o.BookingId AND s.ResolvedAt IS NULL);
+    -- 2) Close suspensions once nothing is overdue for the booking (paid / partial / voided / cancelled)
+    UPDATE s
+       SET ResolvedAt = SYSDATETIME(), ResolvedReason = 'Challan paid'
+      FROM SAC400.dbo.WN_HIK_BookingAccessSuspensions s
+     WHERE s.ResolvedAt IS NULL
+       AND NOT EXISTS (SELECT 1 FROM @Overdue o WHERE o.BookingId = s.BookingId);
+    -- 3) Bookings whose machine state must change (block / unblock)
+    SELECT x.Id AS SuspensionId, x.BookingId, x.ShouldBlock
+      FROM (SELECT s.Id, s.BookingId, s.MachinesBlocked,
+                   CAST(CASE WHEN s.ResolvedAt IS NULL AND (s.OverrideUntil IS NULL OR s.OverrideUntil < @Today)
+                             THEN 1 ELSE 0 END AS BIT) AS ShouldBlock
+              FROM SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+             WHERE s.ResolvedAt IS NULL OR s.MachinesBlocked = 1) x
+     WHERE x.ShouldBlock <> x.MachinesBlocked;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_SetApplied]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_SetApplied
+    @SuspensionId INT,
+    @MachinesBlocked BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE SAC400.dbo.WN_HIK_BookingAccessSuspensions SET MachinesBlocked = @MachinesBlocked WHERE Id = @SuspensionId;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_GetByBookingDetail]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_GetByBookingDetail
+    @BookingDetailId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 s.Id AS SuspensionId, s.BookingId, s.SuspendedAt, s.Reason, s.OverrideUntil, s.MachinesBlocked,
+           i.InvoiceNumber, i.DueOn, i.GrandTotal, ISNULL(i.GrandTotal - i.PaidTotal, 0) AS BalanceDue,
+           (SELECT TOP 1 o.CreatedByEmail FROM SAC400.dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
+             WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) AS OverrideByEmail,
+           (SELECT TOP 1 o.Reason FROM SAC400.dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
+             WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) AS OverrideReason
+      FROM SAC400.dbo.WN_BookingDetails bd WITH (NOLOCK)
+      JOIN SAC400.dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+      JOIN SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK) ON s.BookingId = b.Id AND s.ResolvedAt IS NULL
+      LEFT JOIN SAC400.dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = s.InvoiceId
+     WHERE bd.Id = @BookingDetailId
+     ORDER BY s.Id DESC;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Extend]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_Extend
+    @BookingDetailId INT,
+    @OverrideUntil   DATE,
+    @Reason          NVARCHAR(500),
+    @CreatedById     INT = NULL,
+    @CreatedByEmail  NVARCHAR(200) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @SuspensionId INT, @BookingId INT;
+    SELECT TOP 1 @SuspensionId = s.Id, @BookingId = s.BookingId
+      FROM SAC400.dbo.WN_BookingDetails bd WITH (NOLOCK)
+      JOIN SAC400.dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+      JOIN SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK) ON s.BookingId = b.Id AND s.ResolvedAt IS NULL
+     WHERE bd.Id = @BookingDetailId
+     ORDER BY s.Id DESC;
+    IF @SuspensionId IS NULL
+    BEGIN
+        SELECT CAST(NULL AS INT) AS SuspensionId, CAST(NULL AS INT) AS BookingId;  -- nothing suspended
+        RETURN;
+    END
+    UPDATE SAC400.dbo.WN_HIK_BookingAccessSuspensions SET OverrideUntil = @OverrideUntil WHERE Id = @SuspensionId;
+    INSERT INTO SAC400.dbo.WN_HIK_BookingAccessOverrides (SuspensionId, BookingId, OverrideUntil, Reason, CreatedById, CreatedByEmail)
+    VALUES (@SuspensionId, @BookingId, @OverrideUntil, @Reason, @CreatedById, @CreatedByEmail);
+    SELECT @SuspensionId AS SuspensionId, @BookingId AS BookingId;
+END
 GO

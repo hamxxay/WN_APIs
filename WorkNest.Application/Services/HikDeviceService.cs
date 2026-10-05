@@ -18,7 +18,7 @@ namespace WorkNest.Application.Services
             return await _db.GetHikDevicesAsync(location);
         }
 
-        public async Task<HikRosterResponseDto> GetRostersAsync(string? location = null)
+        public async Task<HikRosterResponseDto> GetRostersAsync(string? location = null, bool includeMachineAdmins = true)
         {
             var snapshots = await _db.GetHikDeviceSnapshotsAsync(location);
             var rosters = new List<HikDeviceRosterItemDto>();
@@ -39,6 +39,7 @@ namespace WorkNest.Application.Services
                 try
                 {
                     var usersNode = JsonNode.Parse(rosterJson);
+                    if (!includeMachineAdmins) usersNode = WithoutMachineAdmins(usersNode);
                     rosters.Add(new HikDeviceRosterItemDto
                     {
                         DeviceId = deviceId,
@@ -57,17 +58,32 @@ namespace WorkNest.Application.Services
                 }
             }
 
-            var cnics = await _db.GetHikCnicMapAsync();
+            var cnicsTask = _db.GetHikCnicMapAsync();
+            var bookedTask = _db.GetHikBookedRoomsDbAsync();
+            var tagsTask = _db.GetHikStaffTagMapDbAsync();
+            await Task.WhenAll(cnicsTask, bookedTask, tagsTask);
+
+            var bookings = bookedTask.Result
+                .GroupBy(r => Convert.ToString(r["employee_no"]) ?? "")
+                .ToDictionary(g => g.Key, g => g.Select(r => new HikBookedRoomDto
+                {
+                    Space = Convert.ToString(r["space"]) ?? "",
+                    SpaceCode = Convert.ToString(r["space_code"]),
+                    Customer = Convert.ToString(r["customer"]),
+                    BookingEnd = r["booking_end"] is DateTime e ? e.ToString("yyyy-MM-ddTHH:mm:ss") : null
+                }).ToList());
 
             return new HikRosterResponseDto
             {
                 Ok = true,
                 Rosters = rosters,
-                Cnics = cnics
+                Cnics = cnicsTask.Result,
+                Bookings = bookings,
+                Tags = tagsTask.Result
             };
         }
 
-        public async Task<HikDeviceUsersResponseDto> GetDeviceUsersAsync(int deviceId)
+        public async Task<HikDeviceUsersResponseDto> GetDeviceUsersAsync(int deviceId, bool includeMachineAdmins = true)
         {
             var rosterJson = await _db.GetHikDeviceSnapshotByIdAsync(deviceId);
             if (string.IsNullOrWhiteSpace(rosterJson))
@@ -82,6 +98,7 @@ namespace WorkNest.Application.Services
             try
             {
                 var usersNode = JsonNode.Parse(rosterJson);
+                if (!includeMachineAdmins) usersNode = WithoutMachineAdmins(usersNode);
                 var total = usersNode is JsonArray arr ? arr.Count : 0;
 
                 return new HikDeviceUsersResponseDto
@@ -109,6 +126,26 @@ namespace WorkNest.Application.Services
                 Ok = true,
                 Next = next
             };
+        }
+    
+        /// <summary>Drops machine-admin users (UserInfo.localUIRight / userType "admin") from a roster array.</summary>
+        public static JsonNode? WithoutMachineAdmins(JsonNode? users)
+        {
+            if (users is not JsonArray arr) return users;
+            var kept = new JsonArray();
+            foreach (var u in arr)
+            {
+                if (u == null || IsMachineAdmin(u)) continue;
+                kept.Add(u.DeepClone());
+            }
+            return kept;
+        }
+
+        public static bool IsMachineAdmin(JsonNode u)
+        {
+            var right = u["localUIRight"]?.ToString();
+            return string.Equals(right, "true", StringComparison.OrdinalIgnoreCase) || right == "1"
+                   || string.Equals(u["userType"]?.ToString(), "admin", StringComparison.OrdinalIgnoreCase);
         }
     }
 }

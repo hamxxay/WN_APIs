@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.HikDevice;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
@@ -36,7 +37,8 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/roster")]
         public async Task<IActionResult> GetRosters([FromQuery] string? location = null)
         {
-            var result = await _deviceService.GetRostersAsync(location);
+            // Machine-admin users are only visible to admin / super admin.
+            var result = await _deviceService.GetRostersAsync(location, User.IsAdminOrSuperAdmin());
             return Ok(result);
         }
 
@@ -47,7 +49,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/devices/{id:int}/users")]
         public async Task<IActionResult> GetDeviceUsers(int id)
         {
-            var result = await _deviceService.GetDeviceUsersAsync(id);
+            var result = await _deviceService.GetDeviceUsersAsync(id, User.IsAdminOrSuperAdmin());
             return Ok(result);
         }
 

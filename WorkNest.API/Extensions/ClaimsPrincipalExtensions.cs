@@ -48,6 +48,16 @@ namespace WorkNest.API.Extensions
             return Roles.IsSuperAdmin(user.GetRole());
         }
 
+        /// <summary>
+        /// Admin / super admin — the only roles that may see machine-admin users on the access machines.
+        /// Same role names as the [Authorize] attributes.
+        /// </summary>
+        public static bool IsAdminOrSuperAdmin(this ClaimsPrincipal user)
+        {
+            return user.IsInRole("admin") || user.IsInRole("Admin") || user.IsInRole("super_admin") || user.IsInRole("SuperAdmin")
+                   || user.IsSuperAdmin() || user.GetRole() == "admin";
+        }
+
         public static bool IsLocationBoundRole(this ClaimsPrincipal user)
         {
             return Roles.IsLocationBoundRole(user.GetRole());

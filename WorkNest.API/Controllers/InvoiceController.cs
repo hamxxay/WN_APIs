@@ -1558,7 +1558,10 @@ END;";
                     : 0m;
 
                 decimal arrears = 0m;
-                string arrearsSql = "SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM dbo.WN_Invoices WHERE UserId = @UserId AND StatusId NOT IN (62, 2);";
+                // Arrears = invoices not Paid and not Cancelled/void (legacy 2 / 5 or the OrderStatus "Paid" / "Cancelled" IDs).
+                string arrearsSql = @"SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM dbo.WN_Invoices WITH (NOLOCK)
+                                      WHERE UserId = @UserId AND StatusId NOT IN (2, 5)
+                                        AND StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled'));";
                 using (var arrCmd = new SqlCommand(arrearsSql, conn))
                 {
                     arrCmd.Parameters.AddWithValue("@UserId", userId);

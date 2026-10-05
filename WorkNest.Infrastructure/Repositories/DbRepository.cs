@@ -2563,10 +2563,13 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     ISNULL(acc.IsEnabled, 1) AS IsEnabled,
                     ba.IsOverCapacity,
                     ba.ExcessSeatCount,
-                    ba.SurchargeApplied
+                    ba.SurchargeApplied,
+                    hpm.MachineID AS MachineId,
+                    (SELECT COUNT(1) FROM dbo.WN_HIK_PendingOps po WITH (NOLOCK) WHERE po.employee_no = hpm.MachineID) AS HikPendingOps
                 FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
                 JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ba.PersonId
                 LEFT JOIN dbo.WN_AccessStatus acc WITH (NOLOCK) ON acc.BookingDetailId = ba.BookingDetailId AND acc.PersonId = ba.PersonId
+                LEFT JOIN dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId = ba.PersonId
                 WHERE ba.BookingDetailId = @BookingDetailId AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))
                 ORDER BY p.Name ASC;";
             await using var cmd = new SqlCommand(sql, c);
@@ -2806,15 +2809,13 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     i.InvoiceTypeId,
                     i.Notes,
                     i.CreatedOn,
-                    CASE i.StatusId 
-                        WHEN 61 THEN 'Unpaid' 
-                        WHEN 62 THEN 'Paid' 
-                        WHEN 1 THEN 'Unpaid' 
-                        WHEN 2 THEN 'Paid' 
-                        WHEN 3 THEN 'Partial' 
-                        WHEN 4 THEN 'Overdue' 
-                        ELSE 'Unknown' 
-                    END AS StatusLabel
+                    COALESCE(
+                        -- legacy values on older rows
+                        CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
+                        -- OrderStatus IDs (looked up, not hard-coded)
+                        (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
+                           FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
+                        'Unknown') AS StatusLabel
                 FROM dbo.WN_Invoices i WITH (NOLOCK)
                 LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                 {whereClause}
@@ -3540,6 +3541,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                             d.Id AS id, 
                             d.Device_Name AS name, 
                             g.Name AS grp, 
+                            d.Code AS code, 
                             d.Location AS location, 
                             d.Online AS online, 
                             d.Last_seen AS last_seen
@@ -3566,7 +3568,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     Id = r.GetInt32(r.GetOrdinal("id")),
                     Name = r.GetString(r.GetOrdinal("name")),
                     Grp = r.IsDBNull(r.GetOrdinal("grp")) ? null : r.GetString(r.GetOrdinal("grp")),
-                    Code = null,
+                    Code = r.IsDBNull(r.GetOrdinal("code")) ? null : r.GetString(r.GetOrdinal("code")),
                     Location = r.IsDBNull(r.GetOrdinal("location")) ? null : r.GetString(r.GetOrdinal("location")),
                     Online = !r.IsDBNull(r.GetOrdinal("online")) && r.GetBoolean(r.GetOrdinal("online")) ? 1 : 0,
                     LastSeen = r.IsDBNull(r.GetOrdinal("last_seen")) ? null : r.GetDateTime(r.GetOrdinal("last_seen")).ToString("yyyy-MM-ddTHH:mm:ss")
@@ -3577,6 +3579,24 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
         public async Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null)
         {
+            // Prefer the machines' real user lists, cached by the HIK sync engine (UserInfo incl. numOfFP/numOfFace).
+            await using (var cacheConn = await Open())
+            {
+                var cacheSql = @"SELECT d.Id, dc.Users_snapshot
+                                 FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
+                                 LEFT JOIN dbo.WN_HIK_DevCache dc WITH (NOLOCK) ON dc.Device_id = d.Id"
+                               + (string.IsNullOrWhiteSpace(location) ? "" : " WHERE d.Location = @Location")
+                               + " ORDER BY d.Id";
+                await using var cacheCmd = new SqlCommand(cacheSql, cacheConn);
+                if (!string.IsNullOrWhiteSpace(location)) cacheCmd.Parameters.AddWithValue("@Location", location);
+                var cached = new List<(int, string?)>();
+                await using (var cr = await cacheCmd.ExecuteReaderAsync())
+                {
+                    while (await cr.ReadAsync()) cached.Add((cr.GetInt32(0), cr.IsDBNull(1) ? null : cr.GetString(1)));
+                }
+                if (cached.Any(x => !string.IsNullOrWhiteSpace(x.Item2))) return cached;
+            }
+
             await using var conn = await Open();
             var sql = @"SELECT 
                             d.Id AS device_id,
@@ -3646,17 +3666,55 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await using var conn = await Open();
             var cnics = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             await using var cmd = new SqlCommand(
-                @"SELECT employee_no, name 
-                  FROM dbo.WN_HIK_Employees WITH (NOLOCK)
-                  WHERE employee_no IS NOT NULL", conn);
+                @"SELECT employee_no, name, cnic
+                  FROM dbo.WN_HIK_Users WITH (NOLOCK)
+                  WHERE employee_no IS NOT NULL AND cnic IS NOT NULL AND cnic <> ''", conn);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
                 var empNo = r.GetString(0);
                 var name = r.IsDBNull(1) ? "" : r.GetString(1).Trim().ToLowerInvariant();
-                cnics[$"{empNo}||{name}"] = "";
+                cnics[$"{empNo}||{name}"] = r.GetString(2);
             }
             return cnics;
+        }
+
+        /// <summary>
+        /// Active booked rooms per machine employee # — attendants enrolled from Attendants &amp; Access
+        /// (WN_HIK_PersonMap → WN_BookingAttendants → WN_BookingDetails → WN_Customers).
+        /// </summary>
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikBookedRoomsDbAsync()
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT DISTINCT
+                    hpm.MachineID AS employee_no,
+                    ISNULL(bd.SpaceName, N'') AS space,
+                    bd.SpaceCode AS space_code,
+                    bd.EndDateTime AS booking_end,
+                    COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, bd.CustomerEmail) AS customer
+                FROM dbo.WN_HIK_PersonMap hpm WITH (NOLOCK)
+                JOIN dbo.WN_BookingAttendants ba WITH (NOLOCK) ON ba.PersonId = hpm.PersonId
+                JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId AND bd.IsDeleted = 0
+                OUTER APPLY (SELECT TOP 1 Company, FirstName, LastName, Email FROM dbo.WN_Customers WITH (NOLOCK)
+                             WHERE Code = bd.CustomerCode OR Email = bd.CustomerEmail) cu
+                WHERE ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE);";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<Dictionary<string, string>> GetHikStaffTagMapDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(
+                @"SELECT u.employee_no, t.Name
+                  FROM dbo.WN_HIK_Users u WITH (NOLOCK)
+                  JOIN dbo.WN_HIK_Tags t WITH (NOLOCK) ON t.Id = u.tag_id", c);
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) map[r.GetString(0)] = r.GetString(1);
+            return map;
         }
 
         public async Task<string?> GetHikDeviceSnapshotByIdAsync(int deviceId)
@@ -3676,6 +3734,801 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             var max = await cmd.ExecuteScalarAsync();
             var next = (max is int m ? m : 999) + 1;
             return next;
+        }
+
+        // --- Hikvision Attendant Enrollment ---
+
+        public async Task<HikAttendantContext?> GetHikAttendantContextDbAsync(int bookingDetailId, int personId)
+        {
+            return (await GetHikAttendantContextsDbAsync(bookingDetailId, personId)).FirstOrDefault();
+        }
+
+        /// <summary>
+        /// Active attendants of a booking (or one person) with the booking window, room, current access flag
+        /// (WN_AccessStatus) and machine employee # (WN_HIK_PersonMap, null if never enrolled).
+        /// </summary>
+        public async Task<IEnumerable<HikAttendantContext>> GetHikAttendantContextsDbAsync(int? bookingDetailId, int? personId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT
+                    p.PersonId,
+                    ba.BookingDetailId,
+                    p.Name,
+                    p.IdType,
+                    p.IdNumber,
+                    bd.StartDateTime,
+                    bd.EndDateTime,
+                    bd.SpaceCode,
+                    bd.SpaceName,
+                    ISNULL(acc.IsEnabled, 1) AS IsEnabled,
+                    hpm.MachineID AS EmployeeNo,
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM dbo.WN_HIK_BookingAccessSuspensions sus WITH (NOLOCK)
+                        JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = sus.BookingId
+                        WHERE bk.IdGUID = bd.BookingGuid AND sus.ResolvedAt IS NULL
+                          AND (sus.OverrideUntil IS NULL OR sus.OverrideUntil < CAST(GETDATE() AS DATE))
+                    ) THEN 1 ELSE 0 END AS IsSuspended
+                FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+                JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ba.PersonId
+                JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId
+                LEFT JOIN dbo.WN_AccessStatus acc WITH (NOLOCK) ON acc.BookingDetailId = ba.BookingDetailId AND acc.PersonId = ba.PersonId
+                LEFT JOIN dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId = ba.PersonId
+                WHERE (@BookingDetailId IS NULL OR ba.BookingDetailId = @BookingDetailId)
+                  AND (@PersonId IS NULL OR ba.PersonId = @PersonId)
+                  AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE));";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@BookingDetailId", SqlDbType.Int).Value = (object?)bookingDetailId ?? DBNull.Value;
+            cmd.Parameters.Add("@PersonId", SqlDbType.Int).Value = (object?)personId ?? DBNull.Value;
+            await using var r = await cmd.ExecuteReaderAsync();
+
+            var list = new List<HikAttendantContext>();
+            foreach (var row in await ReadAll(r))
+            {
+                list.Add(new HikAttendantContext
+                {
+                    PersonId = Convert.ToInt32(row["PersonId"]),
+                    BookingDetailId = Convert.ToInt32(row["BookingDetailId"]),
+                    Name = Convert.ToString(row["Name"]) ?? "",
+                    IdType = Convert.ToString(row["IdType"]) ?? "",
+                    IdNumber = Convert.ToString(row["IdNumber"]) ?? "",
+                    StartDateTime = row["StartDateTime"] is DateTime s ? s : null,
+                    EndDateTime = row["EndDateTime"] is DateTime e ? e : null,
+                    SpaceCode = Convert.ToString(row["SpaceCode"]),
+                    SpaceName = Convert.ToString(row["SpaceName"]),
+                    IsEnabled = row["IsEnabled"] == null || Convert.ToBoolean(row["IsEnabled"]),
+                    EmployeeNo = Convert.ToString(row["EmployeeNo"]),
+                    IsSuspended = row["IsSuspended"] != null && Convert.ToInt32(row["IsSuspended"]) == 1
+                });
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Returns the terminal employee # for a WorkNest person, allocating the next free member number
+        /// (below 8500, same range as the HIK dashboard) on first use. Serialised with an app lock.
+        /// </summary>
+        public async Task<string> GetOrCreateHikEmployeeNoDbAsync(int personId, int floor = 0)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SET XACT_ABORT ON;
+                BEGIN TRAN;
+                EXEC sp_getapplock @Resource = 'WN_HIK_PersonMap_Allocate', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000;
+
+                DECLARE @emp NVARCHAR(32) = (SELECT MachineID FROM dbo.WN_HIK_PersonMap WHERE PersonId = @PersonId);
+                IF @emp IS NULL
+                BEGIN
+                    DECLARE @max INT = CASE WHEN @Floor > 999 AND @Floor < 8500 THEN @Floor ELSE 999 END;
+                    SELECT @max = CASE WHEN MAX(n) > @max THEN MAX(n) ELSE @max END
+                    FROM (SELECT TRY_CAST(MachineID AS INT) AS n FROM dbo.WN_HIK_PersonMap) t WHERE n < 8500;
+
+                    IF OBJECT_ID('dbo.WN_HIK_Employees') IS NOT NULL
+                        EXEC sp_executesql N'SELECT @m = CASE WHEN MAX(n) > @m THEN MAX(n) ELSE @m END FROM (SELECT TRY_CAST(employee_no AS INT) AS n FROM dbo.WN_HIK_Employees) t WHERE n < 8500',
+                            N'@m INT OUTPUT', @m = @max OUTPUT;
+                    IF OBJECT_ID('dbo.WN_HIK_Users') IS NOT NULL
+                        EXEC sp_executesql N'SELECT @m = CASE WHEN MAX(n) > @m THEN MAX(n) ELSE @m END FROM (SELECT TRY_CAST(employee_no AS INT) AS n FROM dbo.WN_HIK_Users) t WHERE n < 8500',
+                            N'@m INT OUTPUT', @m = @max OUTPUT;
+                    IF OBJECT_ID('dbo.WN_HIK_Settings') IS NOT NULL
+                        EXEC sp_executesql N'SELECT @m = CASE WHEN MAX(n) > @m THEN MAX(n) ELSE @m END FROM (SELECT TRY_CAST([value] AS INT) AS n FROM dbo.WN_HIK_Settings WHERE [key] = ''max_member_no'') t WHERE n < 8500',
+                            N'@m INT OUTPUT', @m = @max OUTPUT;
+
+                    IF @max + 1 >= 8500 THROW 50001, 'Machine ID range (1000-8499) is full.', 1;
+                    SET @emp = CAST(@max + 1 AS NVARCHAR(32));
+                    INSERT INTO dbo.WN_HIK_PersonMap (PersonId, MachineID) VALUES (@PersonId, @emp);
+                END
+
+                COMMIT;
+                SELECT @emp;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@PersonId", personId);
+            cmd.Parameters.AddWithValue("@Floor", floor);
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToString(result) ?? throw new InvalidOperationException("Could not allocate a Hikvision employee number.");
+        }
+
+        /// <summary>
+        /// Gives a person a new Machine ID above @Floor (only WN_HIK_PersonMap, WorkNest's own table, is written).
+        /// Used when a freshly allocated number turns out to be taken on a machine.
+        /// </summary>
+        public async Task<string> ReallocateHikEmployeeNoDbAsync(int personId, int floor)
+        {
+            await using (var c = await Open())
+            await using (var del = new SqlCommand("DELETE FROM dbo.WN_HIK_PersonMap WHERE PersonId = @PersonId;", c))
+            {
+                del.Parameters.AddWithValue("@PersonId", personId);
+                await del.ExecuteNonQueryAsync();
+            }
+            return await GetOrCreateHikEmployeeNoDbAsync(personId, floor);
+        }
+
+        /// <summary>Devices that still have queued ops (any kind) for this machine user — read only.</summary>
+        public async Task<HashSet<int>> GetHikPendingOpDeviceIdsForEmployeeDbAsync(string employeeNo)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT DISTINCT device_id FROM dbo.WN_HIK_PendingOps WITH (NOLOCK) WHERE employee_no = @Emp;", c);
+            cmd.Parameters.AddWithValue("@Emp", employeeNo);
+            var ids = new HashSet<int>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
+
+        public async Task<IEnumerable<HikDeviceConnection>> GetHikDeviceConnectionsDbAsync(IEnumerable<int> deviceIds)
+        {
+            var ids = deviceIds.Distinct().ToList();
+            if (ids.Count == 0) return Enumerable.Empty<HikDeviceConnection>();
+
+            await using var c = await Open();
+            var names = ids.Select((_, i) => "@Id" + i).ToList();
+            var sql = $@"
+                SELECT Id, Device_Name, Host, Host2, Port, Use_https, Username, Password, Online, Code
+                FROM dbo.WN_HIK_Devices WITH (NOLOCK)
+                WHERE Id IN ({string.Join(",", names)});";
+            await using var cmd = new SqlCommand(sql, c);
+            for (var i = 0; i < ids.Count; i++) cmd.Parameters.AddWithValue(names[i], ids[i]);
+
+            var list = new List<HikDeviceConnection>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var row = ToDict(r);
+                list.Add(new HikDeviceConnection
+                {
+                    Id = Convert.ToInt32(row["Id"]),
+                    Name = Convert.ToString(row["Device_Name"]) ?? "",
+                    Host = Convert.ToString(row["Host"]) ?? "",
+                    Host2 = Convert.ToString(row["Host2"]),
+                    Port = row["Port"] != null ? Convert.ToInt32(row["Port"]) : 80,
+                    UseHttps = row["Use_https"] != null && Convert.ToBoolean(row["Use_https"]),
+                    Username = Convert.ToString(row["Username"]) ?? "",
+                    Password = Convert.ToString(row["Password"]) ?? "",
+                    Online = row["Online"] != null && Convert.ToBoolean(row["Online"]),
+                    Code = Convert.ToString(row["Code"])
+                });
+            }
+            return list;
+        }
+
+        public async Task<string?> GetHikPendingOpPayloadDbAsync(int deviceId, string op, string employeeNo)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT TOP 1 payload FROM dbo.WN_HIK_PendingOps WITH (NOLOCK)
+                WHERE device_id = @DeviceId AND op = @Op AND ISNULL(employee_no, '') = @Emp
+                ORDER BY id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@DeviceId", deviceId);
+            cmd.Parameters.AddWithValue("@Op", op);
+            cmd.Parameters.AddWithValue("@Emp", employeeNo);
+            var result = await cmd.ExecuteScalarAsync();
+            return result is string json ? json : null;
+        }
+
+        /// <summary>
+        /// Queue an op for an offline machine. Same semantics as HIK queueOp(): one row per device + op + employee,
+        /// replaced on re-queue, and a 'queued:op' line in WN_HIK_SyncLog.
+        /// </summary>
+        public async Task QueueHikPendingOpDbAsync(int deviceId, string op, string employeeNo, string payloadJson)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SET XACT_ABORT ON;
+                BEGIN TRAN;
+                DELETE FROM dbo.WN_HIK_PendingOps WHERE device_id = @DeviceId AND op = @Op AND ISNULL(employee_no, '') = @Emp;
+                INSERT INTO dbo.WN_HIK_PendingOps (device_id, op, employee_no, payload) VALUES (@DeviceId, @Op, @Emp, @Payload);
+                IF OBJECT_ID('dbo.WN_HIK_SyncLog', 'U') IS NOT NULL
+                    INSERT INTO dbo.WN_HIK_SyncLog (Employee_id, Device_id, Action, Ok, Detail)
+                    VALUES (NULL, @DeviceId, CONCAT('queued:', @Op), 1, CONCAT('{""employee_no"":""', @Emp, '"",""source"":""worknest""}'));
+                COMMIT;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@DeviceId", deviceId);
+            cmd.Parameters.AddWithValue("@Op", op);
+            cmd.Parameters.AddWithValue("@Emp", employeeNo);
+            cmd.Parameters.AddWithValue("@Payload", payloadJson);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // --- dbo.OrderStatus (status lookup by description) ---
+
+        public async Task<IReadOnlyDictionary<int, string>> GetOrderStatusesDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT Id, Description FROM dbo.OrderStatus WITH (NOLOCK) WHERE ISNULL(Status, 1) = 1;", c);
+            var map = new Dictionary<int, string>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) map[Convert.ToInt32(r.GetValue(0))] = r.IsDBNull(1) ? "" : Convert.ToString(r.GetValue(1)) ?? "";
+            return map;
+        }
+
+        // --- Challan Validity Extension (existing WN_Challan_* procedures) ---
+
+        public async Task<IDictionary<string, object?>?> SearchChallanDbAsync(string query)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Challan_Search", c);
+            cmd.Parameters.Add("@Query", SqlDbType.NVarChar, 100).Value = query;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        /// <summary>Returns the procedure's validation message (RAISERROR) as an error instead of throwing.</summary>
+        public async Task<(bool Ok, string? Error)> ExtendChallanValidityDbAsync(int bookingId, DateTime newExpiryDate, string updatedBy, string? remarks)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Challan_ExtendValidity", c);
+                cmd.Parameters.AddWithValue("@BookingId", bookingId);
+                cmd.Parameters.Add("@NewExpiryDate", SqlDbType.Date).Value = newExpiryDate.Date;
+                cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value = updatedBy;
+                cmd.Parameters.Add("@Remarks", SqlDbType.NVarChar, 500).Value = (object?)remarks ?? DBNull.Value;
+                await cmd.ExecuteNonQueryAsync();
+                return (true, null);
+            }
+            catch (SqlException ex) when (ex.Class == 16)
+            {
+                return (false, ex.Message); // e.g. "New expiry date must be after the current expiry date."
+            }
+        }
+
+        // --- Hikvision challan-based access suspension (WN_HIK_AccessSuspension_* SPs) ---
+
+        public async Task<IEnumerable<HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_HIK_AccessSuspension_Run", c);
+            var list = new List<HikAccessSuspensionChange>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var row = ToDict(r);
+                list.Add(new HikAccessSuspensionChange
+                {
+                    SuspensionId = Convert.ToInt32(row["SuspensionId"]),
+                    BookingId = Convert.ToInt32(row["BookingId"]),
+                    ShouldBlock = row["ShouldBlock"] != null && Convert.ToBoolean(row["ShouldBlock"])
+                });
+            }
+            return list;
+        }
+
+        public async Task SetHikAccessSuspensionAppliedDbAsync(int suspensionId, bool machinesBlocked)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_HIK_AccessSuspension_SetApplied", c);
+            cmd.Parameters.AddWithValue("@SuspensionId", suspensionId);
+            cmd.Parameters.AddWithValue("@MachinesBlocked", machinesBlocked);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<IDictionary<string, object?>?> GetHikAccessSuspensionByBookingDetailDbAsync(int bookingDetailId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_HIK_AccessSuspension_GetByBookingDetail", c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        /// <summary>
+        /// Dashboard overview (read-only): [0] machine / queued-operation counts,
+        /// [1] open suspensions of bookings that are still running.
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync()
+        {
+            await using var c = await Open();
+            const string sql = @"
+                DECLARE @Today DATE = CAST(GETDATE() AS DATE);
+                SELECT
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS Devices,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 1) AS DevicesOnline,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_PendingOps WITH (NOLOCK)) AS PendingOps,
+                    (SELECT COUNT(DISTINCT device_id) FROM dbo.WN_HIK_PendingOps WITH (NOLOCK)) AS PendingOpsDevices;
+
+                SELECT
+                    s.Id AS SuspensionId, s.BookingId, s.Reason, s.SuspendedAt, s.OverrideUntil,
+                    bd.BookingDetailId, bd.SpaceName, bd.SpaceCode, bd.SpaceCount, bd.BookingEnd,
+                    COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, bd.CustomerEmail) AS Customer,
+                    ppl.EnrolledPeople,
+                    ovr.CreatedByEmail AS OverrideByEmail, ovr.Reason AS OverrideReason
+                FROM dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+                JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = s.BookingId
+                CROSS APPLY (SELECT MIN(d.Id) AS BookingDetailId, MIN(d.SpaceName) AS SpaceName, MIN(d.SpaceCode) AS SpaceCode,
+                                    COUNT(*) AS SpaceCount, MAX(d.EndDateTime) AS BookingEnd,
+                                    MIN(d.CustomerCode) AS CustomerCode, MIN(d.CustomerEmail) AS CustomerEmail
+                               FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                              WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0) bd
+                OUTER APPLY (SELECT TOP 1 Company, FirstName, LastName, Email FROM dbo.WN_Customers WITH (NOLOCK)
+                             WHERE Code = bd.CustomerCode OR Email = bd.CustomerEmail) cu
+                OUTER APPLY (SELECT COUNT(DISTINCT ba.PersonId) AS EnrolledPeople
+                               FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+                               JOIN dbo.WN_BookingDetails d2 WITH (NOLOCK) ON d2.Id = ba.BookingDetailId AND d2.IsDeleted = 0
+                               JOIN dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId = ba.PersonId
+                              WHERE d2.BookingGuid = b.IdGUID
+                                AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= @Today)) ppl
+                OUTER APPLY (SELECT TOP 1 o.CreatedByEmail, o.Reason FROM dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
+                              WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) ovr
+                WHERE s.ResolvedAt IS NULL
+                  AND ISNULL(b.IsDeleted, 0) = 0
+                  AND b.BookingStatusId NOT IN (3, 4) -- cancelled / rejected
+                  AND bd.BookingDetailId IS NOT NULL
+                  AND bd.BookingEnd >= @Today   -- booking still running
+                ORDER BY CASE WHEN s.OverrideUntil >= @Today THEN 1 ELSE 0 END, ppl.EnrolledPeople DESC, s.SuspendedAt DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
+        public async Task<(int? SuspensionId, int? BookingId)> ExtendHikAccessSuspensionDbAsync(int bookingDetailId, DateTime overrideUntil, string reason, int? createdById, string? createdByEmail)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_HIK_AccessSuspension_Extend", c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            cmd.Parameters.Add("@OverrideUntil", SqlDbType.Date).Value = overrideUntil.Date;
+            cmd.Parameters.AddWithValue("@Reason", reason);
+            cmd.Parameters.Add("@CreatedById", SqlDbType.Int).Value = (object?)createdById ?? DBNull.Value;
+            cmd.Parameters.Add("@CreatedByEmail", SqlDbType.NVarChar, 200).Value = (object?)createdByEmail ?? DBNull.Value;
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return (null, null);
+            var row = ToDict(r);
+            return (row["SuspensionId"] != null ? Convert.ToInt32(row["SuspensionId"]) : null,
+                    row["BookingId"] != null ? Convert.ToInt32(row["BookingId"]) : null);
+        }
+
+        /// <summary>
+        /// Challans of the booking behind a booked space — read only.
+        /// Result sets: [0] booking (Id, ChallanNumber, ValidityDate), [1] invoices (void = 5 excluded),
+        /// [2] booking challans (WN_Challans + amounts from WN_vw_BookingSummary + voucher status from WN_Payments).
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetBookingChallansByBookingDetailDbAsync(int bookingDetailId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                DECLARE @BookingId INT = (
+                    SELECT TOP 1 b.Id
+                    FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
+                    JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+                    WHERE bd.Id = @BookingDetailId);
+
+                SELECT b.Id AS BookingId, b.ChallanNumber, b.ValidityDate
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                WHERE b.Id = @BookingId;
+
+                SELECT i.Id, i.InvoiceNumber, i.InvoiceTypeId, i.IssuedOn, i.DueOn,
+                       i.BillingPeriodStart, i.BillingPeriodEnd,
+                       ISNULL(i.GrandTotal, 0) AS GrandTotal, ISNULL(i.PaidTotal, 0) AS PaidTotal, i.StatusId
+                FROM dbo.WN_Invoices i WITH (NOLOCK)
+                WHERE i.BookingId = @BookingId AND ISNULL(i.StatusId, 0) <> 5
+                ORDER BY i.IssuedOn DESC, i.Id DESC;
+
+                SELECT c.Id, c.ChallanNumber, c.IssuedOn, c.ValidUntil, c.StatusId AS ChallanStatusId,
+                       (SELECT bk.ValidityDate FROM dbo.WN_Bookings bk WITH (NOLOCK) WHERE bk.Id = c.BookingId) AS BookingValidityDate,
+                       v.CurrentCycleAmount, v.TotalContractAmount, v.TotalPaidAmount, v.BalanceLeft,
+                       p.StatusId AS PaymentStatusId, p.Amount AS VoucherAmount
+                FROM dbo.WN_Challans c WITH (NOLOCK)
+                LEFT JOIN dbo.WN_vw_BookingSummary v WITH (NOLOCK) ON v.BookingId = c.BookingId
+                OUTER APPLY (SELECT TOP 1 pay.StatusId, pay.Amount
+                             FROM dbo.WN_Payments pay WITH (NOLOCK)
+                             WHERE pay.TransactionRef = c.ChallanNumber OR pay.BookingIdInt = c.BookingId
+                             ORDER BY CASE WHEN pay.TransactionRef = c.ChallanNumber THEN 0 ELSE 1 END, pay.Id DESC) p
+                WHERE c.BookingId = @BookingId
+                ORDER BY c.CreatedOn DESC, c.Id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
+        /// <summary>Booked spaces (WN_BookingDetails) of a booking — read only.</summary>
+        public async Task<IEnumerable<int>> GetBookingDetailIdsForBookingDbAsync(int bookingId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT bd.Id
+                FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
+                JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+                WHERE b.Id = @BookingId;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@BookingId", bookingId);
+            var ids = new List<int>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
+
+        // --- Hikvision Staff (janitors, office boys, … — tagged machine users without a booking) ---
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikStaffDbAsync(string? employeeNo = null)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT u.employee_no, u.name, u.cnic, u.tag_id, t.Name AS tag,
+                       (SELECT COUNT(1) FROM dbo.WN_HIK_PendingOps po WITH (NOLOCK) WHERE po.employee_no = u.employee_no) AS pending_ops
+                FROM dbo.WN_HIK_Users u WITH (NOLOCK)
+                LEFT JOIN dbo.WN_HIK_Tags t WITH (NOLOCK) ON t.Id = u.tag_id
+                WHERE u.tag_id IS NOT NULL AND (@Emp IS NULL OR u.employee_no = @Emp)
+                ORDER BY u.name;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Emp", SqlDbType.NVarChar, 32).Value = string.IsNullOrWhiteSpace(employeeNo) ? DBNull.Value : employeeNo.Trim();
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikTagsDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT Id, Name FROM dbo.WN_HIK_Tags WITH (NOLOCK) WHERE Status = 1 ORDER BY Name;", c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        /// <summary>Adds a job tag (or re-activates an inactive one with the same name); returns its Id.</summary>
+        public async Task<int> AddHikTagDbAsync(string name)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                DECLARE @Id INT = (SELECT Id FROM dbo.WN_HIK_Tags WHERE Name = @Name);
+                IF @Id IS NULL
+                BEGIN
+                    INSERT INTO dbo.WN_HIK_Tags (Name, Status) VALUES (@Name, 1);
+                    SET @Id = SCOPE_IDENTITY();
+                END
+                ELSE
+                    UPDATE dbo.WN_HIK_Tags SET Status = 1 WHERE Id = @Id;
+                SELECT @Id;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Name", name.Trim());
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+        }
+
+        /// <summary>
+        /// Allocates the next free member employee # (same range and lock as attendants) and records the
+        /// staff member in WN_HIK_Users (CNIC + tag) — the HIK sync keeps that row across its rebuilds.
+        /// </summary>
+        public async Task<string> CreateHikStaffDbAsync(string name, string cnic, int? tagId, int floor = 0)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SET XACT_ABORT ON;
+                BEGIN TRAN;
+                EXEC sp_getapplock @Resource = 'WN_HIK_PersonMap_Allocate', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000;
+
+                DECLARE @max INT = CASE WHEN @Floor > 999 AND @Floor < 8500 THEN @Floor ELSE 999 END;
+                SELECT @max = CASE WHEN MAX(n) > @max THEN MAX(n) ELSE @max END
+                FROM (SELECT TRY_CAST(MachineID AS INT) AS n FROM dbo.WN_HIK_PersonMap) t WHERE n < 8500;
+                SELECT @max = CASE WHEN MAX(n) > @max THEN MAX(n) ELSE @max END
+                FROM (SELECT TRY_CAST(employee_no AS INT) AS n FROM dbo.WN_HIK_Users) t WHERE n < 8500;
+                IF OBJECT_ID('dbo.WN_HIK_Employees') IS NOT NULL
+                    EXEC sp_executesql N'SELECT @m = CASE WHEN MAX(n) > @m THEN MAX(n) ELSE @m END FROM (SELECT TRY_CAST(employee_no AS INT) AS n FROM dbo.WN_HIK_Employees) t WHERE n < 8500',
+                        N'@m INT OUTPUT', @m = @max OUTPUT;
+                IF OBJECT_ID('dbo.WN_HIK_Settings') IS NOT NULL
+                    EXEC sp_executesql N'SELECT @m = CASE WHEN MAX(n) > @m THEN MAX(n) ELSE @m END FROM (SELECT TRY_CAST([value] AS INT) AS n FROM dbo.WN_HIK_Settings WHERE [key] = ''max_member_no'') t WHERE n < 8500',
+                        N'@m INT OUTPUT', @m = @max OUTPUT;
+
+                IF @max + 1 >= 8500 THROW 50001, 'Machine ID range (1000-8499) is full.', 1;
+                DECLARE @emp NVARCHAR(32) = CAST(@max + 1 AS NVARCHAR(32));
+                INSERT INTO dbo.WN_HIK_Users (employee_no, name, cnic, tag_id, machines, machine_count)
+                VALUES (@emp, @Name, @Cnic, @TagId, '[]', 0);
+
+                COMMIT;
+                SELECT @emp;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Name", name.Trim());
+            cmd.Parameters.AddWithValue("@Cnic", cnic);
+            cmd.Parameters.Add("@TagId", SqlDbType.Int).Value = (object?)tagId ?? DBNull.Value;
+            cmd.Parameters.AddWithValue("@Floor", floor);
+            return Convert.ToString(await cmd.ExecuteScalarAsync()) ?? throw new InvalidOperationException("Could not allocate an employee number.");
+        }
+
+        public async Task DeleteHikStaffDbAsync(string employeeNo)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.WN_HIK_Users WHERE employee_no = @Emp AND tag_id IS NOT NULL;", c);
+            cmd.Parameters.AddWithValue("@Emp", employeeNo);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>Per-device user rosters as cached by the HIK sync engine (WN_HIK_DevCache.Users_snapshot).</summary>
+        public async Task<IEnumerable<(int DeviceId, string? UsersJson)>> GetHikDevCacheSnapshotsDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT Device_id, Users_snapshot FROM dbo.WN_HIK_DevCache WITH (NOLOCK) WHERE Users_snapshot IS NOT NULL;", c);
+            var list = new List<(int, string?)>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.IsDBNull(1) ? null : r.GetString(1)));
+            return list;
+        }
+
+        public async Task<IEnumerable<int>> GetHikPendingOpDeviceIdsDbAsync(string employeeNo)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT DISTINCT device_id FROM dbo.WN_HIK_PendingOps WITH (NOLOCK) WHERE employee_no = @Emp AND op = 'grant';", c);
+            cmd.Parameters.AddWithValue("@Emp", employeeNo);
+            var ids = new List<int>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
+
+        /// <summary>
+        /// All machines in an Entrance group (group name starting with "Entrance", as the HIK dashboard treats them).
+        /// </summary>
+        public async Task<IEnumerable<int>> GetHikEntranceDeviceIdsDbAsync()
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT d.Id
+                FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
+                JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id
+                WHERE g.Name LIKE N'Entrance%';";
+            await using var cmd = new SqlCommand(sql, c);
+            var ids = new List<int>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
+
+        // --- Hikvision Access Dashboard / Activity Log / Analytics (read-only) ---
+
+        // Denied codes used when WN_HIK_EventCategories has no row for an event code.
+        private const string HikDeniedFallbackSql = "CASE WHEN e.access_event IN (9, 23, 39, 76, 112) THEN 1 ELSE 0 END";
+
+        private static async Task<List<List<IDictionary<string, object?>>>> ReadResultSets(SqlDataReader r)
+        {
+            var sets = new List<List<IDictionary<string, object?>>>();
+            do { sets.Add(await ReadAll(r)); } while (await r.NextResultAsync());
+            return sets;
+        }
+
+        public async Task<IDictionary<string, object?>> GetHikAccessStatsDbAsync()
+        {
+            await using var c = await Open();
+            var sql = $@"
+                DECLARE @Today DATETIME2(0) = CAST(CAST(GETDATE() AS DATE) AS DATETIME2(0));
+                DECLARE @Tomorrow DATETIME2(0) = DATEADD(day, 1, @Today);
+                DECLARE @Yesterday DATETIME2(0) = DATEADD(day, -1, @Today);
+                SELECT
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS devices,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 1) AS devicesOnline,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE status = 'active') AS activeMembers,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE status = 'expired') AS expiredMembers,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE kind = 'card') AS cards,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_AccessGrants WITH (NOLOCK) WHERE sync_state IN ('pending', 'error', 'removing')) AS pendingSync,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE event_time >= @Today AND event_time < @Tomorrow) AS todayScans,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE event_time >= @Yesterday AND event_time < @Today) AS yesterdayScans,
+                    (SELECT COUNT(DISTINCT employee_no) FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                        WHERE event_time >= @Today AND event_time < @Tomorrow AND employee_no IS NOT NULL AND employee_no <> '') AS uniqueToday,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Events e WITH (NOLOCK)
+                        LEFT JOIN dbo.WN_HIK_EventCategories ec WITH (NOLOCK) ON ec.Code = e.access_event
+                        WHERE e.event_time >= @Today AND e.event_time < @Tomorrow
+                          AND COALESCE(CAST(ec.Is_denied AS INT), {HikDeniedFallbackSql}) = 1) AS deniedToday;";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikAccessEventsDbAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit)
+        {
+            await using var c = await Open();
+            var sql = $@"
+                SELECT TOP (@Limit)
+                    e.id,
+                    e.device_id,
+                    e.device_name,
+                    e.employee_no,
+                    e.name,
+                    e.card_no,
+                    e.access_event,
+                    e.event_time,
+                    COALESCE(ec.Label, e.access_event_details) AS label,
+                    COALESCE(CAST(ec.Is_denied AS INT), {HikDeniedFallbackSql}) AS is_denied
+                FROM dbo.WN_HIK_Events e WITH (NOLOCK)
+                LEFT JOIN dbo.WN_HIK_EventCategories ec WITH (NOLOCK) ON ec.Code = e.access_event
+                WHERE (@From IS NULL OR e.event_time >= @From)
+                  AND (@To IS NULL OR e.event_time < @To)
+                  AND (@DeviceId IS NULL OR e.device_id = @DeviceId)
+                  AND ((@Emp IS NULL AND @Name IS NULL)
+                       OR (@Emp IS NOT NULL AND e.employee_no = @Emp)
+                       OR (@Emp IS NULL AND e.name = @Name))
+                ORDER BY e.event_time DESC, e.id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            cmd.Parameters.Add("@From", SqlDbType.DateTime2).Value = (object?)from ?? DBNull.Value;
+            cmd.Parameters.Add("@To", SqlDbType.DateTime2).Value = (object?)to ?? DBNull.Value;
+            cmd.Parameters.Add("@DeviceId", SqlDbType.Int).Value = (object?)deviceId ?? DBNull.Value;
+            cmd.Parameters.Add("@Emp", SqlDbType.NVarChar, 32).Value = string.IsNullOrWhiteSpace(employeeNo) ? DBNull.Value : employeeNo.Trim();
+            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 128).Value = string.IsNullOrWhiteSpace(name) ? DBNull.Value : name.Trim();
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikSyncActivityDbAsync(int limit)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_HIK_Activity_Recent", c);
+            cmd.Parameters.AddWithValue("@limit", limit);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikExpiringDbAsync(int days)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT e.employee_no, e.name, e.valid_end, d.Device_Name AS device
+                FROM dbo.WN_HIK_Employees e WITH (NOLOCK)
+                JOIN dbo.WN_HIK_AccessGrants g WITH (NOLOCK) ON g.employee_id = e.id
+                JOIN dbo.WN_HIK_Devices d WITH (NOLOCK) ON d.Id = g.device_id
+                WHERE e.valid_end IS NOT NULL AND e.valid_end <= DATEADD(day, @Days, SYSDATETIME())
+                ORDER BY e.valid_end ASC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Days", days);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        /// <summary>
+        /// Result sets: [0] hourly, [1] doors, [2] top users, [3] totals + method split, [4] daily.
+        /// Range is [from, to) on the terminal's local event_time.
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetHikAccessAnalyticsDbAsync(DateTime from, DateTime to)
+        {
+            await using var c = await Open();
+            var sql = $@"
+                SELECT DATEPART(hour, event_time) AS hr, COUNT(*) AS cnt
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE event_time >= @From AND event_time < @To
+                GROUP BY DATEPART(hour, event_time);
+
+                SELECT device_name AS name, COUNT(*) AS cnt
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE event_time >= @From AND event_time < @To AND device_name IS NOT NULL
+                GROUP BY device_name
+                ORDER BY cnt DESC;
+
+                SELECT TOP 10 employee_no, name, COUNT(*) AS cnt
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE event_time >= @From AND event_time < @To
+                  AND ((employee_no IS NOT NULL AND employee_no <> '') OR (name IS NOT NULL AND name <> ''))
+                GROUP BY employee_no, name
+                ORDER BY cnt DESC;
+
+                SELECT
+                    COUNT(*) AS total,
+                    COUNT(DISTINCT NULLIF(e.employee_no, '')) AS uniquePeople,
+                    SUM(CASE WHEN COALESCE(CAST(ec.Is_denied AS INT), {HikDeniedFallbackSql}) = 1 THEN 1 ELSE 0 END) AS denied,
+                    SUM(CASE WHEN e.access_event IN (38, 39) THEN 1 ELSE 0 END) AS fingerprint,
+                    SUM(CASE WHEN e.access_event IN (75, 76, 104) THEN 1 ELSE 0 END) AS face,
+                    SUM(CASE WHEN e.access_event NOT IN (38, 39, 75, 76, 104) AND NULLIF(e.card_no, '') IS NOT NULL THEN 1 ELSE 0 END) AS card,
+                    SUM(CASE WHEN NULLIF(e.card_no, '') IS NULL AND (e.access_event BETWEEN 21 AND 26 OR e.access_event = 31) THEN 1 ELSE 0 END) AS door
+                FROM dbo.WN_HIK_Events e WITH (NOLOCK)
+                LEFT JOIN dbo.WN_HIK_EventCategories ec WITH (NOLOCK) ON ec.Code = e.access_event
+                WHERE e.event_time >= @From AND e.event_time < @To;
+
+                SELECT CAST(event_time AS DATE) AS d, COUNT(*) AS cnt
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE event_time >= @From AND event_time < @To
+                GROUP BY CAST(event_time AS DATE)
+                ORDER BY d;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@From", SqlDbType.DateTime2).Value = from;
+            cmd.Parameters.Add("@To", SqlDbType.DateTime2).Value = to;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
+        /// <summary>
+        /// Result sets: [0] profile (WN_HIK_Employees + WN_HIK_Users), [1] doors, [2] hourly, [3] range totals, [4] all-time total.
+        /// The person is matched by employee # when given, otherwise by name.
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetHikUserAnalyticsDbAsync(string? employeeNo, string? name, DateTime from, DateTime to)
+        {
+            await using var c = await Open();
+            const string who = "((@Emp IS NOT NULL AND employee_no = @Emp) OR (@Emp IS NULL AND name = @Name))";
+            var sql = $@"
+                SELECT
+                    COALESCE(u.employee_no, emp.employee_no) AS employee_no,
+                    COALESCE(u.name, emp.name) AS name,
+                    emp.card_no, emp.status, emp.valid_end, u.room
+                FROM (SELECT 1 AS x) one
+                OUTER APPLY (SELECT TOP 1 employee_no, name, room FROM dbo.WN_HIK_Users WITH (NOLOCK) WHERE {who}) u
+                OUTER APPLY (SELECT TOP 1 employee_no, name, card_no, status, valid_end
+                             FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE {who}
+                             ORDER BY valid_end DESC) emp;
+
+                SELECT device_name AS name, COUNT(*) AS cnt
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE {who} AND event_time >= @From AND event_time < @To AND device_name IS NOT NULL
+                GROUP BY device_name
+                ORDER BY cnt DESC;
+
+                SELECT DATEPART(hour, event_time) AS hr, COUNT(*) AS cnt
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE {who} AND event_time >= @From AND event_time < @To
+                GROUP BY DATEPART(hour, event_time);
+
+                SELECT COUNT(*) AS total, MIN(event_time) AS firstScan, MAX(event_time) AS lastScan,
+                       MAX(NULLIF(card_no, '')) AS cardNo
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE {who} AND event_time >= @From AND event_time < @To;
+
+                SELECT COUNT(*) AS total
+                FROM dbo.WN_HIK_Events WITH (NOLOCK)
+                WHERE {who};";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Emp", SqlDbType.NVarChar, 32).Value = string.IsNullOrWhiteSpace(employeeNo) ? DBNull.Value : employeeNo.Trim();
+            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 128).Value = string.IsNullOrWhiteSpace(name) ? DBNull.Value : name.Trim();
+            cmd.Parameters.Add("@From", SqlDbType.DateTime2).Value = from;
+            cmd.Parameters.Add("@To", SqlDbType.DateTime2).Value = to;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
+        /// <summary>
+        /// Stores the CNIC against the member in WN_HIK_Users (keyed by employee # + name, as the HIK dashboard does).
+        /// </summary>
+        public async Task SaveHikUserCnicDbAsync(string employeeNo, string name, string? cnic)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                IF OBJECT_ID('dbo.WN_HIK_Users') IS NOT NULL
+                    EXEC sp_executesql N'
+                        MERGE dbo.WN_HIK_Users WITH (HOLDLOCK) AS t
+                        USING (SELECT @Emp AS emp, @Name AS nm) s ON t.employee_no = s.emp AND t.name = s.nm
+                        WHEN MATCHED THEN UPDATE SET cnic = COALESCE(@Cnic, cnic)
+                        WHEN NOT MATCHED THEN INSERT (employee_no, name, cnic) VALUES (s.emp, s.nm, @Cnic);',
+                        N'@Emp NVARCHAR(32), @Name NVARCHAR(128), @Cnic NVARCHAR(20)',
+                        @Emp = @Emp, @Name = @Name, @Cnic = @Cnic;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Emp", employeeNo);
+            cmd.Parameters.AddWithValue("@Name", name.Trim());
+            cmd.Parameters.AddWithValue("@Cnic", (object?)cnic ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>
+        /// Vaults a captured fingerprint template in WN_HIK_FpVault so the HIK sync engine can replicate it later.
+        /// </summary>
+        public async Task SaveHikFingerprintTemplateDbAsync(string employeeNo, string name, int fingerNo, string template)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                IF OBJECT_ID('dbo.WN_HIK_FpVault') IS NOT NULL
+                    EXEC sp_executesql N'
+                        MERGE dbo.WN_HIK_FpVault WITH (HOLDLOCK) AS t
+                        USING (SELECT @Emp AS emp, @Name AS nm, @FingerNo AS fno) s
+                            ON t.employee_no = s.emp AND t.name = s.nm AND t.finger_no = s.fno
+                        WHEN MATCHED THEN UPDATE SET template = @Template, updated_at = SYSDATETIME()
+                        WHEN NOT MATCHED THEN INSERT (employee_no, name, finger_no, template) VALUES (s.emp, s.nm, s.fno, @Template);',
+                        N'@Emp NVARCHAR(32), @Name NVARCHAR(128), @FingerNo INT, @Template NVARCHAR(MAX)',
+                        @Emp = @Emp, @Name = @Name, @FingerNo = @FingerNo, @Template = @Template;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Emp", employeeNo);
+            cmd.Parameters.AddWithValue("@Name", name.Trim());
+            cmd.Parameters.AddWithValue("@FingerNo", fingerNo);
+            cmd.Parameters.AddWithValue("@Template", template);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         // --- KYC Portal ---
