@@ -85,7 +85,7 @@ namespace WorkNest.Application.Services
             {
                 if (request.PerSeatBasePrice.Value < spaceDetails.Monthly)
                 {
-                    throw new ArgumentException($"Base price for {spaceDetails.SpaceName} is locked and can only be increased. Minimum allowed base price is PKR {spaceDetails.Monthly:N2}.");
+                    throw new ArgumentException($"Base price for {spaceDetails.SpaceName} is locked and can only be increased. Minimum allowed base price is PKR {spaceDetails.Monthly:N0}.");
                 }
             }
 

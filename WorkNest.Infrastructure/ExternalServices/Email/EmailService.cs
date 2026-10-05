@@ -8,7 +8,7 @@ using WorkNest.Application.Interfaces;
 namespace WorkNest.Infrastructure.ExternalServices.Email
 {
     /// <summary>
-    /// Sends email notifications via Gmail SMTP.
+    /// Sends email notifications via configured SMTP (e.g., Zoho Mail / Gmail).
     /// Credentials loaded from appsettings.json - never hardcoded.
     /// </summary>
     public class EmailService : IEmailService
@@ -22,11 +22,30 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             _logger = logger;
         }
 
+        private (string fromEmail, string password, string host, int port) GetEmailSettings()
+        {
+            var fromEmail = _config["Email:FromEmail"] ?? string.Empty;
+            var password  = _config["Email:Password"] ?? _config["Email:GmailAppPassword"] ?? string.Empty;
+            var host      = _config["Email:SmtpHost"] ?? "smtppro.zoho.com";
+            var port      = int.TryParse(_config["Email:SmtpPort"], out var p) ? p : 587;
+            return (fromEmail, password, host, port);
+        }
+
+        private SmtpClient CreateSmtpClient(string fromEmail, string password, string host, int port)
+        {
+            return new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(fromEmail, password),
+                EnableSsl = true,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                UseDefaultCredentials = false
+            };
+        }
+
         public async Task SendTourNotificationAsync(string fullName, string email, string phone, string message)
         {
-            var fromEmail = _config["Email:FromEmail"];
-            var toEmail   = _config["Email:ToEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var (fromEmail, password, host, port) = GetEmailSettings();
+            var toEmail = _config["Email:ToEmail"] ?? fromEmail;
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -49,21 +68,16 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail),
+                    From       = new MailAddress(fromEmail, "WorkNest Tours"),
                     Subject    = $"New Tour Request from {fullName} - WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
                 };
                 mailMessage.To.Add(toEmail);
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
-                {
-                    Credentials = new NetworkCredential(fromEmail, password),
-                    EnableSsl   = true,
-                };
-
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mailMessage);
-                _logger.LogInformation("[EMAIL] Tour notification sent to {To}", toEmail);
+                _logger.LogInformation("[EMAIL] Tour notification sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
             catch (Exception ex)
             {
@@ -73,8 +87,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendQuotationEmailAsync(string email, string customerName, string quotationNumber, byte[]? pdfBytes = null, string? quotationLink = null)
         {
-            var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var (fromEmail, password, host, port) = GetEmailSettings();
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(email) ||
@@ -101,7 +114,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail),
+                    From       = new MailAddress(fromEmail, "WorkNest"),
                     Subject    = $"Your Work-Place Solution - {customerName}",
                     Body       = body,
                     IsBodyHtml = false,
@@ -114,14 +127,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mailMessage.Attachments.Add(attachment);
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
-                {
-                    Credentials = new NetworkCredential(fromEmail, password),
-                    EnableSsl   = true,
-                };
-
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mailMessage);
-                _logger.LogInformation("[EMAIL] Quotation email sent to {To}", email);
+                _logger.LogInformation("[EMAIL] Quotation email sent to {To} via {Host}:{Port}", email, host, port);
             }
             catch (Exception ex)
             {
@@ -135,8 +143,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, decimal currentCycleAmount = 0,
             decimal securityDeposit = 0, decimal taxAmount = 0, decimal discountAmount = 0, byte[]? pdfBytes = null)
         {
-            var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var (fromEmail, password, host, port) = GetEmailSettings();
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -165,29 +172,23 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     sb.AppendLine($"End Date                : {endOn:dd MMM yyyy}");
                 sb.AppendLine();
                 sb.AppendLine("FINANCIAL BREAKDOWN:");
-                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N2}");
+                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N0}");
                 if (securityDeposit > 0)
-                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N2}");
+                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N0}");
                 if (taxAmount > 0)
-                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N2}");
+                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N0}");
                 if (discountAmount > 0)
-                    sb.AppendLine($"Discount                : - PKR {discountAmount:N2}");
+                    sb.AppendLine($"Discount                : - PKR {discountAmount:N0}");
                 sb.AppendLine("--------------------------------------------------");
-                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N2}");
+                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N0}");
 
                 if (isContract && nextBillDueDate.HasValue)
                 {
                     sb.AppendLine();
-                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N2}");
+                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N0}");
                     sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
-                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N2}");
+                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N0}");
                 }
-
-                if (taxAmount > 0)
-                // {
-                //     sb.AppendLine();
-                //     sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
-                // }
 
                 sb.AppendLine();
                 sb.AppendLine("Please present this challan at the front desk or use it as a reference for your payment.");
@@ -202,7 +203,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 string docType = challanNumber.StartsWith("INV", StringComparison.OrdinalIgnoreCase) ? "Invoice" : "Challan";
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail),
+                    From       = new MailAddress(fromEmail, "WorkNest Billing"),
                     Subject    = $"Your WorkNest {docType} — {challanNumber}",
                     Body       = body,
                     IsBodyHtml = false,
@@ -220,14 +221,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     _logger.LogWarning("[EMAIL] Warning: {DocType} {Number} email to {To} is being sent WITHOUT PDF attachment (pdfBytes is null or empty).", docType, challanNumber, toEmail);
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
-                {
-                    Credentials = new NetworkCredential(fromEmail, password),
-                    EnableSsl   = true,
-                };
-
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mailMessage);
-                _logger.LogInformation("[EMAIL] Challan email sent to {To}", toEmail);
+                _logger.LogInformation("[EMAIL] Challan email sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
             catch (Exception ex)
             {
@@ -243,8 +239,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             decimal taxAmount = 0, decimal discountAmount = 0, decimal totalContractAmount = 0,
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, byte[]? pdfBytes = null)
         {
-            var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var (fromEmail, password, host, port) = GetEmailSettings();
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -273,30 +268,24 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 sb.AppendLine($"{cycleLabel.PadRight(24)}: {billingPeriod ?? "N/A"}");
                 sb.AppendLine();
                 sb.AppendLine("FINANCIAL SUMMARY:");
-                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N2}");
+                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N0}");
                 if (securityDeposit > 0)
-                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N2}");
+                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N0}");
                 if (taxAmount > 0)
-                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N2}");
+                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N0}");
                 if (discountAmount > 0)
-                    sb.AppendLine($"Discount                : - PKR {discountAmount:N2}");
+                    sb.AppendLine($"Discount                : - PKR {discountAmount:N0}");
                 sb.AppendLine("--------------------------------------------------");
-                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N2}");
+                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N0}");
 
                 if (isContract && nextBillDueDate.HasValue)
                 {
                     sb.AppendLine();
                     sb.AppendLine("CONTRACT METRICS:");
-                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N2}");
+                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N0}");
                     sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
-                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N2}");
+                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N0}");
                 }
-
-                // if (taxAmount > 0)
-                // {
-                //     sb.AppendLine();
-                //     sb.AppendLine("* Note: Rent includes 10% support services; 16% Provincial Sales Tax (PST) is charged on support services.");
-                // }
 
                 sb.AppendLine();
                 sb.AppendLine("Please find the booking confirmation PDF attached.");
@@ -310,7 +299,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail),
+                    From       = new MailAddress(fromEmail, "WorkNest Bookings"),
                     Subject    = $"Booking Confirmation - {spaceName} | WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
@@ -323,14 +312,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mailMessage.Attachments.Add(attachment);
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
-                {
-                    Credentials = new NetworkCredential(fromEmail, password),
-                    EnableSsl   = true,
-                };
-
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mailMessage);
-                _logger.LogInformation("[EMAIL] Booking confirmation email sent to {To}", toEmail);
+                _logger.LogInformation("[EMAIL] Booking confirmation email sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
             catch (Exception ex)
             {
@@ -345,8 +329,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             decimal taxAmount = 0m, decimal grandTotal = 0m, string customerAddress = "",
             DateTime? billingStart = null, DateTime? billingEnd = null, byte[]? pdfBytes = null)
         {
-            var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var (fromEmail, password, host, port) = GetEmailSettings();
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -417,10 +400,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Space Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{spaceName}</td></tr>
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Attendant Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{attendantName} (ID: {attendantIdNumber})</td></tr>
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Excess Seat Count:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{excessSeatCount} seat(s) over capacity</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Room Rent Surcharge SubTotal:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {surchargeAmount:N2}</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Support Services Component (10%):</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {supportCharge:N2}</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>PST (16% Sales Tax on Support):</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0; color: #d97706;"">PKR {taxAmount:N2}</td></tr>
-                        <tr><td style=""padding: 10px;""><strong>Grand Total Payable:</strong></td><td style=""padding: 10px; color: #0284c7; font-size: 1.1em; font-weight: bold;"">PKR {grandTotal:N2}</td></tr>
+                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Room Rent Surcharge SubTotal:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {surchargeAmount:N0}</td></tr>
+                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Support Services Component (10%):</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {supportCharge:N0}</td></tr>
+                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>PST (16% Sales Tax on Support):</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0; color: #d97706;"">PKR {taxAmount:N0}</td></tr>
+                        <tr><td style=""padding: 10px;""><strong>Grand Total Payable:</strong></td><td style=""padding: 10px; color: #0284c7; font-size: 1.1em; font-weight bold;"">PKR {grandTotal:N0}</td></tr>
                     </table>
 
                     <p style=""font-size: 0.9em; color: #64748b;"">Formula applied: <code>0.5 × Seat Price × Excess Seat Count</code> + 16% PST on 10% Support Services. Statement PDF generated via QuestPDF is attached.</p>
@@ -436,14 +419,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mail.Attachments.Add(new Attachment(new MemoryStream(pdfBytes), $"Custom-Invoice-{invoiceNumber}.pdf", "application/pdf"));
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
-                {
-                    Credentials = new NetworkCredential(fromEmail, password),
-                    EnableSsl = true
-                };
-
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mail);
-                _logger.LogInformation("[EMAIL] Custom surcharge invoice email #{InvoiceNumber} with Statement PDF sent successfully to {ToEmail}.", invoiceNumber, toEmail);
+                _logger.LogInformation("[EMAIL] Custom surcharge invoice email #{InvoiceNumber} with Statement PDF sent successfully to {ToEmail} via {Host}:{Port}.", invoiceNumber, toEmail, host, port);
             }
             catch (Exception ex)
             {
@@ -453,8 +431,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendAgreementEmailAsync(string toEmail, string customerName, string quotationNumber, byte[] pdfBytes)
         {
-            var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var (fromEmail, password, host, port) = GetEmailSettings();
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -490,14 +467,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mail.Attachments.Add(new Attachment(new MemoryStream(pdfBytes), $"Agreement-{quotationNumber}.pdf", "application/pdf"));
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
-                {
-                    Credentials = new NetworkCredential(fromEmail, password),
-                    EnableSsl = true
-                };
-
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mail);
-                _logger.LogInformation("[EMAIL] Agreement PDF email for quotation #{QuotationNumber} sent successfully to {ToEmail}.", quotationNumber, toEmail);
+                _logger.LogInformation("[EMAIL] Agreement PDF email for quotation #{QuotationNumber} sent successfully to {ToEmail} via {Host}:{Port}.", quotationNumber, toEmail, host, port);
             }
             catch (Exception ex)
             {
@@ -507,8 +479,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type)
         {
-            var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var (fromEmail, password, host, port) = GetEmailSettings();
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -551,14 +522,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 mail.Body = html;
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
-                {
-                    Credentials = new NetworkCredential(fromEmail, password),
-                    EnableSsl = true
-                };
-
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mail);
-                _logger.LogInformation("[EMAIL] Announcement email '{Title}' sent successfully to {ToEmail}.", title, toEmail);
+                _logger.LogInformation("[EMAIL] Announcement email '{Title}' sent successfully to {ToEmail} via {Host}:{Port}.", title, toEmail, host, port);
             }
             catch (Exception ex)
             {

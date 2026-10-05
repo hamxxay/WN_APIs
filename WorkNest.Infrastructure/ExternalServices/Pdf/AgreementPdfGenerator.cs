@@ -258,8 +258,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                             AddRow("Customer Entity Type", req.EntityType, "Agreement Status", "Standard Issued", false, false);
                             AddRow("Commencement Date", startDateStr, "Expiration Date", endDateStr, true, false);
-                            AddRow("Recurring Fee Amount", $"PKR {req.FeeAmount:N2}", "Billing Frequency", billingPeriodStr, true, false);
-                            AddRow("Security Deposit (Refundable)", $"PKR {req.SecurityDeposit:N2}");
+                            AddRow("Recurring Fee Amount", $"PKR {req.FeeAmount:N0}", "Billing Frequency", billingPeriodStr, true, false);
+                            AddRow("Security Deposit (Refundable)", $"PKR {req.SecurityDeposit:N0}");
                             AddRow("Designated Operating Hours", opHoursStr, "Contact Number", req.PhoneNumber ?? "-", false, false);
                         });
 
