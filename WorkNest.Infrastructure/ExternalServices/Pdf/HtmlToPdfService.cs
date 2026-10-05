@@ -8,48 +8,61 @@ using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Infrastructure.ExternalServices.Pdf
 {
-    public class HtmlToPdfService : IHtmlToPdfService
+    public class HtmlToPdfService : IHtmlToPdfService, IAsyncDisposable
     {
-        private static readonly SemaphoreSlim _browserFetchLock = new SemaphoreSlim(1, 1);
+        private static readonly SemaphoreSlim _browserLock = new SemaphoreSlim(1, 1);
+        private static IBrowser? _browserInstance;
         private static bool _isBrowserDownloaded = false;
 
-        private async Task EnsureBrowserAsync()
+        private async Task<IBrowser> GetOrLaunchBrowserAsync()
         {
-            if (_isBrowserDownloaded) return;
+            if (_browserInstance != null && !_browserInstance.IsClosed && _browserInstance.IsConnected)
+            {
+                return _browserInstance;
+            }
 
-            await _browserFetchLock.WaitAsync();
+            await _browserLock.WaitAsync();
             try
             {
+                if (_browserInstance != null && !_browserInstance.IsClosed && _browserInstance.IsConnected)
+                {
+                    return _browserInstance;
+                }
+
                 if (!_isBrowserDownloaded)
                 {
                     var browserFetcher = new BrowserFetcher();
                     await browserFetcher.DownloadAsync();
                     _isBrowserDownloaded = true;
                 }
+
+                var launchOptions = new LaunchOptions
+                {
+                    Headless = true,
+                    Args = new[]
+                    {
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-gpu",
+                        "--disable-extensions",
+                        "--no-first-run",
+                        "--no-zygote"
+                    }
+                };
+
+                _browserInstance = await Puppeteer.LaunchAsync(launchOptions);
+                return _browserInstance;
             }
             finally
             {
-                _browserFetchLock.Release();
+                _browserLock.Release();
             }
         }
 
         public async Task<byte[]> ConvertHtmlToPdfAsync(string htmlContent)
         {
-            await EnsureBrowserAsync();
-
-            var launchOptions = new LaunchOptions
-            {
-                Headless = true,
-                Args = new[]
-                {
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu"
-                }
-            };
-
-            await using var browser = await Puppeteer.LaunchAsync(launchOptions);
+            var browser = await GetOrLaunchBrowserAsync();
             await using var page = await browser.NewPageAsync();
 
             string fullHtml = $@"<!DOCTYPE html>
@@ -118,7 +131,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
             await page.SetContentAsync(fullHtml, new NavigationOptions
             {
-                WaitUntil = new[] { WaitUntilNavigation.DOMContentLoaded, WaitUntilNavigation.Networkidle0 }
+                WaitUntil = new[] { WaitUntilNavigation.DOMContentLoaded }
             });
 
             var pdfOptions = new PdfOptions
@@ -136,5 +149,19 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
             return await page.PdfDataAsync(pdfOptions);
         }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_browserInstance != null && !_browserInstance.IsClosed)
+            {
+                try
+                {
+                    await _browserInstance.CloseAsync();
+                    _browserInstance.Dispose();
+                }
+                catch { }
+            }
+        }
     }
 }
+

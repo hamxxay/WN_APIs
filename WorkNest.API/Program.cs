@@ -150,7 +150,7 @@ try
     builder.Services.AddScoped<IEncryptionService, EncryptionService>();
     builder.Services.AddScoped<IEmailService, EmailService>();
     builder.Services.AddScoped<IPdfService, PdfService>();
-    builder.Services.AddScoped<IHtmlToPdfService, HtmlToPdfService>();
+    builder.Services.AddSingleton<IHtmlToPdfService, HtmlToPdfService>();
     builder.Services.AddScoped<IPdfMergeService, PdfMergeService>();
     builder.Services.AddScoped<IPayFastService, PayFastService>();
     builder.Services.AddScoped<IKycFileStorage, LocalKycFileStorage>();
@@ -244,6 +244,22 @@ try
         {
             Log.Error(ex, "Failed to run startup database migrations for lease templates/agreements.");
         }
+
+        // Pre-warm Chromium browser in background to eliminate cold start penalty on first request
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var bgScope = app.Services.CreateScope();
+                var htmlPdf = bgScope.ServiceProvider.GetRequiredService<IHtmlToPdfService>();
+                await htmlPdf.ConvertHtmlToPdfAsync("<p>warmup</p>");
+                Log.Information("[HtmlToPdf] Headless browser pre-warmed successfully.");
+            }
+            catch (Exception bgEx)
+            {
+                Log.Warning(bgEx, "[HtmlToPdf] Background browser pre-warming encountered an issue; will initialize on first use.");
+            }
+        });
     }
 
     Log.Information("WorkNest API starting on {Env}", app.Environment.EnvironmentName);

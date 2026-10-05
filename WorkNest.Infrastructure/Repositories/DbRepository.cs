@@ -2993,22 +2993,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<int> InsertAgreementDbAsync(int quotationId, int customerId, string entityType, int refundDays, decimal feeAmount, decimal securityDeposit, string? opHours, string? custName, string? custCnic, string? custPhone, string? custAddress, string? compName, string? ntn, string? secp, int? userId, int? templateVersionId = null)
         {
             await using var c = await Open();
-            string sql = @"
-                INSERT INTO dbo.WN_Agreements (
-                    QuotationId, CustomerId, EntityType, Status, SentDate,
-                    RefundDays, FeeAmount, SecurityDeposit, OperatingHours,
-                    CustomerName, CustomerCnic, CustomerPhone, CustomerAddress,
-                    CompanyName, Ntn, SecpRegistrationNo, CreatedById, TemplateVersionId, CreatedOn
-                )
-                OUTPUT INSERTED.Id
-                VALUES (
-                    @QuotationId, @CustomerId, @EntityType, 'AgreementSent', SYSUTCDATETIME(),
-                    @RefundDays, @FeeAmount, @SecurityDeposit, @OperatingHours,
-                    @CustomerName, @CustomerCnic, @CustomerPhone, @CustomerAddress,
-                    @CompanyName, @Ntn, @SecpRegistrationNo, @CreatedById, @TemplateVersionId, SYSUTCDATETIME()
-                );";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Agreements_Insert", c);
             cmd.Parameters.AddWithValue("@QuotationId", quotationId);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
             cmd.Parameters.AddWithValue("@EntityType", entityType);
@@ -3033,26 +3018,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<IDictionary<string, object?>?> GetAgreementByIdDbAsync(int agreementId)
         {
             await using var c = await Open();
-            string sql = @"
-                SELECT a.*, q.QuotationNumber, q.StartDateTime, q.EndDateTime,
-                       t.Name AS TemplateName, t.ContentHtml AS TemplateHtml,
-                       COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
-                       COALESCE(comp.CompanyName, br.[Description], loc.Name, 'WorkNest (Pvt) Ltd') AS VendorLegalName,
-                       COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
-                       COALESCE(comp.Contact, '') AS VendorPhone,
-                       COALESCE(comp.NTN, '') AS VendorNtn,
-                       ISNULL(ot.[Description], a.OperatingHours) AS OfferingTypeDescription
-                FROM dbo.WN_Agreements a WITH (NOLOCK)
-                JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
-                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
-                LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
-                LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
-                LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId)
-                LEFT JOIN dbo.WN_LeaseTemplates t WITH (NOLOCK) ON t.Id = a.TemplateVersionId
-                LEFT JOIN dbo.WN_OfferingType ot WITH (NOLOCK) ON (TRY_CAST(a.OperatingHours AS INT) = ot.Id OR TRY_CAST(q.OfferingType AS INT) = ot.Id OR ot.[Description] = a.OperatingHours)
-                WHERE a.Id = @AgreementId;";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Agreements_GetById", c);
             cmd.Parameters.AddWithValue("@AgreementId", agreementId);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
@@ -3064,23 +3030,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<IDictionary<string, object?>?> GetQuotationLocationAndCompanyDetailsDbAsync(int quotationId)
         {
             await using var c = await Open();
-            string sql = @"
-                SELECT TOP 1
-                    COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
-                    COALESCE(comp.CompanyName, br.[Description], loc.Name, 'WorkNest (Pvt) Ltd') AS VendorLegalName,
-                    COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
-                    COALESCE(comp.Contact, '') AS VendorPhone,
-                    COALESCE(comp.NTN, '') AS VendorNtn,
-                    ISNULL(ot.[Description], q.OfferingType) AS OfferingTypeDescription
-                FROM dbo.WN_Quotations q WITH (NOLOCK)
-                JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
-                LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
-                LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
-                LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId)
-                LEFT JOIN dbo.WN_OfferingType ot WITH (NOLOCK) ON (TRY_CAST(q.OfferingType AS INT) = ot.Id OR ot.[Description] = q.OfferingType)
-                WHERE q.Id = @QuotationId;";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Quotations_GetLocationAndCompanyDetails", c);
             cmd.Parameters.AddWithValue("@QuotationId", quotationId);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
@@ -3117,32 +3067,25 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task MarkAgreementSignedDbAsync(int agreementId, int? userId)
         {
             await using var c = await Open();
-            string sql = @"
-                UPDATE dbo.WN_Agreements
-                SET Status = 'Signed', SignedDate = SYSUTCDATETIME(), UpdatedOn = SYSUTCDATETIME()
-                WHERE Id = @AgreementId;";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Agreements_MarkSigned", c);
             cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task SetAgreementBookingIdAsync(int agreementId, int bookingId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Agreements_SetBookingId", c);
+            cmd.Parameters.AddWithValue("@AgreementId", agreementId);
+            cmd.Parameters.AddWithValue("@BookingId", bookingId);
             await cmd.ExecuteNonQueryAsync();
         }
 
         public async Task UpdateCustomerAgreementDetailsDbAsync(int customerId, string? fullName, string? phone, string? cnic, string? address, string? company, string? ntn, string? secp)
         {
             await using var c = await Open();
-            string sql = @"
-                UPDATE dbo.WN_Customers
-                SET FirstName = ISNULL(@FirstName, FirstName),
-                    PhoneNumber = ISNULL(@PhoneNumber, PhoneNumber),
-                    CnicOrPassport = ISNULL(@Cnic, CnicOrPassport),
-                    Address = ISNULL(@Address, Address),
-                    Company = ISNULL(@CompanyName, Company),
-                    NTN = ISNULL(@NTN, NTN),
-                    SecpRegistrationNo = ISNULL(@SecpRegistrationNo, SecpRegistrationNo),
-                    UpdatedAt = SYSUTCDATETIME()
-                WHERE Id = @CustomerId;";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Customers_UpdateAgreementDetails", c);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
             cmd.Parameters.AddWithValue("@FirstName", (object?)fullName ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
@@ -3151,6 +3094,28 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@CompanyName", (object?)company ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@NTN", (object?)ntn ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SecpRegistrationNo", (object?)secp ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task UpdateQuotationStatusAsync(int quotationId, string status)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Quotations_UpdateStatus", c);
+            cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+            cmd.Parameters.AddWithValue("@Status", status);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task AddQuotationActivityAsync(int quotationId, int version, string activityType, string message, int? userId = null, string? customerNote = null)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_QuotationActivities_Insert", c);
+            cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+            cmd.Parameters.AddWithValue("@Version", version);
+            cmd.Parameters.AddWithValue("@ActivityType", activityType);
+            cmd.Parameters.AddWithValue("@Message", message);
+            cmd.Parameters.AddWithValue("@CreatedByUserId", (object?)userId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerNote", (object?)customerNote ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -3226,14 +3191,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task UpdateAgreementSignedPdfDbAsync(int agreementId, string signedPdfPath, DateTime uploadedAt)
         {
             await using var c = await Open();
-            string sql = @"
-                UPDATE dbo.WN_Agreements
-                SET SignedPdfPath = @SignedPdfPath,
-                    SignedPdfUploadedAt = @SignedPdfUploadedAt,
-                    UpdatedOn = SYSUTCDATETIME()
-                WHERE Id = @AgreementId;";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Agreements_UpdateSignedPdf", c);
             cmd.Parameters.AddWithValue("@AgreementId", agreementId);
             cmd.Parameters.AddWithValue("@SignedPdfPath", signedPdfPath);
             cmd.Parameters.AddWithValue("@SignedPdfUploadedAt", uploadedAt);
@@ -3243,14 +3201,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task ClearAgreementSignedPdfDbAsync(int agreementId)
         {
             await using var c = await Open();
-            string sql = @"
-                UPDATE dbo.WN_Agreements
-                SET SignedPdfPath = NULL,
-                    SignedPdfUploadedAt = NULL,
-                    UpdatedOn = SYSUTCDATETIME()
-                WHERE Id = @AgreementId;";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Agreements_ClearSignedPdf", c);
             cmd.Parameters.AddWithValue("@AgreementId", agreementId);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -3258,11 +3209,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<bool> DeleteAgreementDbAsync(int agreementId)
         {
             await using var c = await Open();
-            string sql = @"
-                DELETE FROM dbo.WN_Agreements
-                WHERE Id = @AgreementId;";
-
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Agreements_Delete", c);
             cmd.Parameters.AddWithValue("@AgreementId", agreementId);
             int rowsAffected = await cmd.ExecuteNonQueryAsync();
             return rowsAffected > 0;
