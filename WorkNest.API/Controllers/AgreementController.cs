@@ -45,6 +45,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("send")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // staff only
         public async Task<IActionResult> SendAgreement([FromBody] SendAgreementRequest request)
         {
             try
@@ -69,6 +70,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // all customers' agreements: staff only
         public async Task<IActionResult> GetAgreements(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
@@ -94,7 +96,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("{id:int}/pdf")]
-        [AllowAnonymous]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // was anonymous; customers use my/{id}/pdf (own agreements only)
         public async Task<IActionResult> DownloadAgreementPdf(int id)
         {
             try
@@ -109,6 +111,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("{id:int}/mark-signed")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // creates a booking: same as sign / upload-signed
         public async Task<IActionResult> MarkSigned(int id, [FromBody] MarkAgreementSignedRequest? req)
         {
             try
