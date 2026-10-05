@@ -205,20 +205,26 @@ namespace WorkNest.Application.Services
             }
             else
             {
-              decimal fixedDisc = request.DiscountAmount > 0 ? request.DiscountAmount :
-        ((string.Equals(request.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(request.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) ? request.DiscountValue : 0m);
-    if (fixedDisc > 0)
-    {
-        if (isMeeting)
-        {
-            discountAmount = Round2(Math.Min(fixedDisc, result.Rent));
-        }
-        else
-        {
-            // PKR fixedDisc is per month, so for the billing period cycle: fixedDisc * billingMonths
-            discountAmount = Round2(Math.Min(fixedDisc * billingMonths, result.Rent));
-        }
-    }
+                decimal fixedDisc = request.DiscountAmount > 0 ? request.DiscountAmount :
+                    ((string.Equals(request.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(request.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) ? request.DiscountValue : 0m);
+
+                if (fixedDisc > 0)
+                {
+                    if (isMeeting)
+                    {
+                        discountAmount = Round2(Math.Min(fixedDisc, result.Rent));
+                    }
+                    else
+                    {
+                        // PKR fixedDisc is per month, so for the billing period cycle: fixedDisc * billingMonths
+                        discountAmount = Round2(Math.Min(fixedDisc * billingMonths, result.Rent));
+                    }
+
+                    decimal basisForPct = result.Rent;
+                    if (basisForPct > 0)
+                    {
+                        discountPct = (discountAmount / basisForPct) * 100.0m;
+                    }
                 }
             }
             result.Discount = discountAmount;
