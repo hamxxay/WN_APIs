@@ -156,10 +156,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             }
                         }
 
-                        decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 15.00m;
+                        decimal supportCharge = q.SupportChargeAmount > 0 
+                            ? q.SupportChargeAmount 
+                            : (spaceType == "MeetingRoom" ? Math.Round(firstCycleRent * 0.10m, 2) : 2000.00m * (q.Capacity.HasValue && q.Capacity.Value > 0 ? q.Capacity.Value : 1) * billingMonths);
+                        decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 16.00m;
                         decimal taxOnAdvanceRent = q.TaxAmountOnAdvanceRent > 0 
                             ? q.TaxAmountOnAdvanceRent 
-                            : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(Math.Round(firstCycleRent * 0.10m, 2) * (taxPct / 100.0m), 2));
+                            : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(supportCharge * (taxPct / 100.0m), 2));
                         decimal initialPayable = Math.Max(0, (spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) + secDeposit + taxOnAdvanceRent - discountAmount);
 
                         // Dynamic Summary Ribbon
@@ -412,7 +415,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             decimal? SecurityDeposit = secDeposit > 0 ? secDeposit : null;
                             decimal serviceChargeAmount = q.SupportChargeAmount > 0 
                                 ? q.SupportChargeAmount 
-                                : Math.Round(((spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) - discountAmount) * ((q.AppliedChargePercentage > 0 ? q.AppliedChargePercentage : 10.00m) / 100.0m), 2);
+                                : (spaceType == "MeetingRoom" 
+                                    ? Math.Round(((q.SubtotalAmount - discountAmount) * ((q.AppliedChargePercentage > 0 ? q.AppliedChargePercentage : 10.00m) / 100.0m)), 2) 
+                                    : (2000.00m * (q.Capacity.HasValue && q.Capacity.Value > 0 ? q.Capacity.Value : 1) * billingMonths));
                             decimal ServiceCharges = serviceChargeAmount;
                             decimal RoomRent = Math.Max(0, ((spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) - discountAmount) - ServiceCharges);
                             decimal SalesTax = taxOnAdvanceRent > 0 ? taxOnAdvanceRent : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(ServiceCharges * (taxPct / 100.0m), 2));

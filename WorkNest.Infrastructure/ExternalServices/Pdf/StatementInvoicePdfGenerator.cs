@@ -283,7 +283,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 foreach (var item in data.LineItems)
                 {
                     decimal displayQty = item.Quantity > 0 ? item.Quantity : 1;
-                    decimal displayUnitPrice = item.UnitPrice > 0 ? item.UnitPrice : (displayQty > 0 ? item.PriceExclVat / displayQty : item.PriceExclVat);
+                    decimal displayUnitPrice = displayQty > 0 ? Math.Round(item.PriceExclVat / displayQty, 2) : item.PriceExclVat;
 
                     table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).Text(item.Description).FontColor("#000000");
                     table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).AlignRight().Text(FormatAmount(displayUnitPrice)).FontColor("#000000");

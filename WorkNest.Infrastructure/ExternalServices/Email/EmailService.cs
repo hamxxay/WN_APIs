@@ -337,7 +337,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 return;
             }
 
-            decimal supportCharge = Math.Round(surchargeAmount * 0.10m, 2);
+            decimal supportCharge = (taxAmount > 0) 
+                ? Math.Round(taxAmount / 0.16m, 2) 
+                : (excessSeatCount > 0 ? (2000.00m * excessSeatCount) : Math.Round(surchargeAmount * 0.10m, 2));
             if (taxAmount <= 0) taxAmount = Math.Round(supportCharge * 0.16m, 2);
             if (grandTotal <= 0) grandTotal = surchargeAmount + taxAmount;
 
