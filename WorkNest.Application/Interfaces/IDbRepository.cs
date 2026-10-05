@@ -47,6 +47,8 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, string? shiftType = "24_7");
         Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
+        /// <summary>Signed agreement: agreement SignedDate, booking date and challan dates follow the agreement's date.</summary>
+        Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate);
         /// <summary>Pending bookings whose first (non-cancelled) invoice is Paid.</summary>
         Task<List<int>> GetPendingBookingsWithPaidFirstInvoiceDbAsync(IEnumerable<int> pendingStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds);
         Task CancelBookingAsync(int id, string? userEmail, string? cancelReason, int? updatedById);

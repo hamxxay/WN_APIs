@@ -392,7 +392,11 @@ namespace WorkNest.Application.Services
             await _db.UpdateAgreementSignedPdfDbAsync(agreementId, path, uploadedAtUtc);
         }
 
-        public async Task<AgreementResponseDto> MarkAgreementSignedAsync(int agreementId, int? userId, string? note)
+        /// <summary>
+        /// Signed agreement came back: mark it signed, create the booking from its quotation, and date the
+        /// agreement, booking and challan on <paramref name="signedDate"/> (the date on the signed agreement).
+        /// </summary>
+        public async Task<AgreementResponseDto> MarkAgreementSignedAsync(int agreementId, int? userId, string? note, DateTime? signedDate = null)
         {
             var row = await _db.GetAgreementByIdDbAsync(agreementId);
             if (row == null) throw new InvalidOperationException("Agreement record not found.");
@@ -407,15 +411,21 @@ namespace WorkNest.Application.Services
 
             // 3. Convert Quotation to Booking
             var convertRes = await _quotations.ConvertQuotationToBookingAsync(quotationId, userId);
+            int? bookingId = null;
             if (convertRes.TryGetValue("BookingId", out var bVal) && bVal != null)
             {
-                int bookingId = Convert.ToInt32(bVal);
-                await _db.SetAgreementBookingIdAsync(agreementId, bookingId);
+                bookingId = Convert.ToInt32(bVal);
+                await _db.SetAgreementBookingIdAsync(agreementId, bookingId.Value);
             }
+            if (bookingId == null)
+                throw new InvalidOperationException("The agreement was marked signed but no booking was created. Check the quotation's space and dates.");
 
-            var (rows, _) = await GetAgreementsListAsync(1, 1, null, null);
-            var updated = rows.FirstOrDefault(r => r.Id == agreementId);
-            return updated ?? throw new InvalidOperationException("Failed to retrieve updated agreement.");
+            // 4. Date everything on the agreement's signed date
+            await _db.ApplyAgreementSignedDateDbAsync(agreementId, bookingId, (signedDate ?? DateTime.Today).Date);
+
+            // Re-read this agreement (the old code read only the newest one and failed for older agreements)
+            return await GetAgreementByIdAsync(agreementId)
+                   ?? throw new InvalidOperationException("Failed to retrieve updated agreement.");
         }
 
         public async Task<bool> DeleteAgreementAsync(int agreementId)

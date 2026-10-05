@@ -350,7 +350,7 @@ BEGIN
             NULLIF(bd.SupportChargeAmount, 0),
             CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
         ) AS SupportChargeAmount,
-        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount,
+        ISNULL(i.SecurityDepositAmount, 0) AS SecurityDepositAmount, -- this invoice's deposit only (recurring invoices have none)
         15.00 AS WithholdingTaxRate,
         st.PublicId AS STPublicId,
         st.STInvoiceNumber
@@ -1081,7 +1081,7 @@ END;";
 
         [HttpPost("api/invoice/send-initial/{bookingId:int}")]
         [HttpPost("api/booking/{bookingId:int}/send-initial-invoice")]
-        public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId)
+        public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId, [FromQuery] DateTime? issuedOn = null)
         {
             try
             {
@@ -1214,8 +1214,14 @@ END;";
                     mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
                 }
 
-                string checkSql = "SELECT TOP 1 Id, InvoiceNumber FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id ASC;";
+                string checkSql = @"SELECT TOP 1 Id, InvoiceNumber,
+                                           CASE WHEN ISNULL(PaidTotal, 0) > 0 OR StatusId IN (2, 3, 5)
+                                                  OR StatusId IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK)
+                                                                  WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Partial', 'Cancelled'))
+                                                THEN 1 ELSE 0 END AS IsLocked
+                                    FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId ORDER BY Id ASC;";
                 int existingId = 0;
+                bool existingLocked = false;
                 using (var checkCmd = new SqlCommand(checkSql, conn))
                 {
                     checkCmd.Parameters.AddWithValue("@BookingId", bookingId);
@@ -1223,7 +1229,15 @@ END;";
                     if (await r.ReadAsync())
                     {
                         existingId = r.GetInt32(0);
+                        existingLocked = r.GetInt32(2) == 1;
                     }
+                }
+
+                // A paid, part-paid or cancelled invoice is final: never rewrite its amounts or due date —
+                // just send it again as it is.
+                if (existingId > 0 && existingLocked)
+                {
+                    return await SendInvoiceEmail(existingId);
                 }
 
                 if (existingId > 0)
@@ -1329,7 +1343,7 @@ END;";
                 {
                     BookingId = bookingId,
                     UserId = userId,
-                    IssuedOn = DateTime.Today,
+                    IssuedOn = (issuedOn?.Date is DateTime d && d <= DateTime.Today) ? d : DateTime.Today, // agreement date when given
                     DueOn = startOn.HasValue ? startOn.Value : DateTime.Today,
                     Notes = $"Initial Payment Invoice for Booking #{bookingId} - {spaceName}",
                     SendEmail = true,
@@ -1595,7 +1609,7 @@ END;";
                     SubTotal = grossAdvanceRent,
                     DiscountTotal = appliedDiscount,
                     TaxTotal = taxTotal,
-                    GrandTotal = Math.Round(grossAdvanceRent - appliedDiscount + taxTotal + arrears, 2, MidpointRounding.AwayFromZero),
+                    GrandTotal = Math.Round(grossAdvanceRent - appliedDiscount + taxTotal, 2, MidpointRounding.AwayFromZero), // arrears shown, not added (each invoice is paid on its own)
                     RentAccountId = rentAccountId,
                     SecurityReceivedId = securityReceivedId,
                     ServicesIncomeId = servicesIncomeId,
@@ -1618,17 +1632,11 @@ END;";
                     });
                 }
 
+                // Earlier unpaid invoices stay open and are paid on their own, so the balance is shown
+                // for the customer's information only — adding it here would count it twice.
                 if (arrears > 0)
                 {
-                    dto.Lines.Add(new CreateCustomInvoiceLineDto
-                    {
-                        Description = "Arrears from prior billing cycles",
-                        Quantity = 1,
-                        UnitPrice = arrears,
-                        DiscountAmount = 0,
-                        TaxRate = 0,
-                        ChargeTypeId = 5
-                    });
+                    dto.Notes = $"{dto.Notes}. Previous unpaid balance: PKR {arrears:N0} (separate invoices, not included in this total).";
                 }
 
                 return await CreateCustomInvoice(dto, customerEmail);

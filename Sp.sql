@@ -3832,7 +3832,7 @@ BEGIN
         b.Id                                            AS bookingId,
         CAST(b.IdGUID AS NVARCHAR(36))                  AS bookingGuid,
         b.ChallanNumber                                 AS challanNumber,
-        b.ValidityDate                                  AS currentExpiryDate,
+        ISNULL((SELECT TOP 1 CASE WHEN cx.ValidUntil > b.ValidityDate OR b.ValidityDate IS NULL THEN cx.ValidUntil ELSE b.ValidityDate END FROM dbo.WN_Challans cx WITH (NOLOCK) WHERE cx.BookingId = b.Id ORDER BY cx.Id DESC), b.ValidityDate) AS currentExpiryDate,
         b.BookingStatusId                               AS bookingStatus,
         p.TransactionRef                                AS voucherNumber,
         p.StatusId                                      AS voucherStatus,
@@ -3898,7 +3898,7 @@ BEGIN
     SET NOCOUNT ON;
     SELECT
         c.Id, c.PublicId, c.BookingId, c.ChallanNumber,
-        c.IssuedOn, c.ValidUntil, c.StatusId, c.Notes, c.CreatedOn
+        c.IssuedOn, ISNULL((SELECT CASE WHEN bx.ValidityDate > c.ValidUntil OR c.ValidUntil IS NULL THEN bx.ValidityDate ELSE c.ValidUntil END FROM dbo.WN_Bookings bx WITH (NOLOCK) WHERE bx.Id = c.BookingId), c.ValidUntil) AS ValidUntil, c.StatusId, c.Notes, c.CreatedOn
     FROM dbo.WN_Challans c WITH (NOLOCK)
     WHERE c.BookingId = @BookingId
     ORDER BY c.CreatedOn DESC;
@@ -3920,7 +3920,7 @@ BEGIN
         c.PublicId        AS ChallanPublicId,
         c.ChallanNumber,
         c.IssuedOn,
-        c.ValidUntil,
+        ISNULL((SELECT CASE WHEN bx.ValidityDate > c.ValidUntil OR c.ValidUntil IS NULL THEN bx.ValidityDate ELSE c.ValidUntil END FROM dbo.WN_Bookings bx WITH (NOLOCK) WHERE bx.Id = c.BookingId), c.ValidUntil) AS ValidUntil,
         c.StatusId        AS ChallanStatusId,
         c.Notes           AS ChallanNotes,
         v.BookingId,
@@ -3997,7 +3997,7 @@ BEGIN
     SET NOCOUNT ON;
     SELECT TOP 1
         c.Id, c.PublicId, c.ChallanNumber,
-        c.IssuedOn, c.ValidUntil, c.StatusId,
+        c.IssuedOn, ISNULL((SELECT CASE WHEN bx.ValidityDate > c.ValidUntil OR c.ValidUntil IS NULL THEN bx.ValidityDate ELSE c.ValidUntil END FROM dbo.WN_Bookings bx WITH (NOLOCK) WHERE bx.Id = c.BookingId), c.ValidUntil) AS ValidUntil, c.StatusId,
         v.BookingId, v.BookingPublicId,
         v.UserName, v.UserEmail,
         v.SpaceName, v.SpaceCode,
@@ -5597,7 +5597,18 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_GetInvoiceDetailsById]
     @InvoiceId INT
 AS
 BEGIN
-    EXEC dbo.WN_GetInvoiceDetailsById @InvoiceId = @InvoiceId;
+    SET NOCOUNT ON;
+    SELECT i.*, u.Name AS CustomerName, u.Email AS CustomerEmail, s.Name AS SpaceName
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+     WHERE i.Id = @InvoiceId;
+    SELECT l.*, ct.Label AS ChargeTypeLabel
+      FROM dbo.WN_InvoiceLines l WITH (NOLOCK)
+      LEFT JOIN dbo.WN_ChargeTypes ct WITH (NOLOCK) ON ct.Id = l.ChargeTypeId
+     WHERE l.InvoiceId = @InvoiceId
+     ORDER BY l.SortOrder, l.Id;
 END;
 GO
 /****** Object:  StoredProcedure [dbo].[WN_GetInvoiceEmailData]    Script Date: 30/09/2026 1:23:18 pm ******/
@@ -5797,7 +5808,7 @@ BEGIN
             NULLIF(bd.SupportChargeAmount, 0),
             CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
         ) AS SupportChargeAmount,
-        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount,
+        ISNULL(i.SecurityDepositAmount, 0) AS SecurityDepositAmount,
         st.PublicId AS STPublicId,
         st.STInvoiceNumber
     FROM dbo.WN_Invoices i WITH (NOLOCK)
@@ -8211,7 +8222,7 @@ BEGIN
         p.PaymentMethodId, ISNULL(pm.Code, 'Bank') AS PaymentMethodCode, ISNULL(pm.Label, 'Bank Transfer / Challan') AS PaymentMethodLabel,
         p.Amount, ISNULL(p.CurrencyCode, 'PKR') AS CurrencyCode, p.TransactionRef, p.GatewayRef,
         ISNULL(p.StatusId, 1) AS StatusId,
-        CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN 'Paid' WHEN ISNULL(p.StatusId, 1) = 3 THEN 'Partial' WHEN ISNULL(p.StatusId, 1) = 4 THEN 'Overdue' WHEN ISNULL(p.StatusId, 1) = 5 THEN 'Cancelled' ELSE 'Pending' END AS PaymentStatus,
+        CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN 'Paid' WHEN ISNULL(p.StatusId, 1) = 3 THEN 'Failed' WHEN ISNULL(p.StatusId, 1) = 4 THEN 'Refunded' WHEN ISNULL(p.StatusId, 1) = 5 THEN 'Cancelled' ELSE 'Pending' END AS PaymentStatus,
         p.ExpiresOn, p.PaidOn, p.Notes, p.CreatedOn,
         bs.SpaceNumber,
         bs.ContractStartDate,
@@ -8267,11 +8278,11 @@ BEGIN
         SELECT p.Id, p.IdGUID AS PublicId, bs.BookingId, p.MembershipId,
             p.PaymentMethodId, ISNULL(pm.Code, ''Bank'') AS PaymentMethodCode, ISNULL(pm.Label, ''Bank Transfer / Challan'') AS PaymentMethodLabel,
             p.Amount, ISNULL(p.CurrencyCode, ''PKR'') AS CurrencyCode, p.TransactionRef, ISNULL(p.StatusId, 1) AS StatusId,
-            CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN ''Paid'' WHEN ISNULL(p.StatusId, 1) = 3 THEN ''Partial'' WHEN ISNULL(p.StatusId, 1) = 4 THEN ''Overdue'' WHEN ISNULL(p.StatusId, 1) = 5 THEN ''Cancelled'' ELSE ''Pending'' END AS PaymentStatus,
+            CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN ''Paid'' WHEN ISNULL(p.StatusId, 1) = 3 THEN ''Failed'' WHEN ISNULL(p.StatusId, 1) = 4 THEN ''Refunded'' WHEN ISNULL(p.StatusId, 1) = 5 THEN ''Cancelled'' ELSE ''Pending'' END AS PaymentStatus,
             p.ExpiresOn, p.PaidOn, p.CreatedOn,
             b.StartOn, b.EndOn,
             s.Name AS SpaceName, s.Code AS SpaceCode,
-            ch.ChallanNumber, ch.ValidUntil AS ChallanValidUntil,
+            ch.ChallanNumber, CASE WHEN b.ValidityDate > ch.ValidUntil OR ch.ValidUntil IS NULL THEN b.ValidityDate ELSE ch.ValidUntil END AS ChallanValidUntil,
             bs.SpaceNumber,
             bs.ContractStartDate,
             bs.ContractEndDate,
@@ -8303,11 +8314,11 @@ BEGIN
         SELECT p.Id, p.IdGUID AS PublicId, bs.BookingId, p.MembershipId,
             p.PaymentMethodId, ISNULL(pm.Code, ''Bank'') AS PaymentMethodCode, ISNULL(pm.Label, ''Bank Transfer / Challan'') AS PaymentMethodLabel,
             p.Amount, ISNULL(p.CurrencyCode, ''PKR'') AS CurrencyCode, p.TransactionRef, ISNULL(p.StatusId, 1) AS StatusId,
-            CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN ''Paid'' WHEN ISNULL(p.StatusId, 1) = 3 THEN ''Partial'' WHEN ISNULL(p.StatusId, 1) = 4 THEN ''Overdue'' WHEN ISNULL(p.StatusId, 1) = 5 THEN ''Cancelled'' ELSE ''Pending'' END AS PaymentStatus,
+            CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN ''Paid'' WHEN ISNULL(p.StatusId, 1) = 3 THEN ''Failed'' WHEN ISNULL(p.StatusId, 1) = 4 THEN ''Refunded'' WHEN ISNULL(p.StatusId, 1) = 5 THEN ''Cancelled'' ELSE ''Pending'' END AS PaymentStatus,
             p.ExpiresOn, p.PaidOn, p.CreatedOn,
             b.StartOn, b.EndOn,
             s.Name AS SpaceName, s.Code AS SpaceCode,
-            ch.ChallanNumber, ch.ValidUntil AS ChallanValidUntil,
+            ch.ChallanNumber, CASE WHEN b.ValidityDate > ch.ValidUntil OR ch.ValidUntil IS NULL THEN b.ValidityDate ELSE ch.ValidUntil END AS ChallanValidUntil,
             bs.SpaceNumber,
             bs.ContractStartDate,
             bs.ContractEndDate,
@@ -9619,7 +9630,7 @@ BEGIN
     INNER JOIN dbo.WN_Invoices i ON i.BookingId = ac.BookingId
     WHERE ac.EndDate < SYSUTCDATETIME()
       AND ac.Status = 50 -- Currently active
-      AND i.StatusId != 14; -- Not fully paid
+      AND i.StatusId NOT IN (2, 5) AND i.StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled')); -- Not fully paid
 END;
 GO
 /****** Object:  StoredProcedure [dbo].[WN_Roles_GetAll]    Script Date: 30/09/2026 1:23:18 pm ******/
@@ -11537,7 +11548,7 @@ BEGIN
        AND x.Expiry IS NOT NULL AND x.Expiry < @Today
        AND ISNULL(v.TotalPaidAmount, 0) = 0
        AND NOT EXISTS (SELECT 1 FROM SAC400.dbo.WN_Payments p WITH (NOLOCK)
-                        WHERE (p.TransactionRef = c.ChallanNumber OR p.BookingIdInt = c.BookingId)
+                        WHERE p.TransactionRef = c.ChallanNumber
                           AND p.StatusId IN (2, @Paid, @Partial))
        AND NOT EXISTS (SELECT 1 FROM @Overdue o WHERE o.BookingId = c.BookingId)
      GROUP BY c.BookingId;

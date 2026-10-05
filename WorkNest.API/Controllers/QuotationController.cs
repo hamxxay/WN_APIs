@@ -166,23 +166,10 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/quotation/{id:int}/convert")]
         public async Task<IActionResult> ConvertQuotation(int id, [FromHeader(Name = "x-user-email")] string? actorEmail)
         {
-            var email = ResolveUserEmail(actorEmail);
-            int? actorId = null;
-            if (!string.IsNullOrWhiteSpace(email))
-            {
-                var actorRow = await _db.GetUserByEmailAsync(email);
-                actorId = actorRow?.TryGetValue("Id", out var aid) == true ? System.Convert.ToInt32(aid) : (int?)null;
-            }
-
-            try
-            {
-                var res = await _quotations.ConvertQuotationToBookingAsync(id, actorId);
-                return Ok(ApiResponse.Ok(res, "Quotation converted to booking successfully."));
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ApiResponse.Fail(ex.Message));
-            }
+            // Bookings from quotations are created only when the signed agreement comes back
+            // (POST api/agreements/{id}/sign). Admins can still create a booking directly from the booking form.
+            await Task.CompletedTask;
+            return BadRequest(ApiResponse.Fail("A quotation becomes a booking only when its signed agreement is uploaded. Send the agreement, then upload the signed copy."));
         }
 
         [AllowAnonymous]

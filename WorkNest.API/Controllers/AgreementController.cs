@@ -113,8 +113,14 @@ namespace WorkNest.API.Controllers
         {
             try
             {
+                var existing = await _agreement.GetAgreementByIdAsync(id);
+                if (existing == null)
+                    return NotFound(new { isSuccessful = false, message = $"Agreement #{id} not found." });
+                if (string.IsNullOrWhiteSpace(existing.SignedPdfPath))
+                    return BadRequest(new { isSuccessful = false, message = "Upload the signed agreement first — a booking is only created once the signed copy is on file." });
+
                 int? actorId = ResolveActorId();
-                var result = await _agreement.MarkAgreementSignedAsync(id, actorId, req?.Note);
+                var result = await _agreement.MarkAgreementSignedAsync(id, actorId, req?.Note, existing.SignedDate ?? DateTime.Today);
 
                 return Ok(new
                 {
@@ -127,6 +133,82 @@ namespace WorkNest.API.Controllers
             {
                 return StatusCode(500, new { isSuccessful = false, message = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Signed agreement came back (one step): upload the signed scan + the date written on it.
+        /// Marks the agreement signed, creates the booking from its quotation and dates the agreement,
+        /// booking and challan on that date. The first invoice is then issued with the same date
+        /// (POST api/booking/{bookingId}/send-initial-invoice?issuedOn=yyyy-MM-dd).
+        /// </summary>
+        [HttpPost("{id:int}/sign")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [RequestSizeLimit(10 * 1024 * 1024)]
+        public async Task<IActionResult> SignAgreement(int id, IFormFile? file, [FromForm] DateTime? signedDate, [FromForm] string? note)
+        {
+            try
+            {
+                if (signedDate == null)
+                    return BadRequest(new { isSuccessful = false, message = "Enter the date written on the signed agreement." });
+                var date = signedDate.Value.Date;
+                if (date > DateTime.Today)
+                    return BadRequest(new { isSuccessful = false, message = "The signed date cannot be in the future." });
+
+                var agreement = await _agreement.GetAgreementByIdAsync(id);
+                if (agreement == null)
+                    return NotFound(new { isSuccessful = false, message = $"Agreement #{id} not found." });
+                if (agreement.BookingId != null)
+                    return BadRequest(new { isSuccessful = false, message = $"This agreement is already signed (booking #{agreement.BookingId})." });
+                if (agreement.SentDate != default && date < agreement.SentDate.Date)
+                    return BadRequest(new { isSuccessful = false, message = $"The signed date cannot be before the agreement was sent ({agreement.SentDate:d MMM yyyy})." });
+
+                // 1. Store the signed scan (same checks as upload-signed)
+                var upload = await SaveSignedPdfAsync(id, file);
+                if (upload.Error != null)
+                    return BadRequest(new { isSuccessful = false, message = upload.Error });
+
+                // 2. Mark signed + create the booking, dated on the agreement
+                int? actorId = ResolveActorId();
+                var result = await _agreement.MarkAgreementSignedAsync(id, actorId, note, date);
+
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    data = result,
+                    message = $"Signed agreement saved. Booking #{result.BookingId} created, dated {date:d MMM yyyy}."
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>Validates and stores a signed agreement PDF; records its path on the agreement.</summary>
+        private async Task<(string? Error, string? FileName, DateTime UploadedAtUtc)> SaveSignedPdfAsync(int id, IFormFile? file)
+        {
+            if (file == null || file.Length == 0) return ("Attach the signed agreement (PDF).", null, default);
+            var ext = Path.GetExtension(file.FileName);
+            if (string.IsNullOrWhiteSpace(ext) || !ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                return ("Only PDF files (.pdf) are allowed.", null, default);
+            if (file.Length > 10 * 1024 * 1024) return ("File size exceeds the 10MB limit.", null, default);
+            await using (var stream = file.OpenReadStream())
+            {
+                var header = new byte[5];
+                int read = await stream.ReadAsync(header, 0, 5);
+                if (read < 5 || Encoding.ASCII.GetString(header) != "%PDF-")
+                    return ("Invalid file signature. Uploaded file is not a valid PDF document.", null, default);
+            }
+            var configPath = string.IsNullOrWhiteSpace(_storageSettings.SignedAgreementsPath) ? "App_Data/SignedAgreements" : _storageSettings.SignedAgreementsPath;
+            var targetDir = Path.IsPathRooted(configPath) ? configPath : Path.Combine(_env.ContentRootPath, configPath);
+            if (!Directory.Exists(targetDir)) Directory.CreateDirectory(targetDir);
+            var fileName = $"{id}_{Guid.NewGuid():N}.pdf";
+            var fullFilePath = Path.Combine(targetDir, fileName);
+            await using (var destStream = new FileStream(fullFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                await file.CopyToAsync(destStream);
+            var uploadedAtUtc = DateTime.UtcNow;
+            await _agreement.UpdateSignedPdfInfoAsync(id, fullFilePath, uploadedAtUtc);
+            return (null, fileName, uploadedAtUtc);
         }
 
         [HttpPost("{id:int}/upload-signed")]

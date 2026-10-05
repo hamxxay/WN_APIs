@@ -417,7 +417,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 }
 
                 tc.Item().Text($"And send the receipt on +923201809696").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid within 5 days after due date ").FontSize(7.5f).FontColor("#000000");
+                tc.Item().Text($"{itemNum++}. Your access will be suspended if dues are not paid by the due date ").FontSize(7.5f).FontColor("#000000");
 
 
                 tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial Sales Tax (PST) on support services.").FontSize(7.5f).FontColor("#000000");

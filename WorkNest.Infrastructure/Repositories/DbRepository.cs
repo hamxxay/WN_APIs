@@ -1341,6 +1341,28 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return ids;
         }
 
+        public async Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                UPDATE dbo.WN_Agreements SET SignedDate = @Signed WHERE Id = @AgreementId;
+                IF @BookingId IS NOT NULL
+                BEGIN
+                    -- The booking is dated on the agreement; the challan is valid for 7 days from that date.
+                    UPDATE dbo.WN_Bookings
+                       SET BookingDate = @Signed, TransactionDate = @Signed, ValidityDate = DATEADD(DAY, 7, @Signed)
+                     WHERE Id = @BookingId;
+                    UPDATE dbo.WN_Challans
+                       SET IssuedOn = @Signed, ValidUntil = DATEADD(DAY, 7, @Signed)
+                     WHERE BookingId = @BookingId;
+                END";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@AgreementId", SqlDbType.Int).Value = agreementId;
+            cmd.Parameters.Add("@BookingId", SqlDbType.Int).Value = (object?)bookingId ?? DBNull.Value;
+            cmd.Parameters.Add("@Signed", SqlDbType.DateTime2).Value = signedDate.Date;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         public async Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById)
         {
             await using var c = await Open();
@@ -4324,6 +4346,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                        ISNULL(i.GrandTotal, 0) AS GrandTotal, ISNULL(i.PaidTotal, 0) AS PaidTotal, i.StatusId
                 FROM dbo.WN_Invoices i WITH (NOLOCK)
                 WHERE i.BookingId = @BookingId AND ISNULL(i.StatusId, 0) <> 5
+                  AND ISNULL(i.StatusId, 0) NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled')
                 ORDER BY i.IssuedOn DESC, i.Id DESC;
 
                 SELECT c.Id, c.ChallanNumber, c.IssuedOn, c.ValidUntil, c.StatusId AS ChallanStatusId,
@@ -4334,8 +4357,8 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 LEFT JOIN dbo.WN_vw_BookingSummary v WITH (NOLOCK) ON v.BookingId = c.BookingId
                 OUTER APPLY (SELECT TOP 1 pay.StatusId, pay.Amount
                              FROM dbo.WN_Payments pay WITH (NOLOCK)
-                             WHERE pay.TransactionRef = c.ChallanNumber OR pay.BookingIdInt = c.BookingId
-                             ORDER BY CASE WHEN pay.TransactionRef = c.ChallanNumber THEN 0 ELSE 1 END, pay.Id DESC) p
+                             WHERE pay.TransactionRef = c.ChallanNumber -- the challan's own voucher only
+                             ORDER BY pay.Id DESC) p
                 WHERE c.BookingId = @BookingId
                 ORDER BY c.CreatedOn DESC, c.Id DESC;";
             await using var cmd = new SqlCommand(sql, c);
