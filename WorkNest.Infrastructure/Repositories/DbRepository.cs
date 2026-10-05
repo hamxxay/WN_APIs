@@ -1319,6 +1319,28 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<List<int>> GetPendingBookingsWithPaidFirstInvoiceDbAsync(IEnumerable<int> pendingStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds)
+        {
+            // IDs are ints from code (OrderStatus / booking status lookups), never user input.
+            static string List(IEnumerable<int> ids) { var l = ids.Distinct().ToList(); return l.Count == 0 ? "-1" : string.Join(",", l); }
+            await using var c = await Open();
+            var sql = $@"
+                SELECT b.Id
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                CROSS APPLY (SELECT TOP 1 i.StatusId
+                               FROM dbo.WN_Invoices i WITH (NOLOCK)
+                              WHERE i.BookingId = b.Id AND i.StatusId NOT IN ({List(voidStatusIds)})
+                              ORDER BY i.IssuedOn, i.Id) fi
+                WHERE ISNULL(b.IsDeleted, 0) = 0
+                  AND b.BookingStatusId IN ({List(pendingStatusIds)})
+                  AND fi.StatusId IN ({List(paidStatusIds)});";
+            await using var cmd = new SqlCommand(sql, c);
+            var ids = new List<int>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
+
         public async Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById)
         {
             await using var c = await Open();
@@ -4071,7 +4093,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                               WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) ovr
                 WHERE s.ResolvedAt IS NULL
                   AND ISNULL(b.IsDeleted, 0) = 0
-                  AND b.BookingStatusId NOT IN (3, 4) -- cancelled / rejected
+                  AND b.BookingStatusId NOT IN (3, 4, 6, 86) -- rejected / old cancelled / no show / cancelled
                   AND bd.BookingDetailId IS NOT NULL
                   AND bd.BookingEnd >= @Today   -- booking still running
                 ORDER BY CASE WHEN s.OverrideUntil >= @Today THEN 1 ELSE 0 END, ppl.EnrolledPeople DESC, s.SuspendedAt DESC;";

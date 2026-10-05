@@ -15,6 +15,8 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail);
         Task<ApiResponse> UpdateBookingAsync(int id, BookingUpdateRequest request, int? actorId);
         Task<ApiResponse> UpdateBookingStatusAsync(int id, byte statusId, int? actorId);
+        /// <summary>Pending bookings whose first invoice is Paid become Confirmed. Returns the booking IDs changed.</summary>
+        Task<List<int>> ConfirmPaidBookingsAsync();
         Task<ApiResponse> CancelBookingAsync(int id, string userEmail, string? cancelReason);
         Task<ApiResponse> ReassignBookingAsync(int id, ReassignBookingRequest request, string userEmail);
         Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7");
