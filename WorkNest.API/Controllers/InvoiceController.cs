@@ -351,6 +351,7 @@ BEGIN
             CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
         ) AS SupportChargeAmount,
         COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount,
+        15.00 AS WithholdingTaxRate,
         st.PublicId AS STPublicId,
         st.STInvoiceNumber
     FROM dbo.WN_Invoices i WITH (NOLOCK)
@@ -452,6 +453,8 @@ END;";
                         dto.SupportChargeAmount = reader.GetDecimal(reader.GetOrdinal("SupportChargeAmount"));
                     if (HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount")))
                         dto.SecurityDepositAmount = reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"));
+                    if (HasColumn(reader, "WithholdingTaxRate") && !reader.IsDBNull(reader.GetOrdinal("WithholdingTaxRate")))
+                        dto.WithholdingTaxRate = reader.GetDecimal(reader.GetOrdinal("WithholdingTaxRate"));
                     if (HasColumn(reader, "STPublicId") && !reader.IsDBNull(reader.GetOrdinal("STPublicId")))
                     {
                         var stPublicId = reader.GetGuid(reader.GetOrdinal("STPublicId"));

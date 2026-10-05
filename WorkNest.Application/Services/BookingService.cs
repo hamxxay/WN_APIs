@@ -491,6 +491,7 @@ namespace WorkNest.Application.Services
                 DiscountPercentage = header.TryGetValue("DiscountPercentage", out var dp) && dp is not null ? Convert.ToDecimal(dp) : 0,
                 DiscountAmount = header.TryGetValue("DiscountAmount", out var da) && da is not null ? Convert.ToDecimal(da) : 0,
                 SubtotalAmount = header.TryGetValue("SubtotalAmount", out var sa) && sa is not null ? Convert.ToDecimal(sa) : 0,
+                WithholdingTaxRate = header.TryGetValue("WithholdingTaxRate", out var wtr) && wtr is not null && Convert.ToDecimal(wtr) > 0 ? Convert.ToDecimal(wtr) : 15.00m,
                 TotalContractAmount = totalContractAmount,
                 TotalPaidAmount = totalPaidAmount,
                 BalanceLeft = balanceLeft,
@@ -695,6 +696,7 @@ namespace WorkNest.Application.Services
                 TaxTotal              = taxTotal,
                 DiscountAmount        = discountAmount,
                 TotalPayable          = totalPay,
+                WithholdingTaxRate    = dto?.WithholdingTaxRate ?? 15.00m,
                 MonthsBreakdown       = months,
                 IssuedOn              = DateTime.UtcNow
             };

@@ -142,11 +142,18 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         }
                         else if ((string.Equals(q.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(q.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) && q.DiscountValue > 0)
                         {
-                            discountAmount = Math.Min(q.DiscountValue, firstCycleRent);
+                            discountAmount = Math.Min(q.DiscountValue * (spaceType == "MeetingRoom" ? 1 : billingMonths), firstCycleRent);
                         }
-                        else if (discountAmount > firstCycleRent && spaceType != "MeetingRoom")
+                        else if (discountAmount > 0 && spaceType != "MeetingRoom")
                         {
-                            discountAmount = firstCycleRent;
+                            if (discountAmount <= monthlyRent && billingMonths > 1)
+                            {
+                                discountAmount = Math.Min(discountAmount * billingMonths, firstCycleRent);
+                            }
+                            else
+                            {
+                                discountAmount = Math.Min(discountAmount, firstCycleRent);
+                            }
                         }
 
                         decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 15.00m;
@@ -165,7 +172,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 row.RelativeItem().Column(c =>
                                 {
                                     c.Item().Text("BOOKING RENT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {q.SubtotalAmount:N2}").Bold().FontSize(9.5f).FontColor("#0f172a");
+                                    c.Item().Text($"PKR {q.SubtotalAmount:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
                                     c.Item().Text("Base Booking Rent").FontSize(7f).FontColor("#64748b");
                                 });
                                 row.RelativeItem().Column(c =>
@@ -177,7 +184,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
                                 {
                                     c.Item().Text("TOTAL PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                    c.Item().Text($"PKR {initialPayable:N2}").Bold().FontSize(9.5f).FontColor("#1e40af");
+                                    c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
                                     c.Item().Text("Rent + Tax").FontSize(7f).FontColor("#1e40af");
                                 });
                             }
@@ -186,25 +193,25 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 // row.RelativeItem().Column(c =>
                                 // {
                                 //     c.Item().Text("TOTAL CONTRACT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                //     c.Item().Text($"PKR {totalContract:N2}").Bold().FontSize(9.5f).FontColor("#0f172a");
+                                //     c.Item().Text($"PKR {totalContract:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
                                 //     c.Item().Text($"{contractMonths} Month(s) Total").FontSize(7f).FontColor("#64748b");
                                 // });
                                 row.RelativeItem().Column(c =>
                                 {
                                     c.Item().Text("MONTHLY RENT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {monthlyRent:N2}").Bold().FontSize(9.5f).FontColor("#2563eb");
+                                    c.Item().Text($"PKR {monthlyRent:N0}").Bold().FontSize(9.5f).FontColor("#2563eb");
                                     c.Item().Text("per month").FontSize(7f).FontColor("#64748b");
                                 });
                                 // row.RelativeItem().Column(c =>
                                 // {
                                 //     c.Item().Text("1ST CYCLE RENT").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                //     c.Item().Text($"PKR {firstCycleRent:N2}").Bold().FontSize(9.5f).FontColor("#1d4ed8");
+                                //     c.Item().Text($"PKR {firstCycleRent:N0}").Bold().FontSize(9.5f).FontColor("#1d4ed8");
                                 //     c.Item().Text($"First {billingMonths} Months").FontSize(7f).FontColor("#1e40af");
                                 // });
                                 // row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
                                 // {
                                 //     c.Item().Text("1ST CYCLE PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                //     c.Item().Text($"PKR {initialPayable:N2}").Bold().FontSize(9.5f).FontColor("#1e40af");
+                                //     c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
                                 //     c.Item().Text("Rent + Tax").FontSize(7f).FontColor("#1e40af");
                                 // });
                             }
@@ -213,25 +220,25 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 // row.RelativeItem().Column(c =>
                                 // {
                                 //     c.Item().Text("TOTAL CONTRACT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                //     c.Item().Text($"PKR {totalContract:N2}").Bold().FontSize(9.5f).FontColor("#0f172a");
+                                //     c.Item().Text($"PKR {totalContract:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
                                 //     c.Item().Text($"{contractMonths} Month(s) Total").FontSize(7f).FontColor("#64748b");
                                 // });
                                 row.RelativeItem().Column(c =>
                                 {
                                     c.Item().Text("Private Office Charges").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {monthlyRent:N2}").Bold().FontSize(9.5f).FontColor("#2563eb");
+                                    c.Item().Text($"PKR {monthlyRent:N0}").Bold().FontSize(9.5f).FontColor("#2563eb");
                                     c.Item().Text("per month").FontSize(7f).FontColor("#64748b");
                                 });
                                 row.RelativeItem().Column(c =>
                                 {
                                     c.Item().Text("SECURITY DEPOSIT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {secDeposit:N2}").Bold().FontSize(9.5f).FontColor("#d97706");
+                                    c.Item().Text($"PKR {secDeposit:N0}").Bold().FontSize(9.5f).FontColor("#d97706");
                                     c.Item().Text("Refundable").FontSize(7f).FontColor("#64748b");
                                 });
                                 // row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
                                 // {
                                 //     c.Item().Text("1ST CYCLE PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                //     c.Item().Text($"PKR {initialPayable:N2}").Bold().FontSize(9.5f).FontColor("#1e40af");
+                                //     c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
                                 //     c.Item().Text("Rent + Deposit + Tax").FontSize(7f).FontColor("#1e40af");
                                 // });
                             }
@@ -296,8 +303,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                     }
 
                                     table.Cell().Background(bg).Padding(6).AlignRight().Text(qtyLabel);
-                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {unitPrice:N2}");
-                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {lineAmount:N2}");
+                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {unitPrice:N0}");
+                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {lineAmount:N0}");
                                     alt = !alt;
                                 }
                             }
@@ -316,8 +323,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 {
                                     table.Cell().Background(bg).Padding(6).AlignRight().Text($"{billingMonths}");
                                 }
-                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {monthlyRent:N2}");
-                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {firstCycleRent:N2}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {monthlyRent:N0}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {firstCycleRent:N0}");
                             }
                         });
 
@@ -329,14 +336,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Advance Room Rent ({billingMonths} Mos):");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {firstCycleRent:N2}").Bold();
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {firstCycleRent:N0}").Bold();
                                 });
                                 if (secDeposit > 0)
                                 {
                                     c.Item().Row(r =>
                                     {
                                         r.ConstantItem(220).AlignRight().Text("Security Deposit (Refundable):");
-                                        r.ConstantItem(120).AlignRight().Text($"PKR {secDeposit:N2}").Bold().FontColor("#d97706");
+                                        r.ConstantItem(120).AlignRight().Text($"PKR {secDeposit:N0}").Bold().FontColor("#d97706");
                                     });
                                 }
                             }
@@ -345,7 +352,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text("Booking Rent Amount:");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {q.SubtotalAmount:N2}").Bold();
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {q.SubtotalAmount:N0}").Bold();
                                 });
                             }
 
@@ -354,7 +361,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Provincial Sales Tax ({taxPct:G29}%):").FontColor("#15803d");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {taxOnAdvanceRent:N2}").FontColor("#15803d");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {taxOnAdvanceRent:N0}").FontColor("#15803d");
                                 });
                             }
                             if (discountAmount > 0)
@@ -362,14 +369,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text("Discount:").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {discountAmount:N2}").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"- PKR {discountAmount:N0}").FontColor("#e74c3c");
                                 });
                             }
                             c.Item().LineHorizontal(1).LineColor("#1a1a2e");
                             c.Item().Row(r =>
                             {
                                 r.ConstantItem(220).AlignRight().Text("TOTAL INITIAL AMOUNT PAYABLE:").Bold().FontSize(11);
-                                r.ConstantItem(120).AlignRight().Text($"PKR {initialPayable:N2}").Bold().FontSize(11).FontColor("#1d4ed8");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {initialPayable:N0}").Bold().FontSize(11).FontColor("#1d4ed8");
                             });
                         });
 
@@ -418,7 +425,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             decimal grossedUpTotal = grossedUpRent + securityDeposit;
                             decimal baseAmount = taxableBase + securityDeposit;
 
-                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N2}").FontSize(8).Bold().FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(8).Bold().FontColor("#495057");
                             if (SecurityDeposit.HasValue && securityDeposit > 0)
                             {
                                 tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
@@ -572,10 +579,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 table.Cell().Background(bg).Padding(6).Text(sno++.ToString());
                                 table.Cell().Background(bg).Padding(6).Text(desc);
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text(officeNo);
-                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.UnitPrice:N2}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.UnitPrice:N0}");
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text("-");
-                                table.Cell().Background(bg).Padding(6).AlignRight().Text(line.DiscountAmount > 0 ? $"PKR {line.DiscountAmount:N2}" : "-");
-                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.LineTotal:N2}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text(line.DiscountAmount > 0 ? $"PKR {line.DiscountAmount:N0}" : "-");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {line.LineTotal:N0}");
                                 alt = !alt;
                             }
                         });
@@ -588,14 +595,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Advance Rent ({c.BillingPeriodMonths} Month(s)):");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.CurrentCycleAmount:N2}");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.CurrentCycleAmount:N0}");
                                 });
                                 if (spaceType == "PrivateRoom" && c.SecurityDeposit > 0)
                                 {
                                     inner.Item().Row(r =>
                                     {
                                         r.ConstantItem(220).AlignRight().Text("Security Deposit (Refundable):");
-                                        r.ConstantItem(120).AlignRight().Text($"PKR {c.SecurityDeposit:N2}").FontColor("#d97706");
+                                        r.ConstantItem(120).AlignRight().Text($"PKR {c.SecurityDeposit:N0}").FontColor("#d97706");
                                     });
                                 }
                             }
@@ -604,7 +611,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text("Booking Rent Amount:");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.SubtotalAmount:N2}").Bold();
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.SubtotalAmount:N0}").Bold();
                                 });
                             }
 
@@ -613,7 +620,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Provincial Sales Tax (PST):").FontColor("#15803d");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.TaxAmount:N2}").FontColor("#15803d");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.TaxAmount:N0}").FontColor("#15803d");
                                 });
                             }
                             if (c.DiscountAmount > 0)
@@ -621,14 +628,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Discount:").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {c.DiscountAmount:N2}").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"- PKR {c.DiscountAmount:N0}").FontColor("#e74c3c");
                                 });
                             }
                             inner.Item().LineHorizontal(1).LineColor("#1a1a2e");
                             inner.Item().Row(r =>
                             {
                                 r.ConstantItem(220).AlignRight().Text("TOTAL INITIAL AMOUNT PAYABLE:").Bold().FontSize(11);
-                                r.ConstantItem(120).AlignRight().Text($"PKR {c.TotalPayable:N2}").Bold().FontSize(11).FontColor("#1d4ed8");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {c.TotalPayable:N0}").Bold().FontSize(11).FontColor("#1d4ed8");
                             });
                         });
                         if (!string.IsNullOrWhiteSpace(c.ChallanNotes))
@@ -658,6 +665,19 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             }
                             tc.Item().Text($"{itemNum++}. Cancellation policy applies as per the signed agreement.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
+
+                            decimal rawWht = c.WithholdingTaxRate > 0 ? c.WithholdingTaxRate : 15.00m;
+                            decimal whtRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
+                            decimal secDeposit = c.SecurityDeposit > 0 ? c.SecurityDeposit : 0m;
+                            decimal taxableBase = Math.Max(0, c.TotalPayable - secDeposit);
+                            decimal grossedUpRent = whtRate < 1m ? taxableBase / (1 - whtRate) : taxableBase;
+                            decimal grossedUpTotal = grossedUpRent + secDeposit;
+
+                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(8).Bold().FontColor("#495057");
+                            if (secDeposit > 0)
+                            {
+                                tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                            }
                         });
                     });
 
@@ -750,7 +770,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 {
                                     var bg = alt ? "#f9f9f9" : "#ffffff";
                                     table.Cell().Background(bg).Padding(6).Text($"Advance Rent - {m.MonthName}");
-                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {m.Amount:N2}");
+                                    table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {m.Amount:N0}");
                                     alt = !alt;
                                 }
                             }
@@ -758,7 +778,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 var bg = "#ffffff";
                                 table.Cell().Background(bg).Padding(6).Text($"Advance Rent ({inv.AdvanceRentMonths} Month(s))");
-                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N2}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N0}");
                                 alt = true;
                             }
 
@@ -766,7 +786,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 var bg = alt ? "#f9f9f9" : "#ffffff";
                                 table.Cell().Background(bg).Padding(6).Text($"Security Deposit ({inv.SecurityDepositMonths} Month(s))");
-                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N2}");
+                                table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N0}");
                                 alt = !alt;
                             }
                         });
@@ -777,14 +797,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             c.Item().Row(r =>
                             {
                                 r.ConstantItem(160).AlignRight().Text("Advance Rent:");
-                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N2}");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N0}");
                             });
                             if (inv.SecurityDepositTotal > 0)
                             {
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(160).AlignRight().Text("Security Deposit:");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N2}");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N0}");
                                 });
                             }
                             if (inv.TaxTotal > 0)
@@ -792,7 +812,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(160).AlignRight().Text($"Provincial Sales Tax ({inv.AppliedTaxPercentage:G29}%):").FontColor("#15803d");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.TaxTotal:N2}").FontColor("#15803d");
+                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.TaxTotal:N0}").FontColor("#15803d");
                                 });
                             }
                             if (inv.DiscountAmount > 0)
@@ -800,14 +820,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(160).AlignRight().Text("Discount:").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {inv.DiscountAmount:N2}").FontColor("#e74c3c");
+                                    r.ConstantItem(120).AlignRight().Text($"- PKR {inv.DiscountAmount:N0}").FontColor("#e74c3c");
                                 });
                             }
                             c.Item().LineHorizontal(1).LineColor("#1a1a2e");
                             c.Item().Row(r =>
                             {
                                 r.ConstantItem(160).AlignRight().Text("Total Payable:").Bold().FontSize(12);
-                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.TotalPayable:N2}").Bold().FontSize(12).FontColor("#1a1a2e");
+                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.TotalPayable:N0}").Bold().FontSize(12).FontColor("#1a1a2e");
                             });
                         });
 
@@ -824,9 +844,25 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
-                            tc.Item().Text("1. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#495057");
-                            tc.Item().Text("2. Security deposit is fully refundable upon termination, subject to lease terms.").FontSize(8).FontColor("#495057");
-                            tc.Item().Text("3. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
+                            int itemNum = 1;
+                            tc.Item().Text($"{itemNum++}. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#495057");
+                            if (inv.SecurityDepositTotal > 0)
+                            {
+                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination, subject to lease terms.").FontSize(8).FontColor("#495057");
+                            }
+                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
+
+                            decimal rawWht = inv.WithholdingTaxRate > 0 ? inv.WithholdingTaxRate : 15.00m;
+                            decimal whtRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
+                            decimal taxableBase = Math.Max(0, inv.TotalPayable - inv.SecurityDepositTotal);
+                            decimal grossedUpRent = whtRate < 1m ? taxableBase / (1 - whtRate) : taxableBase;
+                            decimal grossedUpTotal = grossedUpRent + inv.SecurityDepositTotal;
+
+                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(8).Bold().FontColor("#495057");
+                            if (inv.SecurityDepositTotal > 0)
+                            {
+                                tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                            }
                         });
                     });
 

@@ -73,6 +73,7 @@ namespace WorkNest.Application.DTOs.Payment
         public decimal TaxTotal { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal TotalPayable { get; set; }
+        public decimal WithholdingTaxRate { get; set; } = 15.00m;
         public string? Notes { get; set; }
         public List<AdvanceInvoiceMonthDto> MonthsBreakdown { get; set; } = new();
     }

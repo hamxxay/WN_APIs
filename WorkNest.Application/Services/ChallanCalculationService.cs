@@ -431,7 +431,7 @@ namespace WorkNest.Application.Services
 
         private static string FormatCurrency(decimal amount)
         {
-            return $"PKR {amount:N2}";
+            return $"PKR {amount:N0}";
         }
     }
 }
