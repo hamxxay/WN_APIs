@@ -69,7 +69,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             string opHoursStr;
             if (rawOp == "1" || rawOp.Equals("24-by-7", StringComparison.OrdinalIgnoreCase) || rawOp.Equals("24/7", StringComparison.OrdinalIgnoreCase) || rawOp.StartsWith("24/7", StringComparison.OrdinalIgnoreCase) || rawOp.StartsWith("24-by-7", StringComparison.OrdinalIgnoreCase))
             {
-                opHoursStr = "24-by-7";
+                opHoursStr = "24/7";
             }
             else if (rawOp == "2" || rawOp.IndexOf("Morning", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -89,7 +89,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             }
             else
             {
-                opHoursStr = "24-by-7";
+                opHoursStr = "24/7";
             }
 
             int refundDays = req.RefundDays > 0 ? req.RefundDays : 30;

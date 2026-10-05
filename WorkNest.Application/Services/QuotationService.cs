@@ -339,7 +339,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 Guid = header["Guid"]?.ToString(),
                 OfferingTypeId = header.TryGetValue("OfferingTypeId", out var otid) && otid is not null ? Convert.ToInt32(otid) : (header.TryGetValue("OfferingType", out var otv) && int.TryParse(otv?.ToString(), out var pOtId) ? pOtId : 1),
                 OfferingType = header.TryGetValue("OfferingType", out var otStr) && otStr is not null ? otStr.ToString() : "1",
-                OfferingTypeDescription = header.TryGetValue("OfferingTypeDescription", out var otd) && otd is not null ? otd.ToString() : (header.TryGetValue("OfferingType", out var otStr2) ? otStr2?.ToString() : "24-by-7"),
+                OfferingTypeDescription = header.TryGetValue("OfferingTypeDescription", out var otd) && otd is not null ? otd.ToString() : (header.TryGetValue("OfferingType", out var otStr2) ? otStr2?.ToString() : "24/7"),
                 OfferingTypeDiscountCap = header.TryGetValue("OfferingTypeDiscountCap", out var otdc) && otdc is not null ? Convert.ToDecimal(otdc) : 10.00m,
                 QuotationNumber = header["QuotationNumber"]?.ToString() ?? "",
                 QuotationDate = Convert.ToDateTime(header["QuotationDate"]),

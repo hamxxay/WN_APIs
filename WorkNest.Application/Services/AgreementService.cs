@@ -37,10 +37,10 @@ namespace WorkNest.Application.Services
 
         private static string NormalizeOperatingHours(string? opHours)
         {
-            if (string.IsNullOrWhiteSpace(opHours)) return "24-by-7";
+            if (string.IsNullOrWhiteSpace(opHours)) return "24/7";
             string raw = opHours.Trim();
             if (raw == "1" || raw.Equals("24-by-7", StringComparison.OrdinalIgnoreCase) || raw.Equals("24/7", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("24/7", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("24-by-7", StringComparison.OrdinalIgnoreCase))
-                return "24-by-7";
+                return "24/7";
             if (raw == "2" || raw.IndexOf("Morning", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "morning 6am to 6pm";
             if (raw == "3" || raw.IndexOf("Evening", StringComparison.OrdinalIgnoreCase) >= 0)
