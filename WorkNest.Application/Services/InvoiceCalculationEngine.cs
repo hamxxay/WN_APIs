@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace WorkNest.Application.Services
 {
@@ -27,6 +27,8 @@ namespace WorkNest.Application.Services
         public DateTime? StartOn { get; set; }
         public DateTime? EndOn { get; set; }
         public string? ExplicitBillingType { get; set; }
+        public bool DisableProration { get; set; } = false;
+        public bool IsQuotation { get; set; } = false;
     }
 
     public class InvoiceCalculationResult
@@ -158,7 +160,7 @@ namespace WorkNest.Application.Services
             decimal effectiveMonths = billingMonths;
 
             // Proration Logic
-            if (request.StartOn.HasValue && request.StartOn.Value.Day > 1 && result.MonthlyRent > 0)
+            if (!request.DisableProration && !request.IsQuotation && request.StartOn.HasValue && request.StartOn.Value.Day > 1 && result.MonthlyRent > 0)
             {
                 int startDay = request.StartOn.Value.Day;
                 int daysInMonth = DateTime.DaysInMonth(request.StartOn.Value.Year, request.StartOn.Value.Month);
@@ -210,9 +212,10 @@ namespace WorkNest.Application.Services
                 if (fixedDisc > 0)
                 {
                     discountAmount = Round2(Math.Min(fixedDisc, result.Rent));
-                    if (result.Rent > 0)
+                    decimal basisForPct = result.MonthlyRent > 0 ? result.MonthlyRent : result.Rent;
+                    if (basisForPct > 0)
                     {
-                        discountPct = (discountAmount / result.Rent) * 100.0m;
+                        discountPct = (discountAmount / basisForPct) * 100.0m;
                     }
                 }
             }
@@ -226,9 +229,11 @@ namespace WorkNest.Application.Services
 
             // Security Deposit Calculation
             decimal baseDeposit = 0m;
+            bool isExplicitDeposit = false;
             if (request.SecurityDeposit > 0)
             {
                 baseDeposit = request.SecurityDeposit;
+                isExplicitDeposit = true;
             }
             else if (request.SecurityDepositMonths > 0 && result.MonthlyRent > 0)
             {
@@ -236,14 +241,14 @@ namespace WorkNest.Application.Services
             }
             result.DepositBase = baseDeposit;
 
-            // Mirror discount percentage onto deposit
+            // Mirror discount percentage onto deposit only when deposit is calculated from months (not when already explicitly provided/discounted)
             decimal depositDiscount = 0m;
-            if (baseDeposit > 0 && discountPct > 0)
+            if (!isExplicitDeposit && baseDeposit > 0 && discountPct > 0)
             {
                 depositDiscount = Round2(baseDeposit * (discountPct / 100.0m));
             }
             result.DepositDiscount = depositDiscount;
-            result.DepositAfterDiscount = Round2(Math.Max(0m, baseDeposit - depositDiscount));
+            result.DepositAfterDiscount = isExplicitDeposit ? baseDeposit : Round2(Math.Max(0m, baseDeposit - depositDiscount));
 
             // Deposit Installments
             int installments = request.SecurityDepositInstallments > 0 ? request.SecurityDepositInstallments : 1;

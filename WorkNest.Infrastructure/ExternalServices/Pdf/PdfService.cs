@@ -418,7 +418,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             decimal grossedUpTotal = grossedUpRent + securityDeposit;
                             decimal baseAmount = taxableBase + securityDeposit;
 
-                            tc.Item().Text($"{itemNum++}. In case the customer withholds tax on this invoice, the customer is to pay PKR {grossedUpTotal:N2} instead of the base invoice amount of PKR {baseAmount:N2}.").FontSize(8).Bold().FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N2}").FontSize(8).Bold().FontColor("#495057");
                             if (SecurityDeposit.HasValue && securityDeposit > 0)
                             {
                                 tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");

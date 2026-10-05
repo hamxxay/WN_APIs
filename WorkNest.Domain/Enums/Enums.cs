@@ -17,4 +17,11 @@ namespace WorkNest.Domain.Enums
         General        = 14,
         SalesExecutive = 16
     }
+
+    /// <summary>Invoice status values stored in WN_Invoices.StatusId column (from dbo.OrderStatus).</summary>
+    public enum InvoiceStatus : byte
+    {
+        Unpaid = 61,
+        Paid   = 62
+    }
 }
