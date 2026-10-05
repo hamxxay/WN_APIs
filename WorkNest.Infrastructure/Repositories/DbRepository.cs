@@ -2801,6 +2801,8 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     i.Notes,
                     i.CreatedOn,
                     CASE i.StatusId 
+                        WHEN 61 THEN 'Unpaid' 
+                        WHEN 62 THEN 'Paid' 
                         WHEN 1 THEN 'Unpaid' 
                         WHEN 2 THEN 'Paid' 
                         WHEN 3 THEN 'Partial' 

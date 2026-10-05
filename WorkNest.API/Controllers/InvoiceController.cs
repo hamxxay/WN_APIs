@@ -1555,7 +1555,7 @@ END;";
                     : 0m;
 
                 decimal arrears = 0m;
-                string arrearsSql = "SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM dbo.WN_Invoices WHERE UserId = @UserId AND StatusId != 2;";
+                string arrearsSql = "SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM dbo.WN_Invoices WHERE UserId = @UserId AND StatusId NOT IN (62, 2);";
                 using (var arrCmd = new SqlCommand(arrearsSql, conn))
                 {
                     arrCmd.Parameters.AddWithValue("@UserId", userId);
