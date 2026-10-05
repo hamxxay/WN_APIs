@@ -437,17 +437,84 @@ namespace WorkNest.Infrastructure.Repositories
             int? createdById)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_Quotations_ConvertToBooking", c);
+            
+            var quotation = await GetQuotationByIdAsync(quotationId);
 
+            await using var cmd = SP("dbo.WN_Quotations_ConvertToBooking", c);
             cmd.Parameters.AddWithValue("@QuotationId", quotationId);
             cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
 
             await using var r = await cmd.ExecuteReaderAsync();
-
+            var result = new Dictionary<string, object?>();
             if (await r.ReadAsync())
-                return ToDict(r);
+                result = new Dictionary<string, object?>(ToDict(r), StringComparer.OrdinalIgnoreCase);
+            await r.CloseAsync();
 
-            return new Dictionary<string, object?>();
+            if (result.TryGetValue("BookingId", out var bIdObj) && bIdObj != null && Convert.ToInt32(bIdObj) > 0 && quotation != null)
+            {
+                int bookingId = Convert.ToInt32(bIdObj);
+                
+                int capacity = quotation.TryGetValue("Capacity", out var capObj) && capObj != null ? Convert.ToInt32(capObj) : 1;
+                decimal perSeatPrice = quotation.TryGetValue("PerSeatBasePrice", out var psObj) && psObj != null ? Convert.ToDecimal(psObj) : 0m;
+                decimal monthlyPrice = quotation.TryGetValue("MonthlyBasePrice", out var mbObj) && mbObj != null ? Convert.ToDecimal(mbObj) : 0m;
+                int bpm = quotation.TryGetValue("BillingPeriodMonths", out var bpmObj) && bpmObj != null ? Convert.ToInt32(bpmObj) : 3;
+                int secMonths = quotation.TryGetValue("SecurityDepositMonths", out var smObj) && smObj != null ? Convert.ToInt32(smObj) : 2;
+                decimal secDeposit = quotation.TryGetValue("SecurityDeposit", out var sdObj) && sdObj != null ? Convert.ToDecimal(sdObj) : 0m;
+                string discountType = quotation.TryGetValue("DiscountType", out var dtObj) && dtObj != null ? dtObj.ToString()! : "Percentage";
+                decimal discountPct = quotation.TryGetValue("DiscountPercentage", out var dpObj) && dpObj != null ? Convert.ToDecimal(dpObj) : 0m;
+                decimal discountVal = quotation.TryGetValue("DiscountAmount", out var daObj) && daObj != null ? Convert.ToDecimal(daObj) : 0m;
+                decimal subtotal = quotation.TryGetValue("SubtotalAmount", out var stObj) && stObj != null ? Convert.ToDecimal(stObj) : 0m;
+                decimal whtRate = quotation.TryGetValue("WithholdingTaxRate", out var whtObj) && whtObj != null ? Convert.ToDecimal(whtObj) : 15.00m;
+
+                decimal resolvedMonthlyRent = monthlyPrice > 0 ? monthlyPrice : (perSeatPrice > 0 ? perSeatPrice * Math.Max(1, capacity) : (subtotal > 0 && bpm > 0 ? subtotal / bpm : 0m));
+                if (resolvedMonthlyRent <= 0 && subtotal > 0) resolvedMonthlyRent = subtotal;
+
+                decimal baseDeposit = secMonths * resolvedMonthlyRent;
+                decimal discPctForDeposit = (discountType.Equals("Percentage", StringComparison.OrdinalIgnoreCase) || discountType.Equals("Percent", StringComparison.OrdinalIgnoreCase))
+                    ? discountPct
+                    : (resolvedMonthlyRent > 0 && discountVal > 0 ? (discountVal / resolvedMonthlyRent) * 100m : 0m);
+                decimal resolvedSecDeposit = secDeposit > 0 ? secDeposit : (baseDeposit > 0 ? Math.Max(0m, Math.Round(baseDeposit * (1 - (discPctForDeposit / 100m)), 2)) : 0m);
+
+                string syncSql = @"
+                    UPDATE dbo.WN_Bookings
+                    SET MonthlyRent = @MonthlyRent,
+                        SubtotalAmount = @SubtotalAmount,
+                        BillingPeriodMonths = @BPM,
+                        AdvanceRentMonths = @BPM,
+                        SecurityDepositMonths = @SecMonths,
+                        SecurityDepositRequired = @SecurityDeposit,
+                        DiscountType = @DiscountType,
+                        DiscountPercentage = @DiscountPct,
+                        DiscountAmount = @DiscountVal,
+                        WHTRate = @WhtRate
+                    WHERE Id = @BookingId;
+
+                    UPDATE dbo.WN_BookingDetails
+                    SET SecurityDeposit = @SecurityDeposit
+                    WHERE BookingGuid = (SELECT IdGUID FROM dbo.WN_Bookings WHERE Id = @BookingId);
+
+                    UPDATE dbo.WN_Invoices
+                    SET AdvanceRentMonths = @BPM,
+                        BillingPeriodMonths = @BPM,
+                        SecurityDepositMonths = @SecMonths,
+                        SecurityDepositAmount = @SecurityDeposit
+                    WHERE BookingId = @BookingId;";
+
+                await using var syncCmd = new SqlCommand(syncSql, c);
+                syncCmd.Parameters.AddWithValue("@MonthlyRent", resolvedMonthlyRent);
+                syncCmd.Parameters.AddWithValue("@SubtotalAmount", subtotal > 0 ? subtotal : (resolvedMonthlyRent * bpm));
+                syncCmd.Parameters.AddWithValue("@BPM", bpm);
+                syncCmd.Parameters.AddWithValue("@SecMonths", secMonths);
+                syncCmd.Parameters.AddWithValue("@SecurityDeposit", resolvedSecDeposit);
+                syncCmd.Parameters.AddWithValue("@DiscountType", discountType);
+                syncCmd.Parameters.AddWithValue("@DiscountPct", discountPct);
+                syncCmd.Parameters.AddWithValue("@DiscountVal", discountVal);
+                syncCmd.Parameters.AddWithValue("@WhtRate", whtRate);
+                syncCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                await syncCmd.ExecuteNonQueryAsync();
+            }
+
+            return result;
         }
 
 

@@ -210,21 +210,19 @@ namespace WorkNest.API.Controllers
                 if (dto == null)
                 {
                     using var conn = await OpenConnectionAsync();
-                    string findInvoiceSql = @"
-                        SELECT TOP 1 Id, InvoiceNumber, ISNULL(SubTotal, 0) AS SubTotal, ISNULL(DiscountTotal, 0) AS DiscountTotal, ISNULL(TaxTotal, 0) AS TaxTotal
-                        FROM dbo.WN_Invoices WITH (NOLOCK)
-                        WHERE PublicId = @PublicId;";
+                    await EnsureInvoiceStoredProceduresAsync(conn);
 
-                    using var cmdFind = new SqlCommand(findInvoiceSql, conn);
+                    using var cmdFind = new SqlCommand("dbo.WN_GetInvoiceForSTGeneration", conn);
+                    cmdFind.CommandType = CommandType.StoredProcedure;
                     cmdFind.Parameters.AddWithValue("@PublicId", publicId);
                     using var rFind = await cmdFind.ExecuteReaderAsync();
                     if (await rFind.ReadAsync())
                     {
-                        int invId = rFind.GetInt32(0);
-                        string invNum = rFind.GetString(1);
-                        decimal subTotal = rFind.GetDecimal(2);
-                        decimal discTotal = rFind.GetDecimal(3);
-                        decimal taxTotal = rFind.GetDecimal(4);
+                        int invId = rFind.GetInt32(rFind.GetOrdinal("Id"));
+                        string invNum = rFind.GetString(rFind.GetOrdinal("InvoiceNumber"));
+                        decimal subTotal = rFind.GetDecimal(rFind.GetOrdinal("SubTotal"));
+                        decimal discTotal = rFind.GetDecimal(rFind.GetOrdinal("DiscountTotal"));
+                        decimal taxTotal = rFind.GetDecimal(rFind.GetOrdinal("TaxTotal"));
 
                         rFind.Close();
 
@@ -236,30 +234,10 @@ namespace WorkNest.API.Controllers
                         decimal stSubTotal = serviceChargeAmount;
                         decimal stGrandTotal = stSubTotal + taxTotal;
 
-                        string insertStSql = @"
-                            IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId OR PublicId = @PublicId)
-                            BEGIN
-                                INSERT INTO dbo.WN_CustomerSTInvoice (
-                                    PublicId, CustomerInvoiceId, STInvoiceNumber,
-                                    TariffHeading, TariffLabel,
-                                    RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
-                                    ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
-                                    SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
-                                    SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
-                                )
-                                VALUES (
-                                    @PublicId, @InvoiceId, @STInvoiceNumber,
-                                    '9805.9200', 'Business Support Services',
-                                    'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
-                                    'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
-                                    NULL, NULL, 0.00, 0.00,
-                                    @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
-                                );
-                            END;";
-
-                        using var stCmd = new SqlCommand(insertStSql, conn);
-                        stCmd.Parameters.AddWithValue("@PublicId", publicId);
+                        using var stCmd = new SqlCommand("dbo.WN_EnsureCustomerSTInvoice", conn);
+                        stCmd.CommandType = CommandType.StoredProcedure;
                         stCmd.Parameters.AddWithValue("@InvoiceId", invId);
+                        stCmd.Parameters.AddWithValue("@PublicId", (object?)publicId ?? DBNull.Value);
                         stCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
                         stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
                         stCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
@@ -347,17 +325,19 @@ BEGIN
         ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) AS AppliedTaxPercentage,
         COALESCE(
             NULLIF(st.ServiceChargeAmount, 0),
+            NULLIF(i.ServiceCharges, 0),
             NULLIF(bd.SupportChargeAmount, 0),
             CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
         ) AS SupportChargeAmount,
-        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount,
-        15.00 AS WithholdingTaxRate,
+        COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0)) AS SecurityDepositAmount,
+        COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate,
         st.PublicId AS STPublicId,
         st.STInvoiceNumber
     FROM dbo.WN_Invoices i WITH (NOLOCK)
     LEFT JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (
         (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND c.Code = b.CustomerCode)
@@ -406,9 +386,256 @@ END;";
             catch { }
         }
 
+        private static bool _invoiceProceduresUpdated = false;
+
+        private async Task EnsureInvoiceStoredProceduresAsync(SqlConnection conn)
+        {
+            if (_invoiceProceduresUpdated) return;
+            try
+            {
+                var spScripts = new[]
+                {
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_GetInvoiceForSTGeneration
+    @PublicId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id, InvoiceNumber, ISNULL(SubTotal, 0) AS SubTotal, ISNULL(DiscountTotal, 0) AS DiscountTotal, ISNULL(TaxTotal, 0) AS TaxTotal
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE PublicId = @PublicId;
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_EnsureCustomerSTInvoice
+    @InvoiceId INT,
+    @PublicId UNIQUEIDENTIFIER = NULL,
+    @STInvoiceNumber NVARCHAR(50),
+    @RoomRentAmount DECIMAL(18,2),
+    @ServiceChargeAmount DECIMAL(18,2),
+    @STTaxRate DECIMAL(5,2),
+    @SubTotal DECIMAL(18,2),
+    @TaxAmount DECIMAL(18,2),
+    @GrandTotal DECIMAL(18,2)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId OR (@PublicId IS NOT NULL AND PublicId = @PublicId))
+    BEGIN
+        INSERT INTO dbo.WN_CustomerSTInvoice (
+            PublicId, CustomerInvoiceId, STInvoiceNumber,
+            TariffHeading, TariffLabel,
+            RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
+            ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
+            SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
+            SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
+        )
+        VALUES (
+            ISNULL(@PublicId, NEWID()), @InvoiceId, @STInvoiceNumber,
+            '9805.9200', 'Business Support Services',
+            'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
+            'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
+            NULL, NULL, 0.00, 0.00,
+            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
+        );
+    END
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_GetBookingInvoiceDetails
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 
+        b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, 
+        COALESCE(
+            NULLIF(q.MonthlyBasePrice, 0), 
+            (CASE WHEN q.PerSeatBasePrice > 0 THEN q.PerSeatBasePrice * ISNULL(COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1), 1) ELSE NULL END),
+            NULLIF(sp.RoomPrice, 0),
+            (CASE WHEN sp.SeatPrice > 0 THEN sp.SeatPrice * ISNULL(COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1), 1) ELSE NULL END),
+            NULLIF(b.SubtotalAmount, 0),
+            0
+        ) AS MonthlyRent,
+        COALESCE(NULLIF(b.SubtotalAmount, 0), NULLIF(q.SubtotalAmount, 0), 0) AS SubtotalAmount,
+        b.TotalAmount,
+        COALESCE(NULLIF(b.BillingPeriodMonths, 0), NULLIF(q.BillingPeriodMonths, 0), 3) AS BillingPeriodMonths,
+        COALESCE(NULLIF(b.SecurityDepositMonths, 0), NULLIF(q.SecurityDepositMonths, 0), 2) AS SecurityDepositMonths,
+        COALESCE(NULLIF(b.DiscountAmount, 0), NULLIF(q.DiscountAmount, 0), 0) AS DiscountAmount,
+        COALESCE(NULLIF(b.DiscountPercentage, 0), NULLIF(q.DiscountPercentage, 0), 0) AS DiscountPercentage,
+        COALESCE(NULLIF(b.DiscountType, ''), NULLIF(q.DiscountType, ''), 'Percentage') AS DiscountType,
+        COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(bd.SecurityDeposit, 0), NULLIF(sp.SecurityDeposit, 0), 0) AS SecurityDepositRequired,
+        COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(bd.SecurityDeposit, 0), NULLIF(sp.SecurityDeposit, 0), 0) AS ResolvedSecurityDeposit,
+        u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
+        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode,
+        COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1) AS SpaceCapacity,
+        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
+        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
+        COALESCE(bd.PerSeatSupportRate, (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 AND (StartDate IS NULL OR StartDate <= b.StartOn) AND (EndDate IS NULL OR EndDate >= b.StartOn) ORDER BY StartDate DESC), (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 ORDER BY StartDate DESC), 2000.00) AS PerSeatSupportRate,
+        COALESCE(b.RentAccountId, bd.RentAccountId, 2852) AS RentAccountId,
+        COALESCE(b.SecurityReceivedId, bd.SecurityReceivedId, 76) AS SecurityReceivedId,
+        COALESCE(b.ServicesIncomeId, bd.ServicesIncomeId, 2853) AS ServicesIncomeId,
+        COALESCE(b.SalesTaxId, bd.SalesTaxId, 2854) AS SalesTaxId,
+        COALESCE(b.AccountReceivableId, bd.AccountReceivableId, 2855) AS AccountReceivableId,
+        COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = b.UserId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+    OUTER APPLY (
+        SELECT TOP 1
+            sp.SeatPrice,
+            sp.SeatPrice * ISNULL(NULLIF(s.Capacity, 0), 1) AS RoomPrice,
+            sp.SecurityDeposit
+        FROM dbo.WN_SpacePricing sp WITH (NOLOCK)
+        WHERE sp.SpaceId = s.Id AND sp.IsActive = 1
+        ORDER BY sp.EffectiveFrom DESC
+    ) sp
+    WHERE b.Id = @BookingId;
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_GetInvoiceByBookingId
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id, InvoiceNumber, StatusId, GrandTotal 
+    FROM dbo.WN_Invoices WITH (NOLOCK) 
+    WHERE BookingId = @BookingId 
+    ORDER BY Id ASC;
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_UpdateInvoiceBreakdown
+    @InvoiceId INT,
+    @SubTotal DECIMAL(18,2),
+    @DiscountTotal DECIMAL(18,2) = 0,
+    @TaxTotal DECIMAL(18,2) = 0,
+    @GrandTotal DECIMAL(18,2) = 0,
+    @BillingPeriodStart DATE = NULL,
+    @BillingPeriodEnd DATE = NULL,
+    @AdvanceRentMonths INT = NULL,
+    @SecurityDepositMonths INT = NULL,
+    @SecurityDepositAmount DECIMAL(18,2) = 0,
+    @RoomRentExclTax DECIMAL(18,2) = 0,
+    @ServiceCharges DECIMAL(18,2) = 0,
+    @TaxOnServiceCharges DECIMAL(18,2) = 0,
+    @RentAccountId INT = NULL,
+    @SecurityReceivedId INT = NULL,
+    @ServicesIncomeId INT = NULL,
+    @SalesTaxId INT = NULL,
+    @AccountReceivableId INT = NULL,
+    @AccountsCoaId INT = NULL,
+    @DueOn DATE = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_Invoices
+    SET SubTotal = @SubTotal,
+        DiscountTotal = ISNULL(@DiscountTotal, DiscountTotal),
+        TaxTotal = ISNULL(@TaxTotal, TaxTotal),
+        GrandTotal = CASE WHEN @GrandTotal > 0 THEN @GrandTotal ELSE GrandTotal END,
+        BillingPeriodStart = ISNULL(@BillingPeriodStart, BillingPeriodStart),
+        BillingPeriodEnd = ISNULL(@BillingPeriodEnd, BillingPeriodEnd),
+        AdvanceRentMonths = ISNULL(@AdvanceRentMonths, AdvanceRentMonths),
+        SecurityDepositMonths = ISNULL(@SecurityDepositMonths, SecurityDepositMonths),
+        SecurityDepositAmount = ISNULL(@SecurityDepositAmount, SecurityDepositAmount),
+        RoomRentExclTax = ISNULL(@RoomRentExclTax, RoomRentExclTax),
+        ServiceCharges = ISNULL(@ServiceCharges, ServiceCharges),
+        TaxOnServiceCharges = ISNULL(@TaxOnServiceCharges, TaxOnServiceCharges),
+        RentAccountId = COALESCE(@RentAccountId, RentAccountId),
+        SecurityReceivedId = COALESCE(@SecurityReceivedId, SecurityReceivedId),
+        ServicesIncomeId = COALESCE(@ServicesIncomeId, ServicesIncomeId),
+        SalesTaxId = COALESCE(@SalesTaxId, SalesTaxId),
+        AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
+        AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
+        DueOn = ISNULL(@DueOn, DueOn),
+        UpdatedOn = SYSUTCDATETIME()
+    WHERE Id = @InvoiceId;
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_DeleteInvoiceLines
+    @InvoiceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_InvoiceLines WHERE InvoiceId = @InvoiceId;
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_InsertInvoiceLine
+    @InvoiceId INT,
+    @ChargeTypeId TINYINT,
+    @Description NVARCHAR(500),
+    @Quantity DECIMAL(18,2) = 1,
+    @UnitPrice DECIMAL(18,2),
+    @DiscountAmount DECIMAL(18,2) = 0,
+    @TaxRate DECIMAL(5,2) = 0,
+    @SortOrder SMALLINT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_InvoiceLines (
+        InvoiceId, ChargeTypeId, Description, Quantity,
+        UnitPrice, DiscountAmount, TaxRate, SortOrder
+    )
+    VALUES (
+        @InvoiceId, @ChargeTypeId, @Description, @Quantity,
+        @UnitPrice, @DiscountAmount, @TaxRate, @SortOrder
+    );
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_GetBookingLastInvoicePeriodEnd
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 BillingPeriodEnd 
+    FROM dbo.WN_Invoices WITH (NOLOCK) 
+    WHERE BookingId = @BookingId 
+    ORDER BY Id DESC;
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_GetCustomerArrears
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) AS Arrears
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE UserId = @UserId AND StatusId NOT IN (2, 5)
+      AND StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled'));
+END;",
+
+                    @"CREATE OR ALTER PROCEDURE dbo.WN_QueueInvoiceDeliveryFailure
+    @InvoiceId INT,
+    @BookingId INT = NULL,
+    @TargetEmail NVARCHAR(256) = NULL,
+    @LastError NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_InvoiceDeliveryQueue (
+        InvoiceId, BookingId, TargetEmail, Attempts, LastAttemptAt, NextRetryAt, Status, LastError, CreatedOn
+    )
+    VALUES (
+        @InvoiceId, @BookingId, @TargetEmail, 1, SYSUTCDATETIME(), DATEADD(minute, 5, SYSUTCDATETIME()), 'Pending', @LastError, SYSUTCDATETIME()
+    );
+END;"
+                };
+
+                foreach (var spSql in spScripts)
+                {
+                    using var cmd = new SqlCommand(spSql, conn);
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                _invoiceProceduresUpdated = true;
+            }
+            catch { }
+        }
+
         private async Task<StatementInvoicePdfDto?> BuildStatementInvoicePdfDtoAsync(int id, SqlConnection conn)
         {
             await EnsureInvoicePdfSpUpdatedAsync(conn);
+            await EnsureInvoiceStoredProceduresAsync(conn);
             var dto = new StatementInvoicePdfDto();
             int userId = 0;
 
@@ -572,29 +799,10 @@ END;";
                 decimal stSubTotal = serviceChargeAmount;
                 decimal stGrandTotal = stSubTotal + totalLineVat;
 
-                string autoInsertSql = @"
-                    IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId)
-                    BEGIN
-                        INSERT INTO dbo.WN_CustomerSTInvoice (
-                            PublicId, CustomerInvoiceId, STInvoiceNumber,
-                            TariffHeading, TariffLabel,
-                            RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
-                            ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
-                            SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
-                            SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
-                        )
-                        VALUES (
-                            NEWID(), @InvoiceId, @STInvoiceNumber,
-                            '9805.9200', 'Business Support Services',
-                            'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
-                            'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
-                            NULL, NULL, 0.00, 0.00,
-                            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
-                        );
-                    END;";
-
-                using var autoStCmd = new SqlCommand(autoInsertSql, conn);
+                using var autoStCmd = new SqlCommand("dbo.WN_EnsureCustomerSTInvoice", conn);
+                autoStCmd.CommandType = CommandType.StoredProcedure;
                 autoStCmd.Parameters.AddWithValue("@InvoiceId", id);
+                autoStCmd.Parameters.AddWithValue("@PublicId", DBNull.Value);
                 autoStCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
                 autoStCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
                 autoStCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
@@ -794,20 +1002,13 @@ END;";
                 int newInvoiceId = (int)pInvoiceId.Value;
                 string invoiceNumber = (string)pInvoiceNumber.Value;
 
+                await EnsureInvoiceStoredProceduresAsync(conn);
+
                 short sortOrder = 1;
                 foreach (var line in req.Lines)
                 {
-                    string lineSql = @"
-                        INSERT INTO dbo.WN_InvoiceLines (
-                            InvoiceId, ChargeTypeId, Description, Quantity,
-                            UnitPrice, DiscountAmount, TaxRate, SortOrder
-                        )
-                        VALUES (
-                            @InvoiceId, @ChargeTypeId, @Description, @Quantity,
-                            @UnitPrice, @DiscountAmount, @TaxRate, @SortOrder
-                        );";
-
-                    using var lineCmd = new SqlCommand(lineSql, conn);
+                    using var lineCmd = new SqlCommand("dbo.WN_InsertInvoiceLine", conn);
+                    lineCmd.CommandType = CommandType.StoredProcedure;
                     lineCmd.Parameters.AddWithValue("@InvoiceId", newInvoiceId);
                     lineCmd.Parameters.AddWithValue("@ChargeTypeId", line.ChargeTypeId > 0 ? line.ChargeTypeId : (byte)1);
                     lineCmd.Parameters.AddWithValue("@Description", string.IsNullOrWhiteSpace(line.Description) ? "Custom Charge" : line.Description);
@@ -820,26 +1021,13 @@ END;";
                     await lineCmd.ExecuteNonQueryAsync();
                 }
 
-                string updateHeaderSql = @"
-                    UPDATE dbo.WN_Invoices
-                    SET BillingPeriodStart = @BillingPeriodStart,
-                        BillingPeriodEnd = @BillingPeriodEnd,
-                        AdvanceRentMonths = @AdvanceRentMonths,
-                        SecurityDepositMonths = @SecurityDepositMonths,
-                        SecurityDepositAmount = @SecurityDepositAmount,
-                        RoomRentExclTax = @RoomRentExclTax,
-                        ServiceCharges = @ServiceCharges,
-                        TaxOnServiceCharges = @TaxOnServiceCharges,
-                        RentAccountId = COALESCE(@RentAccountId, RentAccountId),
-                        SecurityReceivedId = COALESCE(@SecurityReceivedId, SecurityReceivedId),
-                        ServicesIncomeId = COALESCE(@ServicesIncomeId, ServicesIncomeId),
-                        SalesTaxId = COALESCE(@SalesTaxId, SalesTaxId),
-                        AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
-                        AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
-                        SubTotal = @SubTotal
-                    WHERE Id = @InvoiceId;";
-                using var updateCmd = new SqlCommand(updateHeaderSql, conn);
+                using var updateCmd = new SqlCommand("dbo.WN_UpdateInvoiceBreakdown", conn);
+                updateCmd.CommandType = CommandType.StoredProcedure;
                 updateCmd.Parameters.AddWithValue("@InvoiceId", newInvoiceId);
+                updateCmd.Parameters.AddWithValue("@SubTotal", subTotal - discountTotal);
+                updateCmd.Parameters.AddWithValue("@DiscountTotal", discountTotal);
+                updateCmd.Parameters.AddWithValue("@TaxTotal", taxTotal);
+                updateCmd.Parameters.AddWithValue("@GrandTotal", grandTotal);
                 updateCmd.Parameters.AddWithValue("@BillingPeriodStart", (object?)req.BillingPeriodStart ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@BillingPeriodEnd", (object?)req.BillingPeriodEnd ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@AdvanceRentMonths", (object?)req.AdvanceRentMonths ?? DBNull.Value);
@@ -854,7 +1042,7 @@ END;";
                 updateCmd.Parameters.AddWithValue("@SalesTaxId", (object?)req.SalesTaxId ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@AccountReceivableId", (object?)req.AccountReceivableId ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@AccountsCoaId", (object?)req.AccountsCoaId ?? (object?)req.RentAccountId ?? DBNull.Value);
-                updateCmd.Parameters.AddWithValue("@SubTotal", subTotal - discountTotal);
+                updateCmd.Parameters.AddWithValue("@DueOn", (object?)req.DueOn ?? DBNull.Value);
                 await updateCmd.ExecuteNonQueryAsync();
 
                 string stInvoiceNumber = invoiceNumber.Replace("INV-", "ST-INV-");
@@ -862,29 +1050,10 @@ END;";
                 decimal stSubTotal = serviceChargeAmount;
                 decimal stGrandTotal = stSubTotal + taxTotal;
 
-                string insertStSql = @"
-                    IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId)
-                    BEGIN
-                        INSERT INTO dbo.WN_CustomerSTInvoice (
-                            PublicId, CustomerInvoiceId, STInvoiceNumber,
-                            TariffHeading, TariffLabel,
-                            RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
-                            ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
-                            SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
-                            SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
-                        )
-                        VALUES (
-                            NEWID(), @InvoiceId, @STInvoiceNumber,
-                            '9805.9200', 'Business Support Services',
-                            'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
-                            'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
-                            NULL, NULL, 0.00, 0.00,
-                            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
-                        );
-                    END;";
-
-                using var stCmd = new SqlCommand(insertStSql, conn);
+                using var stCmd = new SqlCommand("dbo.WN_EnsureCustomerSTInvoice", conn);
+                stCmd.CommandType = CommandType.StoredProcedure;
                 stCmd.Parameters.AddWithValue("@InvoiceId", newInvoiceId);
+                stCmd.Parameters.AddWithValue("@PublicId", DBNull.Value);
                 stCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
                 stCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
                 stCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
@@ -1086,31 +1255,7 @@ END;";
             try
             {
                 using var conn = await OpenConnectionAsync();
-
-                string bookingSql = @"
-                    SELECT TOP 1 
-                        b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, b.MonthlyRent, b.SubtotalAmount, b.TotalAmount,
-                        b.BillingPeriodMonths, b.SecurityDepositMonths, b.DiscountAmount, b.DiscountPercentage, b.DiscountType,
-                        b.SecurityDepositRequired,
-                        COALESCE(NULLIF(b.SecurityDepositRequired, 0), NULLIF(bd.SecurityDeposit, 0), 0) AS ResolvedSecurityDeposit,
-                        u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
-                        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode,
-                        ISNULL(s.Capacity, 1) AS SpaceCapacity,
-                        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
-                        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
-                        COALESCE(bd.PerSeatSupportRate, (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 AND (StartDate IS NULL OR StartDate <= b.StartOn) AND (EndDate IS NULL OR EndDate >= b.StartOn) ORDER BY StartDate DESC), (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 ORDER BY StartDate DESC), 2000.00) AS PerSeatSupportRate,
-                        COALESCE(b.RentAccountId, bd.RentAccountId, 2852) AS RentAccountId,
-                        COALESCE(b.SecurityReceivedId, bd.SecurityReceivedId, 76) AS SecurityReceivedId,
-                        COALESCE(b.ServicesIncomeId, bd.ServicesIncomeId, 2853) AS ServicesIncomeId,
-                        COALESCE(b.SalesTaxId, bd.SalesTaxId, 2854) AS SalesTaxId,
-                        COALESCE(b.AccountReceivableId, bd.AccountReceivableId, 2855) AS AccountReceivableId
-                    FROM dbo.WN_Bookings b WITH (NOLOCK)
-                    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
-                    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
-                    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = b.UserId
-                    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-                    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-                    WHERE b.Id = @BookingId;";
+                await EnsureInvoiceStoredProceduresAsync(conn);
 
                 int userId = 0;
                 decimal monthlyRent = 0, subtotalAmount = 0, totalAmount = 0, discountAmount = 0, discountPercentage = 0, secDepositReq = 0, resolvedSecDep = 0;
@@ -1121,8 +1266,9 @@ END;";
                 DateTime? startOn = null, endOn = null;
                 string customerEmail = "", customerName = "", spaceName = "Workspace", spaceTypeName = "", categoryCode = "";
 
-                using (var bCmd = new SqlCommand(bookingSql, conn))
+                using (var bCmd = new SqlCommand("dbo.WN_GetBookingInvoiceDetails", conn))
                 {
+                    bCmd.CommandType = CommandType.StoredProcedure;
                     bCmd.Parameters.AddWithValue("@BookingId", bookingId);
                     using var reader = await bCmd.ExecuteReaderAsync();
                     if (await reader.ReadAsync())
@@ -1178,6 +1324,7 @@ END;";
                     SecurityDeposit = secDepositReq > 0 ? secDepositReq : resolvedSecDep,
                     SecurityDepositMonths = secMonths,
                     PerSeatSupportRate = perSeatSupportRate,
+                    AppliedChargePercentage = appliedChargePercentage,
                     AppliedTaxPercentage = appliedTaxPercentage,
                     DiscountType = discountType,
                     DiscountPercentage = discountPercentage,
@@ -1214,52 +1361,38 @@ END;";
                     mainLineDescription = $"Private Office Charges for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}";
                 }
 
-                string checkSql = "SELECT TOP 1 Id, InvoiceNumber FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id ASC;";
+                string secDepositDescription = secMonths > 0 
+                    ? $"Security Deposit ({secMonths} Month(s) Refundable - {spaceName})" 
+                    : $"Security Deposit (Refundable - {spaceName})";
+                decimal secDepositUnitPrice = (secMonths > 0 && securityDeposit > 0)
+                    ? Math.Round(securityDeposit / secMonths, 2)
+                    : securityDeposit;
+                decimal secDepositQty = (secMonths > 0 && securityDeposit > 0) ? secMonths : 1m;
+
                 int existingId = 0;
-                using (var checkCmd = new SqlCommand(checkSql, conn))
+                using (var checkCmd = new SqlCommand("dbo.WN_GetInvoiceByBookingId", conn))
                 {
+                    checkCmd.CommandType = CommandType.StoredProcedure;
                     checkCmd.Parameters.AddWithValue("@BookingId", bookingId);
                     using var r = await checkCmd.ExecuteReaderAsync();
                     if (await r.ReadAsync())
                     {
-                        existingId = r.GetInt32(0);
+                        existingId = r.GetInt32(r.GetOrdinal("Id"));
                     }
                 }
 
                 if (existingId > 0)
                 {
-                    string updateSql = @"
-                        UPDATE dbo.WN_Invoices
-                        SET SubTotal = @SubTotal,
-                            DiscountTotal = @DiscountTotal,
-                            TaxTotal = @TaxTotal,
-                            GrandTotal = @GrandTotal,
-                            BillingPeriodStart = @BillingPeriodStart,
-                            BillingPeriodEnd = @BillingPeriodEnd,
-                            AdvanceRentMonths = @AdvanceRentMonths,
-                            SecurityDepositMonths = @SecurityDepositMonths,
-                            SecurityDepositAmount = @SecurityDepositAmount,
-                            RoomRentExclTax = @RoomRentExclTax,
-                            ServiceCharges = @ServiceCharges,
-                            TaxOnServiceCharges = @TaxOnServiceCharges,
-                            RentAccountId = COALESCE(@RentAccountId, RentAccountId),
-                            SecurityReceivedId = COALESCE(@SecurityReceivedId, SecurityReceivedId),
-                            ServicesIncomeId = COALESCE(@ServicesIncomeId, ServicesIncomeId),
-                            SalesTaxId = COALESCE(@SalesTaxId, SalesTaxId),
-                            AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
-                            AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
-                            DueOn = @DueOn,
-                            UpdatedOn = SYSUTCDATETIME()
-                        WHERE Id = @InvoiceId;";
-                    using (var upCmd = new SqlCommand(updateSql, conn))
+                    using (var upCmd = new SqlCommand("dbo.WN_UpdateInvoiceBreakdown", conn))
                     {
+                        upCmd.CommandType = CommandType.StoredProcedure;
                         upCmd.Parameters.AddWithValue("@InvoiceId", existingId);
                         upCmd.Parameters.AddWithValue("@SubTotal", expectedSubtotal);
                         upCmd.Parameters.AddWithValue("@DiscountTotal", appliedDiscount);
                         upCmd.Parameters.AddWithValue("@TaxTotal", taxTotal);
                         upCmd.Parameters.AddWithValue("@GrandTotal", expectedGrandTotal);
-                        upCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
-                        upCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
+                        upCmd.Parameters.AddWithValue("@BillingPeriodStart", (object?)periodStart ?? DBNull.Value);
+                        upCmd.Parameters.AddWithValue("@BillingPeriodEnd", (object?)periodEnd ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@AdvanceRentMonths", calc.BillingPeriodMonths);
                         upCmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)secMonths ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDeposit);
@@ -1276,48 +1409,40 @@ END;";
                         await upCmd.ExecuteNonQueryAsync();
                     }
 
-                    using (var delCmd = new SqlCommand("DELETE FROM dbo.WN_InvoiceLines WHERE InvoiceId = @InvoiceId;", conn))
+                    using (var delCmd = new SqlCommand("dbo.WN_DeleteInvoiceLines", conn))
                     {
+                        delCmd.CommandType = CommandType.StoredProcedure;
                         delCmd.Parameters.AddWithValue("@InvoiceId", existingId);
                         await delCmd.ExecuteNonQueryAsync();
                     }
 
-                    string insertLineSql = @"
-                        INSERT INTO dbo.WN_InvoiceLines (
-                            InvoiceId, ChargeTypeId, Description, Quantity,
-                            UnitPrice, DiscountAmount, TaxRate, SortOrder
-                        )
-                        VALUES (
-                            @InvoiceId, 1, @Description, 1,
-                            @UnitPrice, @DiscountAmount, @TaxRate, 1
-                        );";
-                    using (var insCmd = new SqlCommand(insertLineSql, conn))
+                    using (var insCmd = new SqlCommand("dbo.WN_InsertInvoiceLine", conn))
                     {
+                        insCmd.CommandType = CommandType.StoredProcedure;
                         insCmd.Parameters.AddWithValue("@InvoiceId", existingId);
+                        insCmd.Parameters.AddWithValue("@ChargeTypeId", (byte)1);
                         insCmd.Parameters.AddWithValue("@Description", mainLineDescription);
-                        insCmd.Parameters.AddWithValue("@UnitPrice", grossAdvanceRent);
-                        insCmd.Parameters.AddWithValue("@DiscountAmount", appliedDiscount);
+                        insCmd.Parameters.AddWithValue("@Quantity", 1m);
+                        insCmd.Parameters.AddWithValue("@UnitPrice", calc.NetRent);
+                        insCmd.Parameters.AddWithValue("@DiscountAmount", 0m);
                         insCmd.Parameters.AddWithValue("@TaxRate", 0m);
+                        insCmd.Parameters.AddWithValue("@SortOrder", (short)1);
                         await insCmd.ExecuteNonQueryAsync();
                     }
 
                     if (securityDeposit > 0)
                     {
-                        string insertDepSql = @"
-                            INSERT INTO dbo.WN_InvoiceLines (
-                                InvoiceId, ChargeTypeId, Description, Quantity,
-                                UnitPrice, DiscountAmount, TaxRate, SortOrder
-                            )
-                            VALUES (
-                                @InvoiceId, 2, @Description, @Quantity,
-                                @UnitPrice, 0, 0, 2
-                            );";
-                        using (var depCmd = new SqlCommand(insertDepSql, conn))
+                        using (var depCmd = new SqlCommand("dbo.WN_InsertInvoiceLine", conn))
                         {
+                            depCmd.CommandType = CommandType.StoredProcedure;
                             depCmd.Parameters.AddWithValue("@InvoiceId", existingId);
-                            depCmd.Parameters.AddWithValue("@Description", $"Security Deposit ({secMonths} Month(s) Refundable - {spaceName})");
-                            depCmd.Parameters.AddWithValue("@Quantity", secMonths > 0 ? secMonths : 1);
-                            depCmd.Parameters.AddWithValue("@UnitPrice", secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2, MidpointRounding.AwayFromZero) : securityDeposit);
+                            depCmd.Parameters.AddWithValue("@ChargeTypeId", (byte)2);
+                            depCmd.Parameters.AddWithValue("@Description", secDepositDescription);
+                            depCmd.Parameters.AddWithValue("@Quantity", secDepositQty);
+                            depCmd.Parameters.AddWithValue("@UnitPrice", secDepositUnitPrice);
+                            depCmd.Parameters.AddWithValue("@DiscountAmount", 0m);
+                            depCmd.Parameters.AddWithValue("@TaxRate", 0m);
+                            depCmd.Parameters.AddWithValue("@SortOrder", (short)2);
                             await depCmd.ExecuteNonQueryAsync();
                         }
                     }
@@ -1354,14 +1479,14 @@ END;";
                     Lines = new List<CreateCustomInvoiceLineDto>()
                 };
 
-                if (grossAdvanceRent > 0)
+                if (calc.NetRent > 0)
                 {
                     dto.Lines.Add(new CreateCustomInvoiceLineDto
                     {
                         Description = mainLineDescription,
                         Quantity = 1,
-                        UnitPrice = grossAdvanceRent,
-                        DiscountAmount = appliedDiscount,
+                        UnitPrice = calc.NetRent,
+                        DiscountAmount = 0m,
                         TaxRate = 0m,
                         ChargeTypeId = 1
                     });
@@ -1371,9 +1496,9 @@ END;";
                 {
                     dto.Lines.Add(new CreateCustomInvoiceLineDto
                     {
-                        Description = $"Security Deposit ({secMonths} Month(s) Refundable - {spaceName})",
-                        Quantity = secMonths > 0 ? secMonths : 1,
-                        UnitPrice = secMonths > 0 ? Math.Round(securityDeposit / secMonths, 2, MidpointRounding.AwayFromZero) : securityDeposit,
+                        Description = secDepositDescription,
+                        Quantity = secDepositQty,
+                        UnitPrice = secDepositUnitPrice,
                         DiscountAmount = 0,
                         TaxRate = 0,
                         ChargeTypeId = 2
@@ -1407,29 +1532,7 @@ END;";
             try
             {
                 using var conn = await OpenConnectionAsync();
-
-                string bookingSql = @"
-                    SELECT TOP 1 
-                        b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn, b.MonthlyRent, b.SubtotalAmount, b.TotalAmount,
-                        b.BillingPeriodMonths, b.SecurityDepositMonths, b.DiscountAmount, b.DiscountPercentage, b.DiscountType,
-                        u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
-                        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode,
-                        ISNULL(s.Capacity, 1) AS SpaceCapacity,
-                        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
-                        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
-                        ISNULL(bd.PerSeatSupportRate, 2000.00) AS PerSeatSupportRate,
-                        COALESCE(b.RentAccountId, bd.RentAccountId, 2852) AS RentAccountId,
-                        COALESCE(b.SecurityReceivedId, bd.SecurityReceivedId, 76) AS SecurityReceivedId,
-                        COALESCE(b.ServicesIncomeId, bd.ServicesIncomeId, 2853) AS ServicesIncomeId,
-                        COALESCE(b.SalesTaxId, bd.SalesTaxId, 2854) AS SalesTaxId,
-                        COALESCE(b.AccountReceivableId, bd.AccountReceivableId, 2855) AS AccountReceivableId
-                    FROM dbo.WN_Bookings b WITH (NOLOCK)
-                    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
-                    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
-                    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = b.UserId
-                    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-                    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-                    WHERE b.Id = @BookingId;";
+                await EnsureInvoiceStoredProceduresAsync(conn);
 
                 int userId = 0;
                 decimal monthlyRent = 0, subtotalAmount = 0, discountAmount = 0, discountPercentage = 0, totalAmount = 0;
@@ -1439,8 +1542,9 @@ END;";
                 DateTime? startOn = null, endOn = null;
                 string customerEmail = "", customerName = "", spaceName = "Workspace", spaceTypeName = "", categoryCode = "";
 
-                using (var bCmd = new SqlCommand(bookingSql, conn))
+                using (var bCmd = new SqlCommand("dbo.WN_GetBookingInvoiceDetails", conn))
                 {
+                    bCmd.CommandType = CommandType.StoredProcedure;
                     bCmd.Parameters.AddWithValue("@BookingId", bookingId);
                     using var reader = await bCmd.ExecuteReaderAsync();
                     if (await reader.ReadAsync())
@@ -1484,9 +1588,9 @@ END;";
                                      (billingMonths <= 0 && startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays < 20);
 
                 DateTime periodStart = DateTime.Today;
-                string lastEndSql = "SELECT TOP 1 BillingPeriodEnd FROM dbo.WN_Invoices WHERE BookingId = @BookingId ORDER BY Id DESC;";
-                using (var lastEndCmd = new SqlCommand(lastEndSql, conn))
+                using (var lastEndCmd = new SqlCommand("dbo.WN_GetBookingLastInvoicePeriodEnd", conn))
                 {
+                    lastEndCmd.CommandType = CommandType.StoredProcedure;
                     lastEndCmd.Parameters.AddWithValue("@BookingId", bookingId);
                     var lastEndVal = await lastEndCmd.ExecuteScalarAsync();
                     if (lastEndVal != null && lastEndVal != DBNull.Value)
@@ -1558,12 +1662,9 @@ END;";
                     : 0m;
 
                 decimal arrears = 0m;
-                // Arrears = invoices not Paid and not Cancelled/void (legacy 2 / 5 or the OrderStatus "Paid" / "Cancelled" IDs).
-                string arrearsSql = @"SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM dbo.WN_Invoices WITH (NOLOCK)
-                                      WHERE UserId = @UserId AND StatusId NOT IN (2, 5)
-                                        AND StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled'));";
-                using (var arrCmd = new SqlCommand(arrearsSql, conn))
+                using (var arrCmd = new SqlCommand("dbo.WN_GetCustomerArrears", conn))
                 {
+                    arrCmd.CommandType = CommandType.StoredProcedure;
                     arrCmd.Parameters.AddWithValue("@UserId", userId);
                     var arrVal = await arrCmd.ExecuteScalarAsync();
                     if (arrVal != null && arrVal != DBNull.Value)
@@ -1611,8 +1712,8 @@ END;";
                     {
                         Description = $"Rent for {periodStart:MMM d, yyyy} to {periodEnd:MMM d, yyyy}",
                         Quantity = 1,
-                        UnitPrice = grossAdvanceRent,
-                        DiscountAmount = appliedDiscount,
+                        UnitPrice = grossAdvanceRent - appliedDiscount,
+                        DiscountAmount = 0m,
                         TaxRate = effectiveTaxRateOnRent,
                         ChargeTypeId = 1
                     });
@@ -1643,14 +1744,13 @@ END;";
         {
             try
             {
-                string sql = @"
-                    INSERT INTO dbo.WN_InvoiceDeliveryQueue (InvoiceId, BookingId, TargetEmail, Attempts, LastAttemptAt, NextRetryAt, Status, LastError, CreatedOn)
-                    VALUES (@InvoiceId, @BookingId, @TargetEmail, 1, SYSUTCDATETIME(), DATEADD(minute, 5, SYSUTCDATETIME()), 'Pending', @LastError, SYSUTCDATETIME());";
-                using var cmd = new SqlCommand(sql, conn);
+                await EnsureInvoiceStoredProceduresAsync(conn);
+                using var cmd = new SqlCommand("dbo.WN_QueueInvoiceDeliveryFailure", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
                 cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
                 cmd.Parameters.AddWithValue("@BookingId", (object?)bookingId ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@TargetEmail", (object?)targetEmail ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@LastError", lastError);
+                cmd.Parameters.AddWithValue("@LastError", (object?)lastError ?? DBNull.Value);
                 await cmd.ExecuteNonQueryAsync();
             }
             catch (Exception ex)

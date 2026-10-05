@@ -19,6 +19,7 @@ namespace WorkNest.Application.Services
         public int SecurityDepositMonths { get; set; } = 2;
         public int SecurityDepositInstallments { get; set; } = 1;
         public decimal PerSeatSupportRate { get; set; } = 2000.00m;
+        public decimal AppliedChargePercentage { get; set; } = 10.00m;
         public decimal AppliedTaxPercentage { get; set; } = 16.00m;
         public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; } = 0m;
@@ -88,7 +89,7 @@ namespace WorkNest.Application.Services
             result.SpaceType = isMeeting ? "MeetingRoom" : (stName.Contains("Private", StringComparison.OrdinalIgnoreCase) || catCode.Contains("Private", StringComparison.OrdinalIgnoreCase) || request.SpaceTypeId == 1 ? "PrivateRoom" : "SharedSpace");
 
             int capacity = request.Capacity > 0 ? request.Capacity : 1;
-            decimal supportRate = request.PerSeatSupportRate > 0 ? request.PerSeatSupportRate : 2000.00m;
+            decimal chargeRate = request.AppliedChargePercentage > 0 ? request.AppliedChargePercentage : 10.00m;
             decimal taxRate = request.AppliedTaxPercentage > 0 ? request.AppliedTaxPercentage : 16.00m;
 
             DateTime periodStart = request.StartOn ?? DateTime.Today;
@@ -125,7 +126,7 @@ namespace WorkNest.Application.Services
                 result.Discount = discount;
 
                 decimal discountedBase = result.NetRent;
-                result.ServiceCharge = Round2(discountedBase * 0.10m);
+                result.ServiceCharge = Round2(discountedBase * (chargeRate / 100.0m));
                 result.Tax = Round2(result.ServiceCharge * (taxRate / 100.0m));
 
                 result.DepositBase = 0m;
@@ -152,7 +153,7 @@ namespace WorkNest.Application.Services
             if (monthlyRent <= 0)
             {
                 if (request.RoomPrice > 0) monthlyRent = request.RoomPrice;
-                else if (request.SeatPrice > 0) monthlyRent = request.SeatPrice * (result.SpaceType == "PrivateRoom" ? capacity : 1);
+                else if (request.SeatPrice > 0) monthlyRent = request.SeatPrice * capacity;
                 else if (request.SubtotalAmount > 0 && contractMonths > 0) monthlyRent = Round2(request.SubtotalAmount / contractMonths);
             }
             result.MonthlyRent = Round2(monthlyRent);
@@ -175,13 +176,11 @@ namespace WorkNest.Application.Services
 
                 if (startDay < 15)
                 {
-                    // Current month counts as first billing month: prorated current + (N - 1) full months
                     effectiveMonths = billingMonths <= 1 ? fraction : fraction + (billingMonths - 1);
                     periodEnd = new DateTime(request.StartOn.Value.Year, request.StartOn.Value.Month, 1).AddMonths(billingMonths).AddDays(-1);
                 }
                 else
                 {
-                    // Current month is a separate prorated period: prorated current + N full months
                     effectiveMonths = fraction + billingMonths;
                     periodEnd = new DateTime(request.StartOn.Value.Year, request.StartOn.Value.Month, 1).AddMonths(billingMonths + 1).AddDays(-1);
                 }
@@ -211,8 +210,7 @@ namespace WorkNest.Application.Services
 
                 if (fixedDisc > 0)
                 {
-                    decimal multiplier = result.SpaceType == "MeetingRoom" ? 1m : effectiveMonths;
-                    discountAmount = Round2(Math.Min(fixedDisc * multiplier, result.Rent));
+                    discountAmount = Round2(Math.Min(fixedDisc, result.Rent));
                     decimal basisForPct = result.MonthlyRent > 0 ? result.MonthlyRent : result.Rent;
                     if (basisForPct > 0)
                     {
@@ -222,41 +220,36 @@ namespace WorkNest.Application.Services
             }
             result.Discount = discountAmount;
 
-            // Service charge: PerSeatSupportRate (from WN_ChargeTypeRate) x seat capacity x effective billing months (prorated)
-            result.ServiceCharge = Round2(supportRate * capacity * effectiveMonths);
+            // Service charge: 10% on Advance Rent (or effective-dated provincial tax snapshot)
+            result.ServiceCharge = Round2(result.Rent * (chargeRate / 100.0m));
 
             // Tax: 16% on service charge only
             result.Tax = Round2(result.ServiceCharge * (taxRate / 100.0m));
 
-            // Security Deposit Calculation (Full months, never prorated)
+            // Security Deposit Calculation (Full amount / months, never prorated)
             decimal baseDeposit = 0m;
-            int secMonths = request.SecurityDepositMonths > 0 ? request.SecurityDepositMonths : (request.SecurityDeposit > 0 && result.MonthlyRent > 0 ? (int)Math.Max(1, Math.Round(request.SecurityDeposit / result.MonthlyRent)) : 0);
-            
-            if (secMonths > 0 && result.MonthlyRent > 0)
-            {
-                baseDeposit = Round2(result.MonthlyRent * secMonths);
-            }
-            else if (request.SecurityDeposit > 0)
+            if (request.SecurityDeposit > 0)
             {
                 baseDeposit = request.SecurityDeposit;
-            }
-            result.DepositBase = baseDeposit;
-
-            // Apply quotation discount percentage onto security deposit
-            decimal depositDiscount = 0m;
-            if (baseDeposit > 0 && discountPct > 0)
-            {
-                depositDiscount = Round2(baseDeposit * (discountPct / 100.0m));
-            }
-            result.DepositDiscount = depositDiscount;
-
-            if (request.SecurityDeposit > 0 && request.SecurityDeposit < baseDeposit)
-            {
-                // If explicitly already discounted deposit amount was provided
-                result.DepositAfterDiscount = request.SecurityDeposit;
+                result.DepositBase = baseDeposit;
+                result.DepositDiscount = 0m;
+                result.DepositAfterDiscount = baseDeposit;
             }
             else
             {
+                int secMonths = request.SecurityDepositMonths > 0 ? request.SecurityDepositMonths : 2;
+                if (secMonths > 0 && result.MonthlyRent > 0)
+                {
+                    baseDeposit = Round2(result.MonthlyRent * secMonths);
+                }
+                result.DepositBase = baseDeposit;
+
+                decimal depositDiscount = 0m;
+                if (baseDeposit > 0 && discountPct > 0)
+                {
+                    depositDiscount = Round2(baseDeposit * (discountPct / 100.0m));
+                }
+                result.DepositDiscount = depositDiscount;
                 result.DepositAfterDiscount = Round2(Math.Max(0m, baseDeposit - depositDiscount));
             }
 
