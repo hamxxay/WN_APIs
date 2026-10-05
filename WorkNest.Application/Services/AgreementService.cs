@@ -37,10 +37,10 @@ namespace WorkNest.Application.Services
 
         private static string NormalizeOperatingHours(string? opHours)
         {
-            if (string.IsNullOrWhiteSpace(opHours)) return "24-by-7";
+            if (string.IsNullOrWhiteSpace(opHours)) return "24/7";
             string raw = opHours.Trim();
             if (raw == "1" || raw.Equals("24-by-7", StringComparison.OrdinalIgnoreCase) || raw.Equals("24/7", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("24/7", StringComparison.OrdinalIgnoreCase) || raw.StartsWith("24-by-7", StringComparison.OrdinalIgnoreCase))
-                return "24-by-7";
+                return "24/7";
             if (raw == "2" || raw.IndexOf("Morning", StringComparison.OrdinalIgnoreCase) >= 0)
                 return "morning 6am to 6pm";
             if (raw == "3" || raw.IndexOf("Evening", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -147,18 +147,25 @@ namespace WorkNest.Application.Services
             );
 
             // 6. Update Quotation Status to AgreementSent
-            await _db.ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = 'AgreementSent', UpdatedDate = SYSUTCDATETIME() WHERE Id = {q.Id}");
+            await _db.UpdateQuotationStatusAsync(q.Id, "AgreementSent");
 
             // 7. Add Activity log
-            string msg = $"Lease Agreement (Template: {activeTemplate.Name} v{activeTemplate.Id}) sent to {request.FullName ?? q.CustomerName} ({request.EntityType}).".Replace("'", "''");
-            string uIdStr = userId.HasValue ? userId.Value.ToString() : "NULL";
-            await _db.ExecuteRawSqlAsync($"INSERT INTO dbo.WN_QuotationActivities (IdGUID, QuotationId, Version, ActivityType, Message, CreatedByUserId, CreatedDate) VALUES (NEWID(), {q.Id}, {q.Version}, 'AgreementSent', '{msg}', {uIdStr}, SYSUTCDATETIME())");
+            string msg = $"Lease Agreement (Template: {activeTemplate.Name} v{activeTemplate.Id}) sent to {request.FullName ?? q.CustomerName} ({request.EntityType}).";
+            await _db.AddQuotationActivityAsync(q.Id, q.Version, "AgreementSent", msg, userId);
 
-            // 8. Send Email with attached PDF if email is present
+            // 8. Send Email with attached PDF asynchronously without blocking HTTP response
             string recipientEmail = !string.IsNullOrWhiteSpace(request.OverrideEmail) ? request.OverrideEmail : (q.CustomerEmail ?? "");
             if (!string.IsNullOrWhiteSpace(recipientEmail))
             {
-                await _email.SendAgreementEmailAsync(recipientEmail, request.FullName ?? q.CustomerName ?? "Valued Customer", qNum, mergedPdf);
+                string customerDisplay = request.FullName ?? q.CustomerName ?? "Valued Customer";
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _email.SendAgreementEmailAsync(recipientEmail, customerDisplay, qNum, mergedPdf);
+                    }
+                    catch { }
+                });
             }
 
             var dto = new AgreementResponseDto
@@ -396,14 +403,14 @@ namespace WorkNest.Application.Services
             await _db.MarkAgreementSignedDbAsync(agreementId, userId);
 
             // 2. Update Quotation Status to Signed
-            await _db.ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = 'Signed', UpdatedDate = SYSUTCDATETIME() WHERE Id = {quotationId}");
+            await _db.UpdateQuotationStatusAsync(quotationId, "Signed");
 
             // 3. Convert Quotation to Booking
             var convertRes = await _quotations.ConvertQuotationToBookingAsync(quotationId, userId);
             if (convertRes.TryGetValue("BookingId", out var bVal) && bVal != null)
             {
                 int bookingId = Convert.ToInt32(bVal);
-                await _db.ExecuteRawSqlAsync($"UPDATE dbo.WN_Agreements SET BookingId = {bookingId} WHERE Id = {agreementId}");
+                await _db.SetAgreementBookingIdAsync(agreementId, bookingId);
             }
 
             var (rows, _) = await GetAgreementsListAsync(1, 1, null, null);
