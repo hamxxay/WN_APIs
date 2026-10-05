@@ -915,7 +915,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     {
                         c.Item().AlignRight().Text("3rd Floor EOBI Building-II, I-8 Markaz").FontSize(8.5f).FontColor("#475569");
                         c.Item().AlignRight().Text("Islamabad, Pakistan").FontSize(8.5f).FontColor("#475569");
-                        c.Item().AlignRight().Text("Phone: +92 309 9771774 / +92 308 0256000").FontSize(8.5f).FontColor("#475569");
+                        c.Item().AlignRight().Text("Phone: +92 328 0256000 / +92 320 1809696").FontSize(8.5f).FontColor("#475569");
                         c.Item().AlignRight().Text("Email: sales@worknestpk.com").FontSize(8.5f).FontColor("#475569");
                     });
                 });

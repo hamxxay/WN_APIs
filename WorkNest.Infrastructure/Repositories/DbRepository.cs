@@ -2209,6 +2209,173 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
         // --- Dashboard ---
 
+        /// <summary>
+        /// Admin dashboard overview (read-only): [0] headline numbers, [1] last 6 months,
+        /// [2] overdue invoices, [3] leases ending soon, [4] bookings waiting for confirmation,
+        /// [5] receivables aging, [6] occupancy by space type, [7] top customers, [8] lease expiries next 6 months.
+        /// Live bookings = BookingStatusId 1, 2, 5, 33 (old + WN_BookingStatuses pending / confirmed).
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(int? locationId, int endingSoonDays,
+            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds)
+        {
+            // Status IDs are ints from code (OrderStatus lookups), never user input.
+            static string List(IEnumerable<int> ids) { var l = ids.Distinct().ToList(); return l.Count == 0 ? "-1" : string.Join(",", l); }
+            var open = List(openInvoiceStatusIds); var paid = List(paidStatusIds); var voids = List(voidStatusIds);
+            await using var c = await Open();
+            var sql = $@"
+                DECLARE @Now DATETIME2(0) = SYSDATETIME();
+                DECLARE @MonthAgo DATETIME2(0) = DATEADD(MONTH, -1, @Now);
+                DECLARE @Today DATE = CAST(@Now AS DATE);
+                DECLARE @MonthStart DATE = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
+                DECLARE @PrevMonthStart DATE = DATEADD(MONTH, -1, @MonthStart);
+                DECLARE @SoonEnd DATETIME2(0) = DATEADD(DAY, @Days, @Now);
+
+                DECLARE @Spaces TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200));
+                INSERT INTO @Spaces (Id, Name)
+                SELECT s.Id, COALESCE(NULLIF(s.Name, ''), s.Code)
+                  FROM dbo.WN_Spaces s WITH (NOLOCK)
+                 WHERE s.Status = 1 AND (@Loc IS NULL OR s.LocationId = @Loc);
+
+                DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, StartOn DATETIME2(0), EndOn DATETIME2(0), StatusId INT, UserId INT NULL, CustomerCode NVARCHAR(50) NULL, TotalAmount DECIMAL(18,2) NULL);
+                INSERT INTO @Live
+                SELECT b.Id, b.SpaceId, b.StartOn, b.EndOn, b.BookingStatusId, b.UserId, b.CustomerCode, b.TotalAmount
+                  FROM dbo.WN_Bookings b WITH (NOLOCK)
+                  JOIN @Spaces sp ON sp.Id = b.SpaceId
+                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33);
+
+                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT);
+                INSERT INTO @Inv
+                SELECT i.Id, i.InvoiceNumber, i.BookingId, i.UserId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), i.StatusId
+                  FROM dbo.WN_Invoices i WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                 WHERE i.StatusId NOT IN ({voids})
+                   AND (@Loc IS NULL OR b.SpaceId IN (SELECT Id FROM @Spaces));
+
+                -- [0] headline numbers
+                SELECT
+                    (SELECT COUNT(*) FROM @Spaces) AS TotalSpaces,
+                    (SELECT COUNT(DISTINCT SpaceId) FROM @Live WHERE StartOn <= @Now AND EndOn >= @Now) AS OccupiedSpaces,
+                    (SELECT COUNT(DISTINCT SpaceId) FROM @Live WHERE StartOn <= @MonthAgo AND EndOn >= @MonthAgo) AS OccupiedSpacesLastMonth,
+                    (SELECT COUNT(*) FROM @Live WHERE StartOn <= @Now AND EndOn >= @Now) AS ActiveBookings,
+                    (SELECT COUNT(*) FROM @Live WHERE StartOn <= @MonthAgo AND EndOn >= @MonthAgo) AS ActiveBookingsLastMonth,
+                    (SELECT COUNT(*) FROM @Live WHERE StatusId IN (1, 5) AND EndOn >= @Now) AS PendingConfirmations,
+                    (SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open})) AS Outstanding,
+                    (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open})) AS OutstandingCount,
+                    (SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueAmount,
+                    (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueCount,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @MonthStart) AS InvoicedThisMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < @MonthStart) AS InvoicedLastMonth,
+                    (SELECT COUNT(*) FROM @Live WHERE StatusId IN (2, 33) AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
+
+                -- [1] last 12 months (occupancy measured at month end, or now for the current month)
+                ;WITH m AS (
+                    SELECT n, DATEADD(MONTH, -n, @MonthStart) AS MStart FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
+                )
+                SELECT CONVERT(VARCHAR(7), m.MStart, 126) AS Month,
+                       (SELECT COUNT(*) FROM dbo.WN_Bookings nb WITH (NOLOCK)
+                         WHERE ISNULL(nb.IsDeleted, 0) = 0 AND nb.SpaceId IN (SELECT Id FROM @Spaces)
+                           AND nb.CreatedOn >= m.MStart AND nb.CreatedOn < DATEADD(MONTH, 1, m.MStart)
+                           AND nb.BookingStatusId NOT IN (3, 4, 6, 86)) AS NewBookings,
+                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)) AS Invoiced,
+                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart) AND StatusId IN ({paid})) AS Paid,
+                       (SELECT COUNT(DISTINCT SpaceId) FROM @Live
+                         WHERE StartOn <= x.At AND EndOn >= x.At) AS Occupied
+                  FROM m
+                 CROSS APPLY (SELECT CASE WHEN m.n = 0 THEN @Now ELSE DATEADD(SECOND, -1, CAST(DATEADD(MONTH, 1, m.MStart) AS DATETIME2(0))) END AS At) x
+                 ORDER BY m.MStart;
+
+                -- [2] overdue invoices
+                SELECT TOP 6 i.BookingId, i.InvoiceNumber AS Reference, i.DueOn AS [Date], (i.GrandTotal - i.PaidTotal) AS Amount,
+                       sp.Name AS Space, cust.Name AS Customer
+                  FROM @Inv i
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                  LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
+                 OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
+                                FROM dbo.WN_Customers cu WITH (NOLOCK)
+                               WHERE cu.Code = b.CustomerCode OR cu.UserId = ISNULL(b.UserId, i.UserId)) cust
+                 WHERE i.StatusId IN ({open}) AND i.DueOn < @Today
+                 ORDER BY i.DueOn, i.Id;
+
+                -- [3] leases ending soon
+                SELECT TOP 6 l.Id AS BookingId, CONCAT('#', l.Id) AS Reference, l.EndOn AS [Date], l.TotalAmount AS Amount,
+                       sp.Name AS Space, cust.Name AS Customer
+                  FROM @Live l
+                  JOIN @Spaces sp ON sp.Id = l.SpaceId
+                 OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
+                                FROM dbo.WN_Customers cu WITH (NOLOCK)
+                               WHERE cu.Code = l.CustomerCode OR cu.UserId = l.UserId) cust
+                 WHERE l.StatusId IN (2, 33) AND l.EndOn >= @Now AND l.EndOn <= @SoonEnd
+                 ORDER BY l.EndOn;
+
+                -- [4] bookings waiting for confirmation
+                SELECT TOP 6 l.Id AS BookingId, CONCAT('#', l.Id) AS Reference, l.StartOn AS [Date], l.TotalAmount AS Amount,
+                       sp.Name AS Space, cust.Name AS Customer
+                  FROM @Live l
+                  JOIN @Spaces sp ON sp.Id = l.SpaceId
+                 OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
+                                FROM dbo.WN_Customers cu WITH (NOLOCK)
+                               WHERE cu.Code = l.CustomerCode OR cu.UserId = l.UserId) cust
+                 WHERE l.StatusId IN (1, 5) AND l.EndOn >= @Now
+                 ORDER BY l.StartOn;
+
+                -- [5] receivables aging (open balance by days past due)
+                SELECT b.Bucket, b.SortOrder, ISNULL(SUM(x.Balance), 0) AS Amount, COUNT(x.Id) AS Invoices
+                  FROM (VALUES ('Not due', 0), ('1-30 days', 1), ('31-60 days', 2), ('61-90 days', 3), ('90+ days', 4)) b(Bucket, SortOrder)
+                  LEFT JOIN (
+                        SELECT i.Id, (i.GrandTotal - i.PaidTotal) AS Balance,
+                               CASE WHEN i.DueOn IS NULL OR i.DueOn >= @Today THEN 0
+                                    WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 30 THEN 1
+                                    WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 60 THEN 2
+                                    WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 90 THEN 3
+                                    ELSE 4 END AS SortOrder
+                          FROM @Inv i WHERE i.StatusId IN ({open})
+                  ) x ON x.SortOrder = b.SortOrder
+                 GROUP BY b.Bucket, b.SortOrder
+                 ORDER BY b.SortOrder;
+
+                -- [6] occupancy by space type (right now)
+                SELECT COALESCE(NULLIF(st.Description, ''), 'Other') AS SpaceType,
+                       COUNT(*) AS Total,
+                       SUM(occ.IsOccupied) AS Occupied
+                  FROM dbo.WN_Spaces s WITH (NOLOCK)
+                  JOIN @Spaces sp ON sp.Id = s.Id
+                  LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+                 OUTER APPLY (SELECT CASE WHEN EXISTS (SELECT 1 FROM @Live l WHERE l.SpaceId = s.Id AND l.StartOn <= @Now AND l.EndOn >= @Now)
+                                          THEN 1 ELSE 0 END AS IsOccupied) occ
+                 GROUP BY COALESCE(NULLIF(st.Description, ''), 'Other')
+                 ORDER BY COUNT(*) DESC;
+
+                -- [7] top customers by invoiced amount, last 12 months
+                SELECT TOP 5 t.Customer, SUM(t.GrandTotal) AS Amount, COUNT(*) AS Invoices
+                  FROM (
+                        SELECT i.GrandTotal,
+                               COALESCE(cust.Name, CONCAT('Customer #', ISNULL(b.UserId, i.UserId))) AS Customer
+                          FROM @Inv i
+                          LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                         OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
+                                        FROM dbo.WN_Customers cu WITH (NOLOCK)
+                                       WHERE cu.Code = b.CustomerCode OR cu.UserId = ISNULL(b.UserId, i.UserId)) cust
+                         WHERE i.IssuedOn >= DATEADD(MONTH, -11, @MonthStart)
+                  ) t
+                 GROUP BY t.Customer
+                 ORDER BY SUM(t.GrandTotal) DESC;
+
+                -- [8] leases expiring, next 6 months
+                ;WITH f AS (
+                    SELECT n, DATEADD(MONTH, n, @MonthStart) AS MStart FROM (VALUES (0),(1),(2),(3),(4),(5)) v(n)
+                )
+                SELECT CONVERT(VARCHAR(7), f.MStart, 126) AS Month,
+                       (SELECT COUNT(*) FROM @Live l WHERE l.EndOn >= f.MStart AND l.EndOn < DATEADD(MONTH, 1, f.MStart) AND l.EndOn >= @Now) AS Leases,
+                       (SELECT ISNULL(SUM(l.TotalAmount), 0) FROM @Live l WHERE l.EndOn >= f.MStart AND l.EndOn < DATEADD(MONTH, 1, f.MStart) AND l.EndOn >= @Now) AS Value
+                  FROM f
+                 ORDER BY f.MStart;";
+            await using var cmd = new SqlCommand(sql, c) { CommandTimeout = 60 };
+            cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
+            cmd.Parameters.Add("@Days", SqlDbType.Int).Value = endingSoonDays;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
         public async Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync()
         {
             await using var c = await Open();
@@ -2964,7 +3131,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 CenterName = HasColumn(r, "CenterName") && !r.IsDBNull(r.GetOrdinal("CenterName")) ? r.GetString(r.GetOrdinal("CenterName")) : null,
                 VendorLegalName = r.IsDBNull(r.GetOrdinal("VendorLegalName")) ? "WorkNest Coworking Spaces (Pvt) Ltd" : r.GetString(r.GetOrdinal("VendorLegalName")),
                 VendorAddress = r.IsDBNull(r.GetOrdinal("VendorAddress")) ? "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad" : r.GetString(r.GetOrdinal("VendorAddress")),
-                VendorPhone = r.IsDBNull(r.GetOrdinal("VendorPhone")) ? "+92 309 9771774 / +92 308 0256000" : r.GetString(r.GetOrdinal("VendorPhone")),
+                VendorPhone = r.IsDBNull(r.GetOrdinal("VendorPhone")) ? "+92 328 0256000 / +92 320 1809696" : r.GetString(r.GetOrdinal("VendorPhone")),
                 VendorNtn = r.IsDBNull(r.GetOrdinal("VendorNtn")) ? "7492018-3" : r.GetString(r.GetOrdinal("VendorNtn")),
             };
 

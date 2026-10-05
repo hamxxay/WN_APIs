@@ -101,7 +101,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
             string vendorLegalName = !string.IsNullOrWhiteSpace(req.VendorLegalName) ? req.VendorLegalName : "WorkNest (Pvt) Ltd";
             string vendorAddress = !string.IsNullOrWhiteSpace(req.VendorAddress) ? req.VendorAddress : "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad";
-            string vendorPhone = !string.IsNullOrWhiteSpace(req.VendorPhone) ? req.VendorPhone : "+92 309 9771774 / +92 308 0256000";
+            string vendorPhone = !string.IsNullOrWhiteSpace(req.VendorPhone) ? req.VendorPhone : "+92 328 0256000 / +92 320 1809696";
             string vendorNtn = !string.IsNullOrWhiteSpace(req.VendorNtn) ? req.VendorNtn : "7492018-3";
             string centerName = !string.IsNullOrWhiteSpace(req.CenterName) ? req.CenterName : "WorkNest";
 

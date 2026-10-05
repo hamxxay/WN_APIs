@@ -58,7 +58,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         // Vendor Details
         public string VendorLegalName { get; set; } = "WorkNest Coworking Spaces (Pvt) Ltd";
         public string VendorAddress { get; set; } = "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad, Pakistan";
-        public string VendorPhone { get; set; } = "+92 309 9771774 / +92 308 0256000";
+        public string VendorPhone { get; set; } = "+92 328 0256000 / +92 320 1809696";
         public string VendorFax { get; set; } = "+92 51 8439201";
         public string VendorNtn { get; set; } = "7492018-3";
         public string VendorLogoPath { get; set; } = @"F:\WorkNest_FE\public\images\Logo.png";

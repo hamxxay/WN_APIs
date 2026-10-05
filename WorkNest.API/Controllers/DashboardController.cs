@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Extensions;
 
 namespace WorkNest.API.Controllers
 {
@@ -14,6 +15,18 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/dashboard/summary")]
         public async Task<IActionResult> Summary() =>
             Ok(await _dashboard.GetSummaryAsync());
+
+        /// <summary>
+        /// Admin dashboard: headline numbers, 6-month trend and "needs attention" lists.
+        /// Super admins see all locations (or the one asked for); other roles only their own location.
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [HttpGet("api/dashboard/overview")]
+        public async Task<IActionResult> Overview([FromQuery] int? locationId)
+        {
+            var scope = User.IsSuperAdmin() ? (locationId > 0 ? locationId : null) : User.GetLocationId();
+            return Ok(await _dashboard.GetOverviewAsync(scope));
+        }
 
         [HttpGet("/")]
         [AllowAnonymous]
