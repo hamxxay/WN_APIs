@@ -108,6 +108,7 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal TaxAmount { get; set; }
         public decimal TaxAmountOnAdvanceRent { get; set; }
         public decimal TaxAmountOnContract { get; set; }
+        public decimal WithholdingTaxRate { get; set; } = 15.00m;
 
         public List<ChallanLineDto> Details { get; set; } = new();
 

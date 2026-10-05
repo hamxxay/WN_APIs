@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace WorkNest.Application.Services
 {
@@ -211,11 +211,12 @@ namespace WorkNest.Application.Services
 
                 if (fixedDisc > 0)
                 {
-                    discountAmount = Round2(Math.Min(fixedDisc, result.Rent));
+                    decimal multiplier = result.SpaceType == "MeetingRoom" ? 1m : effectiveMonths;
+                    discountAmount = Round2(Math.Min(fixedDisc * multiplier, result.Rent));
                     decimal basisForPct = result.MonthlyRent > 0 ? result.MonthlyRent : result.Rent;
                     if (basisForPct > 0)
                     {
-                        discountPct = (discountAmount / basisForPct) * 100.0m;
+                        discountPct = (fixedDisc / basisForPct) * 100.0m;
                     }
                 }
             }

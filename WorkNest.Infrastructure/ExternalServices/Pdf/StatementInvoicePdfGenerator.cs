@@ -39,6 +39,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public decimal? AppliedChargePercentage { get; set; }
         public decimal? AppliedTaxPercentage { get; set; }
         public decimal SecurityDepositAmount { get; set; }
+        public decimal WithholdingTaxRate { get; set; } = 15.00m;
         public string CurrencyCode { get; set; } = "PKR";
 
         public string? SupportChargesInvoiceUrl { get; set; }
@@ -422,6 +423,22 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial Sales Tax (PST) on support services.").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. Payment is due on or before the due date specified on this invoice.").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(7.5f).FontColor("#000000");
+
+                decimal invoiceTotal = data.CurrentInvoiceTotal > 0
+                    ? data.CurrentInvoiceTotal
+                    : (hasTax ? (totalExclVat + (effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round((data.SupportChargeAmount ?? 0m) * (taxPercentage / 100m), 2))) : totalExclVat);
+                decimal secDeposit = depositTotal > 0 ? depositTotal : data.SecurityDepositAmount;
+                decimal taxableBase = Math.Max(0, invoiceTotal - secDeposit);
+                decimal rawWht = data.WithholdingTaxRate > 0 ? data.WithholdingTaxRate : 15.00m;
+                decimal withholdingTaxRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
+                decimal grossedUpRent = withholdingTaxRate < 1m ? taxableBase / (1 - withholdingTaxRate) : taxableBase;
+                decimal grossedUpTotal = grossedUpRent + secDeposit;
+
+                tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(7.5f).Bold().FontColor("#000000");
+                if (secDeposit > 0)
+                {
+                    tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(7.5f).Bold().FontColor("#000000");
+                }
             });
         }
 

@@ -142,11 +142,18 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         }
                         else if ((string.Equals(q.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(q.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) && q.DiscountValue > 0)
                         {
-                            discountAmount = Math.Min(q.DiscountValue, firstCycleRent);
+                            discountAmount = Math.Min(q.DiscountValue * (spaceType == "MeetingRoom" ? 1 : billingMonths), firstCycleRent);
                         }
-                        else if (discountAmount > firstCycleRent && spaceType != "MeetingRoom")
+                        else if (discountAmount > 0 && spaceType != "MeetingRoom")
                         {
-                            discountAmount = firstCycleRent;
+                            if (discountAmount <= monthlyRent && billingMonths > 1)
+                            {
+                                discountAmount = Math.Min(discountAmount * billingMonths, firstCycleRent);
+                            }
+                            else
+                            {
+                                discountAmount = Math.Min(discountAmount, firstCycleRent);
+                            }
                         }
 
                         decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 15.00m;
@@ -658,6 +665,19 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             }
                             tc.Item().Text($"{itemNum++}. Cancellation policy applies as per the signed agreement.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
+
+                            decimal rawWht = c.WithholdingTaxRate > 0 ? c.WithholdingTaxRate : 15.00m;
+                            decimal whtRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
+                            decimal secDeposit = c.SecurityDeposit > 0 ? c.SecurityDeposit : 0m;
+                            decimal taxableBase = Math.Max(0, c.TotalPayable - secDeposit);
+                            decimal grossedUpRent = whtRate < 1m ? taxableBase / (1 - whtRate) : taxableBase;
+                            decimal grossedUpTotal = grossedUpRent + secDeposit;
+
+                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(8).Bold().FontColor("#495057");
+                            if (secDeposit > 0)
+                            {
+                                tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                            }
                         });
                     });
 
@@ -824,9 +844,25 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#495057");
                             tc.Spacing(2);
-                            tc.Item().Text("1. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#495057");
-                            tc.Item().Text("2. Security deposit is fully refundable upon termination, subject to lease terms.").FontSize(8).FontColor("#495057");
-                            tc.Item().Text("3. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
+                            int itemNum = 1;
+                            tc.Item().Text($"{itemNum++}. The price includes 10% support services and Worknest will charge Provincial sales tax on this service.").FontSize(8).FontColor("#495057");
+                            if (inv.SecurityDepositTotal > 0)
+                            {
+                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination, subject to lease terms.").FontSize(8).FontColor("#495057");
+                            }
+                            tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
+
+                            decimal rawWht = inv.WithholdingTaxRate > 0 ? inv.WithholdingTaxRate : 15.00m;
+                            decimal whtRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
+                            decimal taxableBase = Math.Max(0, inv.TotalPayable - inv.SecurityDepositTotal);
+                            decimal grossedUpRent = whtRate < 1m ? taxableBase / (1 - whtRate) : taxableBase;
+                            decimal grossedUpTotal = grossedUpRent + inv.SecurityDepositTotal;
+
+                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(8).Bold().FontColor("#495057");
+                            if (inv.SecurityDepositTotal > 0)
+                            {
+                                tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                            }
                         });
                     });
 
