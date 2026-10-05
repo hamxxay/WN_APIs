@@ -165,8 +165,11 @@ namespace WorkNest.Application.Services
             {
                 int startDay = request.StartOn.Value.Day;
                 int daysInMonth = DateTime.DaysInMonth(request.StartOn.Value.Year, request.StartOn.Value.Month);
-                int remainingDays = daysInMonth - startDay + 1;
+                // Days are counted from the day AFTER the start (signing) day: 20th of a 30-day month = 10 days.
+                // Before the 15th: those days (+ the rest of the billing cycle); from the 15th: days + full cycle.
+                int remainingDays = daysInMonth - startDay;
                 decimal fraction = (decimal)remainingDays / daysInMonth;
+                periodStart = request.StartOn.Value.Date.AddDays(1);
                 decimal proratedCurrentMonth = Round2(fraction * result.MonthlyRent);
 
                 result.IsProrated = true;

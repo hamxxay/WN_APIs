@@ -621,7 +621,7 @@ namespace WorkNest.Application.Services
             {
                 int startDay = start.Day;
                 int daysInMonth = DateTime.DaysInMonth(start.Year, start.Month);
-                int remainingDays = daysInMonth - startDay + 1;
+                int remainingDays = daysInMonth - startDay; // from the day after the start day (20th of 30 = 10 days)
                 decimal proratedMonth1 = Math.Round(((decimal)remainingDays / daysInMonth) * monthlyRate, 2);
 
                 months.Add(new AdvanceInvoiceMonthDto
