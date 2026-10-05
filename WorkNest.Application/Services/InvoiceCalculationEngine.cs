@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace WorkNest.Application.Services
 {
@@ -27,6 +27,8 @@ namespace WorkNest.Application.Services
         public DateTime? StartOn { get; set; }
         public DateTime? EndOn { get; set; }
         public string? ExplicitBillingType { get; set; }
+        public bool DisableProration { get; set; } = false;
+        public bool IsQuotation { get; set; } = false;
     }
 
     public class InvoiceCalculationResult
@@ -158,7 +160,7 @@ namespace WorkNest.Application.Services
             decimal effectiveMonths = billingMonths;
 
             // Proration Logic
-            if (request.StartOn.HasValue && request.StartOn.Value.Day > 1 && result.MonthlyRent > 0)
+            if (!request.DisableProration && !request.IsQuotation && request.StartOn.HasValue && request.StartOn.Value.Day > 1 && result.MonthlyRent > 0)
             {
                 int startDay = request.StartOn.Value.Day;
                 int daysInMonth = DateTime.DaysInMonth(request.StartOn.Value.Year, request.StartOn.Value.Month);

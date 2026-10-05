@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using WorkNest.Application.DTOs.Booking;
@@ -59,6 +59,8 @@ namespace WorkNest.Application.Services
         public string? ExplicitBillingType { get; set; }
         public List<ChallanLineDto>? Details { get; set; }
         public List<QuotationDetailDto>? QuotationDetails { get; set; }
+        public bool IsQuotation { get; set; } = false;
+        public bool DisableProration { get; set; } = false;
     }
 
     public class ChallanCalculationResult
@@ -113,7 +115,9 @@ namespace WorkNest.Application.Services
                 DiscountValue = input.DiscountValue,
                 StartOn = input.StartOn,
                 EndOn = input.EndOn,
-                ExplicitBillingType = input.ExplicitBillingType
+                ExplicitBillingType = input.ExplicitBillingType,
+                IsQuotation = input.IsQuotation,
+                DisableProration = input.DisableProration
             };
 
             var engineResult = InvoiceCalculationEngine.CalculateInvoice(req);
@@ -333,7 +337,9 @@ namespace WorkNest.Application.Services
                 DiscountValue = q.DiscountValue,
                 DiscountAmount = q.DiscountAmount,
                 ExplicitBillingType = q.BillingType,
-                QuotationDetails = q.Details
+                QuotationDetails = q.Details,
+                IsQuotation = true,
+                DisableProration = true
             };
 
             var calc = Calculate(input);

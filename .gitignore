@@ -37,6 +37,7 @@ scratch/*
 .dotnet/*
 .dotnet_temp/*
 **/App_Data/
+**/PersistentData/
 Sp.sql
 .dotnet /*
 Table.sql
