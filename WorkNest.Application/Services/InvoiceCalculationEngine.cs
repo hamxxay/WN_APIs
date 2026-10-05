@@ -228,28 +228,37 @@ namespace WorkNest.Application.Services
             // Tax: 16% on service charge only
             result.Tax = Round2(result.ServiceCharge * (taxRate / 100.0m));
 
-            // Security Deposit Calculation
+            // Security Deposit Calculation (Full months, never prorated)
             decimal baseDeposit = 0m;
-            bool isExplicitDeposit = false;
-            if (request.SecurityDeposit > 0)
+            int secMonths = request.SecurityDepositMonths > 0 ? request.SecurityDepositMonths : (request.SecurityDeposit > 0 && result.MonthlyRent > 0 ? (int)Math.Max(1, Math.Round(request.SecurityDeposit / result.MonthlyRent)) : 0);
+            
+            if (secMonths > 0 && result.MonthlyRent > 0)
+            {
+                baseDeposit = Round2(result.MonthlyRent * secMonths);
+            }
+            else if (request.SecurityDeposit > 0)
             {
                 baseDeposit = request.SecurityDeposit;
-                isExplicitDeposit = true;
-            }
-            else if (request.SecurityDepositMonths > 0 && result.MonthlyRent > 0)
-            {
-                baseDeposit = Round2(result.MonthlyRent * request.SecurityDepositMonths);
             }
             result.DepositBase = baseDeposit;
 
-            // Mirror discount percentage onto deposit only when deposit is calculated from months (not when already explicitly provided/discounted)
+            // Apply quotation discount percentage onto security deposit
             decimal depositDiscount = 0m;
-            if (!isExplicitDeposit && baseDeposit > 0 && discountPct > 0)
+            if (baseDeposit > 0 && discountPct > 0)
             {
                 depositDiscount = Round2(baseDeposit * (discountPct / 100.0m));
             }
             result.DepositDiscount = depositDiscount;
-            result.DepositAfterDiscount = isExplicitDeposit ? baseDeposit : Round2(Math.Max(0m, baseDeposit - depositDiscount));
+
+            if (request.SecurityDeposit > 0 && request.SecurityDeposit < baseDeposit)
+            {
+                // If explicitly already discounted deposit amount was provided
+                result.DepositAfterDiscount = request.SecurityDeposit;
+            }
+            else
+            {
+                result.DepositAfterDiscount = Round2(Math.Max(0m, baseDeposit - depositDiscount));
+            }
 
             // Deposit Installments
             int installments = request.SecurityDepositInstallments > 0 ? request.SecurityDepositInstallments : 1;

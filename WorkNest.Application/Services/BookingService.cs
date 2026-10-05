@@ -658,11 +658,13 @@ namespace WorkNest.Application.Services
                 advTotal = monthlyRate * advanceMonths;
             }
 
-            // Task 1: Mirror discount to security deposit
+            // Task 1: Mirror discount to security deposit (Deposit is full months, not prorated)
             decimal baseSecTotal = monthlyRate * secDepositMonths;
-            decimal depositDiscountPct = (advTotal > 0 && discountAmount > 0)
-                ? Math.Min(100m, (discountAmount / advTotal) * 100m)
-                : (dto?.DiscountPercentage ?? 0m);
+            decimal depositDiscountPct = (dto?.DiscountPercentage > 0)
+                ? dto.DiscountPercentage
+                : ((monthlyRate > 0 && discountAmount > 0 && advanceMonths > 0)
+                    ? Math.Min(100m, (discountAmount / (monthlyRate * advanceMonths)) * 100m)
+                    : 0m);
             decimal secTotal = baseSecTotal > 0
                 ? Math.Max(0, Math.Round(baseSecTotal * (1 - (depositDiscountPct / 100.0m)), 2))
                 : 0m;

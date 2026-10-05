@@ -1109,7 +1109,13 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                         monthlyRent = subVal / Math.Max(1, advRentM);
                     }
                 }
-                decimal secDepReq = securityDepositOverride ?? (secDepM * monthlyRent);
+                decimal baseDeposit = secDepM * monthlyRent;
+                decimal discPct = (discountType == "Percentage" || discountType == "Percent")
+                    ? (discountValue > 0 ? discountValue : discountPercentage)
+                    : (monthlyRent > 0 && discountValue > 0 ? (discountValue / monthlyRent) * 100m : 0m);
+                decimal secDepReq = securityDepositOverride.HasValue
+                    ? securityDepositOverride.Value
+                    : (baseDeposit > 0 ? Math.Max(0, Math.Round(baseDeposit * (1 - (discPct / 100m)), 2)) : 0m);
 
                 var updateParts = new List<string> {
                     "DiscountType = @DT",
