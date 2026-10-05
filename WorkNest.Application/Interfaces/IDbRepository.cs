@@ -49,6 +49,10 @@ namespace WorkNest.Application.Interfaces
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
         /// <summary>Signed agreement: agreement SignedDate, booking date and challan dates follow the agreement's date.</summary>
         Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate);
+        /// <summary>Agreements of one customer (via the quotation's CustomerId), newest first.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAgreementsDbAsync(int customerId);
+        /// <summary>Set WN_Agreements.Status (and optionally the proposed SignedDate) on an agreement with no booking yet.</summary>
+        Task SetAgreementStatusDbAsync(int agreementId, string status, DateTime? signedDate = null);
         /// <summary>Pending bookings whose first (non-cancelled) invoice is Paid.</summary>
         Task<List<int>> GetPendingBookingsWithPaidFirstInvoiceDbAsync(IEnumerable<int> pendingStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds);
         Task CancelBookingAsync(int id, string? userEmail, string? cancelReason, int? updatedById);

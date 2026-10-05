@@ -1411,6 +1411,39 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return ids;
         }
 
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAgreementsDbAsync(int customerId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT a.Id, a.QuotationId, q.QuotationNumber, a.BookingId, a.Status, a.SentDate, a.SignedDate,
+                       a.SignedPdfUploadedAt, CAST(CASE WHEN a.SignedPdfPath IS NULL OR a.SignedPdfPath = '' THEN 0 ELSE 1 END AS BIT) AS HasSignedCopy,
+                       a.FeeAmount, a.SecurityDeposit, a.CustomerName, a.CompanyName,
+                       COALESCE(NULLIF(s.Name, ''), s.Code) AS SpaceName
+                  FROM dbo.WN_Agreements a WITH (NOLOCK)
+                  JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+                  LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+                 WHERE q.CustomerId = @CustomerId
+                 ORDER BY a.Id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@CustomerId", SqlDbType.Int).Value = customerId;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task SetAgreementStatusDbAsync(int agreementId, string status, DateTime? signedDate = null)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                UPDATE dbo.WN_Agreements
+                   SET Status = @Status, SignedDate = COALESCE(@Signed, SignedDate)
+                 WHERE Id = @Id AND BookingId IS NULL;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = agreementId;
+            cmd.Parameters.Add("@Status", SqlDbType.NVarChar, 50).Value = status;
+            cmd.Parameters.Add("@Signed", SqlDbType.DateTime2).Value = (object?)signedDate?.Date ?? DBNull.Value;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         public async Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate)
         {
             await using var c = await Open();

@@ -135,6 +135,93 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        // ---------------- Customer portal (own agreements only) ----------------
+
+        private string? CurrentUserEmail() =>
+            User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+
+        /// <summary>My Agreements: the logged-in customer's agreements.</summary>
+        [HttpGet("my")]
+        public async Task<IActionResult> GetMyAgreements()
+        {
+            var email = CurrentUserEmail();
+            if (string.IsNullOrWhiteSpace(email)) return Unauthorized(new { isSuccessful = false, message = "User identity required." });
+            var rows = await _agreement.GetMyAgreementsAsync(email);
+            return Ok(new { isSuccessful = true, data = rows });
+        }
+
+        /// <summary>My Agreements: download the agreement sent to me.</summary>
+        [HttpGet("my/{id:int}/pdf")]
+        public async Task<IActionResult> DownloadMyAgreementPdf(int id)
+        {
+            var email = CurrentUserEmail();
+            if (string.IsNullOrWhiteSpace(email) || !await _agreement.IsOwnAgreementAsync(email, id))
+                return NotFound(new { isSuccessful = false, message = "Agreement not found." });
+            try
+            {
+                var pdfBytes = await _agreement.GetAgreementPdfAsync(id);
+                return File(pdfBytes, "application/pdf", $"WorkNest-Agreement-{id}.pdf");
+            }
+            catch (Exception ex)
+            {
+                return NotFound(new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>My Agreements: download the signed copy I uploaded.</summary>
+        [HttpGet("my/{id:int}/signed-pdf")]
+        public async Task<IActionResult> DownloadMySignedPdf(int id)
+        {
+            var email = CurrentUserEmail();
+            if (string.IsNullOrWhiteSpace(email) || !await _agreement.IsOwnAgreementAsync(email, id))
+                return NotFound(new { isSuccessful = false, message = "Agreement not found." });
+            var agreement = await _agreement.GetAgreementByIdAsync(id);
+            if (agreement == null || string.IsNullOrWhiteSpace(agreement.SignedPdfPath))
+                return NotFound(new { isSuccessful = false, message = "No signed copy has been uploaded yet." });
+            var path = Path.IsPathRooted(agreement.SignedPdfPath) ? agreement.SignedPdfPath : Path.Combine(_env.ContentRootPath, agreement.SignedPdfPath);
+            if (!System.IO.File.Exists(path)) return NotFound(new { isSuccessful = false, message = "Signed copy is missing on the server." });
+            return File(await System.IO.File.ReadAllBytesAsync(path), "application/pdf", $"WorkNest-Agreement-{id}-signed.pdf");
+        }
+
+        /// <summary>
+        /// My Agreements: upload my signed copy + the date I signed. Held for admin verification
+        /// (status SignedUploaded); the booking is created when an admin confirms it.
+        /// </summary>
+        [HttpPost("my/{id:int}/upload-signed")]
+        [RequestSizeLimit(10 * 1024 * 1024)]
+        public async Task<IActionResult> UploadMySignedAgreement(int id, IFormFile? file, [FromForm] DateTime? signedDate)
+        {
+            try
+            {
+                var email = CurrentUserEmail();
+                if (string.IsNullOrWhiteSpace(email) || !await _agreement.IsOwnAgreementAsync(email, id))
+                    return NotFound(new { isSuccessful = false, message = "Agreement not found." });
+                if (signedDate == null)
+                    return BadRequest(new { isSuccessful = false, message = "Enter the date you signed the agreement." });
+                var date = signedDate.Value.Date;
+                if (date > DateTime.Today)
+                    return BadRequest(new { isSuccessful = false, message = "The signed date cannot be in the future." });
+
+                var agreement = await _agreement.GetAgreementByIdAsync(id);
+                if (agreement == null) return NotFound(new { isSuccessful = false, message = "Agreement not found." });
+                if (agreement.BookingId != null)
+                    return BadRequest(new { isSuccessful = false, message = "This agreement is already signed and your booking has been created." });
+                if (agreement.SentDate != default && date < agreement.SentDate.Date)
+                    return BadRequest(new { isSuccessful = false, message = $"The signed date cannot be before the agreement was sent ({agreement.SentDate:d MMM yyyy})." });
+
+                var upload = await SaveSignedPdfAsync(id, file);
+                if (upload.Error != null)
+                    return BadRequest(new { isSuccessful = false, message = upload.Error });
+
+                await _agreement.MarkCustomerSignedUploadAsync(id, date);
+                return Ok(new { isSuccessful = true, message = "Thank you — your signed agreement was received. We will verify it and confirm your booking." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
         /// <summary>
         /// Signed agreement came back (one step): upload the signed scan + the date written on it.
         /// Marks the agreement signed, creates the booking from its quotation and dates the agreement,
@@ -162,10 +249,15 @@ namespace WorkNest.API.Controllers
                 if (agreement.SentDate != default && date < agreement.SentDate.Date)
                     return BadRequest(new { isSuccessful = false, message = $"The signed date cannot be before the agreement was sent ({agreement.SentDate:d MMM yyyy})." });
 
-                // 1. Store the signed scan (same checks as upload-signed)
-                var upload = await SaveSignedPdfAsync(id, file);
-                if (upload.Error != null)
-                    return BadRequest(new { isSuccessful = false, message = upload.Error });
+                // 1. Store the signed scan (same checks as upload-signed). When the customer already uploaded
+                //    it from the portal, the admin is verifying that copy and a new file is optional.
+                bool customerCopyOnFile = !string.IsNullOrWhiteSpace(agreement.SignedPdfPath);
+                if (file != null || !customerCopyOnFile)
+                {
+                    var upload = await SaveSignedPdfAsync(id, file);
+                    if (upload.Error != null)
+                        return BadRequest(new { isSuccessful = false, message = upload.Error });
+                }
 
                 // 2. Mark signed + create the booking, dated on the agreement
                 int? actorId = ResolveActorId();

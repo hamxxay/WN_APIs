@@ -164,7 +164,18 @@ namespace WorkNest.Application.Services
                     {
                         await _email.SendAgreementEmailAsync(recipientEmail, customerDisplay, qNum, mergedPdf);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        // Make the failure visible: agreement shows "EmailFailed" in the admin list and the
+                        // quotation's activity log records why. The customer can still get it from My Agreements.
+                        try
+                        {
+                            await _db.SetAgreementStatusDbAsync(agreementId, "EmailFailed");
+                            await _db.AddQuotationActivityAsync(q.Id, q.Version, "AgreementEmailFailed",
+                                $"Agreement email to {recipientEmail} failed: {ex.Message}", userId);
+                        }
+                        catch { /* logging must never break the request */ }
+                    }
                 });
             }
 
@@ -396,6 +407,39 @@ namespace WorkNest.Application.Services
         /// Signed agreement came back: mark it signed, create the booking from its quotation, and date the
         /// agreement, booking and challan on <paramref name="signedDate"/> (the date on the signed agreement).
         /// </summary>
+        private async Task<int> ResolveCustomerIdAsync(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return 0;
+            var user = await _db.GetUserByEmailAsync(email);
+            if (user == null) return 0;
+            int customerId = user.TryGetValue("CustomerId", out var cid) && cid != null ? Convert.ToInt32(cid) : 0;
+            int userId = user.TryGetValue("Id", out var uid) && uid != null ? Convert.ToInt32(uid) : 0;
+            if (customerId <= 0 && userId > 0)
+            {
+                var cust = await _db.GetCustomerByUserIdAsync(userId);
+                if (cust != null && cust.TryGetValue("Id", out var custId) && custId != null) customerId = Convert.ToInt32(custId);
+            }
+            return customerId;
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetMyAgreementsAsync(string email)
+        {
+            int customerId = await ResolveCustomerIdAsync(email);
+            return customerId > 0 ? await _db.GetCustomerAgreementsDbAsync(customerId) : Enumerable.Empty<IDictionary<string, object?>>();
+        }
+
+        public async Task<bool> IsOwnAgreementAsync(string email, int agreementId)
+        {
+            int customerId = await ResolveCustomerIdAsync(email);
+            if (customerId <= 0) return false;
+            return (await _db.GetCustomerAgreementsDbAsync(customerId)).Any(r => r.TryGetValue("Id", out var id) && id != null && Convert.ToInt32(id) == agreementId);
+        }
+
+        public async Task MarkCustomerSignedUploadAsync(int agreementId, DateTime signedDate)
+        {
+            await _db.SetAgreementStatusDbAsync(agreementId, "SignedUploaded", signedDate);
+        }
+
         public async Task<AgreementResponseDto> MarkAgreementSignedAsync(int agreementId, int? userId, string? note, DateTime? signedDate = null)
         {
             var row = await _db.GetAgreementByIdDbAsync(agreementId);
