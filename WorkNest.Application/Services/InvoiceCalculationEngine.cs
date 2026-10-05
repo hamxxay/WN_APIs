@@ -205,24 +205,27 @@ namespace WorkNest.Application.Services
             }
             else
             {
-                decimal fixedDisc = request.DiscountAmount > 0 ? request.DiscountAmount :
-                    ((string.Equals(request.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(request.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) ? request.DiscountValue : 0m);
-
-                if (fixedDisc > 0)
-                {
-                    discountAmount = Round2(Math.Min(fixedDisc, result.Rent));
-                    decimal basisForPct = result.MonthlyRent > 0 ? result.MonthlyRent : result.Rent;
-                    if (basisForPct > 0)
-                    {
-                        discountPct = (fixedDisc / basisForPct) * 100.0m;
-                    }
+              decimal fixedDisc = request.DiscountAmount > 0 ? request.DiscountAmount :
+        ((string.Equals(request.DiscountType, "Amount", StringComparison.OrdinalIgnoreCase) || string.Equals(request.DiscountType, "Fixed", StringComparison.OrdinalIgnoreCase)) ? request.DiscountValue : 0m);
+    if (fixedDisc > 0)
+    {
+        if (isMeeting)
+        {
+            discountAmount = Round2(Math.Min(fixedDisc, result.Rent));
+        }
+        else
+        {
+            // PKR fixedDisc is per month, so for the billing period cycle: fixedDisc * billingMonths
+            discountAmount = Round2(Math.Min(fixedDisc * billingMonths, result.Rent));
+        }
+    }
                 }
             }
             result.Discount = discountAmount;
 
-            // Service charge: 10% on Advance Rent (or effective-dated provincial tax snapshot)
-            result.ServiceCharge = Round2(result.Rent * (chargeRate / 100.0m));
-
+            // Support services: PKR 2,000 (per-seat support rate) × Capacity × Billing Months
+            decimal perSeatSupportRate = request.PerSeatSupportRate > 0 ? request.PerSeatSupportRate : 2000.00m;
+            result.ServiceCharge = Round2(perSeatSupportRate * capacity * billingMonths);
             // Tax: 16% on service charge only
             result.Tax = Round2(result.ServiceCharge * (taxRate / 100.0m));
 

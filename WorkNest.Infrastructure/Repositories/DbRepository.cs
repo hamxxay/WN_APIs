@@ -462,7 +462,9 @@ namespace WorkNest.Infrastructure.Repositories
                 decimal secDeposit = quotation.TryGetValue("SecurityDeposit", out var sdObj) && sdObj != null ? Convert.ToDecimal(sdObj) : 0m;
                 string discountType = quotation.TryGetValue("DiscountType", out var dtObj) && dtObj != null ? dtObj.ToString()! : "Percentage";
                 decimal discountPct = quotation.TryGetValue("DiscountPercentage", out var dpObj) && dpObj != null ? Convert.ToDecimal(dpObj) : 0m;
-                decimal discountVal = quotation.TryGetValue("DiscountAmount", out var daObj) && daObj != null ? Convert.ToDecimal(daObj) : 0m;
+                decimal discountVal = quotation.TryGetValue("DiscountValue", out var dvObj) && dvObj != null && Convert.ToDecimal(dvObj) > 0
+                    ? Convert.ToDecimal(dvObj)
+                    : (quotation.TryGetValue("DiscountAmount", out var daObj) && daObj != null ? Convert.ToDecimal(daObj) : 0m);
                 decimal subtotal = quotation.TryGetValue("SubtotalAmount", out var stObj) && stObj != null ? Convert.ToDecimal(stObj) : 0m;
                 decimal whtRate = quotation.TryGetValue("WithholdingTaxRate", out var whtObj) && whtObj != null ? Convert.ToDecimal(whtObj) : 15.00m;
 
@@ -485,6 +487,7 @@ namespace WorkNest.Infrastructure.Repositories
                         SecurityDepositRequired = @SecurityDeposit,
                         DiscountType = @DiscountType,
                         DiscountPercentage = @DiscountPct,
+                        DiscountValue = @DiscountVal,
                         DiscountAmount = @DiscountVal,
                         WHTRate = @WhtRate
                     WHERE Id = @BookingId;
