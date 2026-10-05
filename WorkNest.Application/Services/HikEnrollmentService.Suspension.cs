@@ -157,6 +157,57 @@ namespace WorkNest.Application.Services
             return result;
         }
 
+        private const int TemporaryAccessEndingSoonDays = 3;
+
+        public async Task<HikAccessOverviewDto> GetAccessOverviewAsync()
+        {
+            var sets = await _db.GetHikAccessOverviewDbAsync();
+            var counts = sets.Count > 0 ? sets[0].FirstOrDefault() : null;
+            int Int(IDictionary<string, object?>? row, string key) =>
+                row != null && row.TryGetValue(key, out var v) && v != null ? Convert.ToInt32(v) : 0;
+
+            var result = new HikAccessOverviewDto
+            {
+                Devices = Int(counts, "Devices"),
+                DevicesOnline = Int(counts, "DevicesOnline"),
+                PendingOps = Int(counts, "PendingOps"),
+                PendingOpsDevices = Int(counts, "PendingOpsDevices"),
+                EndingSoonDays = TemporaryAccessEndingSoonDays
+            };
+            result.DevicesOffline = Math.Max(0, result.Devices - result.DevicesOnline);
+
+            var today = DateTime.Today;
+            foreach (var r in sets.Count > 1 ? sets[1] : new List<IDictionary<string, object?>>())
+            {
+                var overrideUntil = r["OverrideUntil"] as DateTime?;
+                var extended = overrideUntil.HasValue && overrideUntil.Value.Date >= today;
+                var endingSoon = extended && overrideUntil!.Value.Date <= today.AddDays(TemporaryAccessEndingSoonDays);
+                var code = Convert.ToString(r["SpaceCode"]);
+                var name = Convert.ToString(r["SpaceName"]);
+                result.Items.Add(new HikSuspendedBookingDto
+                {
+                    SuspensionId = Int(r, "SuspensionId"),
+                    BookingId = Int(r, "BookingId"),
+                    BookingDetailId = Int(r, "BookingDetailId"),
+                    Customer = Convert.ToString(r["Customer"]),
+                    Space = string.IsNullOrWhiteSpace(name) ? code : name,
+                    SpaceCount = Int(r, "SpaceCount"),
+                    BookingEnd = (r["BookingEnd"] as DateTime?)?.ToString("yyyy-MM-dd"),
+                    EnrolledPeople = Int(r, "EnrolledPeople"),
+                    Reason = Convert.ToString(r["Reason"]),
+                    SuspendedAt = (r["SuspendedAt"] as DateTime?)?.ToString("yyyy-MM-ddTHH:mm:ss"),
+                    Extended = extended,
+                    EndingSoon = endingSoon,
+                    OverrideUntil = overrideUntil?.ToString("yyyy-MM-dd"),
+                    OverrideByEmail = Convert.ToString(r["OverrideByEmail"]),
+                    OverrideReason = Convert.ToString(r["OverrideReason"])
+                });
+                if (extended) result.Extended++; else result.Suspended++;
+                if (endingSoon) result.EndingSoon++;
+            }
+            return result;
+        }
+
         /// <summary>
         /// Manual extension: access is allowed through the chosen date even though the challan is unpaid.
         /// Unblocks the booking's people right away; the hourly cycle re-suspends after that date if still unpaid.

@@ -13,5 +13,7 @@ namespace WorkNest.Application.Interfaces
         Task<HikAccessSuspensionDto> GetAccessSuspensionAsync(int bookingDetailId);
         Task<HikBookingChallansDto> GetBookingChallansAsync(int bookingDetailId);
         Task<HikAccessSyncResultDto> ExtendAccessAsync(int bookingDetailId, HikAccessExtendRequest request, string? createdByEmail);
+        /// <summary>Admin dashboard: machines online/offline, queued operations, suspended bookings.</summary>
+        Task<HikAccessOverviewDto> GetAccessOverviewAsync();
     }
 }

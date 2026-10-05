@@ -160,6 +160,45 @@ namespace WorkNest.Application.DTOs.HikDevice
         public string Reason { get; set; } = string.Empty;
     }
 
+    /// <summary>Admin dashboard "Door access" card: machines, queued machine operations and suspended bookings.</summary>
+    public class HikAccessOverviewDto
+    {
+        public int Devices { get; set; }
+        public int DevicesOnline { get; set; }
+        public int DevicesOffline { get; set; }
+        /// <summary>Operations waiting in WN_HIK_PendingOps for offline machines.</summary>
+        public int PendingOps { get; set; }
+        public int PendingOpsDevices { get; set; }
+        /// <summary>Running bookings blocked right now (open suspension, no active temporary access).</summary>
+        public int Suspended { get; set; }
+        /// <summary>Running bookings on temporary access (open suspension, OverrideUntil today or later).</summary>
+        public int Extended { get; set; }
+        /// <summary>Temporary access that ends within EndingSoonDays.</summary>
+        public int EndingSoon { get; set; }
+        public int EndingSoonDays { get; set; }
+        public List<HikSuspendedBookingDto> Items { get; set; } = new();
+    }
+
+    public class HikSuspendedBookingDto
+    {
+        public int SuspensionId { get; set; }
+        public int BookingId { get; set; }
+        /// <summary>A booked space of the booking — used for the temporary access call.</summary>
+        public int BookingDetailId { get; set; }
+        public string? Customer { get; set; }
+        public string? Space { get; set; }
+        public int SpaceCount { get; set; }
+        public string? BookingEnd { get; set; }
+        public int EnrolledPeople { get; set; }
+        public string? Reason { get; set; }
+        public string? SuspendedAt { get; set; }
+        public bool Extended { get; set; }
+        public bool EndingSoon { get; set; }
+        public string? OverrideUntil { get; set; }
+        public string? OverrideByEmail { get; set; }
+        public string? OverrideReason { get; set; }
+    }
+
     /// <summary>One booking whose machine state must change, from WN_HIK_AccessSuspension_Run.</summary>
     public class HikAccessSuspensionChange
     {

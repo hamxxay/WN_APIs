@@ -4025,6 +4025,55 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await r.ReadAsync() ? ToDict(r) : null;
         }
 
+        /// <summary>
+        /// Dashboard overview (read-only): [0] machine / queued-operation counts,
+        /// [1] open suspensions of bookings that are still running.
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync()
+        {
+            await using var c = await Open();
+            const string sql = @"
+                DECLARE @Today DATE = CAST(GETDATE() AS DATE);
+                SELECT
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS Devices,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 1) AS DevicesOnline,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_PendingOps WITH (NOLOCK)) AS PendingOps,
+                    (SELECT COUNT(DISTINCT device_id) FROM dbo.WN_HIK_PendingOps WITH (NOLOCK)) AS PendingOpsDevices;
+
+                SELECT
+                    s.Id AS SuspensionId, s.BookingId, s.Reason, s.SuspendedAt, s.OverrideUntil,
+                    bd.BookingDetailId, bd.SpaceName, bd.SpaceCode, bd.SpaceCount, bd.BookingEnd,
+                    COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, bd.CustomerEmail) AS Customer,
+                    ppl.EnrolledPeople,
+                    ovr.CreatedByEmail AS OverrideByEmail, ovr.Reason AS OverrideReason
+                FROM dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+                JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = s.BookingId
+                CROSS APPLY (SELECT MIN(d.Id) AS BookingDetailId, MIN(d.SpaceName) AS SpaceName, MIN(d.SpaceCode) AS SpaceCode,
+                                    COUNT(*) AS SpaceCount, MAX(d.EndDateTime) AS BookingEnd,
+                                    MIN(d.CustomerCode) AS CustomerCode, MIN(d.CustomerEmail) AS CustomerEmail
+                               FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                              WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0) bd
+                OUTER APPLY (SELECT TOP 1 Company, FirstName, LastName, Email FROM dbo.WN_Customers WITH (NOLOCK)
+                             WHERE Code = bd.CustomerCode OR Email = bd.CustomerEmail) cu
+                OUTER APPLY (SELECT COUNT(DISTINCT ba.PersonId) AS EnrolledPeople
+                               FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+                               JOIN dbo.WN_BookingDetails d2 WITH (NOLOCK) ON d2.Id = ba.BookingDetailId AND d2.IsDeleted = 0
+                               JOIN dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId = ba.PersonId
+                              WHERE d2.BookingGuid = b.IdGUID
+                                AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= @Today)) ppl
+                OUTER APPLY (SELECT TOP 1 o.CreatedByEmail, o.Reason FROM dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
+                              WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) ovr
+                WHERE s.ResolvedAt IS NULL
+                  AND ISNULL(b.IsDeleted, 0) = 0
+                  AND b.BookingStatusId NOT IN (3, 4) -- cancelled / rejected
+                  AND bd.BookingDetailId IS NOT NULL
+                  AND bd.BookingEnd >= @Today   -- booking still running
+                ORDER BY CASE WHEN s.OverrideUntil >= @Today THEN 1 ELSE 0 END, ppl.EnrolledPeople DESC, s.SuspendedAt DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
         public async Task<(int? SuspensionId, int? BookingId)> ExtendHikAccessSuspensionDbAsync(int bookingDetailId, DateTime overrideUntil, string reason, int? createdById, string? createdByEmail)
         {
             await using var c = await Open();

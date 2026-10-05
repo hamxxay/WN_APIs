@@ -299,6 +299,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync();
         Task SetHikAccessSuspensionAppliedDbAsync(int suspensionId, bool machinesBlocked);
         Task<IDictionary<string, object?>?> GetHikAccessSuspensionByBookingDetailDbAsync(int bookingDetailId);
+        Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync();
         Task<(int? SuspensionId, int? BookingId)> ExtendHikAccessSuspensionDbAsync(int bookingDetailId, DateTime overrideUntil, string reason, int? createdById, string? createdByEmail);
         Task<IEnumerable<int>> GetBookingDetailIdsForBookingDbAsync(int bookingId);
         Task<List<List<IDictionary<string, object?>>>> GetBookingChallansByBookingDetailDbAsync(int bookingDetailId);

@@ -216,6 +216,18 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
+        /// Admin dashboard "Door access" card: machines online / offline, operations queued for offline machines,
+        /// and running bookings that are suspended or on temporary access.
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpGet("api/access-suspensions/overview")]
+        public async Task<IActionResult> GetAccessOverview()
+        {
+            var result = await _accessSuspension.GetAccessOverviewAsync();
+            return Ok(result);
+        }
+
+        /// <summary>
         /// Extend door access manually until a date while the challan is unpaid (sales executive / admin / super admin).
         /// </summary>
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
