@@ -271,8 +271,48 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceDto>> GetHikDevicesAsync(string? location = null);
         Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null);
         Task<Dictionary<string, string>> GetHikCnicMapAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikBookedRoomsDbAsync();
+        Task<Dictionary<string, string>> GetHikStaffTagMapDbAsync();
         Task<string?> GetHikDeviceSnapshotByIdAsync(int deviceId);
         Task<int> GetNextHikEmployeeNoAsync();
+
+        // --- Hikvision Attendant Enrollment ---
+        Task<WorkNest.Application.DTOs.HikDevice.HikAttendantContext?> GetHikAttendantContextDbAsync(int bookingDetailId, int personId);
+        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikAttendantContext>> GetHikAttendantContextsDbAsync(int? bookingDetailId, int? personId);
+        Task<string> GetOrCreateHikEmployeeNoDbAsync(int personId, int floor = 0);
+        Task<string> ReallocateHikEmployeeNoDbAsync(int personId, int floor);
+        Task<HashSet<int>> GetHikPendingOpDeviceIdsForEmployeeDbAsync(string employeeNo);
+        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceConnection>> GetHikDeviceConnectionsDbAsync(IEnumerable<int> deviceIds);
+        Task<IEnumerable<int>> GetHikEntranceDeviceIdsDbAsync();
+
+        // --- Hikvision challan-based access suspension (WN_HIK_AccessSuspension_* SPs) ---
+        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync();
+        Task SetHikAccessSuspensionAppliedDbAsync(int suspensionId, bool machinesBlocked);
+        Task<IDictionary<string, object?>?> GetHikAccessSuspensionByBookingDetailDbAsync(int bookingDetailId);
+        Task<(int? SuspensionId, int? BookingId)> ExtendHikAccessSuspensionDbAsync(int bookingDetailId, DateTime overrideUntil, string reason, int? createdById, string? createdByEmail);
+        Task<IEnumerable<int>> GetBookingDetailIdsForBookingDbAsync(int bookingId);
+        Task<List<List<IDictionary<string, object?>>>> GetBookingChallansByBookingDetailDbAsync(int bookingDetailId);
+        Task<string?> GetHikPendingOpPayloadDbAsync(int deviceId, string op, string employeeNo);
+        Task QueueHikPendingOpDbAsync(int deviceId, string op, string employeeNo, string payloadJson);
+
+        // --- Hikvision Staff (janitors, office boys, … — tagged machine users without a booking) ---
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikStaffDbAsync(string? employeeNo = null);
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikTagsDbAsync();
+        Task<int> AddHikTagDbAsync(string name);
+        Task<string> CreateHikStaffDbAsync(string name, string cnic, int? tagId, int floor = 0);
+        Task DeleteHikStaffDbAsync(string employeeNo);
+        Task<IEnumerable<(int DeviceId, string? UsersJson)>> GetHikDevCacheSnapshotsDbAsync();
+        Task<IEnumerable<int>> GetHikPendingOpDeviceIdsDbAsync(string employeeNo);
+
+        // --- Hikvision Access Dashboard / Activity Log / Analytics (read-only) ---
+        Task<IDictionary<string, object?>> GetHikAccessStatsDbAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikAccessEventsDbAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit);
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikSyncActivityDbAsync(int limit);
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikExpiringDbAsync(int days);
+        Task<List<List<IDictionary<string, object?>>>> GetHikAccessAnalyticsDbAsync(DateTime from, DateTime to);
+        Task<List<List<IDictionary<string, object?>>>> GetHikUserAnalyticsDbAsync(string? employeeNo, string? name, DateTime from, DateTime to);
+        Task SaveHikUserCnicDbAsync(string employeeNo, string name, string? cnic);
+        Task SaveHikFingerprintTemplateDbAsync(string employeeNo, string name, int fingerNo, string template);
 
         // --- KYC Portal ---
         Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null);

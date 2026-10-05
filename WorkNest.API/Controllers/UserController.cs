@@ -6,6 +6,7 @@ using WorkNest.Common.Responses;
 
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
+using WorkNest.Common.Constants;
 
 namespace WorkNest.API.Controllers
 {
@@ -81,76 +82,125 @@ namespace WorkNest.API.Controllers
             return await History(id);
         }
 
+        // ── User management (write) — admin / super admin only ─────────────────────
+        // Only a super admin may create, change or remove a super admin, or grant the super admin role.
+        private const string ManageRoles = "admin,Admin,super_admin,SuperAdmin";
+
+        [Authorize(Roles = ManageRoles)]
         [HttpPost("api/user")]
         public async Task<IActionResult> Create([FromBody] UserCreateRequest request)
         {
-            var result = await _users.CreateUserAsync(request, null);
+            if (GrantsSuperAdmin(request?.Role)) return Forbid();
+            var result = await _users.CreateUserAsync(request!, null);
             return StatusCode(201, result);
         }
 
+        [Authorize(Roles = ManageRoles)]
         [HttpPut("api/user/{id:int}")]
-        public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest request) =>
-            Ok(await _users.UpdateUserAsync(id, request));
+        public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest request)
+        {
+            if (GrantsSuperAdmin(request?.Role) || await IsProtectedSuperAdminAsync(id)) return Forbid();
+            return Ok(await _users.UpdateUserAsync(id, request!));
+        }
 
+        [Authorize(Roles = ManageRoles)]
         [HttpPut("api/user/{publicId:guid}")]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] UserUpdateRequest request)
         {
-            var row = await _db.GetUserByPublicIdAsync(publicId);
-            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
-            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
-            return Ok(await _users.UpdateUserAsync(id, request));
+            var id = await ResolveIdAsync(publicId);
+            if (id is null) return NotFound(ApiResponse.Fail("User not found"));
+            return await Update(id.Value, request);
         }
 
+        [Authorize(Roles = ManageRoles)]
         [HttpDelete("api/user/{id:int}")]
-        public async Task<IActionResult> Delete(int id) =>
-            Ok(await _users.DeleteUserAsync(id));
-
-        [HttpDelete("api/user/{publicId:guid}")]
-        public async Task<IActionResult> DeleteByGuid(Guid publicId)
+        public async Task<IActionResult> Delete(int id)
         {
-            var row = await _db.GetUserByPublicIdAsync(publicId);
-            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
-            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            if (await IsProtectedSuperAdminAsync(id)) return Forbid();
             return Ok(await _users.DeleteUserAsync(id));
         }
 
-        [HttpPatch("api/user/{id:int}/activate")]
-        public async Task<IActionResult> Activate(int id) =>
-            Ok(await _users.ActivateUserAsync(id));
-
-        [HttpPatch("api/user/{publicId:guid}/activate")]
-        public async Task<IActionResult> ActivateByGuid(Guid publicId)
+        [Authorize(Roles = ManageRoles)]
+        [HttpDelete("api/user/{publicId:guid}")]
+        public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
-            var row = await _db.GetUserByPublicIdAsync(publicId);
-            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
-            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            var id = await ResolveIdAsync(publicId);
+            if (id is null) return NotFound(ApiResponse.Fail("User not found"));
+            return await Delete(id.Value);
+        }
+
+        [Authorize(Roles = ManageRoles)]
+        [HttpPatch("api/user/{id:int}/activate")]
+        public async Task<IActionResult> Activate(int id)
+        {
+            if (await IsProtectedSuperAdminAsync(id)) return Forbid();
             return Ok(await _users.ActivateUserAsync(id));
         }
 
-        [HttpPatch("api/user/{id:int}/deactivate")]
-        public async Task<IActionResult> Deactivate(int id) =>
-            Ok(await _users.DeactivateUserAsync(id));
-
-        [HttpPatch("api/user/{publicId:guid}/deactivate")]
-        public async Task<IActionResult> DeactivateByGuid(Guid publicId)
+        [Authorize(Roles = ManageRoles)]
+        [HttpPatch("api/user/{publicId:guid}/activate")]
+        public async Task<IActionResult> ActivateByGuid(Guid publicId)
         {
-            var row = await _db.GetUserByPublicIdAsync(publicId);
-            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
-            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            var id = await ResolveIdAsync(publicId);
+            if (id is null) return NotFound(ApiResponse.Fail("User not found"));
+            return await Activate(id.Value);
+        }
+
+        [Authorize(Roles = ManageRoles)]
+        [HttpPatch("api/user/{id:int}/deactivate")]
+        public async Task<IActionResult> Deactivate(int id)
+        {
+            if (await IsProtectedSuperAdminAsync(id)) return Forbid();
             return Ok(await _users.DeactivateUserAsync(id));
         }
 
-        [HttpPatch("api/user/{id:int}/role")]
-        public async Task<IActionResult> UpdateRole(int id, [FromBody] UserRoleUpdateRequest request) =>
-            Ok(await _users.UpdateUserRoleAsync(id, request));
+        [Authorize(Roles = ManageRoles)]
+        [HttpPatch("api/user/{publicId:guid}/deactivate")]
+        public async Task<IActionResult> DeactivateByGuid(Guid publicId)
+        {
+            var id = await ResolveIdAsync(publicId);
+            if (id is null) return NotFound(ApiResponse.Fail("User not found"));
+            return await Deactivate(id.Value);
+        }
 
+        [Authorize(Roles = ManageRoles)]
+        [HttpPatch("api/user/{id:int}/role")]
+        public async Task<IActionResult> UpdateRole(int id, [FromBody] UserRoleUpdateRequest request)
+        {
+            if (GrantsSuperAdmin(request?.Role) || await IsProtectedSuperAdminAsync(id)) return Forbid();
+            return Ok(await _users.UpdateUserRoleAsync(id, request!));
+        }
+
+        [Authorize(Roles = ManageRoles)]
         [HttpPatch("api/user/{publicId:guid}/role")]
         public async Task<IActionResult> UpdateRoleByGuid(Guid publicId, [FromBody] UserRoleUpdateRequest request)
         {
+            var id = await ResolveIdAsync(publicId);
+            if (id is null) return NotFound(ApiResponse.Fail("User not found"));
+            return await UpdateRole(id.Value, request);
+        }
+
+        private bool CallerIsSuperAdmin() =>
+            User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsSuperAdmin();
+
+        /// <summary>True when a non-super-admin tries to assign the super admin role.</summary>
+        private bool GrantsSuperAdmin(string? role) =>
+            !string.IsNullOrWhiteSpace(role) && Roles.IsSuperAdmin(Roles.ParseRoleId(role)) && !CallerIsSuperAdmin();
+
+        /// <summary>True when a non-super-admin targets an existing super admin account.</summary>
+        private async Task<bool> IsProtectedSuperAdminAsync(int id)
+        {
+            if (CallerIsSuperAdmin()) return false;
+            var row = await _db.GetUserByIdAsync(id);
+            return row != null && row.TryGetValue("RoleId", out var roleId) && roleId != null
+                   && Roles.IsSuperAdmin(Convert.ToInt32(roleId));
+        }
+
+        private async Task<int?> ResolveIdAsync(Guid publicId)
+        {
             var row = await _db.GetUserByPublicIdAsync(publicId);
-            if (row is null) return NotFound(ApiResponse.Fail("User not found"));
-            var id = row.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
-            return Ok(await _users.UpdateUserRoleAsync(id, request));
+            if (row is null) return null;
+            return row.TryGetValue("Id", out var rid) && rid != null ? Convert.ToInt32(rid) : 0;
         }
     }
 }

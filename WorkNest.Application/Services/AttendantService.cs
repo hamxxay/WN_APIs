@@ -91,7 +91,9 @@ namespace WorkNest.Application.Services
                     IsEnabled = r.ContainsKey("IsEnabled") && r["IsEnabled"] != null ? Convert.ToBoolean(r["IsEnabled"]) : true,
                     IsOverCapacity = r.ContainsKey("IsOverCapacity") && r["IsOverCapacity"] != null ? Convert.ToBoolean(r["IsOverCapacity"]) : false,
                     ExcessSeatCount = r.ContainsKey("ExcessSeatCount") && r["ExcessSeatCount"] != null ? Convert.ToInt32(r["ExcessSeatCount"]) : 0,
-                    SurchargeApplied = r.ContainsKey("SurchargeApplied") && r["SurchargeApplied"] != null ? Convert.ToDecimal(r["SurchargeApplied"]) : null
+                    SurchargeApplied = r.ContainsKey("SurchargeApplied") && r["SurchargeApplied"] != null ? Convert.ToDecimal(r["SurchargeApplied"]) : null,
+                    MachineId = r.ContainsKey("MachineId") ? Convert.ToString(r["MachineId"]) : null,
+                    HikPendingOps = r.ContainsKey("HikPendingOps") && r["HikPendingOps"] != null ? Convert.ToInt32(r["HikPendingOps"]) : 0
                 });
             }
 

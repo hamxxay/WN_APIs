@@ -74,6 +74,9 @@ namespace WorkNest.Application.DTOs.Attendant
         public bool IsOverCapacity { get; set; }
         public int ExcessSeatCount { get; set; }
         public decimal? SurchargeApplied { get; set; }
+        /// <summary>Machine ID (WN_HIK_PersonMap.MachineID); null until first enrollment.</summary>
+        public string? MachineId { get; set; }
+        public int HikPendingOps { get; set; }
     }
 
     public class AccessStatusExportDto

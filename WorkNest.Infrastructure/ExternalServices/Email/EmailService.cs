@@ -16,6 +16,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         private readonly IConfiguration _config;
         private readonly ILogger<EmailService> _logger;
 
+        // SMTP server — configurable so any provider works (Gmail, Zoho, …). Defaults keep the old Gmail setup.
+        //   Email:SmtpHost  e.g. "smtppro.zoho.com" (Zoho, own domain) or "smtp.gmail.com"
+        //   Email:SmtpPort  587 (STARTTLS; System.Net.Mail does not support implicit SSL on 465)
+        //   Email:Password  app password for Email:FromEmail (falls back to Email:GmailAppPassword)
+        private string SmtpHost => string.IsNullOrWhiteSpace(_config["Email:SmtpHost"]) ? "smtp.gmail.com" : _config["Email:SmtpHost"]!;
+        private int SmtpPort => int.TryParse(_config["Email:SmtpPort"], out var port) && port > 0 ? port : 587;
+        private string? SmtpPassword => string.IsNullOrWhiteSpace(_config["Email:Password"]) ? _config["Email:GmailAppPassword"] : _config["Email:Password"];
+
         public EmailService(IConfiguration config, ILogger<EmailService> logger)
         {
             _config = config;
@@ -26,7 +34,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         {
             var fromEmail = _config["Email:FromEmail"];
             var toEmail   = _config["Email:ToEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var password  = SmtpPassword;
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -56,7 +64,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 };
                 mailMessage.To.Add(toEmail);
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                using var smtp = new SmtpClient(SmtpHost, SmtpPort)
                 {
                     Credentials = new NetworkCredential(fromEmail, password),
                     EnableSsl   = true,
@@ -74,7 +82,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         public async Task SendQuotationEmailAsync(string email, string customerName, string quotationNumber, byte[]? pdfBytes = null, string? quotationLink = null)
         {
             var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var password  = SmtpPassword;
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(email) ||
@@ -114,7 +122,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mailMessage.Attachments.Add(attachment);
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                using var smtp = new SmtpClient(SmtpHost, SmtpPort)
                 {
                     Credentials = new NetworkCredential(fromEmail, password),
                     EnableSsl   = true,
@@ -136,7 +144,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             decimal securityDeposit = 0, decimal taxAmount = 0, decimal discountAmount = 0, byte[]? pdfBytes = null)
         {
             var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var password  = SmtpPassword;
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -220,7 +228,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     _logger.LogWarning("[EMAIL] Warning: {DocType} {Number} email to {To} is being sent WITHOUT PDF attachment (pdfBytes is null or empty).", docType, challanNumber, toEmail);
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                using var smtp = new SmtpClient(SmtpHost, SmtpPort)
                 {
                     Credentials = new NetworkCredential(fromEmail, password),
                     EnableSsl   = true,
@@ -244,7 +252,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, byte[]? pdfBytes = null)
         {
             var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var password  = SmtpPassword;
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -323,7 +331,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mailMessage.Attachments.Add(attachment);
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                using var smtp = new SmtpClient(SmtpHost, SmtpPort)
                 {
                     Credentials = new NetworkCredential(fromEmail, password),
                     EnableSsl   = true,
@@ -346,7 +354,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             DateTime? billingStart = null, DateTime? billingEnd = null, byte[]? pdfBytes = null)
         {
             var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var password  = SmtpPassword;
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -436,7 +444,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mail.Attachments.Add(new Attachment(new MemoryStream(pdfBytes), $"Custom-Invoice-{invoiceNumber}.pdf", "application/pdf"));
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                using var smtp = new SmtpClient(SmtpHost, SmtpPort)
                 {
                     Credentials = new NetworkCredential(fromEmail, password),
                     EnableSsl = true
@@ -454,7 +462,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         public async Task SendAgreementEmailAsync(string toEmail, string customerName, string quotationNumber, byte[] pdfBytes)
         {
             var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var password  = SmtpPassword;
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -490,7 +498,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mail.Attachments.Add(new Attachment(new MemoryStream(pdfBytes), $"Agreement-{quotationNumber}.pdf", "application/pdf"));
                 }
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                using var smtp = new SmtpClient(SmtpHost, SmtpPort)
                 {
                     Credentials = new NetworkCredential(fromEmail, password),
                     EnableSsl = true
@@ -508,7 +516,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         public async Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type)
         {
             var fromEmail = _config["Email:FromEmail"];
-            var password  = _config["Email:GmailAppPassword"];
+            var password  = SmtpPassword;
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -551,7 +559,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 mail.Body = html;
 
-                using var smtp = new SmtpClient("smtp.gmail.com", 587)
+                using var smtp = new SmtpClient(SmtpHost, SmtpPort)
                 {
                     Credentials = new NetworkCredential(fromEmail, password),
                     EnableSsl = true

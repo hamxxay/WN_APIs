@@ -11491,3 +11491,132 @@ BEGIN
     SELECT @@ROWCOUNT AS AffectedRows;
 END;
 GO
+
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Run]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_Run
+    @Today DATE = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET @Today = ISNULL(@Today, CAST(GETDATE() AS DATE));
+    -- Bookings with something overdue right now
+    DECLARE @Overdue TABLE (BookingId INT PRIMARY KEY, InvoiceId INT NULL, Reason NVARCHAR(200));
+    -- a) Unpaid / Overdue invoices past their due date
+    INSERT INTO @Overdue (BookingId, InvoiceId, Reason)
+    SELECT i.BookingId, MIN(i.Id),
+           CONCAT('Challan ', MIN(i.InvoiceNumber), ' overdue (due ', CONVERT(VARCHAR(10), MIN(i.DueOn), 23), ')')
+      FROM SAC400.dbo.WN_Invoices i WITH (NOLOCK)
+     WHERE i.StatusId IN (1, 4) AND i.BookingId IS NOT NULL
+       AND i.DueOn IS NOT NULL AND i.DueOn < @Today
+     GROUP BY i.BookingId;
+    -- b) Booking challans past their valid-until date with nothing paid
+    INSERT INTO @Overdue (BookingId, InvoiceId, Reason)
+    SELECT c.BookingId, NULL,
+           CONCAT('Booking challan ', MIN(c.ChallanNumber), ' expired (valid until ', CONVERT(VARCHAR(10), MIN(CAST(c.ValidUntil AS DATE)), 23), ')')
+      FROM SAC400.dbo.WN_Challans c WITH (NOLOCK)
+      LEFT JOIN SAC400.dbo.WN_vw_BookingSummary v WITH (NOLOCK) ON v.BookingId = c.BookingId
+     WHERE c.BookingId IS NOT NULL
+       AND ISNULL(c.StatusId, 1) NOT IN (3, 4)
+       AND c.ValidUntil IS NOT NULL AND CAST(c.ValidUntil AS DATE) < @Today
+       AND ISNULL(v.TotalPaidAmount, 0) = 0
+       AND NOT EXISTS (SELECT 1 FROM SAC400.dbo.WN_Payments p WITH (NOLOCK)
+                        WHERE (p.TransactionRef = c.ChallanNumber OR p.BookingIdInt = c.BookingId)
+                          AND p.StatusId IN (2, 3))
+       AND NOT EXISTS (SELECT 1 FROM @Overdue o WHERE o.BookingId = c.BookingId)
+     GROUP BY c.BookingId;
+    -- 1) Open a suspension for overdue bookings with none open yet
+    INSERT INTO SAC400.dbo.WN_HIK_BookingAccessSuspensions (BookingId, InvoiceId, Reason)
+    SELECT o.BookingId, o.InvoiceId, o.Reason
+      FROM @Overdue o
+     WHERE NOT EXISTS (SELECT 1 FROM SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+                        WHERE s.BookingId = o.BookingId AND s.ResolvedAt IS NULL);
+    -- 2) Close suspensions once nothing is overdue for the booking (paid / partial / voided / cancelled)
+    UPDATE s
+       SET ResolvedAt = SYSDATETIME(), ResolvedReason = 'Challan paid'
+      FROM SAC400.dbo.WN_HIK_BookingAccessSuspensions s
+     WHERE s.ResolvedAt IS NULL
+       AND NOT EXISTS (SELECT 1 FROM @Overdue o WHERE o.BookingId = s.BookingId);
+    -- 3) Bookings whose machine state must change (block / unblock)
+    SELECT x.Id AS SuspensionId, x.BookingId, x.ShouldBlock
+      FROM (SELECT s.Id, s.BookingId, s.MachinesBlocked,
+                   CAST(CASE WHEN s.ResolvedAt IS NULL AND (s.OverrideUntil IS NULL OR s.OverrideUntil < @Today)
+                             THEN 1 ELSE 0 END AS BIT) AS ShouldBlock
+              FROM SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+             WHERE s.ResolvedAt IS NULL OR s.MachinesBlocked = 1) x
+     WHERE x.ShouldBlock <> x.MachinesBlocked;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_SetApplied]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_SetApplied
+    @SuspensionId INT,
+    @MachinesBlocked BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE SAC400.dbo.WN_HIK_BookingAccessSuspensions SET MachinesBlocked = @MachinesBlocked WHERE Id = @SuspensionId;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_GetByBookingDetail]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_GetByBookingDetail
+    @BookingDetailId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 s.Id AS SuspensionId, s.BookingId, s.SuspendedAt, s.Reason, s.OverrideUntil, s.MachinesBlocked,
+           i.InvoiceNumber, i.DueOn, i.GrandTotal, ISNULL(i.GrandTotal - i.PaidTotal, 0) AS BalanceDue,
+           (SELECT TOP 1 o.CreatedByEmail FROM SAC400.dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
+             WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) AS OverrideByEmail,
+           (SELECT TOP 1 o.Reason FROM SAC400.dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
+             WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) AS OverrideReason
+      FROM SAC400.dbo.WN_BookingDetails bd WITH (NOLOCK)
+      JOIN SAC400.dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+      JOIN SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK) ON s.BookingId = b.Id AND s.ResolvedAt IS NULL
+      LEFT JOIN SAC400.dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = s.InvoiceId
+     WHERE bd.Id = @BookingDetailId
+     ORDER BY s.Id DESC;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Extend]    Script Date: 05/10/2026 ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_Extend
+    @BookingDetailId INT,
+    @OverrideUntil   DATE,
+    @Reason          NVARCHAR(500),
+    @CreatedById     INT = NULL,
+    @CreatedByEmail  NVARCHAR(200) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @SuspensionId INT, @BookingId INT;
+    SELECT TOP 1 @SuspensionId = s.Id, @BookingId = s.BookingId
+      FROM SAC400.dbo.WN_BookingDetails bd WITH (NOLOCK)
+      JOIN SAC400.dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+      JOIN SAC400.dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK) ON s.BookingId = b.Id AND s.ResolvedAt IS NULL
+     WHERE bd.Id = @BookingDetailId
+     ORDER BY s.Id DESC;
+    IF @SuspensionId IS NULL
+    BEGIN
+        SELECT CAST(NULL AS INT) AS SuspensionId, CAST(NULL AS INT) AS BookingId;  -- nothing suspended
+        RETURN;
+    END
+    UPDATE SAC400.dbo.WN_HIK_BookingAccessSuspensions SET OverrideUntil = @OverrideUntil WHERE Id = @SuspensionId;
+    INSERT INTO SAC400.dbo.WN_HIK_BookingAccessOverrides (SuspensionId, BookingId, OverrideUntil, Reason, CreatedById, CreatedByEmail)
+    VALUES (@SuspensionId, @BookingId, @OverrideUntil, @Reason, @CreatedById, @CreatedByEmail);
+    SELECT @SuspensionId AS SuspensionId, @BookingId AS BookingId;
+END
+GO

@@ -17,6 +17,7 @@ using WorkNest.Infrastructure.ExternalServices.Email;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
 using WorkNest.Infrastructure.ExternalServices.PayFast;
 using WorkNest.Infrastructure.ExternalServices.FileStorage;
+using WorkNest.Infrastructure.ExternalServices.Hikvision;
 using WorkNest.Infrastructure.ExternalServices.Reports;
 using WorkNest.Infrastructure.Repositories;
 using WorkNest.Infrastructure.Security.Encryption;
@@ -154,6 +155,7 @@ try
     builder.Services.AddScoped<IPdfMergeService, PdfMergeService>();
     builder.Services.AddScoped<IPayFastService, PayFastService>();
     builder.Services.AddScoped<IKycFileStorage, LocalKycFileStorage>();
+    builder.Services.AddSingleton<IHikIsapiClient, HikIsapiClient>();
 
     // ── Application Services ──────────────────────────────────────────────────
     builder.Services.AddScoped<IAuthService, AuthService>();
@@ -183,6 +185,10 @@ try
     builder.Services.AddScoped<IAttendantService, AttendantService>();
     builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
     builder.Services.AddScoped<IHikDeviceService, HikDeviceService>();
+    builder.Services.AddScoped<IHikEnrollmentService, HikEnrollmentService>();
+    builder.Services.AddScoped<IHikStaffService, HikEnrollmentService>();
+    builder.Services.AddScoped<IHikAccessSuspensionService, HikEnrollmentService>();
+    builder.Services.AddScoped<IHikAccessService, HikAccessService>();
     builder.Services.AddScoped<IKycService, KycService>();
     builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();
 
@@ -192,6 +198,7 @@ try
     builder.Services.AddHostedService<InvoiceDeliveryRetryService>();
     builder.Services.AddHostedService<AccessCardRestrictionService>();
     builder.Services.AddHostedService<AnnouncementDeliveryService>();
+    builder.Services.AddHostedService<ChallanAccessSuspensionService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
