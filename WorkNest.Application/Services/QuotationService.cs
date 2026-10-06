@@ -132,6 +132,15 @@ namespace WorkNest.Application.Services
 
             int resolvedOfferingTypeId = matchedOt != null ? Convert.ToInt32(matchedOt["Id"]) : 1;
             decimal maxDiscountCap = matchedOt != null ? Convert.ToDecimal(matchedOt["DiscountCap"]) : 10.00m;
+
+            // The cap protects a floor price per seat: standard rate minus the cap (35,000 - 10% = 31,500).
+            // When the base price is raised above the standard rate, the cap widens so the discounted
+            // price can come down to that same floor (40,000 -> up to 21.25%), never below it.
+            if (spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
+            {
+                decimal floorPerSeat = spaceDetails.Monthly * (1 - maxDiscountCap / 100m);
+                maxDiscountCap = Math.Round((perSeatBasePrice - floorPerSeat) / perSeatBasePrice * 100m, 2, MidpointRounding.ToZero);
+            }
             string offeringTypeDbValue = resolvedOfferingTypeId.ToString();
 
             if (discountType == "Percentage" || discountType == "Percent")
@@ -142,6 +151,13 @@ namespace WorkNest.Application.Services
             else if (discountType == "Fixed" || discountType == "Amount")
             {
                 decimal maxAllowedFixed = Math.Round(monthlyBasePrice * (maxDiscountCap / 100m), 2);
+                // Raised base price: allow exactly (base price - floor) per seat, not the rounded percentage.
+                if (spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
+                {
+                    decimal baseCap = matchedOt != null ? Convert.ToDecimal(matchedOt["DiscountCap"]) : 10.00m;
+                    decimal floorPerSeat = spaceDetails.Monthly * (1 - baseCap / 100m);
+                    maxAllowedFixed = Math.Round((perSeatBasePrice - floorPerSeat) * capacity, 2);
+                }
                 if (discountValue > maxAllowedFixed)
                     discountValue = maxAllowedFixed;
             }

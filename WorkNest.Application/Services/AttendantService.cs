@@ -24,6 +24,83 @@ namespace WorkNest.Application.Services
         private static string CleanRawPhone(string input) =>
             string.IsNullOrWhiteSpace(input) ? string.Empty : System.Text.RegularExpressions.Regex.Replace(input, @"[^\d]", "").Trim();
 
+        private static string NormalizeName(string input) =>
+            string.Join(' ', (input ?? string.Empty).Trim().ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+        /// <summary>Last 10 digits, so 03001234567, +92 300 1234567 and 923001234567 compare equal.</summary>
+        private static string PhoneKey(string input)
+        {
+            var digits = CleanRawPhone(input);
+            return digits.Length > 10 ? digits[^10..] : digits;
+        }
+
+        /// <summary>
+        /// Matches what an app user entered against the attendants added to bookings in Sales.
+        /// At least two of name, email, CNIC/passport and phone must match the same person, and one of them
+        /// must be CNIC or email (name and phone alone are too easy for a colleague to know).
+        /// </summary>
+        public async Task<MobileAccessVerifyResult> VerifyMobileAccessAsync(MobileAccessVerifyRequest request)
+        {
+            const string noMatch = "These details don't match any access user on a booking. Check them with your company admin or reception.";
+            var name = NormalizeName(request.Name);
+            var email = (request.Email ?? "").Trim().ToLowerInvariant();
+            var cnic = CleanRawDigitsAndChars(request.Cnic).ToUpperInvariant();
+            var phone = PhoneKey(request.Phone);
+            if (new[] { name, email, cnic, phone }.Count(v => v.Length > 0) < 2 || (email.Length == 0 && cnic.Length == 0))
+                return new MobileAccessVerifyResult { Message = "Enter at least two of name, email, CNIC and phone, including your CNIC or email." };
+
+            var candidates = await _db.GetActiveAttendantAssignmentCandidatesDbAsync(email, cnic, phone, name);
+
+            bool EmailMatches(IDictionary<string, object?> r) =>
+                email.Length > 0 && (r["Email"]?.ToString() ?? "").Trim().ToLowerInvariant() == email;
+            bool CnicMatches(IDictionary<string, object?> r) =>
+                cnic.Length > 0 && CleanRawDigitsAndChars(r["IdNumber"]?.ToString() ?? "").ToUpperInvariant() == cnic;
+            // 0 unless CNIC or email matches; otherwise the number of matching fields.
+            int Score(IDictionary<string, object?> r)
+            {
+                bool strong = EmailMatches(r) || CnicMatches(r);
+                if (!strong) return 0;
+                return (EmailMatches(r) ? 1 : 0) + (CnicMatches(r) ? 1 : 0)
+                     + (name.Length > 0 && NormalizeName(r["Name"]?.ToString() ?? "") == name ? 1 : 0)
+                     + (phone.Length > 0 && PhoneKey(r["Phone"]?.ToString() ?? "") == phone ? 1 : 0);
+            }
+
+            var people = candidates
+                .GroupBy(r => Convert.ToInt32(r["PersonId"]))
+                .Select(g => new { Rows = g.ToList(), Score = Score(g.First()) })
+                .Where(p => p.Score >= 2)
+                .ToList();
+            if (people.Count == 0)
+                return new MobileAccessVerifyResult { Message = noMatch };
+
+            int best = people.Max(p => p.Score);
+            var top = people.Where(p => p.Score == best).ToList();
+            if (top.Count > 1)
+                return new MobileAccessVerifyResult { Message = "These details match more than one person. Enter all four: name, email, CNIC and phone." };
+
+            var rows = top[0].Rows;
+            var spaces = rows
+                .GroupBy(r => Convert.ToInt32(r["BookingDetailId"]))
+                .Select(g => new MobileAccessSpaceDto
+                {
+                    BookingDetailId = g.Key,
+                    SpaceName = g.First()["SpaceName"]?.ToString() ?? "",
+                    IsEnabled = g.Any(r => Convert.ToBoolean(r["IsEnabled"]))
+                })
+                .ToList();
+            bool canOpen = spaces.Any(sp => sp.IsEnabled);
+
+            return new MobileAccessVerifyResult
+            {
+                Matched = true,
+                CanOpenDoor = canOpen,
+                Message = canOpen ? "Access verified." : "Your access is currently disabled. Contact your company admin or reception.",
+                PersonGuid = rows[0]["PersonGuid"] is Guid g ? g : (Guid.TryParse(rows[0]["PersonGuid"]?.ToString(), out var pg) ? pg : null),
+                Name = rows[0]["Name"]?.ToString(),
+                Spaces = spaces
+            };
+        }
+
         public async Task<(int PersonId, Guid PersonGuid)> AddAttendantAsync(CreateAttendantRequest request)
         {
             if (string.IsNullOrWhiteSpace(request.Name)) throw new ArgumentException("Name is required.");

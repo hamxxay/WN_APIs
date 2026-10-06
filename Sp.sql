@@ -11434,13 +11434,13 @@ BEGIN
             @Paid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), @Partial INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id);
     -- Bookings with something overdue right now
     DECLARE @Overdue TABLE (BookingId INT PRIMARY KEY, InvoiceId INT NULL, Reason NVARCHAR(200));
-    -- a) Unpaid / Overdue invoices past their due date
+    -- a) Unpaid / Overdue invoices more than 7 days past their due date (7-day grace period)
     INSERT INTO @Overdue (BookingId, InvoiceId, Reason)
     SELECT i.BookingId, MIN(i.Id),
            CONCAT('Challan ', MIN(i.InvoiceNumber), ' overdue (due ', CONVERT(VARCHAR(10), MIN(i.DueOn), 23), ')')
       FROM SAC400.dbo.WN_Invoices i WITH (NOLOCK)
      WHERE i.StatusId IN (1, 4, @UnPaid, @ChallanExpire) AND i.BookingId IS NOT NULL
-       AND i.DueOn IS NOT NULL AND i.DueOn < @Today
+       AND i.DueOn IS NOT NULL AND i.DueOn < DATEADD(DAY, -7, @Today)
      GROUP BY i.BookingId;
     -- b) Booking challans past their expiry with nothing paid. Expiry = later of WN_Challans.ValidUntil
     --    and WN_Bookings.ValidityDate (extended on the Challan Validity page).

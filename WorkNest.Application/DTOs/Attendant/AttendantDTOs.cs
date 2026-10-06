@@ -102,4 +102,31 @@ namespace WorkNest.Application.DTOs.Attendant
         public int Capacity { get; set; }
         public int ActiveAttendantsCount { get; set; }
     }
+
+    /// <summary>Details a logged-in app user enters to claim door access; matched against booking attendants.</summary>
+    public class MobileAccessVerifyRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Email { get; set; } = string.Empty;
+        public string Phone { get; set; } = string.Empty;
+        public string Cnic { get; set; } = string.Empty;
+    }
+
+    public class MobileAccessSpaceDto
+    {
+        public int BookingDetailId { get; set; }
+        public string SpaceName { get; set; } = string.Empty;
+        public bool IsEnabled { get; set; }
+    }
+
+    public class MobileAccessVerifyResult
+    {
+        public bool Matched { get; set; }
+        /// <summary>True when at least one matched booking has access allowed (the app shows Open Door).</summary>
+        public bool CanOpenDoor { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public Guid? PersonGuid { get; set; }
+        public string? Name { get; set; }
+        public List<MobileAccessSpaceDto> Spaces { get; set; } = new();
+    }
 }
