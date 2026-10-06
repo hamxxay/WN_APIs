@@ -3479,6 +3479,112 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAgreementsAwaitingSignatureDbAsync(int? agreementId = null)
+        {
+            await using var c = await Open();
+            // Reminders are logged per quotation; only those after this agreement's SentDate count, so a
+            // re-sent agreement for the same quotation starts again. Only the newest agreement of a quotation is returned.
+            const string sql = @"
+                SELECT a.Id AS AgreementId, a.QuotationId, q.QuotationNumber, q.Version, a.Status, a.SentDate,
+                       COALESCE(NULLIF(LTRIM(RTRIM(a.CustomerName)), ''), NULLIF(LTRIM(RTRIM(a.CompanyName)), ''),
+                                NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', ISNULL(cu.LastName, '')))), '')) AS CustomerName,
+                       cu.Email AS CustomerEmail,
+                       COALESCE(NULLIF(s.Name, ''), s.Code) AS SpaceName,
+                       ISNULL(rem.ReminderCount, 0) AS ReminderCount, rem.LastReminderAt
+                  FROM dbo.WN_Agreements a WITH (NOLOCK)
+                  JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+                  LEFT JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
+                  LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+                 OUTER APPLY (SELECT COUNT(1) AS ReminderCount, MAX(qa.CreatedDate) AS LastReminderAt
+                                FROM dbo.WN_QuotationActivities qa WITH (NOLOCK)
+                               WHERE qa.QuotationId = a.QuotationId
+                                 AND qa.ActivityType = 'AgreementReminder'
+                                 AND qa.CreatedDate >= a.SentDate) rem
+                 WHERE a.Status IN ('AgreementSent', 'EmailFailed')
+                   AND a.BookingId IS NULL
+                   AND (a.SignedPdfPath IS NULL OR a.SignedPdfPath = '')
+                   AND a.SentDate IS NOT NULL
+                   AND ISNULL(q.Status, '') NOT IN ('Declined', 'Rejected', 'Cancelled', 'Expired', 'Signed', 'Converted')
+                   AND NOT EXISTS (SELECT 1 FROM dbo.WN_Agreements a2 WITH (NOLOCK)
+                                    WHERE a2.QuotationId = a.QuotationId AND a2.Id > a.Id)
+                   AND (@AgreementId IS NULL OR a.Id = @AgreementId)
+                 ORDER BY a.SentDate, a.Id;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@AgreementId", SqlDbType.Int).Value = (object?)agreementId ?? DBNull.Value;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IDictionary<int, (int Count, DateTime? LastReminderAt)>> GetAgreementReminderStatsDbAsync(IEnumerable<int> agreementIds)
+        {
+            var result = new Dictionary<int, (int Count, DateTime? LastReminderAt)>();
+            // Ids are ints from our own list query, never user input.
+            var ids = agreementIds.Where(i => i > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+
+            await using var c = await Open();
+            string sql = $@"
+                SELECT a.Id, COUNT(qa.Id) AS ReminderCount, MAX(qa.CreatedDate) AS LastReminderAt
+                  FROM dbo.WN_Agreements a WITH (NOLOCK)
+                  JOIN dbo.WN_QuotationActivities qa WITH (NOLOCK)
+                    ON qa.QuotationId = a.QuotationId
+                   AND qa.ActivityType = 'AgreementReminder'
+                   AND qa.CreatedDate >= a.SentDate
+                 WHERE a.Id IN ({string.Join(",", ids)})
+                 GROUP BY a.Id;";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                result[r.GetInt32(0)] = (r.GetInt32(1), r.IsDBNull(2) ? null : r.GetDateTime(2));
+            return result;
+        }
+
+        public async Task<IAsyncDisposable?> TryAcquireAppLockDbAsync(string resource)
+        {
+            var c = await Open();
+            try
+            {
+                await using var cmd = new SqlCommand("sp_getapplock", c) { CommandType = CommandType.StoredProcedure };
+                cmd.Parameters.Add("@Resource", SqlDbType.NVarChar, 255).Value = resource;
+                cmd.Parameters.Add("@LockMode", SqlDbType.VarChar, 32).Value = "Exclusive";
+                cmd.Parameters.Add("@LockOwner", SqlDbType.VarChar, 32).Value = "Session";
+                cmd.Parameters.Add("@LockTimeout", SqlDbType.Int).Value = 0;
+                var ret = cmd.Parameters.Add("@Result", SqlDbType.Int);
+                ret.Direction = ParameterDirection.ReturnValue;
+                await cmd.ExecuteNonQueryAsync();
+                if (ret.Value is int code && code >= 0)
+                    return new SqlAppLock(c, resource);
+            }
+            catch
+            {
+                await c.DisposeAsync();
+                throw;
+            }
+            await c.DisposeAsync();
+            return null;
+        }
+
+        /// <summary>Holds the connection that owns a session app lock; releases the lock and closes it on dispose.</summary>
+        private sealed class SqlAppLock : IAsyncDisposable
+        {
+            private readonly SqlConnection _c;
+            private readonly string _resource;
+            public SqlAppLock(SqlConnection c, string resource) { _c = c; _resource = resource; }
+
+            public async ValueTask DisposeAsync()
+            {
+                try
+                {
+                    await using var cmd = new SqlCommand("sp_releaseapplock", _c) { CommandType = CommandType.StoredProcedure };
+                    cmd.Parameters.Add("@Resource", SqlDbType.NVarChar, 255).Value = _resource;
+                    cmd.Parameters.Add("@LockOwner", SqlDbType.VarChar, 32).Value = "Session";
+                    await cmd.ExecuteNonQueryAsync();
+                }
+                catch { /* closing the session releases the lock anyway */ }
+                await _c.DisposeAsync();
+            }
+        }
+
         public async Task<IDictionary<string, object?>?> GetActiveLeaseTemplateByNameDbAsync(string name)
         {
             await using var c = await Open();
@@ -3573,42 +3679,6 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@AgreementId", agreementId);
             int rowsAffected = await cmd.ExecuteNonQueryAsync();
             return rowsAffected > 0;
-        }
-
-        public async Task EnsureLeaseTemplateSchemaDbAsync()
-        {
-            await using var c = await Open();
-            string sql = @"
-                IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'WN_LeaseTemplates')
-                BEGIN
-                    CREATE TABLE dbo.WN_LeaseTemplates (
-                        Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY CLUSTERED,
-                        Name NVARCHAR(100) NOT NULL,
-                        ContentHtml NVARCHAR(MAX) NOT NULL,
-                        IsActive BIT NOT NULL DEFAULT 1,
-                        CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
-                        CreatedBy INT NULL
-                    );
-                    CREATE INDEX IX_WN_LeaseTemplates_Name_IsActive ON dbo.WN_LeaseTemplates(Name, IsActive);
-                END;
-
-                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Agreements') AND name = 'TemplateVersionId')
-                BEGIN
-                    ALTER TABLE dbo.WN_Agreements ADD TemplateVersionId INT NULL;
-                END;
-
-                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Agreements') AND name = 'SignedPdfPath')
-                BEGIN
-                    ALTER TABLE dbo.WN_Agreements ADD SignedPdfPath NVARCHAR(500) NULL;
-                END;
-
-                IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Agreements') AND name = 'SignedPdfUploadedAt')
-                BEGIN
-                    ALTER TABLE dbo.WN_Agreements ADD SignedPdfUploadedAt DATETIME2 NULL;
-                END;";
-
-            await using var cmd = new SqlCommand(sql, c);
-            await cmd.ExecuteNonQueryAsync();
         }
 
         // --- Announcements & Alerts Implementations ---

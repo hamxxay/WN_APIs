@@ -11,6 +11,7 @@ using WorkNest.Application.Interfaces;
 
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -247,6 +248,7 @@ namespace WorkNest.API.Controllers
         /// sending X-Hikvision-Api-Key, which is accepted ONLY when "Hikvision:ApiKey" is configured and non-empty
         /// (there is no built-in default key) and is compared in constant time. Customers and anonymous callers get 401/403.
         /// </summary>
+        [DisableRateLimiting] // machine-to-machine caller: never throttle
         [AllowAnonymous] // the class-level role check is done below so the configured API key can be used without a JWT
         [HttpGet("api/access-status/export")]
         public async Task<IActionResult> ExportAccessStatus()

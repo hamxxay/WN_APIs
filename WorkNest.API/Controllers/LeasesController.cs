@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Agreement;
 using WorkNest.Application.Interfaces;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -30,6 +31,7 @@ namespace WorkNest.API.Controllers
             return null;
         }
 
+        [EnableRateLimiting("pdf")]
         [HttpPost("generate")]
         public async Task<IActionResult> GenerateLease([FromBody] GenerateLeaseAgreementRequest request)
         {

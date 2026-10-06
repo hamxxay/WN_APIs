@@ -96,7 +96,8 @@ namespace WorkNest.API.Services
                         continue;
                     }
 
-                    DateTime rawPeriodEnd = nextPeriodStart.AddMonths(b.BillingPeriodMonths).AddDays(-1);
+                    // Anchored to the contract start so month-end starts don't drift (see BillingPeriods).
+                    DateTime rawPeriodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(b.ContractStart, nextPeriodStart, b.BillingPeriodMonths);
                     DateTime nextPeriodEnd = rawPeriodEnd > b.ContractEnd ? b.ContractEnd : rawPeriodEnd;
 
                     // Step 2: Idempotent Duplicate Invoice Check

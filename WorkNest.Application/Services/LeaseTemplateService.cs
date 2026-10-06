@@ -24,6 +24,19 @@ namespace WorkNest.Application.Services
             _sanitizer.AllowedCssProperties.Add("page-break-after");
             _sanitizer.AllowedCssProperties.Add("margin-top");
             _sanitizer.AllowedCssProperties.Add("margin-bottom");
+
+            // Templates are rendered to PDF by a headless browser on the server, so no URL in them may
+            // point at the network or file system. Only data: URLs (embedded base64 images) survive, in
+            // src/href attributes and CSS url(...) alike; in-page "#anchor" links are kept.
+            _sanitizer.AllowedSchemes.Clear();
+            _sanitizer.AllowedSchemes.Add("data");
+            _sanitizer.FilterUrl += (_, e) =>
+            {
+                var url = e.SanitizedUrl?.Trim();
+                if (string.IsNullOrEmpty(url)) return;
+                if (url.StartsWith("data:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("#")) return;
+                e.SanitizedUrl = null; // relative or other-scheme URL
+            };
         }
 
         public async Task<LeaseTemplateResponseDto?> GetActiveTemplateAsync(string name)

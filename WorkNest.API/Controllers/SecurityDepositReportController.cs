@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Reports;
 using WorkNest.Application.Interfaces;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -36,6 +37,7 @@ namespace WorkNest.API.Controllers
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
+        [EnableRateLimiting("pdf")]
         [HttpGet("detail/{customerId:int}/export")]
         public async Task<IActionResult> ExportCustomerDetailExcel(
             int customerId,
@@ -47,6 +49,7 @@ namespace WorkNest.API.Controllers
             return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         }
 
+        [EnableRateLimiting("pdf")]
         [HttpGet("export")]
         public async Task<IActionResult> ExportExcel([FromQuery] SecurityDepositReportFilterDto filter)
         {

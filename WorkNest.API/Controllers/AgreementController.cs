@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using WorkNest.Application.DTOs.Agreement;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Configurations;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -47,6 +48,7 @@ namespace WorkNest.API.Controllers
             return null;
         }
 
+        [EnableRateLimiting("pdf")]
         [HttpPost("send")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // staff only
         public async Task<IActionResult> SendAgreement([FromBody] SendAgreementRequest request)
@@ -98,6 +100,7 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [EnableRateLimiting("pdf")]
         [HttpGet("{id:int}/pdf")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // was anonymous; customers use my/{id}/pdf (own agreements only)
         public async Task<IActionResult> DownloadAgreementPdf(int id)
@@ -157,6 +160,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>My Agreements: download the agreement sent to me.</summary>
+        [EnableRateLimiting("pdf")]
         [HttpGet("my/{id:int}/pdf")]
         public async Task<IActionResult> DownloadMyAgreementPdf(int id)
         {

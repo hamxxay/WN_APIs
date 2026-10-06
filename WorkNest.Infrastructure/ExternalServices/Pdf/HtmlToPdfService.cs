@@ -65,6 +65,26 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             var browser = await GetOrLaunchBrowserAsync();
             await using var page = await browser.NewPageAsync();
 
+            // The HTML comes from user-editable lease templates: never let Chromium reach the network
+            // or the file system while rendering (SSRF / local-file read). Only inline content is allowed:
+            // data: URLs (embedded base64 images) and about:blank. SetContentAsync writes the document
+            // in place, so it does not issue a request of its own.
+            await page.SetRequestInterceptionAsync(true);
+            page.Request += async (_, e) =>
+            {
+                try
+                {
+                    if (IsAllowedRenderUrl(e.Request.Url))
+                        await e.Request.ContinueAsync();
+                    else
+                        await e.Request.AbortAsync(RequestAbortErrorCode.BlockedByClient);
+                }
+                catch
+                {
+                    // Request already handled / page closed — nothing to do.
+                }
+            };
+
             string fullHtml = $@"<!DOCTYPE html>
 <html>
 <head>
@@ -148,6 +168,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             };
 
             return await page.PdfDataAsync(pdfOptions);
+        }
+
+        /// <summary>Only inline resources may load while rendering: data: URLs and about:blank.</summary>
+        private static bool IsAllowedRenderUrl(string? url)
+        {
+            if (string.IsNullOrEmpty(url)) return false;
+            return url.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                || url.Equals("about:blank", StringComparison.OrdinalIgnoreCase);
         }
 
         public async ValueTask DisposeAsync()

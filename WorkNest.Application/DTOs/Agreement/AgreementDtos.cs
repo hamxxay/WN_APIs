@@ -58,6 +58,10 @@ namespace WorkNest.Application.DTOs.Agreement
         public string? SignedPdfPath { get; set; }
         public DateTime? SignedPdfUploadedAt { get; set; }
         public DateTime CreatedOn { get; set; }
+        /// <summary>Signature reminders emailed since the agreement was sent (admin list only).</summary>
+        public int ReminderCount { get; set; }
+        /// <summary>When the last signature reminder was emailed (UTC, admin list only).</summary>
+        public DateTime? LastReminderAt { get; set; }
     }
 
     public class MarkAgreementSignedRequest

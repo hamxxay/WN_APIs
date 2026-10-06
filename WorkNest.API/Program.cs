@@ -54,6 +54,9 @@ try
     // ── CORS ──────────────────────────────────────────────────────────────────
     builder.Services.AddCorsConfiguration(builder.Configuration);
 
+    // ── Rate limiting (built-in; "RateLimiting" config section) ──────────────
+    builder.Services.AddRateLimitingConfiguration(builder.Configuration);
+
     // ── Swagger ───────────────────────────────────────────────────────────────
     builder.Services.AddSwaggerConfiguration();
     builder.Services.AddEndpointsApiExplorer();
@@ -207,6 +210,7 @@ try
     builder.Services.AddHostedService<AnnouncementDeliveryService>();
     builder.Services.AddHostedService<ChallanAccessSuspensionService>();
     builder.Services.AddHostedService<BookingAutoConfirmService>();
+    builder.Services.AddHostedService<AgreementReminderService>();
     builder.Services.AddMemoryCache();
     builder.Services.AddHttpClient();
     builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();
@@ -250,19 +254,13 @@ try
     }
     app.UseAuthentication();
     app.UseAuthorization();
+    app.UseRateLimitingWithConfig(); // after routing + auth (per-user partitions), before endpoints
     app.MapControllers();
 
     using (var scope = app.Services.CreateScope())
     {
-        try
-        {
-            var dbRepo = scope.ServiceProvider.GetRequiredService<IDbRepository>();
-            await dbRepo.EnsureLeaseTemplateSchemaDbAsync();
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "Failed to run startup database migrations for lease templates/agreements.");
-        }
+        // Schema (WN_LeaseTemplates, WN_Agreements columns) is no longer altered at startup —
+        // see WN_Invoice_Procedures.txt for the DDL to run deliberately on a database that lacks it.
 
         // Pre-warm Chromium browser in background to eliminate cold start penalty on first request
         _ = Task.Run(async () =>

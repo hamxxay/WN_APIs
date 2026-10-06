@@ -390,6 +390,24 @@ namespace WorkNest.Application.Services
                 list.Add(MapToAgreementDto(r));
             }
 
+            // Signature reminders sent (one extra query for the page); the list still loads if it fails.
+            if (list.Count > 0)
+            {
+                try
+                {
+                    var stats = await _db.GetAgreementReminderStatsDbAsync(list.Select(a => a.Id));
+                    foreach (var a in list)
+                    {
+                        if (stats.TryGetValue(a.Id, out var st))
+                        {
+                            a.ReminderCount = st.Count;
+                            a.LastReminderAt = st.LastReminderAt;
+                        }
+                    }
+                }
+                catch { /* reminder info is optional */ }
+            }
+
             return (list, total);
         }
 

@@ -479,6 +479,82 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             }
         }
 
+        public async Task SendAgreementReminderEmailAsync(string toEmail, string customerName, string quotationNumber, string? spaceName, DateTime sentDate, int reminderNumber, string portalUrl, byte[]? pdfBytes = null)
+        {
+            var (fromEmail, password, host, port) = GetEmailSettings();
+
+            // Unlike the other senders this one throws when it cannot send, so the reminder job does not record
+            // a reminder that never left (it retries on a later run instead).
+            if (string.IsNullOrWhiteSpace(fromEmail) ||
+                string.IsNullOrWhiteSpace(toEmail) ||
+                string.IsNullOrWhiteSpace(password))
+            {
+                _logger.LogWarning("[EMAIL] Missing email credentials or recipient email. Agreement reminder email skipped.");
+                throw new InvalidOperationException("Email credentials or recipient email missing; agreement reminder not sent.");
+            }
+
+            try
+            {
+                string name = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(customerName) ? "Valued Customer" : customerName);
+                string qNum = WebUtility.HtmlEncode(quotationNumber);
+                string space = string.IsNullOrWhiteSpace(spaceName) ? "" : WebUtility.HtmlEncode(spaceName);
+                string link = WebUtility.HtmlEncode(portalUrl);
+                string sentOn = sentDate.ToString("dd MMM yyyy");
+                string spaceLine = string.IsNullOrEmpty(space) ? "" : $@"<p style=""margin: 4px 0;""><strong>Space:</strong> {space}</p>";
+                string intro = reminderNumber > 1
+                    ? "This is a final friendly reminder that your WorkNest agreement is still waiting for your signature."
+                    : "This is a friendly reminder that your WorkNest agreement is waiting for your signature.";
+
+                using var mail = new MailMessage();
+                mail.From = new MailAddress(fromEmail, "WorkNest Office Spaces");
+                mail.To.Add(new MailAddress(toEmail));
+                mail.Subject = $"Reminder: Your WorkNest agreement is waiting for your signature ({quotationNumber})";
+                mail.IsBodyHtml = true;
+
+                string body = $@"
+                <div style=""font-family: Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;"">
+                    <h2 style=""color: #2563eb; margin-top: 0;"">Your WorkNest agreement is waiting for your signature</h2>
+                    <p>Dear <strong>{name}</strong>,</p>
+                    <p>{intro}</p>
+                    <div style=""background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px 16px; margin: 16px 0;"">
+                        <p style=""margin: 4px 0;""><strong>Quotation:</strong> {qNum}</p>
+                        {spaceLine}
+                        <p style=""margin: 4px 0;""><strong>Agreement sent on:</strong> {sentOn}</p>
+                    </div>
+                    <p><strong>To complete your booking:</strong></p>
+                    <ol style=""padding-left: 20px; line-height: 1.6;"">
+                        <li>Download your agreement from <strong>My Agreements</strong>{(pdfBytes != null && pdfBytes.Length > 0 ? " (a copy is also attached to this email)" : "")}.</li>
+                        <li>Sign it.</li>
+                        <li>Upload the signed copy on the same My Agreements page, or simply reply to this email with the signed copy attached.</li>
+                    </ol>
+                    <p style=""text-align: center; margin: 24px 0;"">
+                        <a href=""{link}"" style=""background: #2563eb; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 6px; display: inline-block;"">Open My Agreements</a>
+                    </p>
+                    <p style=""font-size: 0.9em; color: #64748b;"">If the button does not work, copy this link into your browser: <a href=""{link}"">{link}</a></p>
+                    <p>If you have already sent the signed agreement, please ignore this reminder. If you have any questions, just reply to this email.</p>
+                    <p>Thank you for choosing WorkNest.</p>
+                    <hr style=""border: none; border-top: 1px solid #e2e8f0; margin-top: 30px;"" />
+                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working &amp; Office Spaces &bull; Automated System</p>
+                </div>";
+
+                mail.Body = body;
+
+                if (pdfBytes != null && pdfBytes.Length > 0)
+                {
+                    mail.Attachments.Add(new Attachment(new MemoryStream(pdfBytes), $"Agreement-{quotationNumber}.pdf", "application/pdf"));
+                }
+
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
+                await smtp.SendMailAsync(mail);
+                _logger.LogInformation("[EMAIL] Agreement reminder #{ReminderNumber} for quotation #{QuotationNumber} sent to {ToEmail} via {Host}:{Port}.", reminderNumber, quotationNumber, toEmail, host, port);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[EMAIL] Failed to send agreement reminder #{ReminderNumber} for quotation #{QuotationNumber} to {ToEmail}.", reminderNumber, quotationNumber, toEmail);
+                throw;
+            }
+        }
+
         public async Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type)
         {
             var (fromEmail, password, host, port) = GetEmailSettings();

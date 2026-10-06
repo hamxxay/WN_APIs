@@ -4,6 +4,7 @@ using WorkNest.Application.DTOs.Contact;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -35,11 +36,13 @@ namespace WorkNest.API.Controllers
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
+        [EnableRateLimiting("public-forms")]
         [HttpPost("api/contact")]
         [AllowAnonymous] // public contact form; the submitter is recorded only from a real login (JWT), never from a header
         public async Task<IActionResult> CreateContact([FromBody] ContactRequest request) =>
             StatusCode(201, await _contacts.CreateContactAsync(request, "contact", User.GetEmail()));
 
+        [EnableRateLimiting("public-forms")]
         [HttpPost("api/book-tour")]
         [AllowAnonymous] // public book-a-tour form; the submitter is recorded only from a real login (JWT), never from a header
         public async Task<IActionResult> BookTour([FromBody] ContactRequest request) =>

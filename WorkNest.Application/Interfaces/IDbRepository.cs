@@ -270,9 +270,22 @@ namespace WorkNest.Application.Interfaces
         Task UpdateCustomerAgreementDetailsDbAsync(int customerId, string? fullName, string? phone, string? cnic, string? address, string? company, string? ntn, string? secp);
         Task UpdateQuotationStatusAsync(int quotationId, string status);
         Task AddQuotationActivityAsync(int quotationId, int version, string activityType, string message, int? userId = null, string? customerNote = null);
+        /// <summary>
+        /// Agreements still waiting for the customer's signature (Status AgreementSent / EmailFailed, no booking, no signed copy;
+        /// newest agreement per quotation only) with customer email, space name and the count / last date of
+        /// 'AgreementReminder' activities logged for the quotation since the agreement was sent.
+        /// Pass <paramref name="agreementId"/> to re-check a single agreement.
+        /// </summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetAgreementsAwaitingSignatureDbAsync(int? agreementId = null);
+        /// <summary>Reminder count and last reminder date (WN_QuotationActivities 'AgreementReminder' since SentDate) per agreement id.</summary>
+        Task<IDictionary<int, (int Count, DateTime? LastReminderAt)>> GetAgreementReminderStatsDbAsync(IEnumerable<int> agreementIds);
+        /// <summary>
+        /// Tries to take a SQL Server session app lock (sp_getapplock, no wait). Returns a handle that releases the lock
+        /// when disposed, or null when another session already holds it.
+        /// </summary>
+        Task<IAsyncDisposable?> TryAcquireAppLockDbAsync(string resource);
         Task<IDictionary<string, object?>?> GetActiveLeaseTemplateByNameDbAsync(string name);
         Task<IDictionary<string, object?>> PublishLeaseTemplateDbAsync(string name, string contentHtml, int? createdBy);
-        Task EnsureLeaseTemplateSchemaDbAsync();
 
         // --- Announcements & Alerts ---
         Task<WorkNest.Application.DTOs.Announcement.AnnouncementDetailDto?> CreateAnnouncementAsync(string title, string body, string type, string targetScope, int? locationId, int? spaceId, IEnumerable<int>? customUserIds, DateTime? scheduledAt, int createdById);

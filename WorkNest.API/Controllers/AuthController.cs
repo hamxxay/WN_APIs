@@ -4,6 +4,7 @@ using WorkNest.Application.DTOs.Auth;
 using WorkNest.Application.Interfaces;
 using System.Security.Claims;
 using WorkNest.API.Security;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -51,6 +52,7 @@ namespace WorkNest.API.Controllers
             return (claimedEmail, null);
         }
 
+        [EnableRateLimiting("auth")]
         [HttpPost("api/auth/sync")]
         [AllowAnonymous]
         public async Task<IActionResult> Sync([FromBody] UserSyncRequest request)
@@ -64,6 +66,7 @@ namespace WorkNest.API.Controllers
             return Ok(await _auth.SyncUserAsync(request));
         }
 
+        [EnableRateLimiting("auth")]
         [HttpPost("api/auth/register")]
         [AllowAnonymous]
         public async Task<IActionResult> Register([FromBody] UserRegisterRequest request)
@@ -77,6 +80,7 @@ namespace WorkNest.API.Controllers
             return Ok(await _auth.RegisterAsync(request));
         }
 
+        [EnableRateLimiting("auth")]
         [HttpPost("api/auth/login")]
         [AllowAnonymous]
         public async Task<IActionResult> Login([FromBody] UserLoginRequest request)
@@ -88,6 +92,7 @@ namespace WorkNest.API.Controllers
             return Ok(await _auth.LoginAsync(request));
         }
 
+        [EnableRateLimiting("auth")]
         [HttpPost("api/auth/google-login")]
         [AllowAnonymous]
         public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest request)

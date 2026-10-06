@@ -6,6 +6,7 @@ using WorkNest.Common.Responses;
 
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -293,6 +294,7 @@ namespace WorkNest.API.Controllers
         }
 
         
+        [EnableRateLimiting("pdf")]
         [HttpGet("api/booking/{id:int}/challan-pdf")]
         public async Task<IActionResult> GetChallanPdf(int id)
         {
@@ -361,6 +363,7 @@ namespace WorkNest.API.Controllers
 
         // Was open to any logged-in user with amounts taken from the query string: now staff only,
         // month counts capped, and the rent / discount come from the booking in the DB when it has them.
+        [EnableRateLimiting("pdf")]
         [HttpGet("api/booking/{id:int}/advance-invoice-pdf")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetAdvanceInvoicePdf(

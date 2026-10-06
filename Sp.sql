@@ -5765,98 +5765,6 @@ BEGIN
     WHERE p.BookingId = @BookingId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetStatementInvoicePdfData]    Script Date: 30/09/2026 1:23:18 pm ******/
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-
-CREATE OR ALTER PROCEDURE [dbo].[WN_GetStatementInvoicePdfData]
-    @InvoiceId INT
-AS
-BEGIN
-    SELECT TOP 1
-        i.Id,
-        i.InvoiceNumber,
-        i.UserId,
-        i.BookingId,
-        i.IssuedOn,
-        i.DueOn,
-        COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn) AS BillingPeriodStart,
-        COALESCE(i.BillingPeriodEnd, b.EndOn, i.DueOn) AS BillingPeriodEnd,
-        ISNULL(i.GrandTotal, 0) AS GrandTotal,
-        ISNULL(i.PaidTotal, 0) AS PaidTotal,
-        ISNULL(i.SubTotal, 0) AS SubTotal,
-        ISNULL(i.DiscountTotal, 0) AS DiscountTotal,
-        ISNULL(i.TaxTotal, 0) AS TaxTotal,
-        ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
-        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AccountName,
-        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AttnName,
-        COALESCE(NULLIF(LTRIM(RTRIM(c.Address)), ''), NULLIF(LTRIM(RTRIM(u.Address)), ''), '') AS BillingAddress,
-        COALESCE(NULLIF(LTRIM(RTRIM(c.Code)), ''), NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''), NULLIF(LTRIM(RTRIM(bd.CustomerCode)), ''), '') AS AccountNumber,
-        COALESCE(NULLIF(LTRIM(RTRIM(c.CnicOrPassport)), ''), NULLIF(LTRIM(RTRIM(c.NTN)), ''), NULLIF(LTRIM(RTRIM(u.CnicOrPassport)), ''), '') AS SntnNtnNic,
-        COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
-        COALESCE(comp.CompanyName, br.[Description], loc.Name, '') AS VendorLegalName,
-        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
-        COALESCE(comp.Contact, '') AS VendorPhone,
-        COALESCE(comp.Fax, '') AS VendorFax,
-        COALESCE(comp.NTN, '') AS VendorNtn,
-        ISNULL(NULLIF(bd.AppliedChargePercentage, 0), 10.00) AS AppliedChargePercentage,
-        ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) AS AppliedTaxPercentage,
-        COALESCE(
-            NULLIF(st.ServiceChargeAmount, 0),
-            NULLIF(bd.SupportChargeAmount, 0),
-            CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
-        ) AS SupportChargeAmount,
-        ISNULL(i.SecurityDepositAmount, 0) AS SecurityDepositAmount,
-        st.PublicId AS STPublicId,
-        st.STInvoiceNumber
-    FROM dbo.WN_Invoices i WITH (NOLOCK)
-    LEFT JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
-    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
-    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
-    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
-    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (
-        (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND c.Code = b.CustomerCode)
-        OR (bd.CustomerCode IS NOT NULL AND bd.CustomerCode <> '' AND c.Code = bd.CustomerCode)
-        OR (i.UserId IS NOT NULL AND i.UserId > 0 AND c.UserId = i.UserId)
-        OR (u.Email IS NOT NULL AND u.Email <> '' AND c.Email = u.Email)
-    ) AND (c.IsActive = 1 OR c.IsActive IS NULL)
-    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
-    LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
-    LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId, u.CompanyId)
-    WHERE i.Id = @InvoiceId;
-
-    SELECT 
-        l.ChargeTypeId,
-        l.Description,
-        ISNULL(l.Quantity, 1) AS Quantity,
-        ISNULL(l.UnitPrice, 0) AS UnitPrice,
-        (l.Quantity * l.UnitPrice - l.DiscountAmount) AS PriceExclVat,
-        l.TaxAmount AS VatAmount,
-        l.LineTotal AS TotalInclVat,
-        l.TaxRate,
-        ISNULL(ct.Label, 'Business Support Services') AS CategoryName
-    FROM dbo.WN_InvoiceLines l WITH (NOLOCK)
-    LEFT JOIN dbo.WN_ChargeTypes ct WITH (NOLOCK) ON ct.Id = l.ChargeTypeId
-    WHERE l.InvoiceId = @InvoiceId
-    ORDER BY l.SortOrder, l.Id;
-
-    DECLARE @UserId INT;
-    SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
-
-    SELECT 
-        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
-        ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
-    FROM dbo.WN_Invoices WITH (NOLOCK)
-    WHERE UserId = @UserId AND Id < @InvoiceId;
-
-    SELECT TOP 1 Description AS BankName, ShortDesc AS BankAccountNumber
-    FROM dbo.AccountsCOA WITH (NOLOCK)
-    WHERE AccountNature = 'Bank' OR Description LIKE '%Bank%';
-END;
-GO
 /****** Object:  StoredProcedure [dbo].[WN_HIK_Access_Extend]    Script Date: 30/09/2026 1:23:18 pm ******/
 SET ANSI_NULLS ON
 GO
@@ -6394,7 +6302,7 @@ BEGIN
 
         SELECT TOP 1 
             @UserId = b.UserId,
-            @MonthlyRent = ISNULL(b.MonthlyBasePrice, b.SubtotalAmount),
+            @MonthlyRent = COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), CASE WHEN ISNULL(b.BillingPeriodMonths, 0) > 0 THEN b.SubtotalAmount / b.BillingPeriodMonths ELSE b.SubtotalAmount END), -- booking's monthly rent (was MonthlyBasePrice, which bookings never fill, falling back to the multi-month subtotal)
             @DiscountAmt = ISNULL(b.DiscountAmount, 0.00),
             @BillingPeriodMonths = ISNULL(b.BillingPeriodMonths, 1),
             @SpaceId = b.SpaceId,
@@ -11643,4 +11551,377 @@ BEGIN
     VALUES (@SuspensionId, @BookingId, @OverrideUntil, @Reason, @CreatedById, @CreatedByEmail);
     SELECT @SuspensionId AS SuspensionId, @BookingId AS BookingId;
 END
+GO
+
+-- =============================================================================
+-- Invoice procedures formerly created at runtime by InvoiceController
+-- (EnsureInvoiceStoredProceduresAsync / EnsureInvoicePdfSpUpdatedAsync). Definitions copied exactly.
+-- =============================================================================
+/****** Object:  StoredProcedure [dbo].[WN_DeleteInvoiceLines] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_DeleteInvoiceLines]
+    @InvoiceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_InvoiceLines WHERE InvoiceId = @InvoiceId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_EnsureCustomerSTInvoice] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_EnsureCustomerSTInvoice]
+    @InvoiceId INT,
+    @PublicId UNIQUEIDENTIFIER = NULL,
+    @STInvoiceNumber NVARCHAR(50),
+    @RoomRentAmount DECIMAL(18,2),
+    @ServiceChargeAmount DECIMAL(18,2),
+    @STTaxRate DECIMAL(5,2),
+    @SubTotal DECIMAL(18,2),
+    @TaxAmount DECIMAL(18,2),
+    @GrandTotal DECIMAL(18,2)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_CustomerSTInvoice WHERE CustomerInvoiceId = @InvoiceId OR (@PublicId IS NOT NULL AND PublicId = @PublicId))
+    BEGIN
+        INSERT INTO dbo.WN_CustomerSTInvoice (
+            PublicId, CustomerInvoiceId, STInvoiceNumber,
+            TariffHeading, TariffLabel,
+            RoomRentDescription, RoomRentAmount, RoomRentTaxRate, RoomRentTaxAmount,
+            ServiceChargeDescription, ServiceChargeAmount, ServiceChargeTaxRate, ServiceChargeTaxAmount,
+            SecurityDepositDescription, SecurityDepositAmount, SecurityDepositTaxRate, SecurityDepositTaxAmount,
+            SubTotal, TaxTotal, GrandTotal, DocumentUrl, CreatedOn, CreatedById
+        )
+        VALUES (
+            ISNULL(@PublicId, NEWID()), @InvoiceId, @STInvoiceNumber,
+            '9805.9200', 'Business Support Services',
+            'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
+            'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
+            NULL, NULL, 0.00, 0.00,
+            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
+        );
+    END
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_GetBookingInvoiceDetails] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetBookingInvoiceDetails]
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1
+        b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn,
+        COALESCE(
+            NULLIF(q.MonthlyBasePrice, 0),
+            (CASE WHEN q.PerSeatBasePrice > 0 THEN q.PerSeatBasePrice * ISNULL(COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1), 1) ELSE NULL END),
+            NULLIF(sp.RoomPrice, 0),
+            (CASE WHEN sp.SeatPrice > 0 THEN sp.SeatPrice * ISNULL(COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1), 1) ELSE NULL END),
+            NULLIF(b.SubtotalAmount, 0),
+            0
+        ) AS MonthlyRent,
+        COALESCE(NULLIF(b.SubtotalAmount, 0), NULLIF(q.SubtotalAmount, 0), 0) AS SubtotalAmount,
+        b.TotalAmount,
+        COALESCE(NULLIF(b.BillingPeriodMonths, 0), NULLIF(q.BillingPeriodMonths, 0), 3) AS BillingPeriodMonths,
+        COALESCE(NULLIF(b.SecurityDepositMonths, 0), NULLIF(q.SecurityDepositMonths, 0), 2) AS SecurityDepositMonths,
+        COALESCE(NULLIF(b.DiscountAmount, 0), NULLIF(q.DiscountAmount, 0), 0) AS DiscountAmount,
+        COALESCE(NULLIF(b.DiscountPercentage, 0), NULLIF(q.DiscountPercentage, 0), 0) AS DiscountPercentage,
+        COALESCE(NULLIF(b.DiscountType, ''), NULLIF(q.DiscountType, ''), 'Percentage') AS DiscountType,
+        COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(bd.SecurityDeposit, 0), NULLIF(sp.SecurityDeposit, 0), 0) AS SecurityDepositRequired,
+        COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(bd.SecurityDeposit, 0), NULLIF(sp.SecurityDeposit, 0), 0) AS ResolvedSecurityDeposit,
+        u.Email AS CustomerEmail, ISNULL(NULLIF(c.Company, ''), ISNULL(NULLIF(u.Name, ''), 'Valued Customer')) AS CustomerName,
+        s.Name AS SpaceName, ISNULL(st.Name, '') AS SpaceTypeName, ISNULL(st.Description, '') AS CategoryCode,
+        COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1) AS SpaceCapacity,
+        ISNULL(bd.AppliedTaxPercentage, 16.00) AS AppliedTaxPercentage,
+        ISNULL(bd.AppliedChargePercentage, 10.00) AS AppliedChargePercentage,
+        COALESCE(bd.PerSeatSupportRate, (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 AND (StartDate IS NULL OR StartDate <= b.StartOn) AND (EndDate IS NULL OR EndDate >= b.StartOn) ORDER BY StartDate DESC), (SELECT TOP 1 FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK) WHERE ChargeTypeId = 4 ORDER BY StartDate DESC), 2000.00) AS PerSeatSupportRate,
+        COALESCE(b.RentAccountId, bd.RentAccountId, 2852) AS RentAccountId,
+        COALESCE(b.SecurityReceivedId, bd.SecurityReceivedId, 76) AS SecurityReceivedId,
+        COALESCE(b.ServicesIncomeId, bd.ServicesIncomeId, 2853) AS ServicesIncomeId,
+        COALESCE(b.SalesTaxId, bd.SalesTaxId, 2854) AS SalesTaxId,
+        COALESCE(b.AccountReceivableId, bd.AccountReceivableId, 2855) AS AccountReceivableId,
+        COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = b.UserId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+    OUTER APPLY (
+        SELECT TOP 1
+            sp.SeatPrice,
+            sp.SeatPrice * ISNULL(NULLIF(s.Capacity, 0), 1) AS RoomPrice,
+            sp.SecurityDeposit
+        FROM dbo.WN_SpacePricing sp WITH (NOLOCK)
+        WHERE sp.SpaceId = s.Id AND sp.IsActive = 1
+        ORDER BY sp.EffectiveFrom DESC
+    ) sp
+    WHERE b.Id = @BookingId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_GetBookingLastInvoicePeriodEnd] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetBookingLastInvoicePeriodEnd]
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 BillingPeriodEnd
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE BookingId = @BookingId
+    ORDER BY Id DESC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_GetCustomerArrears] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetCustomerArrears]
+    @UserId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) AS Arrears
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE UserId = @UserId AND StatusId NOT IN (2, 5)
+      AND StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled'));
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceByBookingId] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetInvoiceByBookingId]
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id, InvoiceNumber, StatusId, GrandTotal
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE BookingId = @BookingId
+    ORDER BY Id ASC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceForSTGeneration] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetInvoiceForSTGeneration]
+    @PublicId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id, InvoiceNumber, ISNULL(SubTotal, 0) AS SubTotal, ISNULL(DiscountTotal, 0) AS DiscountTotal, ISNULL(TaxTotal, 0) AS TaxTotal
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE PublicId = @PublicId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_GetStatementInvoicePdfData] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetStatementInvoicePdfData]
+    @InvoiceId INT
+AS
+BEGIN
+    SELECT TOP 1
+        i.Id,
+        i.InvoiceNumber,
+        i.UserId,
+        i.BookingId,
+        i.IssuedOn,
+        i.DueOn,
+        COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn) AS BillingPeriodStart,
+        COALESCE(i.BillingPeriodEnd, b.EndOn, i.DueOn) AS BillingPeriodEnd,
+        ISNULL(i.GrandTotal, 0) AS GrandTotal,
+        ISNULL(i.PaidTotal, 0) AS PaidTotal,
+        ISNULL(i.SubTotal, 0) AS SubTotal,
+        ISNULL(i.DiscountTotal, 0) AS DiscountTotal,
+        ISNULL(i.TaxTotal, 0) AS TaxTotal,
+        ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AccountName,
+        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AttnName,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Address)), ''), NULLIF(LTRIM(RTRIM(u.Address)), ''), '') AS BillingAddress,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Code)), ''), NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''), NULLIF(LTRIM(RTRIM(bd.CustomerCode)), ''), '') AS AccountNumber,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.CnicOrPassport)), ''), NULLIF(LTRIM(RTRIM(c.NTN)), ''), NULLIF(LTRIM(RTRIM(u.CnicOrPassport)), ''), '') AS SntnNtnNic,
+        COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
+        COALESCE(comp.CompanyName, br.[Description], loc.Name, '') AS VendorLegalName,
+        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
+        COALESCE(comp.Contact, '') AS VendorPhone,
+        COALESCE(comp.Fax, '') AS VendorFax,
+        COALESCE(comp.NTN, '') AS VendorNtn,
+        ISNULL(NULLIF(bd.AppliedChargePercentage, 0), 10.00) AS AppliedChargePercentage,
+        ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) AS AppliedTaxPercentage,
+        COALESCE(
+            NULLIF(st.ServiceChargeAmount, 0),
+            NULLIF(i.ServiceCharges, 0),
+            NULLIF(bd.SupportChargeAmount, 0),
+            CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
+        ) AS SupportChargeAmount,
+        CASE WHEN ISNULL(i.SecurityDepositAmount, 0) > 0 -- only the invoice that bills the deposit (recurring invoices have none)
+             THEN COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0))
+             ELSE 0 END AS SecurityDepositAmount,
+        COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate,
+        st.PublicId AS STPublicId,
+        st.STInvoiceNumber
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    LEFT JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (
+        (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND c.Code = b.CustomerCode)
+        OR (bd.CustomerCode IS NOT NULL AND bd.CustomerCode <> '' AND c.Code = bd.CustomerCode)
+        OR (i.UserId IS NOT NULL AND i.UserId > 0 AND c.UserId = i.UserId)
+        OR (u.Email IS NOT NULL AND u.Email <> '' AND c.Email = u.Email)
+    ) AND (c.IsActive = 1 OR c.IsActive IS NULL)
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+    LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
+    LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId, u.CompanyId)
+    WHERE i.Id = @InvoiceId;
+    SELECT
+        l.ChargeTypeId,
+        l.Description,
+        ISNULL(l.Quantity, 1) AS Quantity,
+        ISNULL(l.UnitPrice, 0) AS UnitPrice,
+        (l.Quantity * l.UnitPrice - l.DiscountAmount) AS PriceExclVat,
+        l.TaxAmount AS VatAmount,
+        l.LineTotal AS TotalInclVat,
+        l.TaxRate,
+        ISNULL(ct.Label, 'Business Support Services') AS CategoryName
+    FROM dbo.WN_InvoiceLines l WITH (NOLOCK)
+    LEFT JOIN dbo.WN_ChargeTypes ct WITH (NOLOCK) ON ct.Id = l.ChargeTypeId
+    WHERE l.InvoiceId = @InvoiceId
+    ORDER BY l.SortOrder, l.Id;
+    DECLARE @UserId INT;
+    SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
+    SELECT
+        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
+        ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE UserId = @UserId AND Id < @InvoiceId;
+    SELECT TOP 1 Description AS BankName, ShortDesc AS BankAccountNumber
+    FROM dbo.AccountsCOA WITH (NOLOCK)
+    WHERE AccountNature = 'Bank' OR Description LIKE '%Bank%';
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_InsertInvoiceLine] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_InsertInvoiceLine]
+    @InvoiceId INT,
+    @ChargeTypeId TINYINT,
+    @Description NVARCHAR(500),
+    @Quantity DECIMAL(18,2) = 1,
+    @UnitPrice DECIMAL(18,2),
+    @DiscountAmount DECIMAL(18,2) = 0,
+    @TaxRate DECIMAL(5,2) = 0,
+    @SortOrder SMALLINT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_InvoiceLines (
+        InvoiceId, ChargeTypeId, Description, Quantity,
+        UnitPrice, DiscountAmount, TaxRate, SortOrder
+    )
+    VALUES (
+        @InvoiceId, @ChargeTypeId, @Description, @Quantity,
+        @UnitPrice, @DiscountAmount, @TaxRate, @SortOrder
+    );
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_QueueInvoiceDeliveryFailure] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_QueueInvoiceDeliveryFailure]
+    @InvoiceId INT,
+    @BookingId INT = NULL,
+    @TargetEmail NVARCHAR(256) = NULL,
+    @LastError NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_InvoiceDeliveryQueue (
+        InvoiceId, BookingId, TargetEmail, Attempts, LastAttemptAt, NextRetryAt, Status, LastError, CreatedOn
+    )
+    VALUES (
+        @InvoiceId, @BookingId, @TargetEmail, 1, SYSUTCDATETIME(), DATEADD(minute, 5, SYSUTCDATETIME()), 'Pending', @LastError, SYSUTCDATETIME()
+    );
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UpdateInvoiceBreakdown] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_UpdateInvoiceBreakdown]
+    @InvoiceId INT,
+    @SubTotal DECIMAL(18,2),
+    @DiscountTotal DECIMAL(18,2) = 0,
+    @TaxTotal DECIMAL(18,2) = 0,
+    @GrandTotal DECIMAL(18,2) = 0,
+    @BillingPeriodStart DATE = NULL,
+    @BillingPeriodEnd DATE = NULL,
+    @AdvanceRentMonths INT = NULL,
+    @SecurityDepositMonths INT = NULL,
+    @SecurityDepositAmount DECIMAL(18,2) = 0,
+    @RoomRentExclTax DECIMAL(18,2) = 0,
+    @ServiceCharges DECIMAL(18,2) = 0,
+    @TaxOnServiceCharges DECIMAL(18,2) = 0,
+    @RentAccountId INT = NULL,
+    @SecurityReceivedId INT = NULL,
+    @ServicesIncomeId INT = NULL,
+    @SalesTaxId INT = NULL,
+    @AccountReceivableId INT = NULL,
+    @AccountsCoaId INT = NULL,
+    @DueOn DATE = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_Invoices
+    SET SubTotal = @SubTotal,
+        DiscountTotal = ISNULL(@DiscountTotal, DiscountTotal),
+        TaxTotal = ISNULL(@TaxTotal, TaxTotal),
+        GrandTotal = CASE WHEN @GrandTotal > 0 THEN @GrandTotal ELSE GrandTotal END,
+        BillingPeriodStart = ISNULL(@BillingPeriodStart, BillingPeriodStart),
+        BillingPeriodEnd = ISNULL(@BillingPeriodEnd, BillingPeriodEnd),
+        AdvanceRentMonths = ISNULL(@AdvanceRentMonths, AdvanceRentMonths),
+        SecurityDepositMonths = ISNULL(@SecurityDepositMonths, SecurityDepositMonths),
+        SecurityDepositAmount = ISNULL(@SecurityDepositAmount, SecurityDepositAmount),
+        RoomRentExclTax = ISNULL(@RoomRentExclTax, RoomRentExclTax),
+        ServiceCharges = ISNULL(@ServiceCharges, ServiceCharges),
+        TaxOnServiceCharges = ISNULL(@TaxOnServiceCharges, TaxOnServiceCharges),
+        RentAccountId = COALESCE(@RentAccountId, RentAccountId),
+        SecurityReceivedId = COALESCE(@SecurityReceivedId, SecurityReceivedId),
+        ServicesIncomeId = COALESCE(@ServicesIncomeId, ServicesIncomeId),
+        SalesTaxId = COALESCE(@SalesTaxId, SalesTaxId),
+        AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
+        AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
+        DueOn = ISNULL(@DueOn, DueOn),
+        UpdatedOn = SYSUTCDATETIME()
+    WHERE Id = @InvoiceId;
+END;
 GO

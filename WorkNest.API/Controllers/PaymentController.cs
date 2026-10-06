@@ -4,6 +4,7 @@ using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
 {
@@ -167,6 +168,7 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        [DisableRateLimiting] // machine-to-machine caller: never throttle
         [HttpPost("api/payment/payfast/notify")]
         [AllowAnonymous]
         public async Task<IActionResult> PayFastNotify()
