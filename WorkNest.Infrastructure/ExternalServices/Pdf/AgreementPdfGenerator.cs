@@ -188,45 +188,61 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 text.Span(", by and between:");
                             });
 
-                            pc.Item().PaddingLeft(8).Text(text =>
+                            pc.Item().Table(table =>
                             {
-                                text.Span("1. Provider: ").Bold().FontColor("#0f172a");
-                                text.Span(vendorLegalName).Bold().FontColor("#0f172a");
-                                text.Span($", having its principal place of business at {vendorAddress} (hereinafter referred to as the ");
-                                text.Span("\"Provider\"").Bold().FontColor("#0f172a");
-                                text.Span("); AND\n");
+                                table.ColumnsDefinition(cols =>
+                                {
+                                    cols.RelativeColumn();
+                                    cols.RelativeColumn();
+                                });
 
-                                text.Span("2. Customer: ").Bold().FontColor("#0f172a");
-                                if (string.Equals(req.EntityType, "Company", StringComparison.OrdinalIgnoreCase))
+                                table.Cell().Background("#f1f5f9").Border(0.5f).BorderColor("#cbd5e1").Padding(5)
+                                    .Text("Provider").Bold().FontSize(8.5f).FontColor("#0f172a");
+
+                                table.Cell().Background("#f1f5f9").Border(0.5f).BorderColor("#cbd5e1").Padding(5)
+                                    .Text("Customer").Bold().FontSize(8.5f).FontColor("#0f172a");
+
+                                table.Cell().Background("#ffffff").Border(0.5f).BorderColor("#cbd5e1").Padding(6).Text(text =>
                                 {
-                                    text.Span($"{companyName}").Bold().FontColor("#0284c7");
-                                    text.Span(" (Registration/CNIC: ");
-                                    text.Span($"{idOrRegNumber}").Bold().FontColor("#0f172a");
-                                    if (!string.IsNullOrWhiteSpace(req.Ntn))
-                                    {
-                                        text.Span($", NTN: {req.Ntn}").Bold().FontColor("#0f172a");
-                                    }
-                                    text.Span($"), located at ");
-                                    text.Span($"{address}").Bold().FontColor("#0f172a");
-                                    text.Span(" (hereinafter referred to as the ");
-                                    text.Span("\"Customer\"").Bold().FontColor("#0f172a");
+                                    text.Span(vendorLegalName).Bold().FontColor("#0f172a");
+                                    text.Span($", having its principal place of business at {vendorAddress} (hereinafter referred to as the ");
+                                    text.Span("\"Provider\"").Bold().FontColor("#0f172a");
                                     text.Span(").");
-                                }
-                                else
+                                });
+
+                                table.Cell().Background("#ffffff").Border(0.5f).BorderColor("#cbd5e1").Padding(6).Text(text =>
                                 {
-                                    text.Span($"{customerDisplayName}").Bold().FontColor("#0284c7");
-                                    text.Span(" (CNIC: ");
-                                    text.Span($"{idOrRegNumber}").Bold().FontColor("#0f172a");
-                                    if (!string.IsNullOrWhiteSpace(req.Ntn))
+                                    if (string.Equals(req.EntityType, "Company", StringComparison.OrdinalIgnoreCase))
                                     {
-                                        text.Span($", NTN: {req.Ntn}").Bold().FontColor("#0f172a");
+                                        text.Span($"{companyName}").Bold().FontColor("#0284c7");
+                                        text.Span(" (Registration/CNIC: ");
+                                        text.Span($"{idOrRegNumber}").Bold().FontColor("#0f172a");
+                                        if (!string.IsNullOrWhiteSpace(req.Ntn))
+                                        {
+                                            text.Span($", NTN: {req.Ntn}").Bold().FontColor("#0f172a");
+                                        }
+                                        text.Span($"), located at ");
+                                        text.Span($"{address}").Bold().FontColor("#0f172a");
+                                        text.Span(" (hereinafter referred to as the ");
+                                        text.Span("\"Customer\"").Bold().FontColor("#0f172a");
+                                        text.Span(").");
                                     }
-                                    text.Span($"), residing at ");
-                                    text.Span($"{address}").Bold().FontColor("#0f172a");
-                                    text.Span(" (hereinafter referred to as the ");
-                                    text.Span("\"Customer\"").Bold().FontColor("#0f172a");
-                                    text.Span(").");
-                                }
+                                    else
+                                    {
+                                        text.Span($"{customerDisplayName}").Bold().FontColor("#0284c7");
+                                        text.Span(" (CNIC: ");
+                                        text.Span($"{idOrRegNumber}").Bold().FontColor("#0f172a");
+                                        if (!string.IsNullOrWhiteSpace(req.Ntn))
+                                        {
+                                            text.Span($", NTN: {req.Ntn}").Bold().FontColor("#0f172a");
+                                        }
+                                        text.Span($"), residing at ");
+                                        text.Span($"{address}").Bold().FontColor("#0f172a");
+                                        text.Span(" (hereinafter referred to as the ");
+                                        text.Span("\"Customer\"").Bold().FontColor("#0f172a");
+                                        text.Span(").");
+                                    }
+                                });
                             });
                         });
 
