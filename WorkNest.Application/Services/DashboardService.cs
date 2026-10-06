@@ -24,6 +24,52 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(results);
         }
 
+        // Sidebar route -> badge key in GetNavBadgeItemsDbAsync.
+        private static readonly (string Route, string Key)[] NavBadgeRoutes =
+        {
+            ("/admin/agreements", "Agreements"), ("/admin/contacts", "Contacts"), ("/admin/bookings", "Bookings"),
+            ("/admin/quotations", "Quotations"), ("/admin/kyc", "Kyc"), ("/admin/invoices", "Invoices"),
+            ("/admin/attendants", "AccessSuspended"), ("/admin/access-dashboard", "MachinesOffline")
+        };
+
+        /// <summary>Items waiting on staff right now, grouped by sidebar route.</summary>
+        private async Task<Dictionary<string, List<string>>> GetNavBadgeItemsAsync(int? locationId, bool includeMachines)
+        {
+            var st = await _orderStatus.GetInvoiceStatusesAsync();
+            // Still owed = Unpaid / Partial / Challan Expire (legacy 1, 3, 4 + OrderStatus IDs looked up by description).
+            var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue);
+            var rows = await _db.GetNavBadgeItemsDbAsync(locationId, open, _clock.Today, _clock.Now);
+
+            var result = new Dictionary<string, List<string>>();
+            foreach (var (route, key) in NavBadgeRoutes)
+            {
+                if (key == "MachinesOffline" && !includeMachines) continue;
+                // KYC is left out entirely when its table is missing (no rows can't be told apart, so keep 0).
+                result[route] = rows.Where(r => r.Key == key).Select(r => r.ItemKey).Distinct().ToList();
+            }
+            return result;
+        }
+
+        public async Task<Dictionary<string, int>> GetNavBadgesAsync(int? locationId, bool includeMachines, string? userEmail)
+        {
+            var items = await GetNavBadgeItemsAsync(locationId, includeMachines);
+            var reads = string.IsNullOrWhiteSpace(userEmail)
+                ? new Dictionary<string, HashSet<string>>()
+                : await _db.GetNavBadgeReadsDbAsync(userEmail);
+            return items.ToDictionary(
+                kv => kv.Key,
+                kv => reads.TryGetValue(kv.Key, out var read) ? kv.Value.Count(i => !read.Contains(i)) : kv.Value.Count);
+        }
+
+        public async Task<bool> MarkNavBadgesReadAsync(int? locationId, string userEmail, IEnumerable<string> routes)
+        {
+            var wanted = new HashSet<string>(routes, StringComparer.OrdinalIgnoreCase);
+            var items = await GetNavBadgeItemsAsync(locationId, includeMachines: true);
+            // Only what is waiting right now is stored, so the list never grows beyond the open items.
+            var toSave = items.Where(kv => wanted.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+            return toSave.Count == 0 || await _db.SaveNavBadgeReadsDbAsync(userEmail, toSave);
+        }
+
         public async Task<DashboardOverviewDto> GetOverviewAsync(int? locationId, string? period = null)
         {
             period = (period ?? "month").Trim().ToLowerInvariant();

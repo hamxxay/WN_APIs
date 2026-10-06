@@ -1100,7 +1100,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
             decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0,
             decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null,
-            string? shiftType = "24_7")
+            string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_Insert", c);
@@ -1125,6 +1125,9 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)securityDepositMonths ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@AdvanceRentMonths", (object?)advanceRentMonths ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            // Only sent when set, so the call still works before the WN_Bookings_Insert update adds @PerSeatBasePrice.
+            if (capacity is > 0) cmd.Parameters.AddWithValue("@Capacity", capacity.Value);
+            if (perSeatBasePrice is > 0) cmd.Parameters.AddWithValue("@PerSeatBasePrice", perSeatBasePrice.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             IDictionary<string, object?> result = new Dictionary<string, object?>();
             if (await r.ReadAsync()) result = ToDict(r);
@@ -2538,6 +2541,153 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadResultSets(r);
         }
 
+        /// <summary>
+        /// Admin sidebar badges (read-only, polled every 60 s by every open admin tab): one row of scalar counts of
+        /// work waiting on staff right now. @Loc limits the counts that have a location (via the space) to that
+        /// location; contacts and machines stay global. Status values are the ones the screens and services write:
+        /// agreements 'EmailFailed' / signed copy on file (WN_Agreements.SignedPdfPath), contacts StatusId 1 = New,
+        /// bookings 1 / 5 = old / new Pending, quotations 'Accepted' / 'Declined', KYC document Status 0 = Pending.
+        /// </summary>
+        public async Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow)
+        {
+            // One row per item waiting on staff: K = badge, ItemKey = what "read" remembers. The key includes the
+            // part that makes an item new again (e.g. agreement status, quotation status, KYC document count).
+            // Status IDs are ints from code (OrderStatus lookups), never user input.
+            var open = openInvoiceStatusIds.Distinct().ToList();
+            var openList = open.Count == 0 ? "-1" : string.Join(",", open);
+            await using var c = await Open();
+            var sql = $@"
+                DECLARE @Items TABLE (K VARCHAR(20) NOT NULL, ItemKey NVARCHAR(100) NOT NULL);
+
+                -- KYC: the documents table is read only by stored procedures elsewhere; skip it if it is not there.
+                IF OBJECT_ID(N'dbo.WN_CustomerKYCDocuments', N'U') IS NOT NULL
+                    INSERT INTO @Items (K, ItemKey)
+                    SELECT 'Kyc', CONCAT(d.CustomerId, ':', COUNT(*))
+                      FROM dbo.WN_CustomerKYCDocuments d WITH (NOLOCK)
+                     WHERE d.IsActive = 1 AND d.Status = 0   -- KycDocumentStatus.Pending
+                       AND (@Loc IS NULL OR EXISTS (
+                            SELECT 1
+                              FROM dbo.WN_Customers cu WITH (NOLOCK)
+                              LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId
+                             WHERE cu.Id = d.CustomerId
+                               AND (u.LocationId = @Loc OR EXISTS (
+                                    SELECT 1
+                                      FROM dbo.WN_Bookings kb WITH (NOLOCK)
+                                      JOIN dbo.WN_Spaces ks WITH (NOLOCK) ON ks.Id = kb.SpaceId
+                                     WHERE ks.LocationId = @Loc
+                                       AND (kb.CustomerCode = cu.Code OR (cu.UserId IS NOT NULL AND kb.UserId = cu.UserId))))))
+                     GROUP BY d.CustomerId;
+
+                INSERT INTO @Items (K, ItemKey)
+                -- signed copy waiting for verification (customer upload or admin upload not yet confirmed) + send failures
+                SELECT 'Agreements', CONCAT(a.Id, ':', a.Status)
+                  FROM dbo.WN_Agreements a WITH (NOLOCK)
+                  JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+                 WHERE a.BookingId IS NULL
+                   AND (a.Status = 'EmailFailed' OR (a.SignedPdfPath IS NOT NULL AND a.SignedPdfPath <> ''))
+                   AND ISNULL(q.Status, '') NOT IN ('Declined', 'Rejected', 'Cancelled', 'Expired')
+                   AND NOT EXISTS (SELECT 1 FROM dbo.WN_Agreements a2 WITH (NOLOCK)
+                                    WHERE a2.QuotationId = a.QuotationId AND a2.Id > a.Id)
+                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = q.SpaceId AND s.LocationId = @Loc))
+                UNION ALL
+                -- contact + book-tour messages still New (WN_Contacts_Insert writes StatusId 1)
+                SELECT 'Contacts', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1
+                UNION ALL
+                -- bookings waiting for confirmation (same rule as the dashboard's PendingConfirmations)
+                SELECT 'Bookings', CAST(b.Id AS NVARCHAR(20))
+                  FROM dbo.WN_Bookings b WITH (NOLOCK)
+                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 5) AND b.EndOn >= @Now
+                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                UNION ALL
+                -- accepted by the customer (agreement not sent yet) + declined in the last 7 days
+                SELECT 'Quotations', CONCAT(q.Id, ':', q.Status)
+                  FROM dbo.WN_Quotations q WITH (NOLOCK)
+                 WHERE (q.Status = 'Accepted'
+                        OR (q.Status = 'Declined' AND EXISTS (
+                               SELECT 1 FROM dbo.WN_QuotationResponses qr WITH (NOLOCK)
+                                WHERE qr.QuotationId = q.Id AND qr.ResponseType = 'Declined'
+                                  AND qr.RespondedDate >= DATEADD(DAY, -7, GETUTCDATE()))))   -- RespondedDate is written with GETUTCDATE()
+                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = q.SpaceId AND s.LocationId = @Loc))
+                UNION ALL
+                -- overdue: still owed (Unpaid / Partial / Challan Expire, legacy + OrderStatus) and past the due date
+                SELECT 'Invoices', CAST(i.Id AS NVARCHAR(20))
+                  FROM dbo.WN_Invoices i WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                 WHERE i.StatusId IN ({openList}) AND i.DueOn < @Today
+                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                UNION ALL
+                -- door access suspended right now: open suspension, no override running, booking still running
+                -- (same conditions as GetHikAccessOverviewDbAsync)
+                SELECT 'AccessSuspended', CAST(sus.Id AS NVARCHAR(20))
+                  FROM dbo.WN_HIK_BookingAccessSuspensions sus WITH (NOLOCK)
+                  JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = sus.BookingId
+                 WHERE sus.ResolvedAt IS NULL
+                   AND (sus.OverrideUntil IS NULL OR sus.OverrideUntil < @Today)
+                   AND ISNULL(b.IsDeleted, 0) = 0
+                   AND b.BookingStatusId NOT IN (3, 4, 6, 86) -- rejected / old cancelled / no show / cancelled
+                   AND EXISTS (SELECT 1 FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                                WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0
+                                  AND d.EndDateTime >= @Today)   -- = MAX(EndDateTime) >= @Today
+                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                UNION ALL
+                -- offline door machines; Last_seen makes a machine that drops off again count as new
+                SELECT 'MachinesOffline', CONCAT(hd.Id, ':', CONVERT(VARCHAR(19), hd.Last_seen, 126))
+                  FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 0;
+
+                SELECT K, ItemKey FROM @Items;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
+            cmd.Parameters.Add("@Today", SqlDbType.Date).Value = businessToday.Date;
+            cmd.Parameters.Add("@Now", SqlDbType.DateTime2).Value = businessNow;
+            var list = new List<(string, string)>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                list.Add((r.GetString(0), r.GetString(1)));
+            return list;
+        }
+
+        public async Task<Dictionary<string, HashSet<string>>> GetNavBadgeReadsDbAsync(string userEmail)
+        {
+            // Item keys each user marked as read, per sidebar route (WN_NAV_BadgeReads; created by the user's script).
+            await using var c = await Open();
+            const string sql = @"
+                IF OBJECT_ID(N'dbo.WN_NAV_BadgeReads', N'U') IS NOT NULL
+                    SELECT RouteKey, ReadItems FROM dbo.WN_NAV_BadgeReads WITH (NOLOCK) WHERE UserEmail = @Email;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 200).Value = userEmail;
+            var result = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                var items = r.IsDBNull(1) ? null : System.Text.Json.JsonSerializer.Deserialize<List<string>>(r.GetString(1));
+                result[r.GetString(0)] = new HashSet<string>(items ?? new List<string>());
+            }
+            return result;
+        }
+
+        public async Task<bool> SaveNavBadgeReadsDbAsync(string userEmail, IDictionary<string, List<string>> itemsByRoute)
+        {
+            await using var c = await Open();
+            await using (var check = new SqlCommand("SELECT CASE WHEN OBJECT_ID(N'dbo.WN_NAV_BadgeReads', N'U') IS NULL THEN 0 ELSE 1 END", c))
+                if (Convert.ToInt32(await check.ExecuteScalarAsync()) == 0) return false;
+
+            const string sql = @"
+                UPDATE dbo.WN_NAV_BadgeReads SET ReadItems = @Items, ReadAt = SYSUTCDATETIME()
+                 WHERE UserEmail = @Email AND RouteKey = @Route;
+                IF @@ROWCOUNT = 0
+                    INSERT INTO dbo.WN_NAV_BadgeReads (UserEmail, RouteKey, ReadItems, ReadAt)
+                    VALUES (@Email, @Route, @Items, SYSUTCDATETIME());";
+            foreach (var (route, items) in itemsByRoute)
+            {
+                await using var cmd = new SqlCommand(sql, c);
+                cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 200).Value = userEmail;
+                cmd.Parameters.Add("@Route", SqlDbType.NVarChar, 100).Value = route;
+                cmd.Parameters.Add("@Items", SqlDbType.NVarChar, -1).Value = System.Text.Json.JsonSerializer.Serialize(items);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            return true;
+        }
+
         public async Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync()
         {
             await using var c = await Open();
@@ -2925,6 +3075,39 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 ORDER BY p.Name ASC;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAllRowsAsync(r);
+        }
+
+        /// <summary>
+        /// Current booking assignments of attendants matching ANY of the given values (read-only; mobile access
+        /// matching). Empty values are ignored; the caller scores how many fields actually match.
+        /// </summary>
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetActiveAttendantAssignmentCandidatesDbAsync(string email, string idNumber, string phoneKey, string name)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT
+                    p.PersonId, p.PersonGuid, p.Name, p.Email, p.Phone, p.IdType, p.IdNumber,
+                    ba.BookingDetailId,
+                    ISNULL(bd.SpaceName, '') AS SpaceName,
+                    ISNULL(acc.IsEnabled, 1) AS IsEnabled
+                FROM dbo.WN_Persons p WITH (NOLOCK)
+                JOIN dbo.WN_BookingAttendants ba WITH (NOLOCK) ON ba.PersonId = p.PersonId
+                LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId
+                LEFT JOIN dbo.WN_AccessStatus acc WITH (NOLOCK) ON acc.BookingDetailId = ba.BookingDetailId AND acc.PersonId = ba.PersonId
+                WHERE (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
+                  AND (
+                        (@Email <> '' AND LOWER(LTRIM(RTRIM(p.Email))) = @Email)
+                     OR (@IdNumber <> '' AND UPPER(REPLACE(REPLACE(p.IdNumber, '-', ''), ' ', '')) = @IdNumber)
+                     OR (@Phone <> '' AND REPLACE(REPLACE(REPLACE(p.Phone, '-', ''), ' ', ''), '+', '') LIKE '%' + @Phone)
+                     OR (@Name <> '' AND LOWER(LTRIM(RTRIM(p.Name))) = @Name)
+                  );";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Email", (email ?? "").Trim().ToLowerInvariant());
+            cmd.Parameters.AddWithValue("@IdNumber", idNumber ?? "");
+            cmd.Parameters.AddWithValue("@Phone", phoneKey ?? "");
+            cmd.Parameters.AddWithValue("@Name", name ?? "");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
         }

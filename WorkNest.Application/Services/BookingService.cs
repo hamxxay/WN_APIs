@@ -210,6 +210,51 @@ namespace WorkNest.Application.Services
             if (discountValue < 0)
                 return ApiResponse.Fail("Discount value cannot be negative.");
 
+            // Base price and discount cap: same rules as QuotationService.CreateQuotationAsync.
+            var (standardPerSeat, spaceCapacity, categoryCode, spaceName) = await GetSpacePricingAsync(spaceId);
+            bool isPrivate = categoryCode is "PrivateOffice" or "Private";
+            bool isMeetingRoom = categoryCode.Contains("Meeting", StringComparison.OrdinalIgnoreCase);
+            // WN_Bookings_Insert prices a private office per seat (price x capacity). Meeting rooms also multiply
+            // by @Capacity, so it is sent for private offices only.
+            int? capacity = isPrivate ? (request.Capacity is > 0 ? request.Capacity : spaceCapacity) : null;
+            int seats = Math.Max(1, capacity ?? 1);
+
+            decimal? perSeatBasePrice = null;
+            if (request.PerSeatBasePrice is > 0 && !isMeetingRoom)
+            {
+                if (standardPerSeat > 0 && request.PerSeatBasePrice.Value < standardPerSeat)
+                    return ApiResponse.Fail($"Base price for {spaceName} is locked and can only be increased. Minimum allowed base price is PKR {standardPerSeat:N0}.");
+                if (request.PerSeatBasePrice.Value > standardPerSeat)
+                    perSeatBasePrice = request.PerSeatBasePrice.Value;
+            }
+
+            if (!isMeetingRoom && discountValue > 0)
+            {
+                var offeringTypes = (await _db.GetOfferingTypesAsync()).ToList();
+                var offering = offeringTypes.FirstOrDefault(o => string.Equals(o["Description"]?.ToString(), request.OfferingType, StringComparison.OrdinalIgnoreCase))
+                    ?? offeringTypes.FirstOrDefault();
+                decimal baseCap = offering?["DiscountCap"] is { } dc ? Convert.ToDecimal(dc) : 10.00m;
+                decimal perSeat = perSeatBasePrice ?? standardPerSeat;
+                decimal monthlyRent = isPrivate ? perSeat * seats : perSeat;
+
+                // The cap protects a floor per seat (standard rate minus the cap); a raised base price may be
+                // discounted down to that floor and no further.
+                decimal cap = baseCap;
+                decimal maxFixed = Math.Round(monthlyRent * baseCap / 100m, 2);
+                if (perSeatBasePrice.HasValue && standardPerSeat > 0)
+                {
+                    decimal floorPerSeat = standardPerSeat * (1 - baseCap / 100m);
+                    cap = Math.Round((perSeat - floorPerSeat) / perSeat * 100m, 2, MidpointRounding.ToZero);
+                    maxFixed = Math.Round((perSeat - floorPerSeat) * (isPrivate ? seats : 1), 2);
+                }
+
+                bool isPercentage = discountType is "Percentage" or "Percent";
+                if (isPercentage && discountValue > cap)
+                    return ApiResponse.Fail($"Discount ({discountValue}%) exceeds the maximum allowed discount of {cap}%.");
+                if (!isPercentage && monthlyRent > 0 && discountValue > maxFixed)
+                    return ApiResponse.Fail($"Discount (PKR {discountValue:N0}) exceeds the maximum allowed discount of PKR {maxFixed:N0} per month.");
+            }
+
             string? firstName = request.CustomerName;
             string? lastName = null;
             if (!string.IsNullOrWhiteSpace(request.CustomerName))
@@ -230,12 +275,25 @@ namespace WorkNest.Application.Services
                 discountType == "Percentage" ? discountValue : 0,
                 discountType, discountValue,
                 request.SecurityDepositOverride, request.FloorId, request.BillingPeriodMonths, request.SecurityDepositMonths, request.AdvanceRentMonths,
-                shiftType);
+                shiftType, capacity, perSeatBasePrice);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 return ApiResponse.Fail(err.ToString() ?? "An error occurred");
 
             return ApiResponse.Ok(result, "Admin booking created.");
+        }
+
+        /// <summary>Standard per-seat monthly price (s.Price, as WN_Bookings_Insert uses), capacity and category of a space.</summary>
+        private async Task<(decimal StandardPerSeat, int Capacity, string CategoryCode, string Name)> GetSpacePricingAsync(int spaceId)
+        {
+            var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
+            var row = rows.FirstOrDefault(r => r.TryGetValue("Id", out var id) && id is not null && Convert.ToInt32(id) == spaceId);
+            if (row is null) return (0m, 1, "", "this space");
+            decimal price = row.TryGetValue("Price", out var p) && p is not null ? Convert.ToDecimal(p) : 0m;
+            int cap = row.TryGetValue("Capacity", out var c) && c is not null ? Convert.ToInt32(c) : 1;
+            string category = row.TryGetValue("CategoryCode", out var cc) ? cc?.ToString() ?? "" : "";
+            string name = row.TryGetValue("Name", out var n) ? n?.ToString() ?? "this space" : "this space";
+            return (price, Math.Max(1, cap), category, name);
         }
 
         public async Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail)

@@ -17,5 +17,6 @@ namespace WorkNest.Application.Interfaces
         Task<int> ToggleAccessStatusAsync(ToggleAccessStatusRequest request);
         Task<IEnumerable<AccessStatusExportDto>> GetAccessStatusExportAsync();
         Task<IEnumerable<CustomerActiveSpaceDto>> GetCustomerActiveSpacesAsync(int customerId);
+        Task<MobileAccessVerifyResult> VerifyMobileAccessAsync(MobileAccessVerifyRequest request);
     }
 }

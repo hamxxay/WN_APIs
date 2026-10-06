@@ -87,7 +87,8 @@ namespace WorkNest.Application.Services
                 var due = r["DueOn"] as DateTime?;
                 var total = Convert.ToDecimal(r["GrandTotal"]);
                 var paid = Convert.ToDecimal(r["PaidTotal"]);
-                // Same rule as WN_HIK_AccessSuspension_Run: Unpaid / Overdue past the due date.
+                // Unpaid / Overdue past the due date. Access is suspended only 7 days later
+                // (grace period in WN_HIK_AccessSuspension_Run).
                 var overdue = (st.IsUnpaid(statusId) || st.IsOverdue(statusId)) && due.HasValue && due.Value.Date < today;
                 var typeId = r["InvoiceTypeId"] != null ? Convert.ToInt32(r["InvoiceTypeId"]) : 0;
 

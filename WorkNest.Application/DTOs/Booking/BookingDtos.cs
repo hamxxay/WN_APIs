@@ -85,6 +85,8 @@ namespace WorkNest.Application.DTOs.Booking
         public int? AdvanceRentMonths { get; set; }
         public byte? SupportChargesId { get; set; }
         public int? Capacity { get; set; }
+        /// <summary>Per-seat monthly price; may only be raised above the space's standard rate (same rule as quotations).</summary>
+        public decimal? PerSeatBasePrice { get; set; }
     }
 
     public class BookingRequest
