@@ -23,12 +23,15 @@ namespace WorkNest.API.Controllers
         private readonly IAgreementService _agreement;
         private readonly IWebHostEnvironment _env;
         private readonly FileStorageSettings _storageSettings;
+        private readonly IBusinessClock _clock;
 
         public AgreementController(
             IAgreementService agreement,
             IWebHostEnvironment env,
-            IOptions<FileStorageSettings> storageSettings)
+            IOptions<FileStorageSettings> storageSettings,
+            IBusinessClock clock)
         {
+            _clock = clock;
             _agreement = agreement;
             _env = env;
             _storageSettings = storageSettings.Value;
@@ -123,7 +126,7 @@ namespace WorkNest.API.Controllers
                     return BadRequest(new { isSuccessful = false, message = "Upload the signed agreement first — a booking is only created once the signed copy is on file." });
 
                 int? actorId = ResolveActorId();
-                var result = await _agreement.MarkAgreementSignedAsync(id, actorId, req?.Note, existing.SignedDate ?? DateTime.Today);
+                var result = await _agreement.MarkAgreementSignedAsync(id, actorId, req?.Note, existing.SignedDate ?? _clock.Today);
 
                 return Ok(new
                 {
@@ -202,7 +205,7 @@ namespace WorkNest.API.Controllers
                 if (signedDate == null)
                     return BadRequest(new { isSuccessful = false, message = "Enter the date you signed the agreement." });
                 var date = signedDate.Value.Date;
-                if (date > DateTime.Today)
+                if (date > _clock.Today)
                     return BadRequest(new { isSuccessful = false, message = "The signed date cannot be in the future." });
 
                 var agreement = await _agreement.GetAgreementByIdAsync(id);
@@ -241,7 +244,7 @@ namespace WorkNest.API.Controllers
                 if (signedDate == null)
                     return BadRequest(new { isSuccessful = false, message = "Enter the date written on the signed agreement." });
                 var date = signedDate.Value.Date;
-                if (date > DateTime.Today)
+                if (date > _clock.Today)
                     return BadRequest(new { isSuccessful = false, message = "The signed date cannot be in the future." });
 
                 var agreement = await _agreement.GetAgreementByIdAsync(id);

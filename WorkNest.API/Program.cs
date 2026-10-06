@@ -147,6 +147,8 @@ try
 
     // ── Infrastructure Services ───────────────────────────────────────────────
     builder.Services.AddHttpContextAccessor();
+    // One business clock (Pakistan time) for every business date; "Business:TimeZone" defaults to Asia/Karachi.
+    builder.Services.AddSingleton<IBusinessClock>(new BusinessClock(builder.Configuration["Business:TimeZone"]).UseAsDefault());
     builder.Services.AddScoped<IDbRepository, DbRepository>();
     builder.Services.AddScoped<IJwtService, JwtService>();
     builder.Services.AddScoped<IEncryptionService, EncryptionService>();
@@ -205,6 +207,9 @@ try
     builder.Services.AddHostedService<AnnouncementDeliveryService>();
     builder.Services.AddHostedService<ChallanAccessSuspensionService>();
     builder.Services.AddHostedService<BookingAutoConfirmService>();
+    builder.Services.AddMemoryCache();
+    builder.Services.AddHttpClient();
+    builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();
     builder.Services.AddHostedService<UnifiPollingService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
@@ -288,6 +293,22 @@ finally
     Log.CloseAndFlush();
 }
 
+/// <summary>
+/// Writes DateTimes for the API. Only real UTC values (DateTimeKind.Utc — e.g. UTC audit columns marked by
+/// DbDateTimeKinds, DateTime.UtcNow) get a "Z". Unspecified / Local values — business wall-clock times in
+/// Pakistan time, which is what SQL returns for StartOn, DueOn, IssuedOn … — are written without an offset,
+/// so the browser treats them as local wall-clock time instead of shifting them by +5h.
+/// </summary>
+public static class FlexibleDateTimeJsonWriter
+{
+    public static void Write(System.Text.Json.Utf8JsonWriter writer, DateTime value)
+    {
+        writer.WriteStringValue(value.Kind == DateTimeKind.Utc
+            ? value.ToString("yyyy-MM-ddTHH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture)
+            : value.ToString("yyyy-MM-ddTHH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture));
+    }
+}
+
 public class FlexibleDateTimeJsonConverter : System.Text.Json.Serialization.JsonConverter<DateTime>
 {
     public override DateTime Read(ref System.Text.Json.Utf8JsonReader reader, Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
@@ -313,9 +334,7 @@ public class FlexibleDateTimeJsonConverter : System.Text.Json.Serialization.Json
     }
 
     public override void Write(System.Text.Json.Utf8JsonWriter writer, DateTime value, System.Text.Json.JsonSerializerOptions options)
-    {
-        writer.WriteStringValue(value.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
-    }
+        => FlexibleDateTimeJsonWriter.Write(writer, value);
 }
 
 public class FlexibleNullableDateTimeJsonConverter : System.Text.Json.Serialization.JsonConverter<DateTime?>
@@ -343,7 +362,7 @@ public class FlexibleNullableDateTimeJsonConverter : System.Text.Json.Serializat
     public override void Write(System.Text.Json.Utf8JsonWriter writer, DateTime? value, System.Text.Json.JsonSerializerOptions options)
     {
         if (value.HasValue)
-            writer.WriteStringValue(value.Value.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"));
+            FlexibleDateTimeJsonWriter.Write(writer, value.Value);
         else
             writer.WriteNullValue();
     }

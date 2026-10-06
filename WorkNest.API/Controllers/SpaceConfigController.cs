@@ -18,6 +18,10 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public SpaceConfigController(ISpaceConfigService config, IDbRepository db) { _config = config; _db = db; }
 
+        // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
+        private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
+
         [HttpGet("api/space-config")]
         [AllowAnonymous]
         public async Task<IActionResult> Get() =>
@@ -29,13 +33,14 @@ namespace WorkNest.API.Controllers
             Ok(await _config.GetSecurityDepositAsync(category));
 
         [HttpPut("api/space-config/{category}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Update(
             string category,
-            [FromBody] SpaceConfigUpdateRequest? body,
-            [FromHeader(Name = "x-user-email")] string? userEmail) =>
-            Ok(await _config.UpdateSpaceConfigAsync(category, body ?? new SpaceConfigUpdateRequest(), userEmail));
+            [FromBody] SpaceConfigUpdateRequest? body) =>
+            Ok(await _config.UpdateSpaceConfigAsync(category, body ?? new SpaceConfigUpdateRequest(), User.GetEmail()));
 
         [HttpPost("api/space-config/generate-inventory")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> GenerateInventory([FromBody] SpaceInventoryRequest request) =>
             StatusCode(201, await _config.GenerateInventoryAsync(request));
 
@@ -43,6 +48,7 @@ namespace WorkNest.API.Controllers
         // These alias to the V1 config until a full V2 DB layer is implemented.
 
         [HttpGet("api/space-config/v2")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetV2(
             [FromQuery] int? companyId,
             [FromQuery] int? branchId,
@@ -60,23 +66,22 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/space-config/v2")]
-        public async Task<IActionResult> CreateV2(
-            [FromBody] SpaceConfigV2Request? body,
-            [FromHeader(Name = "x-user-email")] string? userEmail) =>
-            StatusCode(201, await _config.CreateSpaceConfigV2Async(body ?? new SpaceConfigV2Request(), userEmail));
+        [Authorize(Roles = AdminRoles)]
+        public async Task<IActionResult> CreateV2([FromBody] SpaceConfigV2Request? body) =>
+            StatusCode(201, await _config.CreateSpaceConfigV2Async(body ?? new SpaceConfigV2Request(), User.GetEmail()));
 
         [HttpPut("api/space-config/v2/{id:int}")]
-        public async Task<IActionResult> UpdateV2(
-            int id,
-            [FromBody] SpaceConfigV2Request? body,
-            [FromHeader(Name = "x-user-email")] string? userEmail) =>
-            Ok(await _config.UpdateSpaceConfigV2Async(id, body ?? new SpaceConfigV2Request(), userEmail));
+        [Authorize(Roles = AdminRoles)]
+        public async Task<IActionResult> UpdateV2(int id, [FromBody] SpaceConfigV2Request? body) =>
+            Ok(await _config.UpdateSpaceConfigV2Async(id, body ?? new SpaceConfigV2Request(), User.GetEmail()));
 
         [HttpDelete("api/space-config/v2/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteV2(int id) =>
             Ok(await _config.DeleteSpaceConfigV2Async(id));
 
         [HttpPost("api/space-config/v2/{id:int}/generate")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> GenerateV2(int id)
         {
             var result = await _db.GenerateSpaceInventoryAsync(id, 0, string.Empty, 0, 0);
@@ -84,6 +89,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/space-config/v2/{id:int}/spaces")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetSpacesV2(int id)
         {
             var spaces = (await _db.GetSpaceStatusForConfigAsync(id)).ToList();
@@ -91,6 +97,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/space-config/v2/delete-spaces")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteSpacesV2([FromBody] DeleteSpacesFromConfigRequest? request) =>
             Ok(await _config.DeleteSpacesFromConfigAsync(request ?? new DeleteSpacesFromConfigRequest()));
     }

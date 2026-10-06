@@ -28,12 +28,11 @@ namespace WorkNest.API.Controllers
             _pdf = pdf;
         }
 
-        private string? ResolveUserEmail(string? headerEmail)
-        {
-            var claimEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value 
-                             ?? User.FindFirst("email")?.Value;
-            return !string.IsNullOrWhiteSpace(claimEmail) ? claimEmail : headerEmail;
-        }
+        // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
+        private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+
+        /// <summary>Signed-in user's email from the JWT only (the x-user-email header is no longer trusted).</summary>
+        private string? ResolveUserEmail() => User.GetEmail();
 
         [HttpGet("api/booking/available-spaces")]
         [AllowAnonymous]
@@ -46,7 +45,7 @@ namespace WorkNest.API.Controllers
             Ok(await _bookings.GetAvailableSpacesForBookingAsync(spaceTypeId, startOn, endOn, capacity, shiftType));
 
         [HttpGet("api/booking/available-spaces-reassignment")]
-        [AllowAnonymous]
+        [Authorize(Roles = StaffRoles)] // used by the admin reassign dialog only
         public async Task<IActionResult> AvailableForReassignment(
             [FromQuery] int spaceTypeId,
             [FromQuery] DateTime startOn,
@@ -66,11 +65,11 @@ namespace WorkNest.API.Controllers
             Ok(await _bookings.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType));
 
         [HttpGet("api/booking/my")]
-        public async Task<IActionResult> MyBookings([FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> MyBookings()
         {
-            var email = ResolveUserEmail(userEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             return Ok(await _bookings.GetMyBookingsAsync(email));
         }
 
@@ -102,6 +101,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/booking")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
@@ -123,20 +123,24 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/booking/{publicId:guid}")]
-        public async Task<IActionResult> Get(Guid publicId, [FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> Get(Guid publicId)
         {
-            bool isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsInRole("receptionist") || User.IsInRole("Receptionist") || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
-            var email = isAdmin ? null : ResolveUserEmail(userEmail);
+            bool isAdmin = User.IsStaff();
+            var email = isAdmin ? null : ResolveUserEmail();
+            if (!isAdmin && string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var result = await _bookings.GetBookingByIdAsync(publicId, email);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
 
         [HttpGet("api/booking/{id:int}")]
-        public async Task<IActionResult> GetDetails(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> GetDetails(int id)
         {
-            bool isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsInRole("receptionist") || User.IsInRole("Receptionist") || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
-            var email = isAdmin ? null : ResolveUserEmail(userEmail);
+            bool isAdmin = User.IsStaff();
+            var email = isAdmin ? null : ResolveUserEmail();
+            if (!isAdmin && string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var result = await _bookings.GetBookingDetailsAsync(id.ToString(), email);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
@@ -151,22 +155,29 @@ namespace WorkNest.API.Controllers
             return row == null ? NotFound(ApiResponse.Fail($"Booking #{id} not found.")) : Ok(ApiResponse.Ok(row));
         }
 
+        // Staff see every booking; a customer only their own (it used to call GetChallan(id, null), so ownership was never checked).
         [HttpGet("api/booking/{id:int}/billing-summary")]
-        public async Task<IActionResult> GetBillingSummary(int id) =>
-            await GetChallan(id, null);
+        public async Task<IActionResult> GetBillingSummary(int id)
+        {
+            if (!await CanSeeBookingAsync(id))
+                return NotFound(ApiResponse.Fail("Booking not found."));
+            return await GetChallan(id);
+        }
 
         [HttpGet("api/booking/{id:int}/challan")]
-        public async Task<IActionResult> GetChallan(int id, [FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> GetChallan(int id)
         {
-            bool isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsInRole("receptionist") || User.IsInRole("Receptionist") || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
-            var email = isAdmin ? null : ResolveUserEmail(userEmail);
+            bool isAdmin = User.IsStaff();
+            var email = isAdmin ? null : ResolveUserEmail();
+            if (!isAdmin && string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var result = await _bookings.GetChallanAsync(id);
             if (!result.IsSuccessful) return NotFound(result);
             
             if (email != null)
             {
                 var dto = result.Data as WorkNest.Application.DTOs.Booking.ChallanResponseDto;
-                if (dto != null && !string.Equals(dto.CustomerEmail, email, StringComparison.OrdinalIgnoreCase))
+                if (dto == null || !string.Equals(dto.CustomerEmail, email, StringComparison.OrdinalIgnoreCase))
                 {
                     return Forbid();
                 }
@@ -174,47 +185,9 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
-        [HttpGet("api/booking/migrate-db")]
-        [AllowAnonymous]
-        public async Task<IActionResult> MigrateDb()
-        {
-            try
-            {
-                string sqlPath = @"F:\WN_APIs\SQL\WN_Challans_GetFullByBooking.sql";
-                if (!System.IO.File.Exists(sqlPath))
-                {
-                    return NotFound(new { isSuccessful = false, message = $"SQL file not found at {sqlPath}" });
-                }
-                string sql = await System.IO.File.ReadAllTextAsync(sqlPath);
-                
-                // Split by GO statements
-                var parts = System.Text.RegularExpressions.Regex.Split(
-                    sql, 
-                    @"^\s*GO\s*$", 
-                    System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
-                );
-                
-                foreach (var part in parts)
-                {
-                    if (!string.IsNullOrWhiteSpace(part))
-                    {
-                        await _db.ExecuteRawSqlAsync(part);
-                    }
-                }
-                
-                return Ok(new { isSuccessful = true, message = "Stored procedure migrated successfully." });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { isSuccessful = false, error = ex.Message });
-            }
-        }
-
         [HttpPost("api/booking/create-admin")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
-        public async Task<IActionResult> AdminCreate(
-            [FromBody] AdminBookingRequest request,
-            [FromHeader(Name = "x-user-email")] string? actorEmail)
+        public async Task<IActionResult> AdminCreate([FromBody] AdminBookingRequest request)
         {
             if (request == null)
                 return BadRequest(new { isSuccessful = false, message = "Booking request payload is required." });
@@ -225,7 +198,7 @@ namespace WorkNest.API.Controllers
             if ((request.UserId ?? 0) == 0 && string.IsNullOrWhiteSpace(request.UserIdGuid) && string.IsNullOrWhiteSpace(request.CustomerEmail))
                 return BadRequest(new { isSuccessful = false, message = "UserId, UserIdGuid, or CustomerEmail is required." });
 
-            var actor = ResolveUserEmail(actorEmail);
+            var actor = ResolveUserEmail();
             var result = await _bookings.CreateAdminBookingAsync(request, actor);
             if (!result.IsSuccessful)
                 return BadRequest(result);
@@ -234,13 +207,11 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/booking")]
-        public async Task<IActionResult> Create(
-            [FromBody] BookingRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> Create([FromBody] BookingRequest request)
         {
-            var email = ResolveUserEmail(userEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             
             var result = await _bookings.CreateBookingAsync(request, email);
             if (!result.IsSuccessful && result.Message == "CustomerProfileRequired")
@@ -251,13 +222,11 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/booking/smart")]
-        public async Task<IActionResult> Smart(
-            [FromBody] SmartBookingRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> Smart([FromBody] SmartBookingRequest request)
         {
-            var email = ResolveUserEmail(userEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             
             var result = await _bookings.CreateSmartBookingAsync(request, email);
             if (!result.IsSuccessful && result.Message == "CustomerProfileRequired")
@@ -268,10 +237,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPut("api/booking/{id:int}")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> Update(int id, [FromBody] BookingUpdateRequest request) =>
             Ok(await _bookings.UpdateBookingAsync(id, request, null));
 
         [HttpPut("api/booking/{publicId:guid}")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] BookingUpdateRequest request)
         {
             var booking = await _db.GetBookingByPublicIdAsync(publicId, null);
@@ -281,28 +252,23 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPatch("api/booking/{id:int}/cancel")]
-        public async Task<IActionResult> Cancel(
-            int id,
-            [FromBody] CancelBookingRequest? request,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> Cancel(int id, [FromBody] CancelBookingRequest? request)
         {
-            var email = ResolveUserEmail(userEmail);
+            // WN_Bookings_Cancel checks that the booking belongs to this (JWT) email.
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var result = await _bookings.CancelBookingAsync(id, email, request?.CancelReason);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
 
         [HttpPatch("api/booking/{publicId:guid}/cancel")]
-        public async Task<IActionResult> CancelByGuid(
-            Guid publicId,
-            [FromBody] CancelBookingRequest? request,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        public async Task<IActionResult> CancelByGuid(Guid publicId, [FromBody] CancelBookingRequest? request)
         {
-            var email = ResolveUserEmail(userEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var booking = await _db.GetBookingByPublicIdAsync(publicId, email);
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
@@ -312,10 +278,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPatch("api/booking/{id:int}/status")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] BookingStatusUpdateRequest request) =>
             Ok(await _bookings.UpdateBookingStatusAsync(id, request.StatusId, null));
 
         [HttpPatch("api/booking/{publicId:guid}/status")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatusByGuid(Guid publicId, [FromBody] BookingStatusUpdateRequest request)
         {
             var booking = await _db.GetBookingByPublicIdAsync(publicId, null);
@@ -326,9 +294,10 @@ namespace WorkNest.API.Controllers
 
         
         [HttpGet("api/booking/{id:int}/challan-pdf")]
-        [AllowAnonymous]
         public async Task<IActionResult> GetChallanPdf(int id)
         {
+            if (!await CanSeeBookingAsync(id))
+                return NotFound(new { isSuccessful = false, message = "Challan details not found." });
             var challanResult = await _bookings.GetChallanAsync(id);
             if (!challanResult.IsSuccessful || challanResult.Data is null)
                 return NotFound(new { isSuccessful = false, message = "Challan details not found." });
@@ -364,28 +333,24 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPatch("api/booking/{id:int}/reassign")]
-        public async Task<IActionResult> Reassign(
-            int id,
-            [FromBody] ReassignBookingRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> Reassign(int id, [FromBody] ReassignBookingRequest request)
         {
-            var email = ResolveUserEmail(userEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var result = await _bookings.ReassignBookingAsync(id, request, email);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
         }
 
         [HttpPatch("api/booking/{publicId:guid}/reassign")]
-        public async Task<IActionResult> ReassignByGuid(
-            Guid publicId,
-            [FromBody] ReassignBookingRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> ReassignByGuid(Guid publicId, [FromBody] ReassignBookingRequest request)
         {
-            var email = ResolveUserEmail(userEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var booking = await _db.GetBookingByPublicIdAsync(publicId, null);
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
@@ -394,7 +359,10 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        // Was open to any logged-in user with amounts taken from the query string: now staff only,
+        // month counts capped, and the rent / discount come from the booking in the DB when it has them.
         [HttpGet("api/booking/{id:int}/advance-invoice-pdf")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetAdvanceInvoicePdf(
             int id,
             [FromQuery] int advMonths = 3,
@@ -402,14 +370,44 @@ namespace WorkNest.API.Controllers
             [FromQuery] decimal monthlyRate = 0,
             [FromQuery] decimal discount = 0)
         {
+            if (!await CanSeeBookingAsync(id))
+                return NotFound(ApiResponse.Fail("Booking not found."));
+
+            advMonths = Math.Clamp(advMonths, 1, 36);
+            secMonths = Math.Clamp(secMonths, 0, 36);
+
+            var challan = await _bookings.GetChallanAsync(id);
+            if (!challan.IsSuccessful || challan.Data is not ChallanResponseDto booking)
+                return NotFound(ApiResponse.Fail("Booking not found."));
+
+            if (booking.MonthlyRent > 0) monthlyRate = booking.MonthlyRent;
+            monthlyRate = Math.Max(0m, monthlyRate);
+            decimal grossAdvance = monthlyRate * advMonths;
+            if (booking.DiscountPercentage > 0)
+                discount = Math.Round(grossAdvance * Math.Min(100m, booking.DiscountPercentage) / 100m, 2);
+            discount = Math.Clamp(discount, 0m, grossAdvance);
+
             var pdfBytes = await _bookings.GenerateAdvanceInvoicePdfAsync(id, advMonths, secMonths, monthlyRate, discount);
             return File(pdfBytes, "application/pdf", $"AdvanceInvoice-{id}.pdf");
         }
 
         [HttpGet("api/booking/{bookingId:int}/financial-breakdown")]
-        [AllowAnonymous]
-        public async Task<IActionResult> FinancialBreakdown(int bookingId) =>
-            Ok(await _bookings.GetBookingFinancialBreakdownAsync(bookingId));
+        public async Task<IActionResult> FinancialBreakdown(int bookingId)
+        {
+            if (!await CanSeeBookingAsync(bookingId))
+                return NotFound(ApiResponse.Fail("Booking not found."));
+            return Ok(await _bookings.GetBookingFinancialBreakdownAsync(bookingId));
+        }
+
+        /// <summary>Staff see every booking; a customer only their own (these were anonymous before).</summary>
+        private async Task<bool> CanSeeBookingAsync(int bookingId)
+        {
+            if (User.IsStaff()) return true;
+            var email = User.GetEmail();
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            var db = HttpContext.RequestServices.GetRequiredService<IDbRepository>();
+            return await db.IsBookingOwnedByDbAsync(bookingId, email);
+        }
 }
 
 }

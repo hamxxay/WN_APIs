@@ -22,7 +22,8 @@ namespace WorkNest.API.Controllers
             _db = db;
         }
 
-        private async Task<int?> ResolveCurrentUserIdAsync(string? headerEmail)
+        /// <summary>Identity from the JWT only (the x-user-email header is no longer trusted).</summary>
+        private async Task<int?> ResolveCurrentUserIdAsync()
         {
             var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                        ?? User.FindFirst("sub")?.Value
@@ -36,8 +37,7 @@ namespace WorkNest.API.Controllers
 
             var email = User.FindFirst(ClaimTypes.Email)?.Value
                      ?? User.FindFirst("email")?.Value
-                     ?? User.Identity?.Name
-                     ?? headerEmail;
+                     ?? User.Identity?.Name;
 
             if (!string.IsNullOrWhiteSpace(email))
             {
@@ -54,10 +54,9 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/mobile/announcements")]
         public async Task<IActionResult> GetAnnouncements(
             [FromQuery] int page = 1,
-            [FromQuery] int limit = 20,
-            [FromHeader(Name = "x-user-email")] string? userEmail = null)
+            [FromQuery] int limit = 20)
         {
-            var userId = await ResolveCurrentUserIdAsync(userEmail);
+            var userId = await ResolveCurrentUserIdAsync();
             if (!userId.HasValue)
                 return Unauthorized(ApiResponse.Fail("User identity could not be verified."));
 
@@ -67,10 +66,9 @@ namespace WorkNest.API.Controllers
 
         [HttpPost("api/mobile/announcements/{id:guid}/read")]
         public async Task<IActionResult> MarkAsRead(
-            Guid id,
-            [FromHeader(Name = "x-user-email")] string? userEmail = null)
+            Guid id)
         {
-            var userId = await ResolveCurrentUserIdAsync(userEmail);
+            var userId = await ResolveCurrentUserIdAsync();
             if (!userId.HasValue)
                 return Unauthorized(ApiResponse.Fail("User identity could not be verified."));
 
@@ -83,10 +81,9 @@ namespace WorkNest.API.Controllers
 
         [HttpPost("api/mobile/device-token")]
         public async Task<IActionResult> RegisterDeviceToken(
-            [FromBody] DeviceTokenRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail = null)
+            [FromBody] DeviceTokenRequest request)
         {
-            var userId = await ResolveCurrentUserIdAsync(userEmail);
+            var userId = await ResolveCurrentUserIdAsync();
             if (!userId.HasValue)
                 return Unauthorized(ApiResponse.Fail("User identity could not be verified."));
 

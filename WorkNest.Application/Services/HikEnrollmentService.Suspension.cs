@@ -14,7 +14,7 @@ namespace WorkNest.Application.Services
     {
         public async Task<int> RunAccessSuspensionCycleAsync(CancellationToken cancellationToken = default)
         {
-            var changes = (await _db.RunHikAccessSuspensionDbAsync()).ToList();
+            var changes = (await _db.RunHikAccessSuspensionDbAsync(_clock.Today)).ToList();
             var applied = 0;
 
             foreach (var change in changes)
@@ -48,7 +48,7 @@ namespace WorkNest.Application.Services
             if (row == null) return new HikAccessSuspensionDto { Open = false };
 
             var overrideUntil = row["OverrideUntil"] as DateTime?;
-            var extended = overrideUntil.HasValue && overrideUntil.Value.Date >= DateTime.Today;
+            var extended = overrideUntil.HasValue && overrideUntil.Value.Date >= _clock.Today;
             return new HikAccessSuspensionDto
             {
                 Open = true,
@@ -79,7 +79,7 @@ namespace WorkNest.Application.Services
             result.ChallanNumber = Convert.ToString(booking["ChallanNumber"]);
             result.ChallanValidUntil = (booking["ValidityDate"] as DateTime?)?.ToString("yyyy-MM-dd");
 
-            var today = DateTime.Today;
+            var today = _clock.Today;
             var st = await _orderStatus.GetInvoiceStatusesAsync(); // OrderStatus IDs + legacy values
             foreach (var r in sets.Count > 1 ? sets[1] : new List<IDictionary<string, object?>>())
             {
@@ -176,7 +176,7 @@ namespace WorkNest.Application.Services
             };
             result.DevicesOffline = Math.Max(0, result.Devices - result.DevicesOnline);
 
-            var today = DateTime.Today;
+            var today = _clock.Today;
             foreach (var r in sets.Count > 1 ? sets[1] : new List<IDictionary<string, object?>>())
             {
                 var overrideUntil = r["OverrideUntil"] as DateTime?;
@@ -218,7 +218,7 @@ namespace WorkNest.Application.Services
             var reason = (request?.Reason ?? "").Trim();
             if (!DateTime.TryParse(request?.OverrideUntil, out var until))
                 return Error(result, "Choose the date access is extended until.");
-            if (until.Date < DateTime.Today)
+            if (until.Date < _clock.Today)
                 return Error(result, "The extension date cannot be in the past.");
             if (reason.Length < 3 || reason.Length > 500)
                 return Error(result, "Enter a reason for the extension (3–500 characters).");

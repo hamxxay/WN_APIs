@@ -157,7 +157,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             worksheet.Range("A1:I1").Merge();
 
             // Metadata
-            var filterText = $"Generated On: {DateTime.Now:yyyy-MM-dd HH:mm} | Filter: " +
+            var filterText = $"Generated On: {WorkNest.Application.Services.BusinessClock.Default.Now:yyyy-MM-dd HH:mm} | Filter: " +
                 $"{(filter.FromDate.HasValue ? filter.FromDate.Value.ToString("yyyy-MM-dd") : "All")} to " +
                 $"{(filter.ToDate.HasValue ? filter.ToDate.Value.ToString("yyyy-MM-dd") : "All")}";
             worksheet.Cell("A2").Value = filterText;
@@ -261,7 +261,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             worksheet.Range("A1:J1").Merge();
 
             // Metadata
-            var filterText = $"Customer ID: #{customerId} | Generated On: {DateTime.Now:yyyy-MM-dd HH:mm} | Filter Period: " +
+            var filterText = $"Customer ID: #{customerId} | Generated On: {WorkNest.Application.Services.BusinessClock.Default.Now:yyyy-MM-dd HH:mm} | Filter Period: " +
                 $"{(fromDate.HasValue ? fromDate.Value.ToString("yyyy-MM-dd") : "All")} to " +
                 $"{(toDate.HasValue ? toDate.Value.ToString("yyyy-MM-dd") : "All")}";
             worksheet.Cell("A2").Value = filterText;

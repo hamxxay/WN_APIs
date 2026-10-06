@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Contact;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
+using WorkNest.API.Extensions;
 
 namespace WorkNest.API.Controllers
 {
@@ -14,11 +15,17 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public ContactController(IContactService contacts, IDbRepository db) { _contacts = contacts; _db = db; }
 
+        // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
+        private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
+
         [HttpGet("api/contact/recent")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> Recent([FromQuery] int top = 10) =>
             Ok(ApiResponse.Ok(await _contacts.GetRecentContactsAsync(top)));
 
         [HttpGet("api/contact")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
@@ -29,24 +36,22 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/contact")]
-        [AllowAnonymous]
-        public async Task<IActionResult> CreateContact(
-            [FromBody] ContactRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail) =>
-            StatusCode(201, await _contacts.CreateContactAsync(request, "contact", userEmail));
+        [AllowAnonymous] // public contact form; the submitter is recorded only from a real login (JWT), never from a header
+        public async Task<IActionResult> CreateContact([FromBody] ContactRequest request) =>
+            StatusCode(201, await _contacts.CreateContactAsync(request, "contact", User.GetEmail()));
 
         [HttpPost("api/book-tour")]
-        [AllowAnonymous]
-        public async Task<IActionResult> BookTour(
-            [FromBody] ContactRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail) =>
-            StatusCode(201, await _contacts.CreateContactAsync(request, "book_tour", userEmail));
+        [AllowAnonymous] // public book-a-tour form; the submitter is recorded only from a real login (JWT), never from a header
+        public async Task<IActionResult> BookTour([FromBody] ContactRequest request) =>
+            StatusCode(201, await _contacts.CreateContactAsync(request, "book_tour", User.GetEmail()));
 
         [HttpPatch("api/contact/{id:int}/status")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] ContactStatusUpdateRequest request) =>
             Ok(await _contacts.UpdateContactStatusAsync(id, request.StatusId, null));
 
         [HttpPatch("api/contact/{publicId:guid}/status")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatusByGuid(Guid publicId, [FromBody] ContactStatusUpdateRequest request)
         {
             var (rows, _) = await _db.GetContactsAsync(1, 10000, null);
@@ -57,10 +62,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpDelete("api/contact/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _contacts.DeleteContactAsync(id));
 
         [HttpDelete("api/contact/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetContactsAsync(1, 10000, null);

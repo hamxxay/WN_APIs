@@ -13,6 +13,7 @@ namespace WorkNest.API.Controllers
         public DashboardController(IDashboardService dashboard) => _dashboard = dashboard;
 
         [HttpGet("api/dashboard/summary")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
         public async Task<IActionResult> Summary() =>
             Ok(await _dashboard.GetSummaryAsync());
 

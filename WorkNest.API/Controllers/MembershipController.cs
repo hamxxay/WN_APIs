@@ -7,12 +7,14 @@ using WorkNest.Common.Responses;
 namespace WorkNest.API.Controllers
 {
     [ApiController]
-    [Authorize]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // memberships: staff only
     public class MembershipController : ControllerBase
     {
         private readonly IMembershipService _memberships;
         private readonly IDbRepository _db;
         public MembershipController(IMembershipService memberships, IDbRepository db) { _memberships = memberships; _db = db; }
+
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
 
         [HttpGet("api/membership")]
         public async Task<IActionResult> List(
@@ -63,10 +65,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpDelete("api/membership/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _memberships.DeleteMembershipAsync(id));
 
         [HttpDelete("api/membership/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetMembershipsAsync(1, 10000, null);

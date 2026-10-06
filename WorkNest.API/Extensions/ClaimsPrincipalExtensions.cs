@@ -62,5 +62,26 @@ namespace WorkNest.API.Extensions
         {
             return Roles.IsLocationBoundRole(user.GetRole());
         }
+
+        /// <summary>
+        /// Staff = admin, super admin, sales executive, receptionist (same role names as the [Authorize] attributes).
+        /// Customers (role "general") are not staff.
+        /// </summary>
+        public static bool IsStaff(this ClaimsPrincipal user)
+        {
+            if (user == null) return false;
+            return user.IsInRole("admin") || user.IsInRole("Admin") || user.IsInRole("super_admin") || user.IsInRole("SuperAdmin")
+                   || user.IsInRole("sales_executive") || user.IsInRole("SalesExecutive") || user.IsInRole("receptionist") || user.IsInRole("Receptionist");
+        }
+
+        /// <summary>
+        /// The signed-in user's email, taken ONLY from the JWT (never from a client header such as x-user-email).
+        /// </summary>
+        public static string? GetEmail(this ClaimsPrincipal user)
+        {
+            if (user == null || user.Identity?.IsAuthenticated != true) return null;
+            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? user.FindFirst("email")?.Value;
+            return string.IsNullOrWhiteSpace(email) ? null : email;
+        }
     }
 }

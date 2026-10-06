@@ -10,7 +10,7 @@ namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Route("api/leases")]
-    [Authorize]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // generating a lease: staff only
     public class LeasesController : ControllerBase
     {
         private readonly IAgreementService _agreementService;

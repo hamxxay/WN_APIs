@@ -11,7 +11,7 @@ using WorkNest.Common.Constants;
 namespace WorkNest.API.Controllers
 {
     [ApiController]
-    [Authorize]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // user records: staff only; writes are admin-only below
     [ValidateLocationScope]
     public class UserController : ControllerBase
     {

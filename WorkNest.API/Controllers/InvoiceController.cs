@@ -27,9 +27,11 @@ namespace WorkNest.API.Controllers
         private readonly IPdfService _pdf;
         private readonly IConfiguration _config;
         private readonly IEmailService _email;
+        private readonly IBusinessClock _clock;
 
-        public InvoiceController(IPaymentService payments, IBookingService bookings, IDbRepository db, IPdfService pdf, IConfiguration config, IEmailService email)
+        public InvoiceController(IPaymentService payments, IBookingService bookings, IDbRepository db, IPdfService pdf, IConfiguration config, IEmailService email, IBusinessClock clock)
         {
+            _clock = clock;
             _payments = payments;
             _bookings = bookings;
             _db = db;
@@ -54,14 +56,14 @@ namespace WorkNest.API.Controllers
             return conn;
         }
 
-        private string? ResolveUserEmail(string? headerEmail)
-        {
-            var claimEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
-                             ?? User.FindFirst("email")?.Value;
-            return !string.IsNullOrWhiteSpace(claimEmail) ? claimEmail : headerEmail;
-        }
+        // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
+        private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+
+        /// <summary>Signed-in user's email from the JWT only (the x-user-email header is no longer trusted).</summary>
+        private string? ResolveUserEmail() => User.GetEmail();
 
         [HttpGet("api/invoice")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
@@ -112,7 +114,7 @@ namespace WorkNest.API.Controllers
                             var row = new Dictionary<string, object?>();
                             for (int i = 0; i < reader.FieldCount; i++)
                             {
-                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : WorkNest.Application.Services.DbDateTimeKinds.Normalize(reader.GetName(i), reader.GetValue(i));
                             }
                             items.Add(row);
                         }
@@ -135,6 +137,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/customer/{customerId:int}/invoices")]
+        [Authorize(Roles = StaffRoles)]
         [HttpGet("api/customers/{customerId:int}/invoices")]
         public async Task<IActionResult> GetInvoicesByCustomerId(
             int customerId,
@@ -170,9 +173,17 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/invoice/{id:int}/pdf")]
         [HttpGet("api/invoice/{id:int}/statement-pdf")]
         [HttpGet("api/invoice/{id:int}/download")]
-        [AllowAnonymous]
-        public async Task<IActionResult> GetStatementInvoicePdf(int id)
+        public async Task<IActionResult> GetStatementInvoicePdf(int id, [FromServices] IDbRepository db)
         {
+            // Staff see every invoice; a customer only their own (was anonymous: anyone could read any invoice by number).
+            bool isStaff = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin")
+                || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive") || User.IsInRole("receptionist") || User.IsInRole("Receptionist");
+            if (!isStaff)
+            {
+                var email = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+                if (string.IsNullOrWhiteSpace(email) || !await db.IsInvoiceOwnedByDbAsync(id, email))
+                    return NotFound(new { isSuccessful = false, message = "Invoice not found." });
+            }
             try
             {
                 using var conn = await OpenConnectionAsync();
@@ -843,6 +854,7 @@ END;"
         }
 
         [HttpGet("api/invoice/{id:int}")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetDetails(int id)
         {
             try
@@ -863,7 +875,7 @@ END;"
                         invoice = new Dictionary<string, object?>();
                         for (int i = 0; i < reader.FieldCount; i++)
                         {
-                            invoice[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            invoice[reader.GetName(i)] = reader.IsDBNull(i) ? null : WorkNest.Application.Services.DbDateTimeKinds.Normalize(reader.GetName(i), reader.GetValue(i));
                         }
                     }
 
@@ -877,7 +889,7 @@ END;"
                             var row = new Dictionary<string, object?>();
                             for (int i = 0; i < reader.FieldCount; i++)
                             {
-                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : WorkNest.Application.Services.DbDateTimeKinds.Normalize(reader.GetName(i), reader.GetValue(i));
                             }
                             lines.Add(row);
                         }
@@ -894,13 +906,12 @@ END;"
         }
 
         [HttpPost("api/invoice/advance")]
-        public async Task<IActionResult> CreateAdvance(
-            [FromBody] AdvanceInvoiceRequest request,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> CreateAdvance([FromBody] AdvanceInvoiceRequest request)
         {
-            var email = ResolveUserEmail(userEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
-                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+                return Unauthorized(new { isSuccessful = false, message = "User identity required" });
 
             var result = await _payments.CreateAdvanceInvoiceAsync(request, email);
             if (!result.IsSuccessful) return BadRequest(result);
@@ -908,9 +919,8 @@ END;"
         }
 
         [HttpPost("api/invoice")]
-        public async Task<IActionResult> CreateCustomInvoice(
-            [FromBody] CreateCustomInvoiceDto req,
-            [FromHeader(Name = "x-user-email")] string? userEmail)
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> CreateCustomInvoice([FromBody] CreateCustomInvoiceDto req)
         {
             try
             {
@@ -1142,6 +1152,7 @@ END;"
         }
 
         [HttpPost("api/invoice/{id:int}/send-email")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> SendInvoiceEmail(int id)
         {
             try
@@ -1153,7 +1164,7 @@ END;"
                 string customerName = "";
                 string spaceName = "WorkNest Workspace";
                 decimal grandTotal = 0, subTotal = 0, taxTotal = 0, discountTotal = 0, securityDeposit = 0;
-                DateTime issuedOn = DateTime.Today, dueOn = DateTime.Today;
+                DateTime issuedOn = _clock.Today, dueOn = _clock.Today;
                 bool found = false;
 
                 using (var cmd = new SqlCommand("dbo.WN_GetInvoiceEmailData", conn))
@@ -1251,8 +1262,65 @@ END;"
         }
 
         [HttpPost("api/invoice/send-initial/{bookingId:int}")]
+        [Authorize(Roles = StaffRoles)]
         [HttpPost("api/booking/{bookingId:int}/send-initial-invoice")]
         public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId, [FromQuery] DateTime? issuedOn = null, [FromQuery] bool preview = false)
+        {
+            // Preview saves nothing, so it never takes the lock.
+            if (preview) return await SendInitialInvoiceCoreAsync(bookingId, issuedOn, preview);
+
+            // Check-then-insert below (WN_GetInvoiceByBookingId, then create) is not atomic: two clicks / concurrent
+            // requests could both see no invoice and each create an invoice + ledger voucher. Serialise per booking
+            // across all API instances with a session-owned SQL Server application lock held on a dedicated connection
+            // for the whole operation. The second request waits, then finds the first request's invoice and takes the
+            // existing re-send / update path instead of inserting a duplicate.
+            var lockResource = $"WN_InitialInvoice_{bookingId}";
+            await using var lockConn = new SqlConnection(GetConnectionString());
+            await lockConn.OpenAsync();
+            bool lockTaken = false;
+            try
+            {
+                using (var getLock = new SqlCommand("sp_getapplock", lockConn))
+                {
+                    getLock.CommandType = CommandType.StoredProcedure;
+                    getLock.CommandTimeout = 60;
+                    getLock.Parameters.AddWithValue("@Resource", lockResource);
+                    getLock.Parameters.AddWithValue("@LockMode", "Exclusive");
+                    getLock.Parameters.AddWithValue("@LockOwner", "Session");
+                    getLock.Parameters.AddWithValue("@LockTimeout", 30000);
+                    var ret = getLock.Parameters.Add("@ReturnValue", SqlDbType.Int);
+                    ret.Direction = ParameterDirection.ReturnValue;
+                    await getLock.ExecuteNonQueryAsync();
+                    var code = ret.Value is int c ? c : -999;
+                    if (code < 0)
+                        return Conflict(new { isSuccessful = false, message = "This booking's first invoice is already being created — try again in a moment." });
+                    lockTaken = true;
+                }
+
+                return await SendInitialInvoiceCoreAsync(bookingId, issuedOn, preview);
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    try
+                    {
+                        using var releaseLock = new SqlCommand("sp_releaseapplock", lockConn);
+                        releaseLock.CommandType = CommandType.StoredProcedure;
+                        releaseLock.Parameters.AddWithValue("@Resource", lockResource);
+                        releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
+                        await releaseLock.ExecuteNonQueryAsync();
+                    }
+                    catch
+                    {
+                        // Drop the pooled physical connection so its session (and the lock it owns) really ends.
+                        SqlConnection.ClearPool(lockConn);
+                    }
+                }
+            }
+        }
+
+        private async Task<IActionResult> SendInitialInvoiceCoreAsync(int bookingId, DateTime? issuedOn, bool preview)
         {
             try
             {
@@ -1335,7 +1403,7 @@ END;"
                     EndOn = endOn
                 };
 
-                var calc = WorkNest.Application.Services.InvoiceCalculationEngine.CalculateInvoice(calcReq);
+                var calc = WorkNest.Application.Services.InvoiceCalculationEngine.CalculateInvoice(calcReq, _clock.Today);
 
                 DateTime periodStart = calc.BillingPeriodStart;
                 DateTime periodEnd = calc.BillingPeriodEnd;
@@ -1375,7 +1443,7 @@ END;"
                 // or emailing anything — the admin preview window shows these figures.
                 if (preview)
                 {
-                    var invoiceDate = (issuedOn?.Date is DateTime pd && pd <= DateTime.Today) ? pd : DateTime.Today;
+                    var invoiceDate = (issuedOn?.Date is DateTime pd && pd <= _clock.Today) ? pd : _clock.Today;
                     return Ok(new
                     {
                         isSuccessful = true,
@@ -1458,7 +1526,7 @@ END;"
                         upCmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@AccountsCoaId", (object?)rentAccountId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@DueOn", startOn.HasValue ? startOn.Value : DateTime.Today);
+                        upCmd.Parameters.AddWithValue("@DueOn", startOn.HasValue ? startOn.Value : _clock.Today);
                         await upCmd.ExecuteNonQueryAsync();
                     }
 
@@ -1507,8 +1575,8 @@ END;"
                 {
                     BookingId = bookingId,
                     UserId = userId,
-                    IssuedOn = (issuedOn?.Date is DateTime d && d <= DateTime.Today) ? d : DateTime.Today, // agreement date when given
-                    DueOn = startOn.HasValue ? startOn.Value : DateTime.Today,
+                    IssuedOn = (issuedOn?.Date is DateTime d && d <= _clock.Today) ? d : _clock.Today, // agreement date when given
+                    DueOn = startOn.HasValue ? startOn.Value : _clock.Today,
                     Notes = $"Initial Payment Invoice for Booking #{bookingId} - {spaceName}",
                     SendEmail = true,
                     BillingPeriodStart = periodStart,
@@ -1571,7 +1639,7 @@ END;"
                     });
                 }
 
-                return await CreateCustomInvoice(dto, customerEmail);
+                return await CreateCustomInvoice(dto);
             }
             catch (Exception ex)
             {
@@ -1580,6 +1648,7 @@ END;"
         }
 
         [HttpPost("api/booking/{bookingId:int}/generate-next-invoice")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GenerateNextInvoiceForBooking(int bookingId)
         {
             try
@@ -1640,7 +1709,7 @@ END;"
                                      spaceName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
                                      (billingMonths <= 0 && startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays < 20);
 
-                DateTime periodStart = DateTime.Today;
+                DateTime periodStart = _clock.Today;
                 using (var lastEndCmd = new SqlCommand("dbo.WN_GetBookingLastInvoicePeriodEnd", conn))
                 {
                     lastEndCmd.CommandType = CommandType.StoredProcedure;
@@ -1726,7 +1795,7 @@ END;"
                     }
                 }
 
-                DateTime today = DateTime.Today;
+                DateTime today = _clock.Today;
                 // Recurring invoice due on the last day of the going month
                 DateTime recurringDueDate = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
 
@@ -1779,7 +1848,7 @@ END;"
                     dto.Notes = $"{dto.Notes}. Previous unpaid balance: PKR {arrears:N0} (separate invoices, not included in this total).";
                 }
 
-                return await CreateCustomInvoice(dto, customerEmail);
+                return await CreateCustomInvoice(dto);
             }
             catch (Exception ex)
             {
@@ -1819,8 +1888,8 @@ END;"
     {
         public int? BookingId { get; set; }
         public int UserId { get; set; }
-        public DateTime IssuedOn { get; set; } = DateTime.Today;
-        public DateTime DueOn { get; set; } = DateTime.Today.AddDays(15);
+        public DateTime IssuedOn { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Today;
+        public DateTime DueOn { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Today.AddDays(15);
         public string? CurrencyCode { get; set; } = "PKR";
         public string? Notes { get; set; }
         public bool SendEmail { get; set; } = true;

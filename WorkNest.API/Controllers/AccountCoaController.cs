@@ -5,7 +5,7 @@ using WorkNest.Application.Interfaces;
 namespace WorkNest.API.Controllers
 {
     [ApiController]
-    [Authorize]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // bank accounts: staff only (not used by the customer portal)
     public class AccountCoaController : ControllerBase
     {
         private readonly IAccountCoaService _accounts;

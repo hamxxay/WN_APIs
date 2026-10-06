@@ -23,23 +23,50 @@ namespace WorkNest.API.Controllers
             _db = db;
         }
 
-        private string? ResolveUserEmail(string? headerEmail)
+        // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
+        private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+
+        /// <summary>Signed-in user's email from the JWT only (the x-user-email header is no longer trusted).</summary>
+        private string? ResolveUserEmail() => User.GetEmail();
+
+        private async Task<int?> ResolveActorIdAsync()
         {
-            var claimEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
-                             ?? User.FindFirst("email")?.Value;
-            return !string.IsNullOrWhiteSpace(claimEmail) ? claimEmail : headerEmail;
+            var email = ResolveUserEmail();
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            var actorRow = await _db.GetUserByEmailAsync(email);
+            return actorRow?.TryGetValue("Id", out var aid) == true && aid != null ? System.Convert.ToInt32(aid) : (int?)null;
+        }
+
+        /// <summary>The caller's customer id (0 when the signed-in user has no customer record).</summary>
+        private async Task<int> ResolveCallerCustomerIdAsync()
+        {
+            var email = ResolveUserEmail();
+            if (string.IsNullOrWhiteSpace(email)) return 0;
+            var userRow = await _db.GetUserByEmailAsync(email);
+            if (userRow == null) return 0;
+            int customerId = userRow.TryGetValue("CustomerId", out var cid) && cid != null ? Convert.ToInt32(cid) : 0;
+            int userId = userRow.TryGetValue("Id", out var uid) && uid != null ? Convert.ToInt32(uid) : 0;
+            if (customerId <= 0 && userId > 0)
+            {
+                var custRow = await _db.GetCustomerByUserIdAsync(userId);
+                if (custRow != null && custRow.TryGetValue("Id", out var custId) && custId != null) customerId = Convert.ToInt32(custId);
+            }
+            return customerId;
+        }
+
+        /// <summary>Staff see every quotation; a customer only quotations issued to their own customer record.</summary>
+        private async Task<bool> CanSeeCustomerAsync(int customerId)
+        {
+            if (User.IsStaff()) return true;
+            var own = await ResolveCallerCustomerIdAsync();
+            return own > 0 && own == customerId;
         }
 
         [HttpPost("api/quotation")]
-        public async Task<IActionResult> Create([FromBody] QuotationRequest request, [FromHeader(Name = "x-user-email")] string? actorEmail)
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> Create([FromBody] QuotationRequest request)
         {
-            var email = ResolveUserEmail(actorEmail);
-            int? actorId = null;
-            if (!string.IsNullOrWhiteSpace(email))
-            {
-                var actorRow = await _db.GetUserByEmailAsync(email);
-                actorId = actorRow?.TryGetValue("Id", out var aid) == true ? System.Convert.ToInt32(aid) : (int?)null;
-            }
+            int? actorId = await ResolveActorIdAsync();
 
             try
             {
@@ -68,24 +95,18 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        [AllowAnonymous]
+        // Login required (was anonymous and trusted an x-user-email header): the caller's own quotations only.
         [HttpGet("api/quotations")]
         [HttpGet("api/quotation/my")]
-        public async Task<IActionResult> GetMyQuotations([FromHeader(Name = "x-user-email")] string? actorEmail)
+        public async Task<IActionResult> GetMyQuotations()
         {
             try
             {
-                var email = ResolveUserEmail(actorEmail);
+                var email = ResolveUserEmail();
                 if (string.IsNullOrWhiteSpace(email)) return Unauthorized(ApiResponse.Fail("User identity required."));
                 var userRow = await _db.GetUserByEmailAsync(email);
                 if (userRow == null) return Unauthorized(ApiResponse.Fail("User not found."));
-                int customerId = userRow.TryGetValue("CustomerId", out var cid) && cid != null ? Convert.ToInt32(cid) : 0;
-                int userId = userRow.TryGetValue("Id", out var uid) && uid != null ? Convert.ToInt32(uid) : 0;
-                if (customerId <= 0 && userId > 0)
-                {
-                    var custRow = await _db.GetCustomerByUserIdAsync(userId);
-                    if (custRow != null && custRow.TryGetValue("Id", out var custId) && custId != null) customerId = Convert.ToInt32(custId);
-                }
+                int customerId = await ResolveCallerCustomerIdAsync();
                 if (customerId <= 0) return Ok(ApiResponse.Ok(new List<object>()));
                 var res = await _quotations.GetQuotationsByCustomerAsync(customerId);
                 return Ok(ApiResponse.Ok(res));
@@ -96,12 +117,14 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        [AllowAnonymous]
+        // Was anonymous: staff, or the customer themselves.
         [HttpGet("api/quotation/by-customer/{customerId:int}")]
         public async Task<IActionResult> GetByCustomer(int customerId)
         {
             try
             {
+                if (!await CanSeeCustomerAsync(customerId))
+                    return NotFound(ApiResponse.Fail("Quotations not found."));
                 var res = await _quotations.GetQuotationsByCustomerAsync(customerId);
                 return Ok(ApiResponse.Ok(res));
             }
@@ -111,17 +134,19 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        [AllowAnonymous]
+        // Was anonymous: login required; staff see any quotation, a customer only their own
+        // (the public /quotation/:id page sends an anonymous visitor to the login page on 401 and back afterwards).
         [HttpGet("api/quotation/{id:int}")]
         [HttpGet("api/quotations/{id:int}")]
         public async Task<IActionResult> GetById(int id)
         {
             var res = await _quotations.GetQuotationByIdAsync(id);
-            if (res == null) return NotFound(ApiResponse.Fail("Quotation not found."));
+            if (res == null || !await CanSeeCustomerAsync(res.CustomerId)) return NotFound(ApiResponse.Fail("Quotation not found."));
             return Ok(ApiResponse.Ok(res));
         }
 
         [HttpGet("api/quotation")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetList(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
@@ -143,6 +168,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/quotation/history")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetHistory([FromQuery] int customerId, [FromQuery] int spaceId)
         {
             var res = await _quotations.GetQuotationHistoryAsync(customerId, spaceId);
@@ -150,6 +176,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/quotation/{id:int}/send-email")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> SendEmail(int id, [FromBody] SendQuotationEmailRequest request)
         {
             try
@@ -164,7 +191,8 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/quotation/{id:int}/convert")]
-        public async Task<IActionResult> ConvertQuotation(int id, [FromHeader(Name = "x-user-email")] string? actorEmail)
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> ConvertQuotation(int id)
         {
             // Bookings from quotations are created only when the signed agreement comes back
             // (POST api/agreements/{id}/sign). Admins can still create a booking directly from the booking form.
@@ -172,21 +200,21 @@ namespace WorkNest.API.Controllers
             return BadRequest(ApiResponse.Fail("A quotation becomes a booking only when its signed agreement is uploaded. Send the agreement, then upload the signed copy."));
         }
 
-        [AllowAnonymous]
+        // Login required (was anonymous and trusted an x-user-email header); the caller must own the quotation.
         [HttpPost("api/quotation/{id:int}/accept")]
         [HttpPost("api/quotation/{id:int}/versions/{version:int}/accept")]
         [HttpPost("api/quotations/{id:int}/accept")]
         [HttpPost("api/quotations/{id:int}/versions/{version:int}/accept")]
-        public async Task<IActionResult> AcceptQuotation(int id, [FromBody] AcceptQuotationRequest request, [FromRoute] int version = 1, [FromHeader(Name = "x-user-email")] string? actorEmail = null)
+        public async Task<IActionResult> AcceptQuotation(int id, [FromBody] AcceptQuotationRequest request, [FromRoute] int version = 1)
         {
-            var email = ResolveUserEmail(actorEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
                 return Unauthorized(ApiResponse.Fail("User identity required."));
 
             var userRow = await _db.GetUserByEmailAsync(email);
             if (userRow == null) return Unauthorized(ApiResponse.Fail("User not found."));
 
-            int customerId = userRow.TryGetValue("CustomerId", out var cid) && cid != null ? Convert.ToInt32(cid) : 0;
+            int customerId = await ResolveCallerCustomerIdAsync();
             int? userId = userRow.TryGetValue("Id", out var uid) && uid != null ? Convert.ToInt32(uid) : (int?)null;
 
             if (customerId <= 0)
@@ -195,6 +223,8 @@ namespace WorkNest.API.Controllers
             try
             {
                 var q = await _quotations.GetQuotationByIdAsync(id);
+                if (q == null || q.CustomerId != customerId)
+                    return NotFound(ApiResponse.Fail("Quotation not found."));
                 if (q != null && version == 1 && q.Version > 1) version = q.Version;
 
                 var res = await _quotations.AcceptQuotationAsync(id, version, customerId, request?.Note, userId);
@@ -210,24 +240,24 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        [AllowAnonymous]
+        // Login required (was anonymous and trusted an x-user-email header); the caller must own the quotation.
         [HttpPost("api/quotation/{id:int}/decline")]
         [HttpPost("api/quotation/{id:int}/versions/{version:int}/decline")]
         [HttpPost("api/quotations/{id:int}/decline")]
         [HttpPost("api/quotations/{id:int}/versions/{version:int}/decline")]
-        public async Task<IActionResult> DeclineQuotation(int id, [FromBody] DeclineQuotationRequest request, [FromRoute] int version = 1, [FromHeader(Name = "x-user-email")] string? actorEmail = null)
+        public async Task<IActionResult> DeclineQuotation(int id, [FromBody] DeclineQuotationRequest request, [FromRoute] int version = 1)
         {
             if (request == null || string.IsNullOrWhiteSpace(request.Note))
                 return BadRequest(ApiResponse.Fail("Decline reason note is mandatory."));
 
-            var email = ResolveUserEmail(actorEmail);
+            var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
                 return Unauthorized(ApiResponse.Fail("User identity required."));
 
             var userRow = await _db.GetUserByEmailAsync(email);
             if (userRow == null) return Unauthorized(ApiResponse.Fail("User not found."));
 
-            int customerId = userRow.TryGetValue("CustomerId", out var cid) && cid != null ? Convert.ToInt32(cid) : 0;
+            int customerId = await ResolveCallerCustomerIdAsync();
             int? userId = userRow.TryGetValue("Id", out var uid) && uid != null ? Convert.ToInt32(uid) : (int?)null;
 
             if (customerId <= 0)
@@ -236,6 +266,8 @@ namespace WorkNest.API.Controllers
             try
             {
                 var q = await _quotations.GetQuotationByIdAsync(id);
+                if (q == null || q.CustomerId != customerId)
+                    return NotFound(ApiResponse.Fail("Quotation not found."));
                 if (q != null && version == 1 && q.Version > 1) version = q.Version;
 
                 var res = await _quotations.DeclineQuotationAsync(id, version, customerId, request.Note, userId);
@@ -252,18 +284,13 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/quotation/{id:int}/create-version")]
+        [Authorize(Roles = StaffRoles)]
         [HttpPost("api/quotation/{id:int}/versions")]
         [HttpPost("api/quotations/{id:int}/create-version")]
         [HttpPost("api/quotations/{id:int}/versions")]
-        public async Task<IActionResult> CreateNewVersion(int id, [FromHeader(Name = "x-user-email")] string? actorEmail = null)
+        public async Task<IActionResult> CreateNewVersion(int id)
         {
-            var email = ResolveUserEmail(actorEmail);
-            int? actorId = null;
-            if (!string.IsNullOrWhiteSpace(email))
-            {
-                var actorRow = await _db.GetUserByEmailAsync(email);
-                actorId = actorRow?.TryGetValue("Id", out var aid) == true ? System.Convert.ToInt32(aid) : (int?)null;
-            }
+            int? actorId = await ResolveActorIdAsync();
 
             try
             {
@@ -276,32 +303,37 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        [AllowAnonymous]
+        // Was anonymous: staff, or the customer the quotation was issued to.
         [HttpGet("api/quotation/{id:int}/versions")]
         [HttpGet("api/quotations/{id:int}/versions")]
         public async Task<IActionResult> GetVersions(int id)
         {
+            var q = await _quotations.GetQuotationByIdAsync(id);
+            if (q == null || !await CanSeeCustomerAsync(q.CustomerId)) return NotFound(ApiResponse.Fail("Quotation not found."));
             var res = await _quotations.GetVersionsAsync(id);
             return Ok(ApiResponse.Ok(res));
         }
 
-        [AllowAnonymous]
+        // Was anonymous: staff, or the customer the quotation was issued to.
         [HttpGet("api/quotation/{id:int}/versions/{version:int}")]
         [HttpGet("api/quotations/{id:int}/versions/{version:int}")]
         public async Task<IActionResult> GetVersionById(int id, int version)
         {
+            var root = await _quotations.GetQuotationByIdAsync(id);
+            if (root == null || !await CanSeeCustomerAsync(root.CustomerId)) return NotFound(ApiResponse.Fail("Quotation version not found."));
             var versions = await _quotations.GetVersionsAsync(id);
             var specificVersion = versions.FirstOrDefault(v => v.Version == version);
             if (specificVersion == null)
             {
                 specificVersion = await _quotations.GetQuotationByIdAsync(version);
             }
-            if (specificVersion == null) return NotFound(ApiResponse.Fail("Quotation version not found."));
+            if (specificVersion == null || specificVersion.CustomerId != root.CustomerId) return NotFound(ApiResponse.Fail("Quotation version not found."));
             return Ok(ApiResponse.Ok(specificVersion));
         }
 
-        [AllowAnonymous]
+        // Was anonymous: activity feed across all quotations, staff only.
         [HttpGet("api/quotation/activities")]
+        [Authorize(Roles = StaffRoles)]
         [HttpGet("api/quotations/activities")]
         public async Task<IActionResult> GetActivities([FromQuery] int? quotationId = null, [FromQuery] int limit = 20)
         {
@@ -310,18 +342,13 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/quotation/{id:int}/send")]
+        [Authorize(Roles = StaffRoles)]
         [HttpPost("api/quotations/{id:int}/send")]
         [HttpPost("api/quotation/{id:int}/versions/{version:int}/send")]
         [HttpPost("api/quotations/{id:int}/versions/{version:int}/send")]
-        public async Task<IActionResult> SendQuotation(int id, [FromRoute] int version = 1, [FromHeader(Name = "x-user-email")] string? actorEmail = null)
+        public async Task<IActionResult> SendQuotation(int id, [FromRoute] int version = 1)
         {
-            var email = ResolveUserEmail(actorEmail);
-            int? actorId = null;
-            if (!string.IsNullOrWhiteSpace(email))
-            {
-                var actorRow = await _db.GetUserByEmailAsync(email);
-                actorId = actorRow?.TryGetValue("Id", out var aid) == true ? System.Convert.ToInt32(aid) : (int?)null;
-            }
+            int? actorId = await ResolveActorIdAsync();
 
             try
             {

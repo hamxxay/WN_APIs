@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using System.Data;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.DTOs.Announcement;
@@ -17,9 +18,11 @@ namespace WorkNest.Infrastructure.Repositories
     {
         private readonly string _connectionString;
         private readonly IHttpContextAccessor? _httpContextAccessor;
+        private readonly IBusinessClock _clock;
 
-        public DbRepository(IConfiguration configuration, IHttpContextAccessor? httpContextAccessor = null)
+        public DbRepository(IConfiguration configuration, IHttpContextAccessor? httpContextAccessor = null, IBusinessClock? clock = null)
         {
+            _clock = clock ?? BusinessClock.Default;
             _connectionString = configuration.GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
             _httpContextAccessor = httpContextAccessor;
@@ -30,7 +33,11 @@ namespace WorkNest.Infrastructure.Repositories
         private static IDictionary<string, object?> ToDict(SqlDataReader r)
         {
             var d = new Dictionary<string, object?>(r.FieldCount, StringComparer.OrdinalIgnoreCase);
-            for (int i = 0; i < r.FieldCount; i++) d[r.GetName(i)] = N(r.GetValue(i));
+            for (int i = 0; i < r.FieldCount; i++)
+            {
+                var name = r.GetName(i);
+                d[name] = DbDateTimeKinds.Normalize(name, N(r.GetValue(i))); // UTC audit columns get Kind = Utc (JSON "Z")
+            }
             return d;
         }
 
@@ -82,32 +89,8 @@ namespace WorkNest.Infrastructure.Repositories
                                  ?? user.Identity?.Name;
                     }
 
-                    if (httpContext.Request?.Headers != null)
-                    {
-                        if (string.IsNullOrWhiteSpace(userEmail))
-                        {
-                            if (httpContext.Request.Headers.TryGetValue("x-user-email", out var headerEmail) && !string.IsNullOrWhiteSpace(headerEmail))
-                            {
-                                userEmail = headerEmail.ToString();
-                            }
-                            else if (httpContext.Request.Headers.TryGetValue("X-User-Email", out var headerEmail2) && !string.IsNullOrWhiteSpace(headerEmail2))
-                            {
-                                userEmail = headerEmail2.ToString();
-                            }
-                        }
-
-                        if (string.IsNullOrWhiteSpace(userIdOrGuid))
-                        {
-                            if (httpContext.Request.Headers.TryGetValue("x-user-id", out var headerUid) && !string.IsNullOrWhiteSpace(headerUid))
-                            {
-                                userIdOrGuid = headerUid.ToString();
-                            }
-                            else if (httpContext.Request.Headers.TryGetValue("X-User-Id", out var headerUid2) && !string.IsNullOrWhiteSpace(headerUid2))
-                            {
-                                userIdOrGuid = headerUid2.ToString();
-                            }
-                        }
-                    }
+                    // Identity for the audit session context comes only from the JWT; the x-user-email / x-user-id
+                    // request headers are client-controlled and are no longer used.
                 }
 
                 if (!string.IsNullOrWhiteSpace(userIdOrGuid) || !string.IsNullOrWhiteSpace(userEmail))
@@ -1261,7 +1244,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 try
                 {
                     var challanNum = result.TryGetValue("ChallanNumber", out var cn) ? cn?.ToString() : null;
-                    var validity = result.TryGetValue("ChallanValidUntil", out var vu) && vu is not null ? Convert.ToDateTime(vu) : DateTime.UtcNow.AddDays(5);
+                    var validity = result.TryGetValue("ChallanValidUntil", out var vu) && vu is not null ? Convert.ToDateTime(vu) : _clock.Today.AddDays(5);
 
                     var amtSql = "SELECT TotalAmount, IdGUID, UserGuid FROM dbo.WN_Bookings WHERE Id = @BID";
                     await using var amtCmd = new SqlCommand(amtSql, c);
@@ -1442,6 +1425,35 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.Add("@Status", SqlDbType.NVarChar, 50).Value = status;
             cmd.Parameters.Add("@Signed", SqlDbType.DateTime2).Value = (object?)signedDate?.Date ?? DBNull.Value;
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<bool> IsInvoiceOwnedByDbAsync(int invoiceId, string email)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1 FROM dbo.WN_Invoices i WITH (NOLOCK)
+                    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                    JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(i.UserId, b.UserId)
+                    WHERE i.Id = @Id AND u.Email = @Email) THEN 1 ELSE 0 END;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = invoiceId;
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+        }
+
+        public async Task<bool> IsBookingOwnedByDbAsync(int bookingId, string email)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT CASE WHEN EXISTS (
+                    SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
+                    JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+                    WHERE b.Id = @Id AND u.Email = @Email) THEN 1 ELSE 0 END;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = bookingId;
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
         }
 
         public async Task<IDictionary<string, object?>?> GetBookingSummaryRowDbAsync(int bookingId)
@@ -2350,7 +2362,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         /// Live bookings = BookingStatusId 1, 2, 5, 33 (old + WN_BookingStatuses pending / confirmed).
         /// </summary>
         public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(int? locationId, int endingSoonDays,
-            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month")
+            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null)
         {
             // Period: this month / quarter / year (calendar, to date). Comparisons are against the previous period;
             // trend charts cover 6 / 12 / 24 months and lease expiries look 3 / 6 / 12 months ahead.
@@ -2362,7 +2374,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             var open = List(openInvoiceStatusIds); var paid = List(paidStatusIds); var voids = List(voidStatusIds);
             await using var c = await Open();
             var sql = $@"
-                DECLARE @Now DATETIME2(0) = SYSDATETIME();
+                DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) wall-clock time from the app clock
                 DECLARE @MonthAgo DATETIME2(0) = DATEADD(MONTH, -@PMonths, @Now);   -- same point, one period ago
                 DECLARE @Today DATE = CAST(@Now AS DATE);
                 DECLARE @MonthStart DATE = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
@@ -2519,6 +2531,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
             cmd.Parameters.Add("@Days", SqlDbType.Int).Value = endingSoonDays;
             cmd.Parameters.Add("@PMonths", SqlDbType.Int).Value = months;
+            cmd.Parameters.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow ?? _clock.Now;
             cmd.Parameters.Add("@Series", SqlDbType.Int).Value = seriesMonths;
             cmd.Parameters.Add("@Ahead", SqlDbType.Int).Value = aheadMonths;
             await using var r = await cmd.ExecuteReaderAsync();
@@ -2908,7 +2921,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ba.PersonId
                 LEFT JOIN dbo.WN_AccessStatus acc WITH (NOLOCK) ON acc.BookingDetailId = ba.BookingDetailId AND acc.PersonId = ba.PersonId
                 LEFT JOIN dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId = ba.PersonId
-                WHERE ba.BookingDetailId = @BookingDetailId AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))
+                WHERE ba.BookingDetailId = @BookingDetailId AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
                 ORDER BY p.Name ASC;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
@@ -2938,8 +2951,8 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await using var c = await Open();
             const string sql = @"
                 UPDATE dbo.WN_BookingAttendants 
-                SET AssignedTo = DATEADD(day, -1, CAST(SYSUTCDATETIME() AS DATE)) 
-                WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSUTCDATETIME() AS DATE));
+                SET AssignedTo = DATEADD(day, -1, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)) 
+                WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
                 UPDATE dbo.WN_AccessStatus 
                 SET IsEnabled = 0, RevokedAt = SYSUTCDATETIME() 
@@ -2989,7 +3002,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     bd.StartDateTime,
                     bd.EndDateTime,
                     ISNULL(s.Capacity, 1) AS Capacity,
-                    (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))) AS ActiveAttendantsCount
+                    (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))) AS ActiveAttendantsCount
                 FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
                 LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = bd.CustomerCode OR c.Email = bd.CustomerEmail
                 LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
@@ -3016,7 +3029,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     bd.Amount,
                     s.Price AS SpacePrice,
                     ISNULL(s.Capacity, 1) AS Capacity,
-                    (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))) AS CurrentActiveAttendants
+                    (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))) AS CurrentActiveAttendants
                 FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
                 LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
                 WHERE bd.Id = @BookingDetailId;";
@@ -3192,7 +3205,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                        b.Id AS BookingId, s.Name AS SpaceName
                 FROM dbo.WN_CustomerAttendants ca WITH (NOLOCK)
                 JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ca.PersonId
-                LEFT JOIN dbo.WN_BookingAttendants ba WITH (NOLOCK) ON ba.PersonId = p.PersonId AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE))
+                LEFT JOIN dbo.WN_BookingAttendants ba WITH (NOLOCK) ON ba.PersonId = p.PersonId AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
                 LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId
                 LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
                 LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
@@ -4036,7 +4049,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId AND bd.IsDeleted = 0
                 OUTER APPLY (SELECT TOP 1 Company, FirstName, LastName, Email FROM dbo.WN_Customers WITH (NOLOCK)
                              WHERE Code = bd.CustomerCode OR Email = bd.CustomerEmail) cu
-                WHERE ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE);";
+                WHERE ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);";
             await using var cmd = new SqlCommand(sql, c);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
@@ -4105,7 +4118,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                         SELECT 1 FROM dbo.WN_HIK_BookingAccessSuspensions sus WITH (NOLOCK)
                         JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = sus.BookingId
                         WHERE bk.IdGUID = bd.BookingGuid AND sus.ResolvedAt IS NULL
-                          AND (sus.OverrideUntil IS NULL OR sus.OverrideUntil < CAST(GETDATE() AS DATE))
+                          AND (sus.OverrideUntil IS NULL OR sus.OverrideUntil < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
                     ) THEN 1 ELSE 0 END AS IsSuspended
                 FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
                 JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = ba.PersonId
@@ -4114,7 +4127,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 LEFT JOIN dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId = ba.PersonId
                 WHERE (@BookingDetailId IS NULL OR ba.BookingDetailId = @BookingDetailId)
                   AND (@PersonId IS NULL OR ba.PersonId = @PersonId)
-                  AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSUTCDATETIME() AS DATE));";
+                  AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.Add("@BookingDetailId", SqlDbType.Int).Value = (object?)bookingDetailId ?? DBNull.Value;
             cmd.Parameters.Add("@PersonId", SqlDbType.Int).Value = (object?)personId ?? DBNull.Value;
@@ -4332,10 +4345,11 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
         // --- Hikvision challan-based access suspension (WN_HIK_AccessSuspension_* SPs) ---
 
-        public async Task<IEnumerable<HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync()
+        public async Task<IEnumerable<HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync(DateTime? today = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_HIK_AccessSuspension_Run", c);
+            cmd.Parameters.Add("@Today", SqlDbType.Date).Value = (today ?? _clock.Today).Date; // business (Pakistan) date
             var list = new List<HikAccessSuspensionChange>();
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
@@ -4377,7 +4391,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         {
             await using var c = await Open();
             const string sql = @"
-                DECLARE @Today DATE = CAST(GETDATE() AS DATE);
+                DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
                 SELECT
                     (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS Devices,
                     (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 1) AS DevicesOnline,
@@ -4644,7 +4658,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         {
             await using var c = await Open();
             var sql = $@"
-                DECLARE @Today DATETIME2(0) = CAST(CAST(GETDATE() AS DATE) AS DATETIME2(0));
+                DECLARE @Today DATETIME2(0) = CAST(CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) AS DATETIME2(0));
                 DECLARE @Tomorrow DATETIME2(0) = DATEADD(day, 1, @Today);
                 DECLARE @Yesterday DATETIME2(0) = DATEADD(day, -1, @Today);
                 SELECT
@@ -4719,7 +4733,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 FROM dbo.WN_HIK_Employees e WITH (NOLOCK)
                 JOIN dbo.WN_HIK_AccessGrants g WITH (NOLOCK) ON g.employee_id = e.id
                 JOIN dbo.WN_HIK_Devices d WITH (NOLOCK) ON d.Id = g.device_id
-                WHERE e.valid_end IS NOT NULL AND e.valid_end <= DATEADD(day, @Days, SYSDATETIME())
+                WHERE e.valid_end IS NOT NULL AND e.valid_end <= DATEADD(day, @Days, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)))
                 ORDER BY e.valid_end ASC;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@Days", days);
@@ -5307,7 +5321,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 int proratedDays = Convert.ToInt32(r.GetValue(r.GetOrdinal("ProrationDays")));
                 int daysInMonth = Convert.ToInt32(r.GetValue(r.GetOrdinal("TotalDaysInStartMonth")));
 
-                DateTime pStart = request.StartOn ?? DateTime.Today;
+                DateTime pStart = request.StartOn ?? _clock.Today;
                 int bMonths = request.BillingPeriodMonths > 0 ? request.BillingPeriodMonths : 1;
                 DateTime pEnd;
                 if (proratedDays > 0)

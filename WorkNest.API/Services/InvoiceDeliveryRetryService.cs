@@ -108,7 +108,8 @@ namespace WorkNest.API.Services
                     string customerName = "Valued Customer";
                     string spaceName = "WorkNest Workspace";
                     decimal grandTotal = 0, subTotal = 0, taxTotal = 0, discountTotal = 0;
-                    DateTime issuedOn = DateTime.Today, dueOn = DateTime.Today;
+                    var businessToday = _serviceProvider.GetRequiredService<IBusinessClock>().Today;
+                    DateTime issuedOn = businessToday, dueOn = businessToday;
                     bool invoiceFound = false;
 
                     using (var emailCmd = new SqlCommand("dbo.WN_GetInvoiceEmailData", conn))

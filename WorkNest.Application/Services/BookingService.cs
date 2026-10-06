@@ -12,7 +12,8 @@ namespace WorkNest.Application.Services
         private readonly IEmailService _email;
         private readonly IPdfService _pdf;
         private readonly IOrderStatusService _orderStatus;
-        public BookingService(IDbRepository db, IEmailService email, IPdfService pdf, IOrderStatusService orderStatus) { _db = db; _email = email; _pdf = pdf; _orderStatus = orderStatus; }
+        private readonly IBusinessClock _clock;
+        public BookingService(IDbRepository db, IEmailService email, IPdfService pdf, IOrderStatusService orderStatus, IBusinessClock clock) { _db = db; _email = email; _pdf = pdf; _orderStatus = orderStatus; _clock = clock; }
 
         // Booking statuses (WN_BookingStatuses): 5 Pending, 33 Confirmed. 1 is an older "pending" value still
         // written on new bookings (it has no WN_BookingStatuses row), so it counts as pending too.
@@ -183,7 +184,7 @@ namespace WorkNest.Application.Services
 
             if (startOn == default)
             {
-                startOn = DateTime.UtcNow.Date;
+                startOn = _clock.Today;
             }
 
             if (endOn == default || endOn <= startOn)
@@ -613,7 +614,7 @@ namespace WorkNest.Application.Services
             var challanResult = await GetChallanAsync(bookingId);
             var dto = challanResult.IsSuccessful ? (ChallanResponseDto)challanResult.Data! : null;
 
-            var start = dto?.StartOn ?? DateTime.UtcNow;
+            var start = dto?.StartOn ?? _clock.Today;
             var months = new List<AdvanceInvoiceMonthDto>();
             decimal advTotal = 0m;
 
@@ -696,15 +697,15 @@ namespace WorkNest.Application.Services
 
             var invDto = new AdvanceInvoicePdfDto
             {
-                InvoiceNumber         = $"ADV-{bookingId}-{DateTime.UtcNow:yyyyMMdd}",
+                InvoiceNumber         = $"ADV-{bookingId}-{_clock.Today:yyyyMMdd}",
                 CustomerName          = dto?.CustomerName ?? "Customer",
                 CustomerEmail         = dto?.CustomerEmail ?? "",
                 SpaceName             = dto?.SpaceName ?? dto?.SpaceCode ?? "",
                 SpaceTypeName         = dto?.SpaceTypeName ?? "",
                 LocationName          = dto?.LocationName ?? "",
-                StartOn               = dto?.StartOn ?? DateTime.UtcNow,
-                EndOn                 = dto?.EndOn ?? DateTime.UtcNow,
-                DueOn                 = dto?.StartOn ?? DateTime.UtcNow,
+                StartOn               = dto?.StartOn ?? _clock.Today,
+                EndOn                 = dto?.EndOn ?? _clock.Today,
+                DueOn                 = dto?.StartOn ?? _clock.Today,
                 AdvanceRentMonths     = advanceMonths,
                 SecurityDepositMonths = secDepositMonths,
                 AdvanceRentTotal      = advTotal,
@@ -716,7 +717,7 @@ namespace WorkNest.Application.Services
                 TotalPayable          = totalPay,
                 WithholdingTaxRate    = dto?.WithholdingTaxRate ?? 15.00m,
                 MonthsBreakdown       = months,
-                IssuedOn              = DateTime.UtcNow
+                IssuedOn              = _clock.Today
             };
 
             return _pdf.GenerateAdvanceInvoicePdf(invDto);

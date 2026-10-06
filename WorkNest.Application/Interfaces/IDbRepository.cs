@@ -51,6 +51,9 @@ namespace WorkNest.Application.Interfaces
         Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate);
         /// <summary>One booking in the same shape as a bookings-list row (WN_vw_BookingSummary).</summary>
         Task<IDictionary<string, object?>?> GetBookingSummaryRowDbAsync(int bookingId);
+        /// <summary>True when the invoice / booking belongs to the user with this email (customer self-service checks).</summary>
+        Task<bool> IsInvoiceOwnedByDbAsync(int invoiceId, string email);
+        Task<bool> IsBookingOwnedByDbAsync(int bookingId, string email);
         /// <summary>Agreements of one customer (via the quotation's CustomerId), newest first.</summary>
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAgreementsDbAsync(int customerId);
         /// <summary>Set WN_Agreements.Status (and optionally the proposed SignedDate) on an agreement with no booking yet.</summary>
@@ -209,7 +212,7 @@ namespace WorkNest.Application.Interfaces
         // --- Dashboard ---
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(int? locationId, int endingSoonDays,
-            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month");
+            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null);
 
         // --- AccountCOA ---
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAccountsCoaAsync();
@@ -308,7 +311,7 @@ namespace WorkNest.Application.Interfaces
         Task<(bool Ok, string? Error)> ExtendChallanValidityDbAsync(int bookingId, DateTime newExpiryDate, string updatedBy, string? remarks);
 
         // --- Hikvision challan-based access suspension (WN_HIK_AccessSuspension_* SPs) ---
-        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync();
+        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync(DateTime? today = null);
         Task SetHikAccessSuspensionAppliedDbAsync(int suspensionId, bool machinesBlocked);
         Task<IDictionary<string, object?>?> GetHikAccessSuspensionByBookingDetailDbAsync(int bookingDetailId);
         Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync();

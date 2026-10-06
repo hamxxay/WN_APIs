@@ -17,9 +17,11 @@ namespace WorkNest.Application.Services
         private readonly IHikIsapiClient _isapi;
         private readonly ILogger<HikEnrollmentService> _logger;
         private readonly IOrderStatusService _orderStatus;
+        private readonly IBusinessClock _clock;
 
-        public HikEnrollmentService(IDbRepository db, IHikIsapiClient isapi, ILogger<HikEnrollmentService> logger, IOrderStatusService orderStatus)
+        public HikEnrollmentService(IDbRepository db, IHikIsapiClient isapi, ILogger<HikEnrollmentService> logger, IOrderStatusService orderStatus, IBusinessClock clock)
         {
+            _clock = clock;
             _db = db;
             _isapi = isapi;
             _logger = logger;

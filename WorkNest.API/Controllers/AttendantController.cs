@@ -1,4 +1,6 @@
 using System;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -240,32 +242,35 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// External Export API for Hikvision Fingerprint / Access Control Integration.
-        /// Auth Mechanism: Option A — Dedicated API Key Header (X-Hikvision-Api-Key) or Bearer Token.
+        /// Access-status export (Hikvision fingerprint / access control integration).
+        /// Allowed for: a staff JWT (the admin Attendants page — the only current caller), or a machine caller
+        /// sending X-Hikvision-Api-Key, which is accepted ONLY when "Hikvision:ApiKey" is configured and non-empty
+        /// (there is no built-in default key) and is compared in constant time. Customers and anonymous callers get 401/403.
         /// </summary>
-        [AllowAnonymous]
+        [AllowAnonymous] // the class-level role check is done below so the configured API key can be used without a JWT
         [HttpGet("api/access-status/export")]
         public async Task<IActionResult> ExportAccessStatus()
         {
-            var expectedApiKey = _configuration["Hikvision:ApiKey"] ?? "WN-Hikvision-Secret-Key-2026";
-            
-            if (Request.Headers.TryGetValue("X-Hikvision-Api-Key", out var apiKeyHeader))
-            {
-                if (string.Equals(apiKeyHeader, expectedApiKey, StringComparison.Ordinal))
-                {
-                    var data = await _attendants.GetAccessStatusExportAsync();
-                    return Ok(data);
-                }
-            }
-
-            // Fallback check if caller has a valid JWT token
-            if (User.Identity != null && User.Identity.IsAuthenticated)
+            if (User.IsStaff() || HasValidHikvisionApiKey())
             {
                 var data = await _attendants.GetAccessStatusExportAsync();
                 return Ok(data);
             }
 
-            return Unauthorized(new { message = "Invalid or missing X-Hikvision-Api-Key header authentication." });
+            if (User.Identity?.IsAuthenticated == true)
+                return Forbid();
+
+            return Unauthorized(new { message = "Staff sign-in or a valid X-Hikvision-Api-Key header is required." });
+        }
+
+        private bool HasValidHikvisionApiKey()
+        {
+            var configuredKey = _configuration["Hikvision:ApiKey"];
+            if (string.IsNullOrWhiteSpace(configuredKey)) return false;
+            if (!Request.Headers.TryGetValue("X-Hikvision-Api-Key", out var apiKeyHeader)) return false;
+            var supplied = apiKeyHeader.ToString();
+            if (string.IsNullOrEmpty(supplied)) return false;
+            return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(configuredKey), Encoding.UTF8.GetBytes(supplied));
         }
     }
 }

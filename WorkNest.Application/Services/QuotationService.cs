@@ -13,8 +13,11 @@ namespace WorkNest.Application.Services
         private readonly IEmailService _email;
         private readonly IPdfService _pdf;
 
-        public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf)
+        private readonly IBusinessClock _clock;
+
+        public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf, IBusinessClock clock)
         {
+            _clock = clock;
             _db = db;
             _email = email;
             _pdf = pdf;
@@ -255,7 +258,7 @@ namespace WorkNest.Application.Services
             }
 
             // Generate unique Quotation Number (e.g. WN-QT-YYYYMMDD-XXXXXX)
-            string todayStr = DateTime.UtcNow.ToString("yyyyMMdd");
+            string todayStr = _clock.Today.ToString("yyyyMMdd");
             string randomStr = Guid.NewGuid().ToString().Substring(0, 6).ToUpper();
             string quotationNumber = $"WN-QT-{todayStr}-{randomStr}";
 

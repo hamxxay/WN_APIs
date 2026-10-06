@@ -10,8 +10,10 @@ namespace WorkNest.Application.Services
 
         private readonly IDbRepository _db;
         private readonly IOrderStatusService _orderStatus;
-        public DashboardService(IDbRepository db, IOrderStatusService orderStatus)
+        private readonly IBusinessClock _clock;
+        public DashboardService(IDbRepository db, IOrderStatusService orderStatus, IBusinessClock clock)
         {
+            _clock = clock;
             _db = db;
             _orderStatus = orderStatus;
         }
@@ -30,7 +32,7 @@ namespace WorkNest.Application.Services
             // Open = still owed (Unpaid / Partial / Overdue, legacy + OrderStatus); void = legacy 5 + OrderStatus Cancelled.
             var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue);
             var voids = st.Cancelled.Append(5);
-            var sets = await _db.GetDashboardOverviewDbAsync(locationId, EndingSoonDays, open, st.Paid, voids, period);
+            var sets = await _db.GetDashboardOverviewDbAsync(locationId, EndingSoonDays, open, st.Paid, voids, period, _clock.Now);
 
             var k = sets.Count > 0 ? sets[0].FirstOrDefault() : null;
             int Int(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) && v != null ? Convert.ToInt32(v) : 0;
@@ -55,7 +57,7 @@ namespace WorkNest.Application.Services
                 PaidThisPeriod = Math.Round(Dec(k, "PaidThisPeriod"), 2),
                 LeasesEndingSoon = Int(k, "LeasesEndingSoon"),
                 EndingSoonDays = EndingSoonDays,
-                GeneratedAt = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss")
+                GeneratedAt = _clock.Now.ToString("yyyy-MM-ddTHH:mm:ss")
             };
             dto.OccupancyPct = Pct(dto.OccupiedSpaces, dto.TotalSpaces);
             dto.OccupancyPctLastMonth = Pct(dto.OccupiedSpacesLastMonth, dto.TotalSpaces);

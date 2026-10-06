@@ -197,7 +197,7 @@ BEGIN
         ac.StartDate = ISNULL(inv.BillingPeriodStart, b.StartOn),
         ac.EndDate   = ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)),
         ac.Status    = CASE 
-                        WHEN ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)) < SYSUTCDATETIME() THEN 3 -- Inactive/Expired
+                        WHEN ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)) THEN 3 -- Inactive/Expired
                         ELSE 1 -- Active
                        END,
         ac.UpdatedOn = SYSUTCDATETIME()
@@ -249,7 +249,7 @@ BEGIN
         ISNULL(inv.BillingPeriodStart, b.StartOn) AS StartDate,
         ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)) AS EndDate,
         CASE 
-            WHEN ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)) < SYSUTCDATETIME() THEN 3 -- Inactive/Expired
+            WHEN ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)) THEN 3 -- Inactive/Expired
             ELSE 1 -- Active
         END AS Status,
         SYSUTCDATETIME() AS CreatedOn,
@@ -576,7 +576,7 @@ BEGIN
     FROM dbo.WN_ChargeTypes ct
     LEFT JOIN dbo.WN_ChargeTypeAccountMapping m 
            ON m.ChargeTypeId = ct.Id 
-          AND (m.EffectiveTo IS NULL OR m.EffectiveTo >= CAST(GETDATE() AS DATE))
+          AND (m.EffectiveTo IS NULL OR m.EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
     LEFT JOIN dbo.AccountsCOA coa 
            ON coa.Id = COALESCE(m.RentAccountId, m.ServicesIncomeId, m.SecurityReceivedId, m.SalesTaxId, m.AccountReceivableId)
     WHERE ct.IsActive = 1
@@ -618,7 +618,7 @@ BEGIN
              CASE WHEN @Id = 2 THEN @AccountId ELSE NULL END,
              CASE WHEN @Id = 3 THEN @AccountId ELSE NULL END,
              CASE WHEN @Id = 4 THEN @AccountId ELSE NULL END,
-             CAST(GETDATE() AS DATE));
+             CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
     END
 END
 GO
@@ -1061,7 +1061,7 @@ BEGIN
     -- Count active attendants currently assigned to this BookingDetailId
     SELECT @CurrentAttendantCount = COUNT(1)
     FROM [dbo].[WN_BookingAttendants]
-    WHERE BookingDetailId = @BookingDetailId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSUTCDATETIME() AS DATE));
+    WHERE BookingDetailId = @BookingDetailId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
     -- Capacity Check Strategy
     -- Meeting rooms & shared spaces hard block over-capacity
@@ -1081,7 +1081,7 @@ BEGIN
     END
 
     -- Check if person is already active on this booking detail
-    IF EXISTS (SELECT 1 FROM [dbo].[WN_BookingAttendants] WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSUTCDATETIME() AS DATE)))
+    IF EXISTS (SELECT 1 FROM [dbo].[WN_BookingAttendants] WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)))
     BEGIN
         RAISERROR('Attendant is already actively assigned to this booking.', 16, 1);
         RETURN;
@@ -1142,7 +1142,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @Today DATE = CAST(SYSUTCDATETIME() AS DATE);
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
     DECLARE @EndOfCurrentMonth DATE = EOMONTH(@Today);
     DECLARE @DayOfMonth INT = DAY(@Today);
 
@@ -1362,7 +1362,7 @@ BEGIN
         RETURN;
     END
 
-    SET @Today = CAST(GETDATE() AS DATE);
+    SET @Today = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
 
     BEGIN TRANSACTION;
 
@@ -1384,7 +1384,7 @@ BEGIN
 
     SET @ChallanNumber = 'WN-' + CONVERT(NVARCHAR(8), @Today, 112) + '-'
                        + RIGHT('000000' + CAST(@SeqNum AS NVARCHAR(6)), 6);
-    SET @ValidityDate  = DATEADD(DAY, 5, GETDATE());
+    SET @ValidityDate  = DATEADD(DAY, 5, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)));
 
     SELECT TOP 1
         @SpaceId           = s.Id,
@@ -2175,8 +2175,8 @@ BEGIN
             CAST(NEWID() AS UNIQUEIDENTIFIER) AS Guid,
             CAST(0 AS INT) AS BookingId,
             CAST(0 AS INT) AS UserId,
-            CAST(GETDATE() AS DATE) AS MonthStartDate,
-            CAST(GETDATE() AS DATE) AS MonthEndDate,
+            CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) AS MonthStartDate,
+            CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) AS MonthEndDate,
             CAST(0 AS INT) AS AllocatedMinutes,
             CAST(0 AS INT) AS UsedMinutes,
             CAST(0 AS INT) AS RemainingMinutes,
@@ -2396,8 +2396,8 @@ BEGIN
         JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
         WHERE sp.SpaceId      = s.Id
           AND sp.IsActive     = 1
-          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
         ORDER BY sp.EffectiveFrom DESC
     ) vp
     WHERE s.IsActive        = 1
@@ -2447,8 +2447,8 @@ BEGIN
         FROM dbo.WN_SpacePricing sp
         WHERE sp.SpaceId      = s.Id
           AND sp.IsActive     = 1
-          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
         ORDER BY sp.EffectiveFrom DESC
     ) vp
     WHERE s.IsActive       = 1
@@ -2796,8 +2796,8 @@ BEGIN
         JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
         WHERE sp.SpaceId       = s.Id
           AND sp.IsActive      = 1
-          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
         ORDER BY sp.EffectiveFrom DESC
     ) vp
     WHERE s.IsActive  = 1
@@ -2958,27 +2958,27 @@ BEGIN
         IF @RentAccountId IS NULL
             SELECT TOP 1 @RentAccountId = RentAccountId 
             FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK) 
-            WHERE ChargeTypeId = 1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(GETDATE() AS DATE));
+            WHERE ChargeTypeId = 1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
         IF @SecurityReceivedId IS NULL
             SELECT TOP 1 @SecurityReceivedId = SecurityReceivedId 
             FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK) 
-            WHERE ChargeTypeId = 2 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(GETDATE() AS DATE));
+            WHERE ChargeTypeId = 2 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
         IF @SalesTaxId IS NULL
             SELECT TOP 1 @SalesTaxId = SalesTaxId 
             FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK) 
-            WHERE ChargeTypeId = 3 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(GETDATE() AS DATE));
+            WHERE ChargeTypeId = 3 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
         IF @ServicesIncomeId IS NULL
             SELECT TOP 1 @ServicesIncomeId = ServicesIncomeId 
             FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK) 
-            WHERE ChargeTypeId = 4 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(GETDATE() AS DATE));
+            WHERE ChargeTypeId = 4 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
         IF @AccountReceivableId IS NULL
             SELECT TOP 1 @AccountReceivableId = AccountReceivableId 
             FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK) 
-            WHERE ChargeTypeId = 1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(GETDATE() AS DATE));
+            WHERE ChargeTypeId = 1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
         -- Duration and pricing calculations
         DECLARE @Duration DECIMAL(18,2) = 1.0;
@@ -3100,7 +3100,7 @@ BEGIN
             FROM dbo.WN_Locations loc WITH (NOLOCK)
             WHERE loc.Id = @LocationId;
 
-            DECLARE @BookingDateAnchor DATE = CAST(SYSUTCDATETIME() AS DATE);
+            DECLARE @BookingDateAnchor DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
 
             SELECT TOP 1 @ChargePercentage = ChargePercentage
             FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
@@ -3142,8 +3142,8 @@ BEGIN
         END
 
         DECLARE @TotalAmount DECIMAL(18,2) = @DiscountedRent + @DiscountedDeposit + @SupportChargeAmount + @TaxAmount;
-        DECLARE @ChallanNum NVARCHAR(50) = 'WN-' + CONVERT(NVARCHAR(8), SYSUTCDATETIME(), 112) + '-' + RIGHT(CAST(ABS(CHECKSUM(NEWID())) AS NVARCHAR(10)), 4);
-        DECLARE @ChallanValidUntil DATETIME2 = DATEADD(day, 7, SYSUTCDATETIME());
+        DECLARE @ChallanNum NVARCHAR(50) = 'WN-' + CONVERT(NVARCHAR(8), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)), 112) + '-' + RIGHT(CAST(ABS(CHECKSUM(NEWID())) AS NVARCHAR(10)), 4);
+        DECLARE @ChallanValidUntil DATETIME2 = DATEADD(day, 7, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)));
         DECLARE @CreatedByGuid UNIQUEIDENTIFIER = NULL;
         IF @CreatedById IS NOT NULL
             SELECT @CreatedByGuid = IdGUID FROM dbo.WN_Users WHERE Id = @CreatedById;
@@ -3402,7 +3402,7 @@ BEGIN
             RETURN;
         END
 
-        DECLARE @Today DATE = CAST(SYSUTCDATETIME() AS DATE);
+        DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
         DECLARE @SeqNum INT;
         DECLARE @ChallanNum NVARCHAR(50);
 
@@ -3569,8 +3569,8 @@ BEGIN
         WHERE sp.SpaceId       = @SpaceId
           AND sp.IsActive      = 1
           AND bp.Code          = @BillingPeriodCode
-          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
         ORDER BY sp.EffectiveFrom DESC;
 
         IF @PricingId IS NULL
@@ -4215,7 +4215,7 @@ BEGIN
         END
         ELSE
         BEGIN
-            SET @InvoiceNumber = 'INV-ADV-' + CONVERT(NVARCHAR(8), GETDATE(), 112) + '-' + CAST(CAST(RAND()*100000 AS INT) AS NVARCHAR(10));
+            SET @InvoiceNumber = 'INV-ADV-' + CONVERT(NVARCHAR(8), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)), 112) + '-' + CAST(CAST(RAND()*100000 AS INT) AS NVARCHAR(10));
         END
 
         -- Load Account mappings
@@ -6458,8 +6458,8 @@ BEGIN
                 SELECT TOP 1 @AppliedTaxPercentage = ISNULL(TaxPercentage, 16.00)
                 FROM dbo.WN_Tax WITH (NOLOCK)
                 WHERE ProvinceId = @ProvinceId
-                  AND StartDate <= SYSUTCDATETIME()
-                  AND (EndDate IS NULL OR EndDate > SYSUTCDATETIME())
+                  AND StartDate <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))
+                  AND (EndDate IS NULL OR EndDate > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)))
                 ORDER BY StartDate DESC;
             END
         END
@@ -6468,7 +6468,7 @@ BEGIN
         DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
         DECLARE @GrandTotal DECIMAL(18,2) = @TotalBaseAmount + @TaxAmount;
 
-        DECLARE @Today DATE = CAST(SYSUTCDATETIME() AS DATE);
+        DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
         DECLARE @DueDate DATE = EOMONTH(@Today);
         DECLARE @InvNum NVARCHAR(50) = 'INV-REC-' + CAST(@BookingId AS NVARCHAR(10)) + '-' + CONVERT(NVARCHAR(8), @BillingPeriodStart, 112);
         DECLARE @SubTotalAmount DECIMAL(18,2) = @RentAmount + @AttendantSurchargeSubtotal;
@@ -6697,12 +6697,12 @@ BEGIN
     -- 2. Default IssuedOn (Exact to the second) & DueOn
     IF @IssuedOn IS NULL
     BEGIN
-        SET @IssuedOn = GETDATE();
+        SET @IssuedOn = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0));
     END
     ELSE IF CAST(@IssuedOn AS TIME) = '00:00:00'
     BEGIN
         -- If only a date portion was passed, preserve the date and append current time down to the second
-        SET @IssuedOn = DATEADD(SECOND, DATEDIFF(SECOND, CAST(CAST(GETDATE() AS DATE) AS DATETIME), GETDATE()), CAST(CAST(@IssuedOn AS DATE) AS DATETIME));
+        SET @IssuedOn = DATEADD(SECOND, DATEDIFF(SECOND, CAST(CAST(CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)) AS DATE) AS DATETIME), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))), CAST(CAST(@IssuedOn AS DATE) AS DATETIME));
     END
 
     IF @DueOn IS NULL
@@ -6823,7 +6823,7 @@ BEGIN
     BEGIN
         DECLARE @NextId INT;
         SELECT @NextId = ISNULL(MAX(Id), 0) + 1 FROM dbo.WN_Invoices;
-        SET @InvoiceNumber = 'INV-' + CAST(YEAR(GETDATE()) AS VARCHAR(4)) + '-' + RIGHT('00000' + CAST(@NextId AS VARCHAR(10)), 5);
+        SET @InvoiceNumber = 'INV-' + CAST(YEAR(CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))) AS VARCHAR(4)) + '-' + RIGHT('00000' + CAST(@NextId AS VARCHAR(10)), 5);
     END
 
     -- 8. Resolve CreatedById from Booking, User, or WN_Users table
@@ -8113,7 +8113,7 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Payments_GenerateVoucher]
 AS
 BEGIN
     SET NOCOUNT ON;
-    DECLARE @Today DATE = CAST(SYSUTCDATETIME() AS DATE);
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
     DECLARE @SeqNum INT;
     DECLARE @VoucherRef NVARCHAR(50);
 
@@ -9239,8 +9239,8 @@ BEGIN
             SELECT TOP 1 @AppliedChargePercentage = ISNULL(ChargePercentage, 10.00)
             FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
             WHERE ChargeTypeId = @SupportChargesId
-              AND StartDate <= CAST(SYSUTCDATETIME() AS DATE)
-              AND (EndDate IS NULL OR EndDate > CAST(SYSUTCDATETIME() AS DATE))
+              AND StartDate <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+              AND (EndDate IS NULL OR EndDate > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
             ORDER BY StartDate DESC;
 
             IF @TaxApplicable = 1
@@ -9248,8 +9248,8 @@ BEGIN
                 SELECT TOP 1 @AppliedTaxPercentage = ISNULL(TaxPercentage, 16.00)
                 FROM dbo.WN_Tax WITH (NOLOCK)
                 WHERE ProvinceId = @ProvinceId
-                  AND StartDate <= CAST(SYSUTCDATETIME() AS DATE)
-                  AND (EndDate IS NULL OR EndDate > CAST(SYSUTCDATETIME() AS DATE))
+                  AND StartDate <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+                  AND (EndDate IS NULL OR EndDate > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
                 ORDER BY StartDate DESC;
             END
         END
@@ -9271,7 +9271,7 @@ BEGIN
             SupportChargesId, AppliedChargePercentage, AppliedTaxPercentage, SupportChargeAmount, TaxAmount
         )
         VALUES (
-            @QuotationNumber, CAST(SYSUTCDATETIME() AS DATE), @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
+            @QuotationNumber, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE), @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
             @SubtotalAmount, @SafeDiscountPct, @DiscountAmount, @TotalAmount, @Remarks, 'Active', @NewVersion, 1,
             SYSUTCDATETIME(), @CreatedById, ISNULL(@DiscountType, 'Percentage'), @SecDeposit, @FloorId, ISNULL(@BillingPeriodMonths, 3),
             @SupportChargesId, @AppliedChargePercentage, @AppliedTaxPercentage, @SupportChargeAmount, @TaxAmount
@@ -9383,7 +9383,7 @@ BEGIN
         SET @NewStatusId = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id); -- OrderStatus 'Partial'
         IF @MonthsCovered >= 1 AND @BookingId IS NOT NULL AND @BookingId > 0
         BEGIN
-            DECLARE @AccessValidUntil DATETIME2 = DATEADD(month, @MonthsCovered, ISNULL(@BillingPeriodStart, SYSUTCDATETIME()));
+            DECLARE @AccessValidUntil DATETIME2 = DATEADD(month, @MonthsCovered, ISNULL(@BillingPeriodStart, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))));
             IF @BillingPeriodEnd IS NOT NULL AND @AccessValidUntil > @BillingPeriodEnd
                 SET @AccessValidUntil = @BillingPeriodEnd;
 
@@ -9430,7 +9430,7 @@ BEGIN
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
 
-    IF @RunDate IS NULL SET @RunDate = CAST(SYSUTCDATETIME() AS DATE);
+    IF @RunDate IS NULL SET @RunDate = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
 
     DECLARE @InvoicesGenerated INT = 0;
     DECLARE @InvoicesSkipped   INT = 0;
@@ -9628,7 +9628,7 @@ BEGIN
         ac.UpdatedOn = SYSUTCDATETIME()
     FROM dbo.WN_AccessCards ac
     INNER JOIN dbo.WN_Invoices i ON i.BookingId = ac.BookingId
-    WHERE ac.EndDate < SYSUTCDATETIME()
+    WHERE ac.EndDate < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))
       AND ac.Status = 50 -- Currently active
       AND i.StatusId NOT IN (2, 5) AND i.StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled')); -- Not fully paid
 END;
@@ -9982,8 +9982,8 @@ BEGIN
     WHERE sc.Code         = @CategoryCode
       AND bp.Code         = 'Monthly'
       AND sp.IsActive     = 1
-      AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-      AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+      AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+      AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
     ORDER BY sp.EffectiveFrom DESC;
 END
 GO
@@ -10285,8 +10285,8 @@ BEGIN
     WHERE sp.SpaceId      = @SpaceId
       AND sp.IsActive     = 1
       AND sp.TierTypeId   = @TierTypeId
-      AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-      AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+      AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+      AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
       AND (@BillingPeriodId IS NULL OR sp.BillingPeriodId = @BillingPeriodId)
     ORDER BY sp.BillingPeriodId;
 END
@@ -10323,7 +10323,7 @@ BEGIN
         RETURN;
     END
 
-    SET @EffectiveFrom = ISNULL(@EffectiveFrom, CAST(SYSUTCDATETIME() AS DATE));
+    SET @EffectiveFrom = ISNULL(@EffectiveFrom, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
 
     -- Close the previous active pricing row for this space/period/tier
     UPDATE dbo.WN_SpacePricing SET
@@ -10446,7 +10446,7 @@ BEGIN
                 VALUES
                     (@NewSpaceId, @MonthlyBillingPeriodId, 1, @PricePerSeat, @SecurityDeposit,
                      @RentAccountId, @DepositAccountId, N'PKR',
-                     CAST(SYSUTCDATETIME() AS DATE), NULL, 1,
+                     CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE), NULL, 1,
                      N'Auto-generated from SpaceInventoryConfig', @CreatedById);
             END
         END
@@ -10550,8 +10550,8 @@ BEGIN
         FROM dbo.WN_SpacePricing   sp
         JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
         WHERE sp.SpaceId      = s.Id AND sp.IsActive = 1
-          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
         ORDER BY sp.EffectiveFrom DESC
     ) vp
     WHERE s.IsActive = 1
@@ -10613,8 +10613,8 @@ BEGIN
         FROM dbo.WN_SpacePricing   sp
         JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
         WHERE sp.SpaceId = s.Id AND sp.IsActive = 1
-          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
         ORDER BY sp.EffectiveFrom DESC
     ) vp
     WHERE s.IsActive       = 1
@@ -10687,8 +10687,8 @@ BEGIN
         FROM dbo.WN_SpacePricing   sp
         JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
         WHERE sp.SpaceId      = s.Id AND sp.IsActive = 1
-          AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE))
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
         ORDER BY sp.EffectiveFrom DESC
     ) vp
     WHERE s.IdGUID = @PublicId;
@@ -11023,7 +11023,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 1)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET RentAccountId = @RentAccountId WHERE ChargeTypeId = 1;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, RentAccountId, EffectiveFrom) VALUES (1, @RentAccountId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, RentAccountId, EffectiveFrom) VALUES (1, @RentAccountId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @SecurityReceivedId IS NOT NULL
@@ -11031,7 +11031,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 2)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET SecurityReceivedId = @SecurityReceivedId WHERE ChargeTypeId = 2;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SecurityReceivedId, EffectiveFrom) VALUES (2, @SecurityReceivedId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SecurityReceivedId, EffectiveFrom) VALUES (2, @SecurityReceivedId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @SalesTaxId IS NOT NULL
@@ -11039,7 +11039,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 3)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET SalesTaxId = @SalesTaxId WHERE ChargeTypeId = 3;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SalesTaxId, EffectiveFrom) VALUES (3, @SalesTaxId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SalesTaxId, EffectiveFrom) VALUES (3, @SalesTaxId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @ServicesIncomeId IS NOT NULL
@@ -11047,7 +11047,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 4)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET ServicesIncomeId = @ServicesIncomeId WHERE ChargeTypeId = 4;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, ServicesIncomeId, EffectiveFrom) VALUES (4, @ServicesIncomeId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, ServicesIncomeId, EffectiveFrom) VALUES (4, @ServicesIncomeId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @AccountReceivableId IS NOT NULL
@@ -11123,7 +11123,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 1)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET RentAccountId = @RentAccountId WHERE ChargeTypeId = 1;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, RentAccountId, EffectiveFrom) VALUES (1, @RentAccountId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, RentAccountId, EffectiveFrom) VALUES (1, @RentAccountId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @SecurityReceivedId IS NOT NULL
@@ -11131,7 +11131,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 2)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET SecurityReceivedId = @SecurityReceivedId WHERE ChargeTypeId = 2;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SecurityReceivedId, EffectiveFrom) VALUES (2, @SecurityReceivedId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SecurityReceivedId, EffectiveFrom) VALUES (2, @SecurityReceivedId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @SalesTaxId IS NOT NULL
@@ -11139,7 +11139,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 3)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET SalesTaxId = @SalesTaxId WHERE ChargeTypeId = 3;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SalesTaxId, EffectiveFrom) VALUES (3, @SalesTaxId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, SalesTaxId, EffectiveFrom) VALUES (3, @SalesTaxId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @ServicesIncomeId IS NOT NULL
@@ -11147,7 +11147,7 @@ BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 4)
                 UPDATE dbo.WN_ChargeTypeAccountMapping SET ServicesIncomeId = @ServicesIncomeId WHERE ChargeTypeId = 4;
             ELSE
-                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, ServicesIncomeId, EffectiveFrom) VALUES (4, @ServicesIncomeId, CAST(GETDATE() AS DATE));
+                INSERT INTO dbo.WN_ChargeTypeAccountMapping (ChargeTypeId, ServicesIncomeId, EffectiveFrom) VALUES (4, @ServicesIncomeId, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
         END
 
         IF @AccountReceivableId IS NOT NULL
@@ -11520,7 +11520,7 @@ CREATE OR ALTER PROCEDURE dbo.WN_HIK_AccessSuspension_Run
 AS
 BEGIN
     SET NOCOUNT ON;
-    SET @Today = ISNULL(@Today, CAST(GETDATE() AS DATE));
+    SET @Today = ISNULL(@Today, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
     -- Status IDs from dbo.OrderStatus (old invoices keep legacy 1/2/4, so both are accepted)
     DECLARE @UnPaid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), @ChallanExpire INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id),
             @Paid INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), @Partial INT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id);

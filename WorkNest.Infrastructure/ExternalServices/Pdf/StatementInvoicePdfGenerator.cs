@@ -15,9 +15,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public string BillingAddress { get; set; } = "Suite 401, 4th Floor, Commercial Tower, Sector F-8, Islamabad";
         public string AccountNumber { get; set; } = "ACC-987654";
         public string InvoiceNumber { get; set; } = "INV-2026-0042";
-        public DateTime StatementDate { get; set; } = DateTime.Now;
-        public DateTime InvoiceDate { get; set; } = DateTime.Now;
-        public DateTime DueDate { get; set; } = DateTime.Now.AddDays(15);
+        public DateTime StatementDate { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Now;
+        public DateTime InvoiceDate { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Now;
+        public DateTime DueDate { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Now.AddDays(15);
         public DateTime? BillingPeriodStart { get; set; }
         
         public DateTime? BillingPeriodEnd { get; set; }
@@ -787,7 +787,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
         private static List<StatementInvoiceLineItemDto> GetDefaultLineItems(decimal vatRate)
         {
-            var startDate = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+            var startDate = new DateTime(WorkNest.Application.Services.BusinessClock.Default.Now.Year, WorkNest.Application.Services.BusinessClock.Default.Now.Month, 1);
             var endDate = startDate.AddMonths(1).AddDays(-1);
 
             decimal officeBase = 200000.00m;

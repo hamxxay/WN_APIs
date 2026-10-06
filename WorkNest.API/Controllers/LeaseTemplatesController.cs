@@ -10,7 +10,7 @@ namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Route("api/lease-templates")]
-    [Authorize]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // staff only
     public class LeaseTemplatesController : ControllerBase
     {
         private readonly ILeaseTemplateService _templateService;
@@ -54,6 +54,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // publishing a new template version changes configuration: admin only
         public async Task<IActionResult> PublishTemplate([FromBody] PublishLeaseTemplateRequest request)
         {
             try

@@ -14,6 +14,8 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public PricingPlanController(IPricingPlanService plans, IDbRepository db) { _plans = plans; _db = db; }
 
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
+
         [HttpGet("api/pricingplan/all")]
         [AllowAnonymous]
         public async Task<IActionResult> All() =>
@@ -52,14 +54,17 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/pricingplan")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Create([FromBody] PricingPlanUpsertRequest request) =>
             StatusCode(201, await _plans.CreatePlanAsync(request, null));
 
         [HttpPut("api/pricingplan/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Update(int id, [FromBody] PricingPlanUpsertRequest request) =>
             Ok(await _plans.UpdatePlanAsync(id, request));
 
         [HttpPut("api/pricingplan/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] PricingPlanUpsertRequest request)
         {
             var (rows, _) = await _db.GetPricingPlansAsync(1, 10000);
@@ -70,10 +75,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpDelete("api/pricingplan/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _plans.DeletePlanAsync(id));
 
         [HttpDelete("api/pricingplan/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetPricingPlansAsync(1, 10000);

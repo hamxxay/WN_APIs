@@ -60,9 +60,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         {
             string logoPath = GetLogoFilePath();
 
-            string startDateStr = req.ContractStartDate.HasValue ? req.ContractStartDate.Value.ToString("dd MMMM yyyy") : DateTime.Now.ToString("dd MMMM yyyy");
-            string endDateStr = req.ContractEndDate.HasValue ? req.ContractEndDate.Value.ToString("dd MMMM yyyy") : DateTime.Now.AddYears(1).ToString("dd MMMM yyyy");
-            string agreementDateStr = DateTime.Now.ToString("dd MMMM yyyy");
+            string startDateStr = req.ContractStartDate.HasValue ? req.ContractStartDate.Value.ToString("dd MMMM yyyy") : WorkNest.Application.Services.BusinessClock.Default.Now.ToString("dd MMMM yyyy");
+            string endDateStr = req.ContractEndDate.HasValue ? req.ContractEndDate.Value.ToString("dd MMMM yyyy") : WorkNest.Application.Services.BusinessClock.Default.Now.AddYears(1).ToString("dd MMMM yyyy");
+            string agreementDateStr = WorkNest.Application.Services.BusinessClock.Default.Now.ToString("dd MMMM yyyy");
             string billingPeriodStr = !string.IsNullOrWhiteSpace(req.BillingFrequency) ? req.BillingFrequency : "Monthly";
             
             string rawOp = (req.OperatingHours ?? "").Trim();

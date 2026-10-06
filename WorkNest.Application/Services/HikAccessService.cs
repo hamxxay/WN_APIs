@@ -23,15 +23,18 @@ namespace WorkNest.Application.Services
 
         private readonly IDbRepository _db;
 
-        public HikAccessService(IDbRepository db)
+        private readonly IBusinessClock _clock;
+
+        public HikAccessService(IDbRepository db, IBusinessClock clock)
         {
             _db = db;
+            _clock = clock;
         }
 
         public async Task<HikAccessDashboardDto> GetDashboardAsync(int expiringDays = 7)
         {
             expiringDays = Math.Clamp(expiringDays, 1, 60);
-            var today = DateTime.Today;
+            var today = _clock.Today;
 
             var statsTask = _db.GetHikAccessStatsDbAsync();
             var devicesTask = _db.GetHikDevicesAsync();
@@ -214,7 +217,7 @@ namespace WorkNest.Application.Services
 
         private static List<HikExpiringMemberDto> GroupExpiring(IEnumerable<IDictionary<string, object?>> rows)
         {
-            var now = DateTime.Now;
+            var now = BusinessClock.Default.Now; // machine validity times are Pakistan wall-clock
             return rows
                 .GroupBy(r => $"{Str(r, "employee_no")}||{(Str(r, "name") ?? "").Trim().ToLowerInvariant()}")
                 .Select(g =>

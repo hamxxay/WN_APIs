@@ -15,10 +15,12 @@ namespace WorkNest.API.Controllers
     public class HikAccessController : ControllerBase
     {
         private readonly IHikAccessService _access;
+        private readonly IBusinessClock _clock;
 
-        public HikAccessController(IHikAccessService access)
+        public HikAccessController(IHikAccessService access, IBusinessClock clock)
         {
             _access = access;
+            _clock = clock;
         }
 
         /// <summary>
@@ -63,7 +65,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/access/analytics")]
         public async Task<IActionResult> GetAnalytics([FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
         {
-            var result = await _access.GetAnalyticsAsync(from ?? DateTime.Today, to ?? from ?? DateTime.Today);
+            var result = await _access.GetAnalyticsAsync(from ?? _clock.Today, to ?? from ?? _clock.Today);
             return Ok(result);
         }
 
@@ -80,7 +82,7 @@ namespace WorkNest.API.Controllers
             if (string.IsNullOrWhiteSpace(employeeNo) && string.IsNullOrWhiteSpace(name))
                 return BadRequest(new { message = "employeeNo or name is required." });
 
-            var result = await _access.GetUserAnalyticsAsync(employeeNo, name, from ?? DateTime.Today, to ?? from ?? DateTime.Today);
+            var result = await _access.GetUserAnalyticsAsync(employeeNo, name, from ?? _clock.Today, to ?? from ?? _clock.Today);
             return Ok(result);
         }
     }

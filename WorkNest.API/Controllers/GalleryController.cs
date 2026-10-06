@@ -14,6 +14,8 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public GalleryController(IGalleryService gallery, IDbRepository db) { _gallery = gallery; _db = db; }
 
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
+
         [HttpGet("api/gallery/all")]
         [AllowAnonymous]
         public async Task<IActionResult> All([FromQuery] int? locationId) =>
@@ -31,14 +33,17 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/gallery")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Create([FromBody] GalleryUpsertRequest request) =>
             StatusCode(201, await _gallery.CreateImageAsync(request, null));
 
         [HttpPut("api/gallery/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Update(int id, [FromBody] GalleryUpdateRequest request) =>
             Ok(await _gallery.UpdateImageAsync(id, request));
 
         [HttpPut("api/gallery/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] GalleryUpdateRequest request)
         {
             var (rows, _) = await _db.GetGalleryImagesAsync(1, 10000, null);
@@ -49,10 +54,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpDelete("api/gallery/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _gallery.DeleteImageAsync(id));
 
         [HttpDelete("api/gallery/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetGalleryImagesAsync(1, 10000, null);

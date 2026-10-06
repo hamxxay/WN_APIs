@@ -157,13 +157,12 @@ namespace WorkNest.API.Controllers
         /// </summary>
         [HttpGet("document/{id}/download")]
         [HttpGet("document/{id}/view")]
-        [AllowAnonymous]
         public async Task<IActionResult> StreamDocument(int id, [FromQuery] bool inline = false)
         {
             var (stream, contentType, fileName, error) = await _kycService.DownloadDocumentAsync(
                 id,
                 GetCurrentLocationId(),
-                IsSuperAdmin() || !User.Identity?.IsAuthenticated == true
+                IsSuperAdmin() // anonymous visitors used to be treated as super admin here
             );
 
             if (stream == null)

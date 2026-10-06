@@ -18,6 +18,10 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public SpaceController(ISpaceService spaces, IDbRepository db) { _spaces = spaces; _db = db; }
 
+        // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
+        private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
+
         [HttpGet("api/billing-periods")]
         [AllowAnonymous]
         public async Task<IActionResult> GetBillingPeriods()
@@ -65,6 +69,7 @@ namespace WorkNest.API.Controllers
             Ok(await _spaces.GetAvailabilityCountsAsync(shiftType));
 
         [HttpGet("api/space/vacant")]
+        [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> Vacant([FromQuery] string? shiftType = "24_7")
         {
             var items = await _spaces.GetAvailableSpacesAsync(shiftType);
@@ -122,10 +127,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/space")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Create([FromBody] SpaceInsertRequest request) =>
             StatusCode(201, await _spaces.CreateSpaceAsync(request, null));
 
         [HttpPut("api/space/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Update(int id, [FromBody] SpaceUpdateRequest request)
         {
             var result = await _spaces.UpdateSpaceAsync(id, request, null);
@@ -134,6 +141,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPut("api/space/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] SpaceUpdateRequest request)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
@@ -146,10 +154,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpDelete("api/space/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _spaces.DeleteSpaceAsync(id));
 
         [HttpDelete("api/space/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);

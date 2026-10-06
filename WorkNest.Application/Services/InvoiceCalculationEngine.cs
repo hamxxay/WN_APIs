@@ -73,6 +73,10 @@ namespace WorkNest.Application.Services
             Math.Round(val, 2, MidpointRounding.AwayFromZero);
 
         public static InvoiceCalculationResult CalculateInvoice(InvoiceCalculationRequest request)
+            => CalculateInvoice(request, BusinessClock.Default.Today);
+
+        /// <summary>Same calculation with the business "today" passed in (used when the booking has no start date).</summary>
+        public static InvoiceCalculationResult CalculateInvoice(InvoiceCalculationRequest request, DateTime today)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
@@ -92,7 +96,7 @@ namespace WorkNest.Application.Services
             decimal chargeRate = request.AppliedChargePercentage > 0 ? request.AppliedChargePercentage : 10.00m;
             decimal taxRate = request.AppliedTaxPercentage > 0 ? request.AppliedTaxPercentage : 16.00m;
 
-            DateTime periodStart = request.StartOn ?? DateTime.Today;
+            DateTime periodStart = request.StartOn ?? today.Date;
             DateTime periodEnd;
 
             if (isMeeting)

@@ -43,7 +43,7 @@ namespace WorkNest.API.Controllers
             [FromQuery] DateTime? toDate = null)
         {
             var fileBytes = await _reportService.ExportCustomerDetailExcelAsync(customerId, fromDate, toDate);
-            var fileName = $"Customer_{customerId}_Deposit_History_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            var fileName = $"Customer_{customerId}_Deposit_History_{WorkNest.Application.Services.BusinessClock.Default.Now:yyyyMMdd_HHmmss}.xlsx";
             return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         }
 
@@ -51,7 +51,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> ExportExcel([FromQuery] SecurityDepositReportFilterDto filter)
         {
             var fileBytes = await _reportService.ExportExcelAsync(filter);
-            var fileName = $"Security_Deposit_Report_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            var fileName = $"Security_Deposit_Report_{WorkNest.Application.Services.BusinessClock.Default.Now:yyyyMMdd_HHmmss}.xlsx";
             return File(fileBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         }
 

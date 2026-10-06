@@ -16,6 +16,7 @@ namespace WorkNest.Application.Services
         private readonly ILeaseTemplateService _templateService;
         private readonly IHtmlToPdfService _htmlToPdfService;
         private readonly IPdfMergeService _pdfMergeService;
+        private readonly IBusinessClock _clock;
 
         public AgreementService(
             IDbRepository db,
@@ -24,8 +25,10 @@ namespace WorkNest.Application.Services
             IPdfService pdf,
             ILeaseTemplateService templateService,
             IHtmlToPdfService htmlToPdfService,
-            IPdfMergeService pdfMergeService)
+            IPdfMergeService pdfMergeService,
+            IBusinessClock clock)
         {
+            _clock = clock;
             _db = db;
             _quotations = quotations;
             _email = email;
@@ -465,7 +468,7 @@ namespace WorkNest.Application.Services
                 throw new InvalidOperationException("The agreement was marked signed but no booking was created. Check the quotation's space and dates.");
 
             // 4. Date everything on the agreement's signed date
-            await _db.ApplyAgreementSignedDateDbAsync(agreementId, bookingId, (signedDate ?? DateTime.Today).Date);
+            await _db.ApplyAgreementSignedDateDbAsync(agreementId, bookingId, (signedDate ?? _clock.Today).Date);
 
             // Re-read this agreement (the old code read only the newest one and failed for older agreements)
             return await GetAgreementByIdAsync(agreementId)

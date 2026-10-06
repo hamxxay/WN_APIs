@@ -11,8 +11,11 @@ namespace WorkNest.Application.Services
     {
         private readonly IDbRepository _db;
 
-        public ChallanService(IDbRepository db)
+        private readonly IBusinessClock _clock;
+
+        public ChallanService(IDbRepository db, IBusinessClock clock)
         {
+            _clock = clock;
             _db = db;
         }
 
@@ -27,7 +30,7 @@ namespace WorkNest.Application.Services
         {
             if (request == null || request.BookingId <= 0) return (false, "Booking is required.");
             if (!DateTime.TryParse(request.NewExpiryDate, out var newDate)) return (false, "Choose a valid new expiry date.");
-            if (newDate.Date < DateTime.Today) return (false, "The new expiry date cannot be in the past.");
+            if (newDate.Date < _clock.Today) return (false, "The new expiry date cannot be in the past.");
 
             var remarks = string.IsNullOrWhiteSpace(request.Remarks) ? null : request.Remarks.Trim();
             if (remarks?.Length > 500) remarks = remarks[..500];

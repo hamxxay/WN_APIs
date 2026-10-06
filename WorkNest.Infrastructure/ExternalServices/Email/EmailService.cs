@@ -353,8 +353,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                         AccountName = customerName,
                         AttnName = attendantName,
                         BillingAddress = customerAddress ?? "",
-                        InvoiceDate = DateTime.Today,
-                        DueDate = DateTime.Today.AddDays(7),
+                        InvoiceDate = WorkNest.Application.Services.BusinessClock.Default.Today,
+                        DueDate = WorkNest.Application.Services.BusinessClock.Default.Today.AddDays(7),
                         BillingPeriodStart = billingStart,
                         BillingPeriodEnd = billingEnd,
                         CurrentInvoiceTotal = grandTotal,
@@ -367,8 +367,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                             new WorkNest.Infrastructure.ExternalServices.Pdf.StatementInvoiceLineItemDto
                             {
                                 Description = $"Room Rent Capacity Overage Surcharge - {spaceName} ({excessSeatCount} excess seat{(excessSeatCount > 1 ? "s" : "")} for {attendantName})",
-                                FromDate = billingStart ?? DateTime.Today,
-                                ToDate = billingEnd ?? DateTime.Today.AddMonths(1),
+                                FromDate = billingStart ?? WorkNest.Application.Services.BusinessClock.Default.Today,
+                                ToDate = billingEnd ?? WorkNest.Application.Services.BusinessClock.Default.Today.AddMonths(1),
                                 PriceExclVat = surchargeAmount,
                                 VatAmount = taxAmount,
                                 Category = "Room Rent Surcharge"

@@ -14,6 +14,8 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public SpaceTypeController(ISpaceTypeService spaceTypes, IDbRepository db) { _spaceTypes = spaceTypes; _db = db; }
 
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
+
         [HttpGet("api/spacetype/all")]
         [AllowAnonymous]
         public async Task<IActionResult> All() =>
@@ -30,14 +32,17 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/spacetype")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Create([FromBody] SpaceTypeUpsertRequest request) =>
             StatusCode(201, await _spaceTypes.CreateSpaceTypeAsync(request, null));
 
         [HttpPut("api/spacetype/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Update(int id, [FromBody] SpaceTypeUpsertRequest request) =>
             Ok(await _spaceTypes.UpdateSpaceTypeAsync(id, request, null));
 
         [HttpPut("api/spacetype/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] SpaceTypeUpsertRequest request)
         {
             var (rows, _) = await _db.GetSpaceTypesAsync(1, 10000);
@@ -48,10 +53,12 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpDelete("api/spacetype/{id:int}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _spaceTypes.DeleteSpaceTypeAsync(id));
 
         [HttpDelete("api/spacetype/{publicId:guid}")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetSpaceTypesAsync(1, 10000);

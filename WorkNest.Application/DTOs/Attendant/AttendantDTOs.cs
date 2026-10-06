@@ -25,7 +25,7 @@ namespace WorkNest.Application.DTOs.Attendant
         public int BookingDetailId { get; set; }
         public int PersonId { get; set; }
         public int CustomerId { get; set; }
-        public DateTime AssignedFrom { get; set; } = DateTime.UtcNow.Date;
+        public DateTime AssignedFrom { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Today;
     }
 
     public class ToggleAccessStatusRequest

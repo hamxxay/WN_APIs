@@ -2,6 +2,8 @@ namespace WorkNest.Application.DTOs.Auth
 {
     public class UserSyncRequest
     {
+        /// <summary>Firebase ID token (user.getIdToken()) — proves the person signed in with Firebase.</summary>
+        public string? FirebaseIdToken { get; set; }
         public string Email { get; set; } = string.Empty;
         public string? Name { get; set; }
         public string? FirstName { get; set; }
@@ -14,6 +16,8 @@ namespace WorkNest.Application.DTOs.Auth
 
     public class UserRegisterRequest
     {
+        /// <summary>Firebase ID token (user.getIdToken()) — proves the person signed in with Firebase.</summary>
+        public string? FirebaseIdToken { get; set; }
         public string Email { get; set; } = string.Empty;
         public string? Password { get; set; }
         public string? Name { get; set; }
@@ -26,6 +30,8 @@ namespace WorkNest.Application.DTOs.Auth
 
     public class UserLoginRequest
     {
+        /// <summary>Firebase ID token (user.getIdToken()) — proves the person signed in with Firebase.</summary>
+        public string? FirebaseIdToken { get; set; }
         public string Email { get; set; } = string.Empty;
         public string? Password { get; set; }
         public string? Name { get; set; }
@@ -36,6 +42,8 @@ namespace WorkNest.Application.DTOs.Auth
 
     public class GoogleLoginRequest
     {
+        /// <summary>Firebase ID token (user.getIdToken()) — proves the person signed in with Firebase.</summary>
+        public string? FirebaseIdToken { get; set; }
         public string IdToken { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string? Name { get; set; }
