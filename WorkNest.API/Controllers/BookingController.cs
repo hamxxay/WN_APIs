@@ -142,6 +142,15 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        /// <summary>One booking in the same shape as a row of GET api/booking (used to open the first-invoice window).</summary>
+        [HttpGet("api/booking/{id:int}/row")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive,receptionist,Receptionist")]
+        public async Task<IActionResult> GetListRow(int id, [FromServices] IDbRepository db)
+        {
+            var row = await db.GetBookingSummaryRowDbAsync(id);
+            return row == null ? NotFound(ApiResponse.Fail($"Booking #{id} not found.")) : Ok(ApiResponse.Ok(row));
+        }
+
         [HttpGet("api/booking/{id:int}/billing-summary")]
         public async Task<IActionResult> GetBillingSummary(int id) =>
             await GetChallan(id, null);

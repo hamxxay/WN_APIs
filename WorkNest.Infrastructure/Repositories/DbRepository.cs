@@ -1444,6 +1444,15 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<IDictionary<string, object?>?> GetBookingSummaryRowDbAsync(int bookingId)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT v.* FROM dbo.WN_vw_BookingSummary v WITH (NOLOCK) WHERE v.BookingId = @Id;", c);
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = bookingId;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
         public async Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate)
         {
             await using var c = await Open();
