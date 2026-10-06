@@ -337,6 +337,14 @@ namespace WorkNest.Application.Interfaces
         Task SaveHikUserCnicDbAsync(string employeeNo, string name, string? cnic);
         Task SaveHikFingerprintTemplateDbAsync(string employeeNo, string name, int fingerNo, string template);
 
+        // --- UniFi dashboard (WN_UNIFI_History / WN_UNIFI_ClientAliases) ---
+        Task<IEnumerable<(DateTime SampledAt, int Wifi, int Wired, int Guest, int Online, int Offline, string? SitesJson)>> GetUnifiHistoryDbAsync(int days);
+        Task<bool> InsertUnifiHistoryDbAsync(DateTime sampledAt, int wifi, int wired, int guest, int online, int offline, string? sitesJson, int minGapSeconds);
+        Task<int> DeleteUnifiHistoryOlderThanDbAsync(int days);
+        Task<Dictionary<string, string>> GetUnifiClientAliasesDbAsync();
+        Task UpsertUnifiClientAliasDbAsync(string mac, string alias, string? updatedByEmail);
+        Task DeleteUnifiClientAliasDbAsync(string mac);
+
         // --- KYC Portal ---
         Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null);
         Task<IEnumerable<WorkNest.Domain.Entities.CustomerKYCDocument>> GetCustomerKycDocumentsDbAsync(int customerId, bool includeInactive = false);

@@ -4870,6 +4870,107 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // --- UniFi dashboard: client-count history + client aliases (all times UTC) ---
+
+        public async Task<IEnumerable<(DateTime SampledAt, int Wifi, int Wired, int Guest, int Online, int Offline, string? SitesJson)>> GetUnifiHistoryDbAsync(int days)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT SampledAt, Wifi, Wired, Guest, Online, Offline, SitesJson
+                FROM dbo.WN_UNIFI_History WITH (NOLOCK)
+                WHERE SampledAt >= DATEADD(DAY, -@Days, SYSUTCDATETIME())
+                ORDER BY SampledAt;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Days", days);
+            var list = new List<(DateTime, int, int, int, int, int, string?)>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            static int I(SqlDataReader r, int i) => r.IsDBNull(i) ? 0 : Convert.ToInt32(r.GetValue(i));
+            while (await r.ReadAsync())
+            {
+                list.Add((DateTime.SpecifyKind(r.GetDateTime(0), DateTimeKind.Utc), I(r, 1), I(r, 2), I(r, 3), I(r, 4), I(r, 5),
+                          r.IsDBNull(6) ? null : r.GetString(6)));
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Inserts a history sample unless one already exists within minGapSeconds of it, so several API
+        /// instances polling the same network don't write duplicate samples. Returns true when inserted.
+        /// </summary>
+        public async Task<bool> InsertUnifiHistoryDbAsync(DateTime sampledAt, int wifi, int wired, int guest, int online, int offline, string? sitesJson, int minGapSeconds)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SET XACT_ABORT ON;
+                BEGIN TRAN;
+                IF NOT EXISTS (SELECT 1 FROM dbo.WN_UNIFI_History WITH (UPDLOCK, HOLDLOCK)
+                               WHERE SampledAt > DATEADD(SECOND, -@MinGap, @SampledAt))
+                BEGIN
+                    INSERT INTO dbo.WN_UNIFI_History (SampledAt, Wifi, Wired, Guest, Online, Offline, SitesJson)
+                    VALUES (@SampledAt, @Wifi, @Wired, @Guest, @Online, @Offline, @SitesJson);
+                    SELECT 1;
+                END
+                ELSE
+                    SELECT 0;
+                COMMIT;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@SampledAt", SqlDbType.DateTime2).Value = sampledAt;
+            cmd.Parameters.AddWithValue("@MinGap", Math.Max(0, minGapSeconds));
+            cmd.Parameters.AddWithValue("@Wifi", wifi);
+            cmd.Parameters.AddWithValue("@Wired", wired);
+            cmd.Parameters.AddWithValue("@Guest", guest);
+            cmd.Parameters.AddWithValue("@Online", online);
+            cmd.Parameters.AddWithValue("@Offline", offline);
+            cmd.Parameters.Add("@SitesJson", SqlDbType.NVarChar, -1).Value = (object?)sitesJson ?? DBNull.Value;
+            var result = await cmd.ExecuteScalarAsync();
+            return Convert.ToInt32(result ?? 0) == 1;
+        }
+
+        public async Task<int> DeleteUnifiHistoryOlderThanDbAsync(int days)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.WN_UNIFI_History WHERE SampledAt < DATEADD(DAY, -@Days, SYSUTCDATETIME());", c);
+            cmd.Parameters.AddWithValue("@Days", days);
+            return await cmd.ExecuteNonQueryAsync();
+        }
+
+        /// <summary>Client aliases keyed by MAC (lower-case aa:bb:cc:dd:ee:ff).</summary>
+        public async Task<Dictionary<string, string>> GetUnifiClientAliasesDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT Mac, Alias FROM dbo.WN_UNIFI_ClientAliases WITH (NOLOCK);", c);
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+            {
+                if (!r.IsDBNull(0) && !r.IsDBNull(1)) map[r.GetString(0)] = r.GetString(1);
+            }
+            return map;
+        }
+
+        public async Task UpsertUnifiClientAliasDbAsync(string mac, string alias, string? updatedByEmail)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                MERGE dbo.WN_UNIFI_ClientAliases WITH (HOLDLOCK) AS t
+                USING (SELECT @Mac AS Mac) s ON t.Mac = s.Mac
+                WHEN MATCHED THEN UPDATE SET Alias = @Alias, UpdatedAt = SYSUTCDATETIME(), UpdatedByEmail = @Email
+                WHEN NOT MATCHED THEN INSERT (Mac, Alias, UpdatedAt, UpdatedByEmail) VALUES (s.Mac, @Alias, SYSUTCDATETIME(), @Email);";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Mac", mac);
+            cmd.Parameters.AddWithValue("@Alias", alias);
+            cmd.Parameters.AddWithValue("@Email", (object?)updatedByEmail ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task DeleteUnifiClientAliasDbAsync(string mac)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.WN_UNIFI_ClientAliases WHERE Mac = @Mac;", c);
+            cmd.Parameters.AddWithValue("@Mac", mac);
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         // --- KYC Portal ---
 
         public async Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null)

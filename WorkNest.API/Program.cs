@@ -19,6 +19,7 @@ using WorkNest.Infrastructure.ExternalServices.PayFast;
 using WorkNest.Infrastructure.ExternalServices.FileStorage;
 using WorkNest.Infrastructure.ExternalServices.Hikvision;
 using WorkNest.Infrastructure.ExternalServices.Reports;
+using WorkNest.Infrastructure.ExternalServices.Unifi;
 using WorkNest.Infrastructure.Repositories;
 using WorkNest.Infrastructure.Security.Encryption;
 using WorkNest.Infrastructure.Security.JWT;
@@ -156,6 +157,7 @@ try
     builder.Services.AddScoped<IPayFastService, PayFastService>();
     builder.Services.AddScoped<IKycFileStorage, LocalKycFileStorage>();
     builder.Services.AddSingleton<IHikIsapiClient, HikIsapiClient>();
+    builder.Services.AddSingleton<IUnifiClient, UnifiClient>();
 
     // ── Application Services ──────────────────────────────────────────────────
     builder.Services.AddScoped<IAuthService, AuthService>();
@@ -193,6 +195,7 @@ try
     builder.Services.AddScoped<IHikAccessService, HikAccessService>();
     builder.Services.AddScoped<IKycService, KycService>();
     builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();
+    builder.Services.AddSingleton<IUnifiService, UnifiService>();
 
 
     // ── Background Hosted Services ────────────────────────────────────────────
@@ -202,6 +205,7 @@ try
     builder.Services.AddHostedService<AnnouncementDeliveryService>();
     builder.Services.AddHostedService<ChallanAccessSuspensionService>();
     builder.Services.AddHostedService<BookingAutoConfirmService>();
+    builder.Services.AddHostedService<UnifiPollingService>();
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
