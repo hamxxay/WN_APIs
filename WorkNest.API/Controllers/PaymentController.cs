@@ -14,12 +14,21 @@ namespace WorkNest.API.Controllers
         private readonly IDbRepository _db;
         public PaymentController(IPaymentService payments, IDbRepository db) { _payments = payments; _db = db; }
 
+        // Prefer the email from the JWT; fall back to the x-user-email header (same as BookingController).
+        private string? ResolveUserEmail(string? headerEmail)
+        {
+            var claimEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                             ?? User.FindFirst("email")?.Value;
+            return !string.IsNullOrWhiteSpace(claimEmail) ? claimEmail : headerEmail;
+        }
+
         [HttpGet("api/payment/my")]
         public async Task<IActionResult> MyPayments([FromHeader(Name = "x-user-email")] string? userEmail)
         {
-            if (string.IsNullOrWhiteSpace(userEmail))
-                return Unauthorized(new { isSuccessful = false, message = "User email header required" });
-            return Ok(await _payments.GetMyPaymentsAsync(userEmail));
+            var email = ResolveUserEmail(userEmail);
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "User identity or email header required" });
+            return Ok(await _payments.GetMyPaymentsAsync(email));
         }
 
         [HttpGet("api/payment")]
