@@ -1252,7 +1252,7 @@ END;"
 
         [HttpPost("api/invoice/send-initial/{bookingId:int}")]
         [HttpPost("api/booking/{bookingId:int}/send-initial-invoice")]
-        public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId, [FromQuery] DateTime? issuedOn = null)
+        public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId, [FromQuery] DateTime? issuedOn = null, [FromQuery] bool preview = false)
         {
             try
             {
@@ -1370,6 +1370,37 @@ END;"
                     ? Math.Round(securityDeposit / secMonths, 2)
                     : securityDeposit;
                 decimal secDepositQty = (secMonths > 0 && securityDeposit > 0) ? secMonths : 1m;
+
+                // Preview: return exactly what this invoice will contain (same calculation), without saving
+                // or emailing anything — the admin preview window shows these figures.
+                if (preview)
+                {
+                    var invoiceDate = (issuedOn?.Date is DateTime pd && pd <= DateTime.Today) ? pd : DateTime.Today;
+                    return Ok(new
+                    {
+                        isSuccessful = true,
+                        data = new
+                        {
+                            bookingId,
+                            issuedOn = invoiceDate.ToString("yyyy-MM-dd"),
+                            periodStart = periodStart.ToString("yyyy-MM-dd"),
+                            periodEnd = periodEnd.ToString("yyyy-MM-dd"),
+                            description = mainLineDescription,
+                            monthlyRent = calc.MonthlyRent,
+                            billingMonths = calc.BillingPeriodMonths,
+                            isProrated = calc.IsProrated,
+                            proratedDays = calc.ProratedDays,
+                            rent = grossAdvanceRent,
+                            discount = appliedDiscount,
+                            discountPercentage = grossAdvanceRent > 0 ? Math.Round(appliedDiscount * 100m / grossAdvanceRent, 2) : 0m,
+                            tax = taxTotal,
+                            serviceCharge = supportCharge,
+                            securityDeposit,
+                            securityDepositMonths = secMonths,
+                            grandTotal = expectedGrandTotal
+                        }
+                    });
+                }
 
                 int existingId = 0;
                 bool existingLocked = false;
