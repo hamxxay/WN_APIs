@@ -1,0 +1,34 @@
+-- WHT invoices — part 5 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- Run the parts in order: 01 (migration) first, then 02-08.
+-- WN_InsertInvoiceLine: WHT invoices get grossed-up lines (API-created invoices).
+CREATE OR ALTER PROCEDURE [dbo].[WN_InsertInvoiceLine]
+    @InvoiceId INT,
+    @ChargeTypeId TINYINT,
+    @Description NVARCHAR(500),
+    @Quantity DECIMAL(18,2) = 1,
+    @UnitPrice DECIMAL(18,2),
+    @DiscountAmount DECIMAL(18,2) = 0,
+    @TaxRate DECIMAL(5,2) = 0,
+    @SortOrder SMALLINT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- WHT invoices (InvoiceTypeId 6): gross up non-deposit lines like the invoice header. Normal invoices unchanged.
+    DECLARE @InvWhtRate DECIMAL(9,4) = NULL;
+    SELECT @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
+    IF @InvWhtRate > 0 AND @InvWhtRate < 100 AND @ChargeTypeId <> 2
+    BEGIN
+        SET @UnitPrice      = ROUND(@UnitPrice / (1.0 - (@InvWhtRate / 100.0)), 2);
+        SET @DiscountAmount = ROUND(ISNULL(@DiscountAmount, 0) / (1.0 - (@InvWhtRate / 100.0)), 2);
+    END
+
+    INSERT INTO dbo.WN_InvoiceLines (
+        InvoiceId, ChargeTypeId, Description, Quantity,
+        UnitPrice, DiscountAmount, TaxRate, SortOrder
+    )
+    VALUES (
+        @InvoiceId, @ChargeTypeId, @Description, @Quantity,
+        @UnitPrice, @DiscountAmount, @TaxRate, @SortOrder
+    );
+END;

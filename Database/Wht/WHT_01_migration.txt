@@ -1,0 +1,48 @@
+-- WHT invoices — part 1 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- Run the parts in order: 01 (migration) first, then 02-08.
+-- Migration: additive, idempotent (safe to run twice). Adds columns/constraints only; nothing is dropped or renamed.
+
+-- 1. Quotations: WHT flag. The rate already exists as WN_Quotations.WithholdingTaxRate (reused, not duplicated).
+IF COL_LENGTH('dbo.WN_Quotations', 'SendWhtInvoice') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD SendWhtInvoice BIT NOT NULL CONSTRAINT DF_WN_Quotations_SendWhtInvoice DEFAULT (0);');
+IF OBJECT_ID('dbo.CK_WN_Quotations_Wht', 'C') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations WITH CHECK ADD CONSTRAINT CK_WN_Quotations_Wht
+          CHECK (SendWhtInvoice = 0 OR (WithholdingTaxRate > 0 AND WithholdingTaxRate < 100));');
+
+-- 2. Bookings: WHT flag + rate snapshot. WN_Bookings.WHTRate is written by the API today; added only if missing.
+IF COL_LENGTH('dbo.WN_Bookings', 'SendWhtInvoice') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Bookings ADD SendWhtInvoice BIT NOT NULL CONSTRAINT DF_WN_Bookings_SendWhtInvoice DEFAULT (0);');
+IF COL_LENGTH('dbo.WN_Bookings', 'WHTRate') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Bookings ADD WHTRate DECIMAL(5,2) NULL;');
+IF OBJECT_ID('dbo.CK_WN_Bookings_Wht', 'C') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Bookings WITH CHECK ADD CONSTRAINT CK_WN_Bookings_Wht
+          CHECK (SendWhtInvoice = 0 OR (WHTRate > 0 AND WHTRate < 100));');
+
+-- 3. Invoices: WN_Invoices.WHTRate / WHTAmount already exist (WN_Invoices_Insert writes them); added only if missing.
+--    InvoiceTypeId 6 = WHT invoice (1 Standard, 2 Advance, 3 Recurring, 4 Custom, 5 Surcharge). There is no
+--    invoice-types lookup table in SAC400, so nothing to insert.
+IF COL_LENGTH('dbo.WN_Invoices', 'WHTRate') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Invoices ADD WHTRate DECIMAL(9,4) NULL;');
+IF COL_LENGTH('dbo.WN_Invoices', 'WHTAmount') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Invoices ADD WHTAmount DECIMAL(18,4) NOT NULL CONSTRAINT DF_WN_Invoices_WHTAmount DEFAULT (0);');
+
+-- 4. GL account for the WHT debit, per location (resolved by LocationId + EffectiveFrom/EffectiveTo like the others).
+IF COL_LENGTH('dbo.WN_ChargeTypeAccountMapping', 'WhtAccountId') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_ChargeTypeAccountMapping ADD WhtAccountId INT NULL;');
+
+-- >>> FILL IN: Id of the new "Withholding Tax Receivable" GL account (create it in the chart of accounts first).
+--     Location 2 currently uses a copy of location 1's accounts, so both get the same account.
+DECLARE @WhtAccountId INT = NULL;   -- <<< PLACEHOLDER: set the real account Id, e.g. 2861
+DECLARE @Location1Id  INT = 1;
+DECLARE @Location2Id  INT = 2;
+
+IF @WhtAccountId IS NULL
+    PRINT 'WhtAccountId not set: columns added, mapping NOT populated. Set @WhtAccountId and run this script again. WHT invoices fail with "No WHT GL account" until it is set.';
+ELSE
+    EXEC sp_executesql
+        N'UPDATE dbo.WN_ChargeTypeAccountMapping
+             SET WhtAccountId = @WhtAccountId
+           WHERE LocationId IN (@Location1Id, @Location2Id)
+             AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE));',
+        N'@WhtAccountId INT, @Location1Id INT, @Location2Id INT',
+        @WhtAccountId = @WhtAccountId, @Location1Id = @Location1Id, @Location2Id = @Location2Id;

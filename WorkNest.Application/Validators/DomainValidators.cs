@@ -94,4 +94,27 @@ namespace WorkNest.Application.Validators
             RuleFor(x => x.FeatureName).NotEmpty();
         }
     }
+
+    /// <summary>WHT invoice: when ticked, the rate is required and must be 0.01-99.99 (same rule as the DB CHECK).</summary>
+    public class QuotationRequestWhtValidator : AbstractValidator<WorkNest.Application.DTOs.Quotation.QuotationRequest>
+    {
+        public QuotationRequestWhtValidator()
+        {
+            When(x => x.SendWhtInvoice, () =>
+                RuleFor(x => x.WithholdingTaxRate)
+                    .NotNull().WithMessage("WHT rate is required when a WHT invoice is generated.")
+                    .InclusiveBetween(0.01m, 99.99m).WithMessage("WHT rate must be between 0.01 and 99.99."));
+        }
+    }
+
+    public class AdminBookingRequestWhtValidator : AbstractValidator<WorkNest.Application.DTOs.Booking.AdminBookingRequest>
+    {
+        public AdminBookingRequestWhtValidator()
+        {
+            When(x => x.SendWhtInvoice, () =>
+                RuleFor(x => x.WhtRate)
+                    .NotNull().WithMessage("WHT rate is required when a WHT invoice is generated.")
+                    .InclusiveBetween(0.01m, 99.99m).WithMessage("WHT rate must be between 0.01 and 99.99."));
+        }
+    }
 }

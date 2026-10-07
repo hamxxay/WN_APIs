@@ -4279,6 +4279,9 @@ BEGIN
             VALUES (@InvoiceId, 2, 'Security Deposit - ' + CAST(@SecurityDepositMonths AS NVARCHAR(5)) + ' Month(s)', @SecurityDepositMonths, @MonthlyRent, 0, 0, @DepositAccountId, @AdvanceRentMonths + 1);
         END
 
+        -- WHT invoices: gross up the lines just inserted (no-op for normal invoices).
+        EXEC dbo.WN_Invoice_ApplyWhtToLines @InvoiceId = @InvoiceId;
+
         COMMIT TRANSACTION;
 
         SELECT @InvoiceId AS InvoiceId, @InvoiceNumber AS InvoiceNumber, @TotalPayable AS TotalAmount;
@@ -4629,6 +4632,9 @@ BEGIN
             CASE WHEN @SubTotal > 0 THEN CAST(ROUND(@TaxAmount / @SubTotal, 4) AS DECIMAL(6,4)) ELSE 0 END,
             1
         );
+
+        -- WHT invoices: gross up the lines just inserted (no-op for normal invoices).
+        EXEC dbo.WN_Invoice_ApplyWhtToLines @InvoiceId = @InvoiceId;
 
         COMMIT TRANSACTION;
 
@@ -6456,6 +6462,9 @@ BEGIN
             );
         END
 
+        -- WHT invoices: gross up the lines just inserted (no-op for normal invoices).
+        EXEC dbo.WN_Invoice_ApplyWhtToLines @InvoiceId = @InvoiceId;
+
         COMMIT TRANSACTION;
 
         SELECT @InvoiceId AS InvoiceId, @InvNum AS InvoiceNumber, @GrandTotal AS TotalAmount;
@@ -6557,7 +6566,7 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Invoices_Insert]
     @CurrencyCode           NVARCHAR(10)        = 'PKR',
     @StatusId               TINYINT             = NULL, -- NULL = OrderStatus 'Un Paid' (looked up below)
     @Notes                  NVARCHAR(MAX)       = NULL,
-    @InvoiceTypeId          INT                 = 1, -- 1: Standard, 2: Advance, 3: Recurring, 4: Custom, 5: Surcharge
+    @InvoiceTypeId          INT                 = 1, -- 1: Standard, 2: Advance, 3: Recurring, 4: Custom, 5: Surcharge, 6: WHT (set here for WHT bookings)
     @AdvanceRentMonths      INT                 = NULL,
     @SecurityDepositMonths  INT                 = NULL,
     @SecurityDepositAmount  DECIMAL(18, 2)      = 0.00,
@@ -6702,15 +6711,20 @@ BEGIN
             WHERE BookingId = @BookingId;
         END
 
-        -- If @SecurityDepositAmount was omitted or is smaller than the full required deposit, adopt the full booking deposit
-        IF (@SecurityDepositAmount IS NULL OR @SecurityDepositAmount = 0.00) AND @BookingSecReq > 0
+        -- The booking's security deposit belongs on its FIRST invoice only. Later invoices (next / recurring / custom /
+        -- surcharge) used to get the full deposit forced on too, so they failed the breakdown check or booked it again.
+        IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId)
         BEGIN
-            SET @SecurityDepositAmount = @BookingSecReq;
-        END
-        ELSE IF @BookingSecReq > 0 AND @SecurityDepositAmount < @BookingSecReq
-        BEGIN
-            -- If caller passed single-seat/monthly rate (e.g. 70,000) instead of total deposit (e.g. 490,000)
-            SET @SecurityDepositAmount = @BookingSecReq;
+            -- If @SecurityDepositAmount was omitted or is smaller than the full required deposit, adopt the full booking deposit
+            IF (@SecurityDepositAmount IS NULL OR @SecurityDepositAmount = 0.00) AND @BookingSecReq > 0
+            BEGIN
+                SET @SecurityDepositAmount = @BookingSecReq;
+            END
+            ELSE IF @BookingSecReq > 0 AND @SecurityDepositAmount < @BookingSecReq
+            BEGIN
+                -- If caller passed single-seat/monthly rate (e.g. 70,000) instead of total deposit (e.g. 490,000)
+                SET @SecurityDepositAmount = @BookingSecReq;
+            END
         END
     END
 
@@ -6873,12 +6887,45 @@ BEGIN
             SET @RoomRentExclTax = @RoomRentExclTax + @RoundingDiff;
     END
 
+    -- 11b. Withholding tax (WHT) invoice: the booking has SendWhtInvoice = 1 (rate snapshotted on the booking).
+    --      Rent, service charges and the tax on them are grossed up so that, after the customer withholds WhtRate%,
+    --      the net received is unchanged: Gross = ROUND(Net / (1 - WhtRate/100), 2) (= Net * k, k = 1 / (1 - r)).
+    --      WhtAmount is derived by subtraction so the voucher always balances. The security deposit is NOT grossed up.
+    --      Bookings without the flag skip this block entirely.
+    DECLARE @IsWhtInvoice BIT = 0;
+    DECLARE @WhtNetAmount DECIMAL(18, 4) = 0.0000;
+    IF @BookingId IS NOT NULL
+    BEGIN
+        DECLARE @BkSendWht BIT = 0;
+        DECLARE @BkWhtRate DECIMAL(9, 4) = NULL;
+        SELECT @BkSendWht = ISNULL(SendWhtInvoice, 0), @BkWhtRate = WHTRate
+        FROM dbo.WN_Bookings WITH (NOLOCK)
+        WHERE Id = @BookingId;
+
+        IF @BkSendWht = 1 AND @BkWhtRate > 0 AND @BkWhtRate < 100
+        BEGIN
+            DECLARE @WhtDivisor DECIMAL(18, 10) = 1.0 - (@BkWhtRate / 100.0);
+            SET @IsWhtInvoice        = 1;
+            SET @WhtNetAmount        = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges;
+            SET @RoomRentExclTax     = ROUND(@RoomRentExclTax / @WhtDivisor, 2);
+            SET @ServiceCharges      = ROUND(@ServiceCharges / @WhtDivisor, 2);
+            SET @TaxOnServiceCharges = ROUND(@TaxOnServiceCharges / @WhtDivisor, 2);
+            SET @WHTRate             = @BkWhtRate;
+            SET @WHTAmount           = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @WhtNetAmount;
+            SET @TaxTotal            = @TaxOnServiceCharges;
+            SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + @DiscountTotal;   -- discount is applied before the gross-up
+            SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + @SecAmt;
+            SET @InvoiceTypeId       = 6;
+        END
+    END
+
     -- 12. Dynamic GL Accounts Lookup (Location-Aware by Date)
     DECLARE @ARAccountId            INT = NULL;
     DECLARE @RentAccountId_Loc      INT = NULL;
     DECLARE @SecurityReceivedId_Loc INT = NULL;
     DECLARE @SalesTaxId_Loc         INT = NULL;
     DECLARE @ServicesIncomeId_Loc   INT = NULL;
+    DECLARE @WhtAccountId_Loc       INT = NULL;
 
     IF @LocationId IS NOT NULL
     BEGIN
@@ -6887,7 +6934,8 @@ BEGIN
             @RentAccountId_Loc      = MAX(CASE WHEN ChargeTypeId = 1 THEN RentAccountId END),
             @SecurityReceivedId_Loc = MAX(CASE WHEN ChargeTypeId = 2 THEN SecurityReceivedId END),
             @SalesTaxId_Loc         = MAX(CASE WHEN ChargeTypeId = 3 THEN SalesTaxId END),
-            @ServicesIncomeId_Loc   = MAX(CASE WHEN ChargeTypeId = 4 THEN ServicesIncomeId END)
+            @ServicesIncomeId_Loc   = MAX(CASE WHEN ChargeTypeId = 4 THEN ServicesIncomeId END),
+            @WhtAccountId_Loc       = MAX(WhtAccountId)
         FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
         WHERE LocationId = @LocationId
           AND EffectiveFrom <= @IssuedOn
@@ -6926,6 +6974,12 @@ BEGIN
         IF @ServiceCharges > 0 AND @ServicesIncomeId_Loc IS NULL
         BEGIN
             RAISERROR('No GL account mapping for LocationId %d, ChargeTypeId 4 on %s', 16, 1, @LocationId, 4, @IssuedOnStr);
+            RETURN -1;
+        END
+
+        IF @IsWhtInvoice = 1 AND @WHTAmount > 0 AND @WhtAccountId_Loc IS NULL
+        BEGIN
+            RAISERROR('No WHT GL account (WN_ChargeTypeAccountMapping.WhtAccountId) for LocationId %d on %s', 16, 1, @LocationId, @IssuedOnStr);
             RETURN -1;
         END
     END
@@ -7024,7 +7078,9 @@ BEGIN
         SET @GeneratedPublicId = @PublicId;
 
         -- Step B: Update or Insert dbo.WN_SecurityDeposits (RefId = Invoice.Id, RefNo = Invoice.InvoiceNumber, CustomerId = CustomerCode)
-        IF @BookingId IS NOT NULL
+        -- Only invoices that carry the deposit point the deposit record at themselves (later rent invoices used to
+        -- re-point it, so the deposit report showed the latest rent invoice).
+        IF @BookingId IS NOT NULL AND @SecAmt > 0
         BEGIN
             UPDATE dbo.WN_SecurityDeposits
             SET RefId      = @InvoiceId,
@@ -7154,6 +7210,27 @@ BEGIN
                 SET @DescSuffix = ' - ' + LTRIM(RTRIM(@CustomerDisplayName));
             END
 
+            -- AR is debited with what the customer actually pays: the full total, or for a WHT invoice the total less WHT
+            -- (the WHT part is debited to the WHT account instead).
+            DECLARE @ARDebitAmount DECIMAL(18, 4) = @GrandTotal - CASE WHEN @IsWhtInvoice = 1 THEN @WHTAmount ELSE 0.0000 END;
+
+            -- Balance guard (WHT invoices): debits must equal credits, or the whole invoice is rolled back.
+            IF @IsWhtInvoice = 1
+            BEGIN
+                DECLARE @TotalDebits  DECIMAL(18, 4) = @ARDebitAmount + @WHTAmount;
+                DECLARE @TotalCredits DECIMAL(18, 4) =
+                      CASE WHEN @RoomRentExclTax > 0 THEN @RoomRentExclTax ELSE 0 END
+                    + CASE WHEN @ServiceCharges > 0 THEN @ServiceCharges ELSE 0 END
+                    + CASE WHEN @TaxOnServiceCharges > 0 THEN @TaxOnServiceCharges ELSE 0 END
+                    + CASE WHEN @SecAmt > 0 THEN @SecAmt ELSE 0 END;
+                IF ABS(@TotalDebits - @TotalCredits) > 0.005
+                BEGIN
+                    DECLARE @DebitsStr VARCHAR(30) = CAST(@TotalDebits AS VARCHAR(30));
+                    DECLARE @CreditsStr VARCHAR(30) = CAST(@TotalCredits AS VARCHAR(30));
+                    RAISERROR('WHT invoice voucher does not balance: debits %s, credits %s.', 16, 1, @DebitsStr, @CreditsStr);
+                END
+            END
+
             -- 1. Create Voucher via dbo.Vouchers_Insert
             DECLARE @VoucherTable TABLE (Id INT, Code VARCHAR(50));
             DECLARE @VoucherShortGUID VARCHAR(50) = CONVERT(VARCHAR(50), NEWID());
@@ -7193,10 +7270,25 @@ BEGIN
                 @AccountId                   = @ARAccountId,
                 @Description                 = @DescAR,
                 @ProjectId                   = NULL,
-                @Debit                       = @GrandTotal,
+                @Debit                       = @ARDebitAmount,
                 @Credit                      = 0.0000,
                 @VehicleId                   = NULL,
                 @ConstructionProjectActiveId = NULL;
+
+            -- (a2) Withholding tax (DEBIT) — WHT invoices only
+            IF @IsWhtInvoice = 1 AND @WHTAmount > 0
+            BEGIN
+                DECLARE @DescWht VARCHAR(255) = LEFT('Withholding Tax ' + CAST(CAST(@WHTRate AS DECIMAL(5,2)) AS VARCHAR(10)) + '% - Invoice ' + @InvoiceNumber + @DescSuffix, 255);
+                EXEC dbo.Ledgers_Insert
+                    @VoucherId                   = @VoucherId,
+                    @AccountId                   = @WhtAccountId_Loc,
+                    @Description                 = @DescWht,
+                    @ProjectId                   = NULL,
+                    @Debit                       = @WHTAmount,
+                    @Credit                      = 0.0000,
+                    @VehicleId                   = NULL,
+                    @ConstructionProjectActiveId = NULL;
+            END
 
             -- (b) Room Rent (CREDIT)
             IF @RoomRentExclTax > 0
@@ -7258,7 +7350,7 @@ BEGIN
             DECLARE @CustLedgerShortGUID VARCHAR(50) = CONVERT(VARCHAR(50), NEWID());
             EXEC dbo.CustomerLedger_Insert
                 @Description         = @DescAR,
-                @Debit               = @GrandTotal,
+                @Debit               = @ARDebitAmount,
                 @Credit              = 0.0000,
                 @LedgerDate          = @IssuedOn,
                 @CustomerVendorId    = @CustomerVendorId,
@@ -11824,6 +11916,32 @@ BEGIN
     WHERE AccountNature = 'Bank' OR Description LIKE '%Bank%';
 END;
 GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoice_ApplyWhtToLines] ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE OR ALTER PROCEDURE [dbo].[WN_Invoice_ApplyWhtToLines]
+    @InvoiceId INT
+AS
+BEGIN
+    -- Grosses up the non-deposit lines of a WHT invoice (InvoiceTypeId 6) the same way WN_Invoices_Insert grossed
+    -- up its header: UnitPrice and DiscountAmount / (1 - WhtRate/100), rounded to 2 dp. Security deposit lines
+    -- (ChargeTypeId 2) are not grossed up. Does nothing for normal invoices. Call ONCE, after the lines are inserted.
+    SET NOCOUNT ON;
+    DECLARE @WhtRate DECIMAL(9,4) = NULL;
+    SELECT @WhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
+    IF @WhtRate IS NULL OR @WhtRate <= 0 OR @WhtRate >= 100 RETURN 0;
+
+    DECLARE @WhtDivisor DECIMAL(18,10) = 1.0 - (@WhtRate / 100.0);
+    UPDATE dbo.WN_InvoiceLines
+       SET UnitPrice      = ROUND(UnitPrice / @WhtDivisor, 2),
+           DiscountAmount = ROUND(ISNULL(DiscountAmount, 0) / @WhtDivisor, 2)
+     WHERE InvoiceId = @InvoiceId
+       AND ChargeTypeId <> 2;
+    RETURN 0;
+END;
+GO
 /****** Object:  StoredProcedure [dbo].[WN_InsertInvoiceLine] ******/
 SET ANSI_NULLS ON
 GO
@@ -11841,6 +11959,16 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_InsertInvoiceLine]
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    -- WHT invoices (InvoiceTypeId 6): gross up non-deposit lines like the invoice header. Normal invoices unchanged.
+    DECLARE @InvWhtRate DECIMAL(9,4) = NULL;
+    SELECT @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
+    IF @InvWhtRate > 0 AND @InvWhtRate < 100 AND @ChargeTypeId <> 2
+    BEGIN
+        SET @UnitPrice      = ROUND(@UnitPrice / (1.0 - (@InvWhtRate / 100.0)), 2);
+        SET @DiscountAmount = ROUND(ISNULL(@DiscountAmount, 0) / (1.0 - (@InvWhtRate / 100.0)), 2);
+    END
+
     INSERT INTO dbo.WN_InvoiceLines (
         InvoiceId, ChargeTypeId, Description, Quantity,
         UnitPrice, DiscountAmount, TaxRate, SortOrder
@@ -11901,6 +12029,25 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_UpdateInvoiceBreakdown]
 AS
 BEGIN
     SET NOCOUNT ON;
+
+    -- WHT invoices (InvoiceTypeId 6) keep their grossed-up amounts when callers rewrite the breakdown with net
+    -- figures (e.g. re-sending the first invoice). Same formula as WN_Invoices_Insert; normal invoices unchanged.
+    DECLARE @InvType INT = NULL, @InvWhtRate DECIMAL(9,4) = NULL, @InvWhtAmount DECIMAL(18,4) = NULL;
+    SELECT @InvType = InvoiceTypeId, @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId;
+    IF @InvType = 6 AND @InvWhtRate > 0 AND @InvWhtRate < 100
+       AND (ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0)) > 0
+    BEGIN
+        DECLARE @WhtDivisor DECIMAL(18,10) = 1.0 - (@InvWhtRate / 100.0);
+        DECLARE @NetAmount DECIMAL(18,4) = ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0);
+        SET @RoomRentExclTax     = ROUND(ISNULL(@RoomRentExclTax, 0) / @WhtDivisor, 2);
+        SET @ServiceCharges      = ROUND(ISNULL(@ServiceCharges, 0) / @WhtDivisor, 2);
+        SET @TaxOnServiceCharges = ROUND(ISNULL(@TaxOnServiceCharges, 0) / @WhtDivisor, 2);
+        SET @InvWhtAmount        = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @NetAmount;
+        SET @TaxTotal            = @TaxOnServiceCharges;
+        SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + ISNULL(@DiscountTotal, 0);
+        SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + ISNULL(@SecurityDepositAmount, 0);
+    END
+
     UPDATE dbo.WN_Invoices
     SET SubTotal = @SubTotal,
         DiscountTotal = ISNULL(@DiscountTotal, DiscountTotal),
@@ -11921,6 +12068,7 @@ BEGIN
         AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
         AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
         DueOn = ISNULL(@DueOn, DueOn),
+        WHTAmount = ISNULL(@InvWhtAmount, WHTAmount),
         UpdatedOn = SYSUTCDATETIME()
     WHERE Id = @InvoiceId;
 END;
