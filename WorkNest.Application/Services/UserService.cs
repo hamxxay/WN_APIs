@@ -102,7 +102,7 @@ namespace WorkNest.Application.Services
             var roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
             int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
 
-            if (Roles.IsSuperAdmin(roleId) || roleId == Roles.GeneralId)
+            if (!Roles.IsLocationBoundRole(roleId))
             {
                 finalLocationId = null;
             }
@@ -110,7 +110,7 @@ namespace WorkNest.Application.Services
             {
                 if (!finalLocationId.HasValue || finalLocationId.Value <= 0)
                 {
-                    return ApiResponse.Fail("Location is required for Admin and Sales Executive roles.");
+                    return ApiResponse.Fail("Location is required for Sales Executives.");
                 }
             }
 
@@ -150,7 +150,7 @@ namespace WorkNest.Application.Services
             {
                 int roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
 
-                if (Roles.IsSuperAdmin(roleId) || roleId == Roles.GeneralId)
+                if (!Roles.IsLocationBoundRole(roleId))
                 {
                     finalLocationId = null;
                 }
@@ -174,7 +174,7 @@ namespace WorkNest.Application.Services
             {
                 var existingUser = await _db.GetUserByIdAsync(id);
                 var existingRoleId = existingUser?.TryGetValue("RoleId", out var rid) == true && rid is not null ? Convert.ToInt32(rid) : Roles.GeneralId;
-                if (Roles.IsSuperAdmin(existingRoleId) || existingRoleId == Roles.GeneralId)
+                if (!Roles.IsLocationBoundRole(existingRoleId))
                 {
                     finalLocationId = null;
                 }
@@ -221,7 +221,7 @@ namespace WorkNest.Application.Services
             int roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
             int? finalLocationId = request.LocationId;
 
-            if (Roles.IsSuperAdmin(roleId) || roleId == Roles.GeneralId)
+            if (!Roles.IsLocationBoundRole(roleId))
             {
                 finalLocationId = null;
             }
@@ -238,7 +238,7 @@ namespace WorkNest.Application.Services
                     }
                     else
                     {
-                        return ApiResponse.Fail("Location is required when updating role to Admin or Sales Executive.");
+                        return ApiResponse.Fail("Location is required when making a user a Sales Executive.");
                     }
                 }
             }

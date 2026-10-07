@@ -83,13 +83,15 @@ namespace WorkNest.Common.Constants
         public static bool IsAdminRole(string role) =>
             role == Admin || role == SuperAdmin;
 
-        /// <summary>Returns true if the role requires single-location binding (Admin, SalesExecutive).</summary>
+        /// <summary>
+        /// Only Sales Executives are limited to their assigned location(s); Admins and Super Admins cover
+        /// every location.
+        /// </summary>
         public static bool IsLocationBoundRole(int? roleId) =>
-            roleId == AdminId || roleId == SalesExecutiveId;
+            roleId == SalesExecutiveId;
 
-        /// <summary>Returns true if the role string requires single-location binding (admin, sales_executive).</summary>
+        /// <summary>Only sales_executive is limited to its assigned location(s).</summary>
         public static bool IsLocationBoundRole(string? role) =>
-            string.Equals(role, Admin, System.StringComparison.OrdinalIgnoreCase) ||
             string.Equals(role, SalesExecutive, System.StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Returns true if the role is SuperAdmin.</summary>
