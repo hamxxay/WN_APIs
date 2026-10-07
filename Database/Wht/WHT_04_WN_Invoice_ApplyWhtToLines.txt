@@ -1,0 +1,23 @@
+-- WHT invoices — part 4 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- Run the parts in order: 01 (migration) first, then 02-08.
+-- NEW procedure WN_Invoice_ApplyWhtToLines (used by parts 06-08).
+CREATE OR ALTER PROCEDURE [dbo].[WN_Invoice_ApplyWhtToLines]
+    @InvoiceId INT
+AS
+BEGIN
+    -- Grosses up the non-deposit lines of a WHT invoice (InvoiceTypeId 6) the same way WN_Invoices_Insert grossed
+    -- up its header: UnitPrice and DiscountAmount / (1 - WhtRate/100), rounded to 2 dp. Security deposit lines
+    -- (ChargeTypeId 2) are not grossed up. Does nothing for normal invoices. Call ONCE, after the lines are inserted.
+    SET NOCOUNT ON;
+    DECLARE @WhtRate DECIMAL(9,4) = NULL;
+    SELECT @WhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
+    IF @WhtRate IS NULL OR @WhtRate <= 0 OR @WhtRate >= 100 RETURN 0;
+
+    DECLARE @WhtDivisor DECIMAL(18,10) = 1.0 - (@WhtRate / 100.0);
+    UPDATE dbo.WN_InvoiceLines
+       SET UnitPrice      = ROUND(UnitPrice / @WhtDivisor, 2),
+           DiscountAmount = ROUND(ISNULL(DiscountAmount, 0) / @WhtDivisor, 2)
+     WHERE InvoiceId = @InvoiceId
+       AND ChargeTypeId <> 2;
+    RETURN 0;
+END;

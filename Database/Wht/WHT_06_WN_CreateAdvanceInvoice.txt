@@ -1,0 +1,131 @@
+-- WHT invoices — part 6 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- Run the parts in order: 01 (migration) first, then 02-08.
+-- WN_CreateAdvanceInvoice: WHT line gross-up for advance invoices. Only change: one EXEC before COMMIT.
+CREATE OR ALTER PROCEDURE [dbo].[WN_CreateAdvanceInvoice]
+    @BookingId              INT,
+    @AdvanceRentMonths      INT,
+    @SecurityDepositMonths  INT,
+    @DiscountPercentage     DECIMAL(5,2)    = 0.00,
+    @DiscountAmount         DECIMAL(18,2)   = 0.00,
+    @TaxPercentage          DECIMAL(5,2)    = 0.00,
+    @TaxAmount              DECIMAL(18,2)   = 0.00,
+    @Notes                  NVARCHAR(MAX)   = NULL,
+    @CreatedByAdminId       NVARCHAR(100)   = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- New invoices use dbo.OrderStatus IDs (looked up by description, not hard-coded).
+    DECLARE @UnPaidStatusId TINYINT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id);
+    BEGIN TRANSACTION;
+    BEGIN TRY
+
+        DECLARE @CustomerId INT, @MonthlyRent DECIMAL(18,2), @BookingStart DATETIME, @BookingEnd DATETIME;
+        SELECT @CustomerId = UserId, @MonthlyRent = RoomPrice, @BookingStart = StartOn, @BookingEnd = EndOn
+        FROM dbo.WN_vw_BookingSummary WHERE BookingId = @BookingId;
+
+        IF @BookingId IS NULL OR @CustomerId IS NULL
+        BEGIN
+            RAISERROR('Invalid booking specified.', 16, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+
+        -- Calculate amounts
+        DECLARE @AdvanceRentTotal DECIMAL(18,2) = @AdvanceRentMonths * @MonthlyRent;
+        DECLARE @SecurityDepositTotal DECIMAL(18,2) = @SecurityDepositMonths * @MonthlyRent;
+        DECLARE @Subtotal DECIMAL(18,2) = @AdvanceRentTotal;
+        DECLARE @CalcDiscount DECIMAL(18,2) = 0.00;
+        IF ISNULL(@DiscountPercentage, 0) > 0
+            SET @CalcDiscount = ROUND(@AdvanceRentTotal * (@DiscountPercentage / 100.0), 2);
+        ELSE IF ISNULL(@DiscountAmount, 0) > 0
+            SET @CalcDiscount = CASE WHEN @DiscountAmount > @AdvanceRentTotal THEN @AdvanceRentTotal ELSE @DiscountAmount END;
+
+        DECLARE @DiscountedRent DECIMAL(18,2) = @AdvanceRentTotal - @CalcDiscount;
+        DECLARE @SupportCharge DECIMAL(18,2) = ROUND(@DiscountedRent * 0.10, 2);
+        DECLARE @CalcTax DECIMAL(18,2) = CASE WHEN @TaxAmount > 0 THEN @TaxAmount ELSE ROUND(@SupportCharge * (CASE WHEN ISNULL(@TaxPercentage, 0) > 0 THEN @TaxPercentage ELSE 16.00 END / 100.0), 2) END;
+        DECLARE @TotalPayable DECIMAL(18,2) = @DiscountedRent + @SecurityDepositTotal + @CalcTax;
+
+        -- Resolve sequence
+        DECLARE @InvoiceNumber NVARCHAR(50);
+        IF EXISTS (SELECT * FROM sys.sequences WHERE name = 'Seq_InvoiceNumber')
+        BEGIN
+            SET @InvoiceNumber = 'INV-ADV-' + CAST(NEXT VALUE FOR dbo.Seq_InvoiceNumber AS NVARCHAR(20));
+        END
+        ELSE
+        BEGIN
+            SET @InvoiceNumber = 'INV-ADV-' + CONVERT(NVARCHAR(8), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)), 112) + '-' + CAST(CAST(RAND()*100000 AS INT) AS NVARCHAR(10));
+        END
+
+        -- Load Account mappings
+        DECLARE @RentAccountId    INT = NULL;
+        DECLARE @DepositAccountId INT = NULL;
+
+        SELECT TOP 1 
+            @RentAccountId    = sp.RentAccountId,
+            @DepositAccountId = sp.DepositAccountId
+        FROM dbo.WN_SpacePricing sp
+        JOIN dbo.WN_Bookings     b  ON b.PricingId = sp.Id
+        WHERE b.Id = @BookingId;
+
+        IF @RentAccountId IS NULL SET @RentAccountId = 2852;
+        IF @DepositAccountId IS NULL AND @SecurityDepositTotal > 0 SET @DepositAccountId = 76;
+
+        -- Call Centralized SP to insert invoice header
+        DECLARE @InvoiceId INT;
+        EXEC dbo.WN_Invoices_Insert
+            @UserId                 = @CustomerId,
+            @BookingId              = @BookingId,
+            @InvoiceNumber          = @InvoiceNumber,
+            @InvoiceTypeId          = 2, -- 2: Advance Invoice
+            @AdvanceRentMonths      = @AdvanceRentMonths,
+            @SecurityDepositMonths  = @SecurityDepositMonths,
+            @SecurityDepositAmount  = @SecurityDepositTotal,
+            @SubTotal               = @Subtotal,
+            @DiscountTotal          = @CalcDiscount,
+            @TaxTotal               = @CalcTax,
+            @GrandTotal             = @TotalPayable,
+            @StatusId               = @UnPaidStatusId, -- OrderStatus 'Un Paid'
+            @Notes                  = @Notes,
+            @IssuedOn               = NULL, -- Defaults to today
+            @DueOn                  = NULL, -- Defaults to today + 7 days
+            @SyncCustomerVendor     = 1,
+            @InvoiceId              = @InvoiceId OUTPUT,
+            @GeneratedInvoiceNumber = @InvoiceNumber OUTPUT;
+
+        -- Create Line Items in WN_InvoiceLines
+        DECLARE @PerMonthDisc DECIMAL(18,2) = CASE WHEN @AdvanceRentMonths > 0 THEN ROUND(@CalcDiscount / @AdvanceRentMonths, 2) ELSE 0 END;
+        DECLARE @i INT = 1;
+        WHILE @i <= @AdvanceRentMonths
+        BEGIN
+            DECLARE @MonthStart DATETIME = DATEADD(month, @i - 1, @BookingStart);
+            DECLARE @MonthLabel NVARCHAR(50) = DATENAME(month, @MonthStart) + ' ' + CAST(YEAR(@MonthStart) AS NVARCHAR(4));
+            DECLARE @MonthLineDisc DECIMAL(18,2) = CASE WHEN @i = @AdvanceRentMonths THEN @CalcDiscount - (@PerMonthDisc * (@AdvanceRentMonths - 1)) ELSE @PerMonthDisc END;
+
+            INSERT INTO dbo.WN_InvoiceLines (InvoiceId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, SortOrder)
+            VALUES (@InvoiceId, 1, 'Advance Rent - ' + @MonthLabel, 1, @MonthlyRent, @MonthLineDisc, 0, @RentAccountId, @i);
+
+            -- Insert into Prepaid Periods tracking as Pending
+            INSERT INTO dbo.WN_InvoicePrepaidPeriods (InvoiceId, BookingId, PeriodStartDate, PeriodEndDate, MonthName, MonthlyRentAmount, Status)
+            VALUES (@InvoiceId, @BookingId, @MonthStart, DATEADD(day, -1, DATEADD(month, 1, @MonthStart)), @MonthLabel, @MonthlyRent, 'Pending');
+
+            SET @i = @i + 1;
+        END
+
+        IF @SecurityDepositMonths > 0
+        BEGIN
+            INSERT INTO dbo.WN_InvoiceLines (InvoiceId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, SortOrder)
+            VALUES (@InvoiceId, 2, 'Security Deposit - ' + CAST(@SecurityDepositMonths AS NVARCHAR(5)) + ' Month(s)', @SecurityDepositMonths, @MonthlyRent, 0, 0, @DepositAccountId, @AdvanceRentMonths + 1);
+        END
+
+        -- WHT invoices: gross up the lines just inserted (no-op for normal invoices).
+        EXEC dbo.WN_Invoice_ApplyWhtToLines @InvoiceId = @InvoiceId;
+
+        COMMIT TRANSACTION;
+
+        SELECT @InvoiceId AS InvoiceId, @InvoiceNumber AS InvoiceNumber, @TotalPayable AS TotalAmount;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;

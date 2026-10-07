@@ -33,6 +33,8 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal? PerSeatSupportRate { get; set; }
         public int? FloorId { get; set; }
         public decimal? WithholdingTaxRate { get; set; } = 15.00m;
+        /// <summary>Generate Withholding Tax (WHT) invoices for the booking made from this quotation (rate = WithholdingTaxRate).</summary>
+        public bool SendWhtInvoice { get; set; }
         public string? Remarks { get; set; }
         public DateTime ValidUntil { get; set; }
     }
@@ -87,6 +89,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal TaxAmountOnAdvanceRent { get; set; }
         public decimal TaxAmountOnContract { get; set; }
         public decimal WithholdingTaxRate { get; set; } = 15.00m;
+        public bool SendWhtInvoice { get; set; }
         public decimal TotalPayable { get; set; }
         public string? Remarks { get; set; }
         public string? Status { get; set; }

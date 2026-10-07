@@ -1,0 +1,70 @@
+-- WHT invoices — part 3 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- Run the parts in order: 01 (migration) first, then 02-08.
+-- WN_UpdateInvoiceBreakdown: re-applies the WHT gross-up for WHT invoices.
+CREATE OR ALTER PROCEDURE [dbo].[WN_UpdateInvoiceBreakdown]
+    @InvoiceId INT,
+    @SubTotal DECIMAL(18,2),
+    @DiscountTotal DECIMAL(18,2) = 0,
+    @TaxTotal DECIMAL(18,2) = 0,
+    @GrandTotal DECIMAL(18,2) = 0,
+    @BillingPeriodStart DATE = NULL,
+    @BillingPeriodEnd DATE = NULL,
+    @AdvanceRentMonths INT = NULL,
+    @SecurityDepositMonths INT = NULL,
+    @SecurityDepositAmount DECIMAL(18,2) = 0,
+    @RoomRentExclTax DECIMAL(18,2) = 0,
+    @ServiceCharges DECIMAL(18,2) = 0,
+    @TaxOnServiceCharges DECIMAL(18,2) = 0,
+    @RentAccountId INT = NULL,
+    @SecurityReceivedId INT = NULL,
+    @ServicesIncomeId INT = NULL,
+    @SalesTaxId INT = NULL,
+    @AccountReceivableId INT = NULL,
+    @AccountsCoaId INT = NULL,
+    @DueOn DATE = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- WHT invoices (InvoiceTypeId 6) keep their grossed-up amounts when callers rewrite the breakdown with net
+    -- figures (e.g. re-sending the first invoice). Same formula as WN_Invoices_Insert; normal invoices unchanged.
+    DECLARE @InvType INT = NULL, @InvWhtRate DECIMAL(9,4) = NULL, @InvWhtAmount DECIMAL(18,4) = NULL;
+    SELECT @InvType = InvoiceTypeId, @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId;
+    IF @InvType = 6 AND @InvWhtRate > 0 AND @InvWhtRate < 100
+       AND (ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0)) > 0
+    BEGIN
+        DECLARE @WhtDivisor DECIMAL(18,10) = 1.0 - (@InvWhtRate / 100.0);
+        DECLARE @NetAmount DECIMAL(18,4) = ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0);
+        SET @RoomRentExclTax     = ROUND(ISNULL(@RoomRentExclTax, 0) / @WhtDivisor, 2);
+        SET @ServiceCharges      = ROUND(ISNULL(@ServiceCharges, 0) / @WhtDivisor, 2);
+        SET @TaxOnServiceCharges = ROUND(ISNULL(@TaxOnServiceCharges, 0) / @WhtDivisor, 2);
+        SET @InvWhtAmount        = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @NetAmount;
+        SET @TaxTotal            = @TaxOnServiceCharges;
+        SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + ISNULL(@DiscountTotal, 0);
+        SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + ISNULL(@SecurityDepositAmount, 0);
+    END
+
+    UPDATE dbo.WN_Invoices
+    SET SubTotal = @SubTotal,
+        DiscountTotal = ISNULL(@DiscountTotal, DiscountTotal),
+        TaxTotal = ISNULL(@TaxTotal, TaxTotal),
+        GrandTotal = CASE WHEN @GrandTotal > 0 THEN @GrandTotal ELSE GrandTotal END,
+        BillingPeriodStart = ISNULL(@BillingPeriodStart, BillingPeriodStart),
+        BillingPeriodEnd = ISNULL(@BillingPeriodEnd, BillingPeriodEnd),
+        AdvanceRentMonths = ISNULL(@AdvanceRentMonths, AdvanceRentMonths),
+        SecurityDepositMonths = ISNULL(@SecurityDepositMonths, SecurityDepositMonths),
+        SecurityDepositAmount = ISNULL(@SecurityDepositAmount, SecurityDepositAmount),
+        RoomRentExclTax = ISNULL(@RoomRentExclTax, RoomRentExclTax),
+        ServiceCharges = ISNULL(@ServiceCharges, ServiceCharges),
+        TaxOnServiceCharges = ISNULL(@TaxOnServiceCharges, TaxOnServiceCharges),
+        RentAccountId = COALESCE(@RentAccountId, RentAccountId),
+        SecurityReceivedId = COALESCE(@SecurityReceivedId, SecurityReceivedId),
+        ServicesIncomeId = COALESCE(@ServicesIncomeId, ServicesIncomeId),
+        SalesTaxId = COALESCE(@SalesTaxId, SalesTaxId),
+        AccountReceivableId = COALESCE(@AccountReceivableId, AccountReceivableId),
+        AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
+        DueOn = ISNULL(@DueOn, DueOn),
+        WHTAmount = ISNULL(@InvWhtAmount, WHTAmount),
+        UpdatedOn = SYSUTCDATETIME()
+    WHERE Id = @InvoiceId;
+END;

@@ -1,0 +1,845 @@
+-- WHT invoices — part 2 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- Run the parts in order: 01 (migration) first, then 02-08.
+-- WN_Invoices_Insert: WHT gross-up + posting, and the first-invoice-only security deposit fix.
+CREATE OR ALTER PROCEDURE [dbo].[WN_Invoices_Insert]
+(
+    -- Core & Existing Parameters (100% Backward Compatible)
+    @UserId                 INT,
+    @BookingId              INT                 = NULL,
+    @MembershipId           INT                 = NULL,
+    @InvoiceNumber          NVARCHAR(50)        = NULL,
+    @PublicId               UNIQUEIDENTIFIER    = NULL,
+    @IssuedOn               DATETIME            = NULL,
+    @DueOn                  DATE                = NULL,
+    @SubTotal               DECIMAL(18, 4)      = 0.0000,
+    @DiscountTotal          DECIMAL(18, 4)      = 0.0000,
+    @TaxTotal               DECIMAL(18, 4)      = 0.0000,
+    @GrandTotal             DECIMAL(18, 4)      = NULL,
+    @PaidTotal              DECIMAL(18, 4)      = 0.0000,
+    @CurrencyCode           NVARCHAR(10)        = 'PKR',
+    @StatusId               TINYINT             = NULL, -- NULL = OrderStatus 'Un Paid' (looked up below)
+    @Notes                  NVARCHAR(MAX)       = NULL,
+    @InvoiceTypeId          INT                 = 1, -- 1: Standard, 2: Advance, 3: Recurring, 4: Custom, 5: Surcharge, 6: WHT (set here for WHT bookings)
+    @AdvanceRentMonths      INT                 = NULL,
+    @SecurityDepositMonths  INT                 = NULL,
+    @SecurityDepositAmount  DECIMAL(18, 2)      = 0.00,
+    @AccountsCoaId          INT                 = NULL,
+    @BillingPeriodMonths    INT                 = NULL,
+    @BillingPeriodStart     DATETIME            = NULL,
+    @BillingPeriodEnd       DATETIME            = NULL,
+    @AccountReceivableId    INT                 = NULL,
+    @RentAccountId          INT                 = NULL,
+    @ServicesIncomeId       INT                 = NULL,
+    @SalesTaxId             INT                 = NULL,
+    @SecurityReceivedId     INT                 = NULL,
+    @CreatedById            INT                 = NULL,
+    @SyncCustomerVendor     BIT                 = 1,
+
+    -- Optional GL Posting & Breakdown Parameters
+    @RoomRentExclTax        DECIMAL(18, 4)      = NULL,
+    @ServiceCharges         DECIMAL(18, 4)      = NULL,
+    @TaxOnServiceCharges    DECIMAL(18, 4)      = NULL,
+    @WHTRate                DECIMAL(9, 4)       = 0.0000,
+    @WHTAmount              DECIMAL(18, 4)      = 0.0000,
+    @LocationId             INT                 = NULL,
+    @VoucherTypeId          TINYINT             = 1,    -- Default Voucher Type: 1 (JV)
+    @CustomerVendorId       INT                 = NULL,
+    @PostToLedger           BIT                 = 1,
+
+    -- Output Parameters
+    @InvoiceId              INT                 = NULL OUTPUT,
+    @GeneratedInvoiceNumber NVARCHAR(50)        = NULL OUTPUT,
+    @GeneratedPublicId      UNIQUEIDENTIFIER    = NULL OUTPUT,
+    @VoucherId              INT                 = NULL OUTPUT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- New invoices use dbo.OrderStatus IDs (looked up by description, not hard-coded).
+    IF @StatusId IS NULL SET @StatusId = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id);
+
+    -- 1. Default PublicId
+    IF @PublicId IS NULL
+    BEGIN
+        SET @PublicId = NEWID();
+    END
+
+    -- 2. Default IssuedOn (Exact to the second) & DueOn
+    IF @IssuedOn IS NULL
+    BEGIN
+        SET @IssuedOn = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0));
+    END
+    ELSE IF CAST(@IssuedOn AS TIME) = '00:00:00'
+    BEGIN
+        -- If only a date portion was passed, preserve the date and append current time down to the second
+        SET @IssuedOn = DATEADD(SECOND, DATEDIFF(SECOND, CAST(CAST(CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)) AS DATE) AS DATETIME), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))), CAST(CAST(@IssuedOn AS DATE) AS DATETIME));
+    END
+
+    IF @DueOn IS NULL
+    BEGIN
+        SET @DueOn = CAST(DATEADD(DAY, 7, @IssuedOn) AS DATE);
+    END
+
+    -- 3. Resolve CustomerCode across all available sources early
+    DECLARE @CustomerCode NVARCHAR(50) = NULL;
+
+    -- (a) From WN_Bookings
+    IF @BookingId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @CustomerCode = CustomerCode 
+        FROM dbo.WN_Bookings WITH (NOLOCK) 
+        WHERE Id = @BookingId AND CustomerCode IS NOT NULL AND LTRIM(RTRIM(CustomerCode)) <> '';
+    END
+
+    -- (b) From WN_BookingDetails
+    IF (@CustomerCode IS NULL OR @CustomerCode = '') AND @BookingId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @CustomerCode = bd.CustomerCode
+        FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
+        JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+        WHERE b.Id = @BookingId AND bd.CustomerCode IS NOT NULL AND LTRIM(RTRIM(bd.CustomerCode)) <> '';
+    END
+
+    -- (c) From WN_Customers via UserId
+    IF (@CustomerCode IS NULL OR @CustomerCode = '') AND @UserId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @CustomerCode = Code 
+        FROM dbo.WN_Customers WITH (NOLOCK) 
+        WHERE UserId = @UserId AND Code IS NOT NULL AND LTRIM(RTRIM(Code)) <> '';
+    END
+
+    -- (d) From WN_Customers via Email matching WN_Users
+    IF (@CustomerCode IS NULL OR @CustomerCode = '') AND @UserId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @CustomerCode = c.Code
+        FROM dbo.WN_Customers c WITH (NOLOCK)
+        JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Email = c.Email
+        WHERE u.Id = @UserId AND c.Code IS NOT NULL AND LTRIM(RTRIM(c.Code)) <> '';
+    END
+
+    -- (e) From CustomersVendors via CustomerVendorId
+    IF (@CustomerCode IS NULL OR @CustomerCode = '') AND @CustomerVendorId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @CustomerCode = Code
+        FROM dbo.CustomersVendors WITH (NOLOCK)
+        WHERE Id = @CustomerVendorId AND Code IS NOT NULL AND LTRIM(RTRIM(Code)) <> '';
+    END
+
+    -- (f) From CustomersVendors via Email matching WN_Users
+    IF (@CustomerCode IS NULL OR @CustomerCode = '') AND @UserId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @CustomerCode = cv.Code
+        FROM dbo.CustomersVendors cv WITH (NOLOCK)
+        JOIN dbo.WN_Users u WITH (NOLOCK) ON cv.Email = u.Email
+        WHERE u.Id = @UserId AND cv.Code IS NOT NULL AND LTRIM(RTRIM(cv.Code)) <> '';
+    END
+
+    -- 4. Fallback / resolution for booking-related metadata (SecurityDepositAmount, Months)
+    IF @BookingId IS NOT NULL
+    BEGIN
+        IF @SecurityDepositMonths IS NULL
+        BEGIN
+            SELECT @SecurityDepositMonths = SecurityDepositMonths 
+            FROM dbo.WN_Bookings WITH (NOLOCK) 
+            WHERE Id = @BookingId;
+        END
+
+        IF @AdvanceRentMonths IS NULL
+        BEGIN
+            SELECT @AdvanceRentMonths = AdvanceRentMonths 
+            FROM dbo.WN_Bookings WITH (NOLOCK) 
+            WHERE Id = @BookingId;
+        END
+
+        -- Resolve total required security deposit from Booking or SecurityDeposits table
+        DECLARE @BookingSecReq DECIMAL(18, 4) = 0.0000;
+        SELECT @BookingSecReq = ISNULL(SecurityDepositRequired, 0.0000)
+        FROM dbo.WN_Bookings WITH (NOLOCK)
+        WHERE Id = @BookingId;
+
+        IF @BookingSecReq = 0.0000
+        BEGIN
+            SELECT TOP 1 @BookingSecReq = ISNULL(Amount, 0.0000)
+            FROM dbo.WN_SecurityDeposits WITH (NOLOCK)
+            WHERE BookingId = @BookingId;
+        END
+
+        -- The booking's security deposit belongs on its FIRST invoice only. Later invoices (next / recurring / custom /
+        -- surcharge) used to get the full deposit forced on too, so they failed the breakdown check or booked it again.
+        IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId)
+        BEGIN
+            -- If @SecurityDepositAmount was omitted or is smaller than the full required deposit, adopt the full booking deposit
+            IF (@SecurityDepositAmount IS NULL OR @SecurityDepositAmount = 0.00) AND @BookingSecReq > 0
+            BEGIN
+                SET @SecurityDepositAmount = @BookingSecReq;
+            END
+            ELSE IF @BookingSecReq > 0 AND @SecurityDepositAmount < @BookingSecReq
+            BEGIN
+                -- If caller passed single-seat/monthly rate (e.g. 70,000) instead of total deposit (e.g. 490,000)
+                SET @SecurityDepositAmount = @BookingSecReq;
+            END
+        END
+    END
+
+    -- 5. Default GrandTotal calculation if omitted
+    IF @GrandTotal IS NULL
+    BEGIN
+        SET @GrandTotal = (@SubTotal - @DiscountTotal) + @TaxTotal + ISNULL(@SecurityDepositAmount, 0.0000);
+    END
+
+    -- 6. Default Currency
+    IF @CurrencyCode IS NULL OR LTRIM(RTRIM(@CurrencyCode)) = ''
+    BEGIN
+        SET @CurrencyCode = 'PKR';
+    END
+
+    -- 7. Auto-generate InvoiceNumber if omitted
+    IF @InvoiceNumber IS NULL OR LTRIM(RTRIM(@InvoiceNumber)) = ''
+    BEGIN
+        DECLARE @NextId INT;
+        SELECT @NextId = ISNULL(MAX(Id), 0) + 1 FROM dbo.WN_Invoices;
+        SET @InvoiceNumber = 'INV-' + CAST(YEAR(CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))) AS VARCHAR(4)) + '-' + RIGHT('00000' + CAST(@NextId AS VARCHAR(10)), 5);
+    END
+
+    -- 8. Resolve CreatedById from Booking, User, or WN_Users table
+    IF @CreatedById IS NULL AND @BookingId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @CreatedById = CreatedById 
+        FROM dbo.WN_Bookings WITH (NOLOCK) 
+        WHERE Id = @BookingId AND CreatedById IS NOT NULL;
+    END
+
+    IF @CreatedById IS NULL AND @UserId IS NOT NULL
+    BEGIN
+        SET @CreatedById = @UserId;
+    END
+
+    IF @CreatedById IS NULL
+    BEGIN
+        SELECT TOP 1 @CreatedById = Id 
+        FROM dbo.WN_Users WITH (NOLOCK) 
+        ORDER BY Id ASC;
+    END
+
+    -- 9. Location Resolution (LocationId -> CompanyId & BranchId)
+    IF @LocationId IS NULL AND @BookingId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @LocationId = s.LocationId
+        FROM dbo.WN_Bookings b WITH (NOLOCK)
+        JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        WHERE b.Id = @BookingId;
+    END
+
+    -- Fallback: lookup via User's latest booking if not provided
+    IF @LocationId IS NULL AND @UserId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 @LocationId = s.LocationId
+        FROM dbo.WN_Bookings b WITH (NOLOCK)
+        JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        WHERE b.UserId = @UserId
+        ORDER BY b.Id DESC;
+    END
+
+    -- Resolve CompanyId and BranchId from WN_Locations
+    DECLARE @CompanyId INT = NULL;
+    DECLARE @BranchId  INT = NULL;
+
+    IF @LocationId IS NOT NULL
+    BEGIN
+        SELECT TOP 1 
+            @CompanyId = CompanyId, 
+            @BranchId  = BranchId
+        FROM dbo.WN_Locations WITH (NOLOCK)
+        WHERE Id = @LocationId;
+    END
+
+    IF @PostToLedger = 1 AND (@LocationId IS NULL OR @CompanyId IS NULL OR @BranchId IS NULL)
+    BEGIN
+        RAISERROR('Unable to resolve LocationId, CompanyId, or BranchId for invoice ledger posting.', 16, 1);
+        RETURN -1;
+    END
+
+    -- 10. Breakdown Derivation
+    DECLARE @NetBase DECIMAL(18, 4) = 0.0000;
+    DECLARE @SecAmt  DECIMAL(18, 4) = ISNULL(@SecurityDepositAmount, 0.0000);
+
+    IF @GrandTotal IS NOT NULL AND @GrandTotal > 0
+    BEGIN
+        SET @NetBase = @GrandTotal - @SecAmt - @TaxTotal;
+    END
+    ELSE
+    BEGIN
+        SET @NetBase = (@SubTotal - @DiscountTotal);
+        IF @NetBase < 0 SET @NetBase = 0.0000;
+        SET @GrandTotal = @NetBase + @TaxTotal + @SecAmt;
+    END
+
+    IF @NetBase < 0 SET @NetBase = 0.0000;
+
+    IF (@RoomRentExclTax IS NULL AND @ServiceCharges IS NULL AND @TaxOnServiceCharges IS NULL)
+       OR (ISNULL(@RoomRentExclTax, 0) = 0 AND ISNULL(@ServiceCharges, 0) = 0 AND ISNULL(@TaxOnServiceCharges, 0) = 0 AND @GrandTotal > 0)
+    BEGIN
+        IF @TaxTotal > 0
+        BEGIN
+            -- Custom / Surcharge invoices: entire taxable base is treated as Service Fee
+            IF @InvoiceTypeId IN (4, 5) OR @BookingId IS NULL
+            BEGIN
+                SET @TaxOnServiceCharges = @TaxTotal;
+                SET @ServiceCharges      = @NetBase;
+                SET @RoomRentExclTax     = 0.0000;
+            END
+            ELSE
+            BEGIN
+                -- Standard / Advance / Recurring booking invoices
+                DECLARE @AppliedChargePct DECIMAL(5,2) = 10.00;
+                IF @BookingId IS NOT NULL
+                BEGIN
+                    SELECT TOP 1 @AppliedChargePct = ISNULL(AppliedChargePercentage, 10.00)
+                    FROM dbo.WN_BookingDetails WITH (NOLOCK)
+                    WHERE BookingGuid = (SELECT TOP 1 IdGUID FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @BookingId);
+                END
+
+                SET @TaxOnServiceCharges = @TaxTotal;
+                SET @ServiceCharges      = ROUND(@NetBase * (@AppliedChargePct / 100.0), 4);
+                SET @RoomRentExclTax     = @NetBase - @ServiceCharges;
+            END
+        END
+        ELSE
+        BEGIN
+            -- Zero tax invoices
+            SET @RoomRentExclTax     = @NetBase;
+            SET @ServiceCharges      = 0.0000;
+            SET @TaxOnServiceCharges = 0.0000;
+        END
+    END
+    ELSE
+    BEGIN
+        SET @RoomRentExclTax     = ISNULL(@RoomRentExclTax, 0.0000);
+        SET @ServiceCharges      = ISNULL(@ServiceCharges, 0.0000);
+        SET @TaxOnServiceCharges = ISNULL(@TaxOnServiceCharges, 0.0000);
+    END
+
+    -- 11. Balance & Fractional Rounding Alignment (Absorb sub-rupee rounding delta)
+    DECLARE @CalculatedTotal DECIMAL(18, 4) = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + @SecAmt;
+    DECLARE @RoundingDiff    DECIMAL(18, 4) = @GrandTotal - @CalculatedTotal;
+
+    IF ABS(@RoundingDiff) > 1.00
+    BEGIN
+        DECLARE @CalcTotalStr VARCHAR(30) = CAST(@CalculatedTotal AS VARCHAR(30));
+        DECLARE @GrandTotalStr VARCHAR(30) = CAST(@GrandTotal AS VARCHAR(30));
+        RAISERROR('Invoice breakdown amounts sum (%s) does not match GrandTotal (%s).', 16, 1, @CalcTotalStr, @GrandTotalStr);
+        RETURN -1;
+    END
+    ELSE IF @RoundingDiff <> 0.0000
+    BEGIN
+        IF @RoomRentExclTax > 0
+            SET @RoomRentExclTax = @RoomRentExclTax + @RoundingDiff;
+        ELSE IF @ServiceCharges > 0
+            SET @ServiceCharges = @ServiceCharges + @RoundingDiff;
+        ELSE
+            SET @RoomRentExclTax = @RoomRentExclTax + @RoundingDiff;
+    END
+
+    -- 11b. Withholding tax (WHT) invoice: the booking has SendWhtInvoice = 1 (rate snapshotted on the booking).
+    --      Rent, service charges and the tax on them are grossed up so that, after the customer withholds WhtRate%,
+    --      the net received is unchanged: Gross = ROUND(Net / (1 - WhtRate/100), 2) (= Net * k, k = 1 / (1 - r)).
+    --      WhtAmount is derived by subtraction so the voucher always balances. The security deposit is NOT grossed up.
+    --      Bookings without the flag skip this block entirely.
+    DECLARE @IsWhtInvoice BIT = 0;
+    DECLARE @WhtNetAmount DECIMAL(18, 4) = 0.0000;
+    IF @BookingId IS NOT NULL
+    BEGIN
+        DECLARE @BkSendWht BIT = 0;
+        DECLARE @BkWhtRate DECIMAL(9, 4) = NULL;
+        SELECT @BkSendWht = ISNULL(SendWhtInvoice, 0), @BkWhtRate = WHTRate
+        FROM dbo.WN_Bookings WITH (NOLOCK)
+        WHERE Id = @BookingId;
+
+        IF @BkSendWht = 1 AND @BkWhtRate > 0 AND @BkWhtRate < 100
+        BEGIN
+            DECLARE @WhtDivisor DECIMAL(18, 10) = 1.0 - (@BkWhtRate / 100.0);
+            SET @IsWhtInvoice        = 1;
+            SET @WhtNetAmount        = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges;
+            SET @RoomRentExclTax     = ROUND(@RoomRentExclTax / @WhtDivisor, 2);
+            SET @ServiceCharges      = ROUND(@ServiceCharges / @WhtDivisor, 2);
+            SET @TaxOnServiceCharges = ROUND(@TaxOnServiceCharges / @WhtDivisor, 2);
+            SET @WHTRate             = @BkWhtRate;
+            SET @WHTAmount           = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @WhtNetAmount;
+            SET @TaxTotal            = @TaxOnServiceCharges;
+            SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + @DiscountTotal;   -- discount is applied before the gross-up
+            SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + @SecAmt;
+            SET @InvoiceTypeId       = 6;
+        END
+    END
+
+    -- 12. Dynamic GL Accounts Lookup (Location-Aware by Date)
+    DECLARE @ARAccountId            INT = NULL;
+    DECLARE @RentAccountId_Loc      INT = NULL;
+    DECLARE @SecurityReceivedId_Loc INT = NULL;
+    DECLARE @SalesTaxId_Loc         INT = NULL;
+    DECLARE @ServicesIncomeId_Loc   INT = NULL;
+    DECLARE @WhtAccountId_Loc       INT = NULL;
+
+    IF @LocationId IS NOT NULL
+    BEGIN
+        SELECT 
+            @ARAccountId            = MAX(CASE WHEN ChargeTypeId = 1 THEN AccountReceivableId END),
+            @RentAccountId_Loc      = MAX(CASE WHEN ChargeTypeId = 1 THEN RentAccountId END),
+            @SecurityReceivedId_Loc = MAX(CASE WHEN ChargeTypeId = 2 THEN SecurityReceivedId END),
+            @SalesTaxId_Loc         = MAX(CASE WHEN ChargeTypeId = 3 THEN SalesTaxId END),
+            @ServicesIncomeId_Loc   = MAX(CASE WHEN ChargeTypeId = 4 THEN ServicesIncomeId END),
+            @WhtAccountId_Loc       = MAX(WhtAccountId)
+        FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+        WHERE LocationId = @LocationId
+          AND EffectiveFrom <= @IssuedOn
+          AND (EffectiveTo IS NULL OR EffectiveTo >= @IssuedOn);
+    END
+
+    -- Validate required GL account mappings
+    IF @PostToLedger = 1
+    BEGIN
+        DECLARE @IssuedOnStr VARCHAR(30) = CONVERT(VARCHAR(30), @IssuedOn, 120);
+
+        IF @ARAccountId IS NULL
+        BEGIN
+            RAISERROR('No GL account mapping for LocationId %d, ChargeTypeId 1 on %s', 16, 1, @LocationId, 1, @IssuedOnStr);
+            RETURN -1;
+        END
+
+        IF @RoomRentExclTax > 0 AND @RentAccountId_Loc IS NULL
+        BEGIN
+            RAISERROR('No GL account mapping for LocationId %d, ChargeTypeId 1 on %s', 16, 1, @LocationId, 1, @IssuedOnStr);
+            RETURN -1;
+        END
+
+        IF @SecAmt > 0 AND @SecurityReceivedId_Loc IS NULL
+        BEGIN
+            RAISERROR('No GL account mapping for LocationId %d, ChargeTypeId 2 on %s', 16, 1, @LocationId, 2, @IssuedOnStr);
+            RETURN -1;
+        END
+
+        IF @TaxOnServiceCharges > 0 AND @SalesTaxId_Loc IS NULL
+        BEGIN
+            RAISERROR('No GL account mapping for LocationId %d, ChargeTypeId 3 on %s', 16, 1, @LocationId, 3, @IssuedOnStr);
+            RETURN -1;
+        END
+
+        IF @ServiceCharges > 0 AND @ServicesIncomeId_Loc IS NULL
+        BEGIN
+            RAISERROR('No GL account mapping for LocationId %d, ChargeTypeId 4 on %s', 16, 1, @LocationId, 4, @IssuedOnStr);
+            RETURN -1;
+        END
+
+        IF @IsWhtInvoice = 1 AND @WHTAmount > 0 AND @WhtAccountId_Loc IS NULL
+        BEGIN
+            RAISERROR('No WHT GL account (WN_ChargeTypeAccountMapping.WhtAccountId) for LocationId %d on %s', 16, 1, @LocationId, @IssuedOnStr);
+            RETURN -1;
+        END
+    END
+
+    -- Map resolved accounts to invoice header columns
+    SET @AccountReceivableId = @ARAccountId;
+    SET @RentAccountId       = @RentAccountId_Loc;
+    SET @SecurityReceivedId  = @SecurityReceivedId_Loc;
+    SET @SalesTaxId          = @SalesTaxId_Loc;
+    SET @ServicesIncomeId    = @ServicesIncomeId_Loc;
+    IF @AccountsCoaId IS NULL SET @AccountsCoaId = @RentAccountId;
+
+    -- 13. Atomic Transaction & Posting Pipeline
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Step A: Insert into dbo.WN_Invoices
+        INSERT INTO dbo.WN_Invoices (
+            PublicId,
+            InvoiceNumber,
+            UserId,
+            BookingId,
+            MembershipId,
+            IssuedOn,
+            DueOn,
+            SubTotal,
+            DiscountTotal,
+            TaxTotal,
+            GrandTotal,
+            PaidTotal,
+            CurrencyCode,
+            StatusId,
+            Notes,
+            CreatedOn,
+            CreatedById,
+            InvoiceTypeId,
+            AdvanceRentMonths,
+            SecurityDepositMonths,
+            SecurityDepositAmount,
+            AccountsCoaId,
+            BillingPeriodMonths,
+            BillingPeriodStart,
+            BillingPeriodEnd,
+            AccountReceivableId,
+            RentAccountId,
+            ServicesIncomeId,
+            SalesTaxId,
+            SecurityReceivedId,
+            RoomRentExclTax,
+            ServiceCharges,
+            TaxOnServiceCharges,
+            WHTRate,
+            WHTAmount
+        )
+        VALUES (
+            @PublicId,
+            @InvoiceNumber,
+            @UserId,
+            @BookingId,
+            @MembershipId,
+            @IssuedOn,
+            @DueOn,
+            @SubTotal,
+            @DiscountTotal,
+            @TaxTotal,
+            @GrandTotal,
+            @PaidTotal,
+            @CurrencyCode,
+            @StatusId,
+            @Notes,
+            SYSUTCDATETIME(),
+            @CreatedById,
+            @InvoiceTypeId,
+            @AdvanceRentMonths,
+            @SecurityDepositMonths,
+            @SecurityDepositAmount,
+            @AccountsCoaId,
+            @BillingPeriodMonths,
+            @BillingPeriodStart,
+            @BillingPeriodEnd,
+            @AccountReceivableId,
+            @RentAccountId,
+            @ServicesIncomeId,
+            @SalesTaxId,
+            @SecurityReceivedId,
+            @RoomRentExclTax,
+            @ServiceCharges,
+            @TaxOnServiceCharges,
+            ISNULL(@WHTRate, 0.0000),
+            ISNULL(@WHTAmount, 0.0000)
+        );
+
+        SET @InvoiceId = SCOPE_IDENTITY();
+        SET @GeneratedInvoiceNumber = @InvoiceNumber;
+        SET @GeneratedPublicId = @PublicId;
+
+        -- Step B: Update or Insert dbo.WN_SecurityDeposits (RefId = Invoice.Id, RefNo = Invoice.InvoiceNumber, CustomerId = CustomerCode)
+        -- Only invoices that carry the deposit point the deposit record at themselves (later rent invoices used to
+        -- re-point it, so the deposit report showed the latest rent invoice).
+        IF @BookingId IS NOT NULL AND @SecAmt > 0
+        BEGIN
+            UPDATE dbo.WN_SecurityDeposits
+            SET RefId      = @InvoiceId,
+                RefNo      = @InvoiceNumber,
+                CustomerId = COALESCE(CustomerId, @CustomerCode),
+                Amount     = CASE 
+                                WHEN (Amount IS NULL OR Amount = 0) AND @SecAmt > 0 THEN @SecAmt 
+                                WHEN Amount > 0 AND @SecAmt > Amount THEN @SecAmt
+                                ELSE Amount 
+                             END
+            WHERE BookingId = @BookingId;
+
+            -- If no record existed yet for this booking and security deposit amount > 0, insert it
+            IF @SecAmt > 0 AND NOT EXISTS (SELECT 1 FROM dbo.WN_SecurityDeposits WITH (NOLOCK) WHERE BookingId = @BookingId)
+            BEGIN
+                INSERT INTO dbo.WN_SecurityDeposits
+                    (BookingId, UserId, Amount, AccountId, StatusId, Notes, UpdatedById, SecurityReceivedId,
+                     AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, CustomerId, RefId, RefNo)
+                VALUES
+                    (@BookingId, @UserId, @SecAmt, @SecurityReceivedId, 1, 'Security deposit for invoice ' + @InvoiceNumber, @CreatedById, @SecurityReceivedId,
+                     @AccountReceivableId, @RentAccountId, @ServicesIncomeId, @SalesTaxId, @CustomerCode, @InvoiceId, @InvoiceNumber);
+            END
+        END
+        ELSE IF @SecAmt > 0
+        BEGIN
+            INSERT INTO dbo.WN_SecurityDeposits
+                (BookingId, UserId, Amount, AccountId, StatusId, Notes, UpdatedById, SecurityReceivedId,
+                 AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, CustomerId, RefId, RefNo)
+            VALUES
+                (NULL, @UserId, @SecAmt, @SecurityReceivedId, 1, 'Security deposit for invoice ' + @InvoiceNumber, @CreatedById, @SecurityReceivedId,
+                 @AccountReceivableId, @RentAccountId, @ServicesIncomeId, @SalesTaxId, @CustomerCode, @InvoiceId, @InvoiceNumber);
+        END
+
+        -- Step C: Customer/Vendor Sync
+        IF @SyncCustomerVendor = 1
+        BEGIN
+            IF OBJECT_ID('dbo.WN_CustomersVendors_SyncOnInvoice', 'P') IS NOT NULL
+            BEGIN
+                EXEC dbo.WN_CustomersVendors_SyncOnInvoice
+                    @CustomerId  = NULL,
+                    @UserId      = @UserId,
+                    @BookingId   = @BookingId,
+                    @CreatedById = @CreatedById;
+            END
+        END
+
+        -- Step D: Accounting Postings (when @PostToLedger = 1 and @GrandTotal > 0)
+        IF @PostToLedger = 1 AND @GrandTotal > 0
+        BEGIN
+            -- Derive CustomerVendorId if not supplied
+            IF @CustomerVendorId IS NULL
+            BEGIN
+                IF @CustomerCode IS NOT NULL AND @CustomerCode <> ''
+                BEGIN
+                    SELECT TOP 1 @CustomerVendorId = Id 
+                    FROM dbo.CustomersVendors WITH (NOLOCK) 
+                    WHERE Code = @CustomerCode 
+                    ORDER BY Id DESC;
+                END
+
+                IF @CustomerVendorId IS NULL AND @UserId IS NOT NULL
+                BEGIN
+                    SELECT TOP 1 @CustomerVendorId = cv.Id
+                    FROM dbo.CustomersVendors cv WITH (NOLOCK)
+                    JOIN dbo.WN_Users u WITH (NOLOCK) ON cv.Email = u.Email
+                    WHERE u.Id = @UserId AND cv.Email IS NOT NULL AND cv.Email <> ''
+                    ORDER BY cv.Id DESC;
+                END
+            END
+
+            -- Derive Customer / Company Name for description suffix (on the right)
+            DECLARE @CustomerDisplayName NVARCHAR(200) = NULL;
+
+            IF @CustomerCode IS NOT NULL AND @CustomerCode <> ''
+            BEGIN
+                SELECT TOP 1 
+                    @CustomerDisplayName = CASE 
+                        WHEN c.Company IS NOT NULL AND LTRIM(RTRIM(c.Company)) <> '' THEN LTRIM(RTRIM(c.Company))
+                        ELSE LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, '')))
+                    END
+                FROM dbo.WN_Customers c WITH (NOLOCK)
+                WHERE c.Code = @CustomerCode;
+            END
+
+            IF (@CustomerDisplayName IS NULL OR @CustomerDisplayName = '') AND @BookingId IS NOT NULL
+            BEGIN
+                SELECT TOP 1 
+                    @CustomerDisplayName = CASE 
+                        WHEN c.Company IS NOT NULL AND LTRIM(RTRIM(c.Company)) <> '' THEN LTRIM(RTRIM(c.Company))
+                        ELSE LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, '')))
+                    END
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                JOIN dbo.WN_Customers c WITH (NOLOCK) ON (c.Code = b.CustomerCode OR (b.CustomerCode IS NULL AND c.UserId = b.UserId))
+                WHERE b.Id = @BookingId;
+            END
+
+            IF (@CustomerDisplayName IS NULL OR @CustomerDisplayName = '') AND @UserId IS NOT NULL
+            BEGIN
+                SELECT TOP 1 
+                    @CustomerDisplayName = CASE 
+                        WHEN c.Company IS NOT NULL AND LTRIM(RTRIM(c.Company)) <> '' THEN LTRIM(RTRIM(c.Company))
+                        ELSE LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, '')))
+                    END
+                FROM dbo.WN_Customers c WITH (NOLOCK)
+                WHERE c.UserId = @UserId;
+            END
+
+            IF (@CustomerDisplayName IS NULL OR @CustomerDisplayName = '') AND @CustomerVendorId IS NOT NULL
+            BEGIN
+                SELECT TOP 1 
+                    @CustomerDisplayName = LTRIM(RTRIM(Name))
+                FROM dbo.CustomersVendors WITH (NOLOCK)
+                WHERE Id = @CustomerVendorId;
+            END
+
+            IF (@CustomerDisplayName IS NULL OR @CustomerDisplayName = '') AND @UserId IS NOT NULL
+            BEGIN
+                SELECT TOP 1 
+                    @CustomerDisplayName = LTRIM(RTRIM(Name))
+                FROM dbo.WN_Users WITH (NOLOCK)
+                WHERE Id = @UserId;
+            END
+
+            DECLARE @DescSuffix VARCHAR(200) = '';
+            IF @CustomerDisplayName IS NOT NULL AND LTRIM(RTRIM(@CustomerDisplayName)) <> ''
+            BEGIN
+                SET @DescSuffix = ' - ' + LTRIM(RTRIM(@CustomerDisplayName));
+            END
+
+            -- AR is debited with what the customer actually pays: the full total, or for a WHT invoice the total less WHT
+            -- (the WHT part is debited to the WHT account instead).
+            DECLARE @ARDebitAmount DECIMAL(18, 4) = @GrandTotal - CASE WHEN @IsWhtInvoice = 1 THEN @WHTAmount ELSE 0.0000 END;
+
+            -- Balance guard (WHT invoices): debits must equal credits, or the whole invoice is rolled back.
+            IF @IsWhtInvoice = 1
+            BEGIN
+                DECLARE @TotalDebits  DECIMAL(18, 4) = @ARDebitAmount + @WHTAmount;
+                DECLARE @TotalCredits DECIMAL(18, 4) =
+                      CASE WHEN @RoomRentExclTax > 0 THEN @RoomRentExclTax ELSE 0 END
+                    + CASE WHEN @ServiceCharges > 0 THEN @ServiceCharges ELSE 0 END
+                    + CASE WHEN @TaxOnServiceCharges > 0 THEN @TaxOnServiceCharges ELSE 0 END
+                    + CASE WHEN @SecAmt > 0 THEN @SecAmt ELSE 0 END;
+                IF ABS(@TotalDebits - @TotalCredits) > 0.005
+                BEGIN
+                    DECLARE @DebitsStr VARCHAR(30) = CAST(@TotalDebits AS VARCHAR(30));
+                    DECLARE @CreditsStr VARCHAR(30) = CAST(@TotalCredits AS VARCHAR(30));
+                    RAISERROR('WHT invoice voucher does not balance: debits %s, credits %s.', 16, 1, @DebitsStr, @CreditsStr);
+                END
+            END
+
+            -- 1. Create Voucher via dbo.Vouchers_Insert
+            DECLARE @VoucherTable TABLE (Id INT, Code VARCHAR(50));
+            DECLARE @VoucherShortGUID VARCHAR(50) = CONVERT(VARCHAR(50), NEWID());
+
+            INSERT INTO @VoucherTable (Id, Code)
+            EXEC dbo.Vouchers_Insert
+                @TypeId              = @VoucherTypeId,
+                @TransDate           = @IssuedOn,
+                @TotalAmount         = @GrandTotal,
+                @CompanyId           = @CompanyId,
+                @CreatedById         = @CreatedById,
+                @ShortGUID           = @VoucherShortGUID,
+                @RefNo               = @InvoiceNumber,
+                @RefId               = @InvoiceId,
+                @BranchId            = @BranchId,
+                @FundMangId          = NULL,
+                @CreatedByBranchId   = @BranchId,
+                @CreatedByCompanyId  = @CompanyId;
+
+            SELECT TOP 1 @VoucherId = Id FROM @VoucherTable;
+
+            IF @VoucherId IS NULL OR @VoucherId <= 0
+            BEGIN
+                RAISERROR('Failed to create Voucher record for invoice %s', 16, 1, @InvoiceNumber);
+            END
+
+            -- 2. Create Ledger Entries via dbo.Ledgers_Insert (Customer / Company Name on the right)
+            DECLARE @DescAR VARCHAR(255)       = LEFT('Accounts Receivable - Invoice ' + @InvoiceNumber + @DescSuffix, 255);
+            DECLARE @DescRent VARCHAR(255)     = LEFT('Rent - Invoice ' + @InvoiceNumber + @DescSuffix, 255);
+            DECLARE @DescService VARCHAR(255)  = LEFT('Services Income - Invoice ' + @InvoiceNumber + @DescSuffix, 255);
+            DECLARE @DescTax VARCHAR(255)      = LEFT('Sales Tax - Invoice ' + @InvoiceNumber + @DescSuffix, 255);
+            DECLARE @DescSecurity VARCHAR(255) = LEFT('Security Received - Invoice ' + @InvoiceNumber + @DescSuffix, 255);
+
+            -- (a) Accounts Receivable (DEBIT)
+            EXEC dbo.Ledgers_Insert
+                @VoucherId                   = @VoucherId,
+                @AccountId                   = @ARAccountId,
+                @Description                 = @DescAR,
+                @ProjectId                   = NULL,
+                @Debit                       = @ARDebitAmount,
+                @Credit                      = 0.0000,
+                @VehicleId                   = NULL,
+                @ConstructionProjectActiveId = NULL;
+
+            -- (a2) Withholding tax (DEBIT) — WHT invoices only
+            IF @IsWhtInvoice = 1 AND @WHTAmount > 0
+            BEGIN
+                DECLARE @DescWht VARCHAR(255) = LEFT('Withholding Tax ' + CAST(CAST(@WHTRate AS DECIMAL(5,2)) AS VARCHAR(10)) + '% - Invoice ' + @InvoiceNumber + @DescSuffix, 255);
+                EXEC dbo.Ledgers_Insert
+                    @VoucherId                   = @VoucherId,
+                    @AccountId                   = @WhtAccountId_Loc,
+                    @Description                 = @DescWht,
+                    @ProjectId                   = NULL,
+                    @Debit                       = @WHTAmount,
+                    @Credit                      = 0.0000,
+                    @VehicleId                   = NULL,
+                    @ConstructionProjectActiveId = NULL;
+            END
+
+            -- (b) Room Rent (CREDIT)
+            IF @RoomRentExclTax > 0
+            BEGIN
+                EXEC dbo.Ledgers_Insert
+                    @VoucherId                   = @VoucherId,
+                    @AccountId                   = @RentAccountId_Loc,
+                    @Description                 = @DescRent,
+                    @ProjectId                   = NULL,
+                    @Debit                       = 0.0000,
+                    @Credit                      = @RoomRentExclTax,
+                    @VehicleId                   = NULL,
+                    @ConstructionProjectActiveId = NULL;
+            END
+
+            -- (c) Services Income (CREDIT)
+            IF @ServiceCharges > 0
+            BEGIN
+                EXEC dbo.Ledgers_Insert
+                    @VoucherId                   = @VoucherId,
+                    @AccountId                   = @ServicesIncomeId_Loc,
+                    @Description                 = @DescService,
+                    @ProjectId                   = NULL,
+                    @Debit                       = 0.0000,
+                    @Credit                      = @ServiceCharges,
+                    @VehicleId                   = NULL,
+                    @ConstructionProjectActiveId = NULL;
+            END
+
+            -- (d) Sales Tax (CREDIT)
+            IF @TaxOnServiceCharges > 0
+            BEGIN
+                EXEC dbo.Ledgers_Insert
+                    @VoucherId                   = @VoucherId,
+                    @AccountId                   = @SalesTaxId_Loc,
+                    @Description                 = @DescTax,
+                    @ProjectId                   = NULL,
+                    @Debit                       = 0.0000,
+                    @Credit                      = @TaxOnServiceCharges,
+                    @VehicleId                   = NULL,
+                    @ConstructionProjectActiveId = NULL;
+            END
+
+            -- (e) Security Deposit Received (CREDIT)
+            IF @SecAmt > 0
+            BEGIN
+                EXEC dbo.Ledgers_Insert
+                    @VoucherId                   = @VoucherId,
+                    @AccountId                   = @SecurityReceivedId_Loc,
+                    @Description                 = @DescSecurity,
+                    @ProjectId                   = NULL,
+                    @Debit                       = 0.0000,
+                    @Credit                      = @SecAmt,
+                    @VehicleId                   = NULL,
+                    @ConstructionProjectActiveId = NULL;
+            END
+
+            -- 3. Create CustomerLedger Entry via dbo.CustomerLedger_Insert (AR DEBIT)
+            DECLARE @CustLedgerShortGUID VARCHAR(50) = CONVERT(VARCHAR(50), NEWID());
+            EXEC dbo.CustomerLedger_Insert
+                @Description         = @DescAR,
+                @Debit               = @ARDebitAmount,
+                @Credit              = 0.0000,
+                @LedgerDate          = @IssuedOn,
+                @CustomerVendorId    = @CustomerVendorId,
+                @AccountId           = @ARAccountId,
+                @Status              = @StatusId,
+                @CreatedById         = @CreatedById,
+                @ShortGUID           = @CustLedgerShortGUID,
+                @CompanyId           = @CompanyId,
+                @RefNo               = @InvoiceNumber,
+                @RefId               = @InvoiceId,
+                @TypeId              = @VoucherTypeId,
+                @CreatedByBranchId   = @BranchId,
+                @CreatedByCompanyId  = @CompanyId,
+                @BranchId            = @BranchId;
+        END
+
+        COMMIT TRANSACTION;
+
+        -- Return output resultset for callers
+        SELECT 
+            @InvoiceId              AS InvoiceId,
+            @GeneratedInvoiceNumber AS InvoiceNumber,
+            @GeneratedPublicId      AS PublicId,
+            @VoucherId              AS VoucherId;
+
+        RETURN 0;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();
+        DECLARE @ErrorSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrorState INT = ERROR_STATE();
+
+        RAISERROR(@ErrorMessage, @ErrorSeverity, @ErrorState);
+        RETURN -1;
+    END CATCH
+END

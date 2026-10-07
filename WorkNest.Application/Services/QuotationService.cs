@@ -324,7 +324,8 @@ namespace WorkNest.Application.Services
                 securityDepositMonths,
                 calculatedSecDeposit,
                 offeringTypeDbValue,
-                request.WithholdingTaxRate ?? 15.00m
+                request.WithholdingTaxRate ?? 15.00m,
+                request.SendWhtInvoice ? true : null
             );
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -491,6 +492,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             }
             catch { }
 
+            dto.SendWhtInvoice = await _db.GetQuotationSendWhtInvoiceAsync(dto.Id);
             return dto;
         }
 

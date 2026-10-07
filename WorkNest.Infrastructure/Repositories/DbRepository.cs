@@ -248,7 +248,8 @@ namespace WorkNest.Infrastructure.Repositories
             int? securityDepositMonths = null,
             decimal? securityDeposit = null,
             string? offeringType = null,
-            decimal? withholdingTaxRate = null)
+            decimal? withholdingTaxRate = null,
+            bool? sendWhtInvoice = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_Insert", c);
@@ -296,6 +297,7 @@ namespace WorkNest.Infrastructure.Repositories
                 if (maxDiscountPercent.HasValue) updateParts.Add("MaxDiscountPercent = @MDP");
                 if (!string.IsNullOrWhiteSpace(offeringType)) updateParts.Add("OfferingType = @OT");
                 if (withholdingTaxRate.HasValue) updateParts.Add("WithholdingTaxRate = @WTR");
+                if (sendWhtInvoice == true) updateParts.Add("SendWhtInvoice = 1"); // only when ticked: untouched quotations keep the default 0
 
                 var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
                 await using var upd = new SqlCommand(updateSql, c);
@@ -326,6 +328,7 @@ namespace WorkNest.Infrastructure.Repositories
                 if (maxDiscountPercent.HasValue) result["MaxDiscountPercent"] = maxDiscountPercent.Value;
                 if (!string.IsNullOrWhiteSpace(offeringType)) result["OfferingType"] = offeringType;
                 if (withholdingTaxRate.HasValue) result["WithholdingTaxRate"] = withholdingTaxRate.Value;
+                if (sendWhtInvoice == true) result["SendWhtInvoice"] = true;
             }
 
             return result;
@@ -530,6 +533,14 @@ namespace WorkNest.Infrastructure.Repositories
                         WHTRate = @WhtRate
                     WHERE Id = @BookingId;
 
+                    -- WHT invoice flag travels with the quotation (rate already copied above as WHTRate).
+                    IF COL_LENGTH('dbo.WN_Bookings', 'SendWhtInvoice') IS NOT NULL AND COL_LENGTH('dbo.WN_Quotations', 'SendWhtInvoice') IS NOT NULL
+                        EXEC sp_executesql
+                            N'UPDATE b SET SendWhtInvoice = ISNULL(q.SendWhtInvoice, 0)
+                                FROM dbo.WN_Bookings b JOIN dbo.WN_Quotations q ON q.Id = @QID
+                               WHERE b.Id = @BID',
+                            N'@QID INT, @BID INT', @QID = @QuotationId, @BID = @BookingId;
+
                     UPDATE dbo.WN_BookingDetails
                     SET SecurityDeposit = @SecurityDeposit
                     WHERE BookingGuid = (SELECT IdGUID FROM dbo.WN_Bookings WHERE Id = @BookingId);
@@ -552,6 +563,7 @@ namespace WorkNest.Infrastructure.Repositories
                 syncCmd.Parameters.AddWithValue("@DiscountVal", discountVal);
                 syncCmd.Parameters.AddWithValue("@WhtRate", whtRate);
                 syncCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                syncCmd.Parameters.AddWithValue("@QuotationId", quotationId);
                 await syncCmd.ExecuteNonQueryAsync();
             }
 
@@ -1155,7 +1167,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
             decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0,
             decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null,
-            string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null)
+            string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_Insert", c);
@@ -1240,6 +1252,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 if (securityDepositOverride.HasValue) updateParts.Add("SecurityDepositOverride = @SDO");
                 if (floorId.HasValue) updateParts.Add("FloorId = @FID");
                 if (!string.IsNullOrWhiteSpace(shiftType)) updateParts.Add("ShiftType = @ST");
+                if (sendWhtInvoice && whtRate is > 0) { updateParts.Add("SendWhtInvoice = 1"); updateParts.Add("WHTRate = @WHTR"); } // rate snapshot
 
                 var updateSql = $@"
                     UPDATE dbo.WN_Bookings 
@@ -1282,6 +1295,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 if (securityDepositOverride.HasValue) upd.Parameters.AddWithValue("@SDO", securityDepositOverride.Value);
                 if (floorId.HasValue) upd.Parameters.AddWithValue("@FID", floorId.Value);
                 if (!string.IsNullOrWhiteSpace(shiftType)) upd.Parameters.AddWithValue("@ST", shiftType);
+                if (sendWhtInvoice && whtRate is > 0) upd.Parameters.AddWithValue("@WHTR", whtRate.Value);
                 await upd.ExecuteNonQueryAsync();
 
                 result["DiscountType"] = discountType;
@@ -3169,6 +3183,20 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@Name", name ?? "");
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAllRowsAsync(r);
+        }
+
+        /// <summary>WN_Quotations.SendWhtInvoice (false if the column doesn't exist yet: error 207).</summary>
+        public async Task<bool> GetQuotationSendWhtInvoiceAsync(int quotationId)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand("SELECT SendWhtInvoice FROM dbo.WN_Quotations WITH (NOLOCK) WHERE Id = @Id", c);
+                cmd.Parameters.AddWithValue("@Id", quotationId);
+                var v = await cmd.ExecuteScalarAsync();
+                return v is not null && v is not DBNull && Convert.ToBoolean(v);
+            }
+            catch (SqlException ex) when (ex.Number == 207) { return false; }
         }
 
         // ---- Extra locations per user (WN_UserLocations). SQL error 208 = table not created yet. ----

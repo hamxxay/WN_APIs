@@ -43,7 +43,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7");
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7");
         Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7");
-        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null, string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null);
+        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null, string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null);
         Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, string? shiftType = "24_7");
         Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
@@ -87,7 +87,8 @@ namespace WorkNest.Application.Interfaces
             int? securityDepositMonths = null,
             decimal? securityDeposit = null,
             string? offeringType = null,
-            decimal? withholdingTaxRate = null
+            decimal? withholdingTaxRate = null,
+            bool? sendWhtInvoice = null
         );
         Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null);
         Task<IDictionary<string, object?>?> GetQuotationByIdAsync(
@@ -256,6 +257,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAttendantsDbAsync(int customerId);
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingAttendantsDbAsync(int bookingDetailId);
         Task<List<int>> GetUserLocationIdsAsync(int userId);
+        Task<bool> GetQuotationSendWhtInvoiceAsync(int quotationId);
         Task<Dictionary<int, List<(int Id, string Name)>>> GetUserLocationsMapAsync(IEnumerable<int> userIds);
         Task<bool> SetUserLocationsAsync(int userId, IReadOnlyCollection<int> locationIds, int? actorId);
         Task<int?> GetSpaceLocationIdAsync(int spaceId);

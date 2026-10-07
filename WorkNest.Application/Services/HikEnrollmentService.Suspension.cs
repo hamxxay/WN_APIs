@@ -96,7 +96,7 @@ namespace WorkNest.Application.Services
                 {
                     Id = Convert.ToInt32(r["Id"]),
                     InvoiceNumber = Convert.ToString(r["InvoiceNumber"]),
-                    Type = typeId switch { 1 => "Standard", 2 => "Advance", 3 => "Recurring", 4 => "Custom", 5 => "Surcharge", _ => "Invoice" },
+                    Type = typeId switch { 1 => "Standard", 2 => "Advance", 3 => "Recurring", 4 => "Custom", 5 => "Surcharge", 6 => "WHT invoice", _ => "Invoice" },
                     IssuedOn = (r["IssuedOn"] as DateTime?)?.ToString("yyyy-MM-dd"),
                     DueOn = due?.ToString("yyyy-MM-dd"),
                     PeriodStart = (r["BillingPeriodStart"] as DateTime?)?.ToString("yyyy-MM-dd"),

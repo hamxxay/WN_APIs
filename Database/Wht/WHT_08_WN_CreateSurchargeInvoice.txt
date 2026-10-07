@@ -1,0 +1,147 @@
+-- WHT invoices — part 8 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- Run the parts in order: 01 (migration) first, then 02-08.
+-- WN_CreateSurchargeInvoice: WHT line gross-up for attendant surcharge invoices. Only change: one EXEC before COMMIT.
+CREATE OR ALTER PROCEDURE [dbo].[WN_CreateSurchargeInvoice]
+    @BookingDetailId INT,
+    @PersonId INT,
+    @CustomerId INT,
+    @SurchargeAmount DECIMAL(18,2),
+    @ExcessSeatCount INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- New invoices use dbo.OrderStatus IDs (looked up by description, not hard-coded).
+    DECLARE @UnPaidStatusId TINYINT = (SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id);
+    SET XACT_ABORT ON;
+
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- Fetch Booking info
+        DECLARE @BookingId INT, @UserId INT, @BookingGuid UNIQUEIDENTIFIER, @CustomerCode NVARCHAR(50);
+        SELECT TOP 1
+            @BookingGuid = bd.BookingGuid,
+            @CustomerCode = bd.CustomerCode,
+            @BookingId = b.Id,
+            @UserId = b.UserId
+        FROM [dbo].[WN_BookingDetails] bd WITH (NOLOCK)
+        LEFT JOIN [dbo].[WN_Bookings] b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+        WHERE bd.Id = @BookingDetailId;
+
+        -- Fallback for UserId if not directly linked via booking
+        IF @UserId IS NULL
+        BEGIN
+            SELECT TOP 1 @UserId = UserId FROM [dbo].[WN_Customers] WITH (NOLOCK) WHERE Id = @CustomerId;
+        END
+
+        -- Fetch Attendant info
+        DECLARE @AssignedFrom DATETIME, @AssignedTo DATETIME, @SurchargeApplied DECIMAL(18,2);
+        SELECT TOP 1
+            @AssignedFrom = AssignedFrom,
+            @AssignedTo = AssignedTo,
+            @SurchargeApplied = SurchargeApplied
+        FROM [dbo].[WN_BookingAttendants] WITH (NOLOCK)
+        WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId;
+
+        -- Determine cycle boundaries
+        DECLARE @CycleEnd DATETIME = DATEADD(month, 1, @AssignedFrom);
+        DECLARE @SurchargeMonths INT = 1;
+        IF @AssignedTo IS NOT NULL AND @AssignedTo > @AssignedFrom
+        BEGIN
+            SET @SurchargeMonths = CEILING(DATEDIFF(day, @AssignedFrom, @AssignedTo) / 30.0);
+            IF @SurchargeMonths < 1 SET @SurchargeMonths = 1;
+            SET @CycleEnd = @AssignedTo;
+        END
+
+        -- Calculate Financials
+        DECLARE @SubTotal DECIMAL(18,2) = @SurchargeAmount * @SurchargeMonths;
+        DECLARE @AppliedChargePercentage DECIMAL(5,2) = 10.00;
+        DECLARE @AppliedTaxPercentage DECIMAL(5,2) = 16.00;
+
+        SELECT TOP 1
+            @AppliedChargePercentage = ISNULL(AppliedChargePercentage, 10.00),
+            @AppliedTaxPercentage = ISNULL(AppliedTaxPercentage, 16.00)
+        FROM [dbo].[WN_BookingDetails] WITH (NOLOCK)
+        WHERE Id = @BookingDetailId;
+
+        DECLARE @SupportCharge DECIMAL(18,2) = ROUND(@SubTotal * (@AppliedChargePercentage / 100.0), 2);
+        DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportCharge * (@AppliedTaxPercentage / 100.0), 2);
+        DECLARE @GrandTotal DECIMAL(18,2) = @SubTotal + @TaxAmount;
+
+        -- Fetch Person info
+        DECLARE @PersonName NVARCHAR(200), @PersonIdNumber NVARCHAR(50);
+        SELECT TOP 1
+            @PersonName = Name,
+            @PersonIdNumber = IdNumber
+        FROM [dbo].[WN_Persons] WITH (NOLOCK)
+        WHERE PersonId = @PersonId;
+
+        -- Generate Invoice Number
+        DECLARE @NextId INT;
+        SELECT @NextId = ISNULL(MAX(Id), 0) + 1 FROM [dbo].[WN_Invoices];
+        DECLARE @InvoiceNumber NVARCHAR(50) = 'INV-SUR-' + CAST(YEAR(GETDATE()) AS VARCHAR(4)) + '-' + RIGHT('00000' + CAST(@NextId AS VARCHAR(10)), 5);
+        DECLARE @Notes NVARCHAR(MAX) = 'Attendant Capacity Overage Surcharge (Current Cycle: ' + CAST(@SurchargeMonths AS VARCHAR(10)) + ' month(s)) - ' + ISNULL(@PersonName, '') + ' (' + ISNULL(@PersonIdNumber, '') + ')';
+
+        -- Call Centralized SP to insert invoice header
+        DECLARE @InvoiceId INT;
+        EXEC dbo.WN_Invoices_Insert
+            @UserId                 = @UserId,
+            @BookingId              = NULL,
+            @InvoiceNumber          = @InvoiceNumber,
+            @IssuedOn               = NULL,
+            @DueOn                  = NULL,
+            @SubTotal               = @SubTotal,
+            @DiscountTotal          = 0.00,
+            @TaxTotal               = @TaxAmount,
+            @GrandTotal             = @GrandTotal,
+            @PaidTotal              = 0.00,
+            @CurrencyCode           = 'PKR',
+            @StatusId               = @UnPaidStatusId, -- OrderStatus 'Un Paid'
+            @Notes                  = @Notes,
+            @InvoiceTypeId          = 1, -- Custom/Surcharge
+            @SecurityDepositAmount  = 0.00,
+            @BillingPeriodStart     = @AssignedFrom,
+            @BillingPeriodEnd       = @CycleEnd,
+            @SyncCustomerVendor     = 1,
+            @InvoiceId              = @InvoiceId OUTPUT,
+            @GeneratedInvoiceNumber = @InvoiceNumber OUTPUT;
+
+        -- Insert line item into WN_InvoiceLines
+        INSERT INTO [dbo].[WN_InvoiceLines] (
+            InvoiceId,
+            ChargeTypeId,
+            Description,
+            Quantity,
+            UnitPrice,
+            DiscountAmount,
+            TaxRate,
+            SortOrder
+        )
+        VALUES (
+            @InvoiceId,
+            1, -- Rent / Surcharge Charge Type
+            'Capacity Overage Surcharge (' + CAST(@ExcessSeatCount AS VARCHAR(10)) + ' excess seat(s)) - ' + ISNULL(@PersonName, 'Attendant'),
+            @ExcessSeatCount,
+            @SurchargeAmount * @SurchargeMonths / CASE WHEN @ExcessSeatCount > 0 THEN @ExcessSeatCount ELSE 1 END,
+            0.00,
+            CASE WHEN @SubTotal > 0 THEN CAST(ROUND(@TaxAmount / @SubTotal, 4) AS DECIMAL(6,4)) ELSE 0 END,
+            1
+        );
+
+        -- WHT invoices: gross up the lines just inserted (no-op for normal invoices).
+        EXEC dbo.WN_Invoice_ApplyWhtToLines @InvoiceId = @InvoiceId;
+
+        COMMIT TRANSACTION;
+
+        SELECT 
+            @InvoiceId AS InvoiceId,
+            @InvoiceNumber AS InvoiceNumber,
+            @GrandTotal AS GrandTotal,
+            @SubTotal AS SubTotal,
+            @TaxAmount AS TaxAmount,
+            'Success' AS Status;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END;

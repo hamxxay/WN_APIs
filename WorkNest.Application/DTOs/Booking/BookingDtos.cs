@@ -87,6 +87,9 @@ namespace WorkNest.Application.DTOs.Booking
         public int? Capacity { get; set; }
         /// <summary>Per-seat monthly price; may only be raised above the space's standard rate (same rule as quotations).</summary>
         public decimal? PerSeatBasePrice { get; set; }
+        /// <summary>Generate Withholding Tax (WHT) invoices for this booking; WhtRate is then required (0.01-99.99).</summary>
+        public bool SendWhtInvoice { get; set; }
+        public decimal? WhtRate { get; set; }
     }
 
     public class BookingRequest

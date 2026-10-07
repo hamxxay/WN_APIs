@@ -279,7 +279,7 @@ namespace WorkNest.Application.Services
                 discountType == "Percentage" ? discountValue : 0,
                 discountType, discountValue,
                 request.SecurityDepositOverride, request.FloorId, request.BillingPeriodMonths, request.SecurityDepositMonths, request.AdvanceRentMonths,
-                shiftType, capacity, perSeatBasePrice);
+                shiftType, capacity, perSeatBasePrice, request.SendWhtInvoice, request.SendWhtInvoice ? request.WhtRate : null);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 return ApiResponse.Fail(err.ToString() ?? "An error occurred");
