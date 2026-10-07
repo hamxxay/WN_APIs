@@ -429,7 +429,9 @@ namespace WorkNest.API.Controllers
                 }
             }
 
-            decimal totalLineVat = dto.LineItems.Sum(i => i.VatAmount);
+            // Same rule as the PDF (StatementInvoicePdfGenerator): the invoice's TaxTotal, else the lines' VAT.
+            // Lines can carry no VAT while the invoice total does, which used to hide the Sales Tax Invoice link.
+            decimal totalLineVat = dto.TaxTotal > 0 ? dto.TaxTotal : dto.LineItems.Sum(i => i.VatAmount);
             bool hasTax = totalLineVat > 0 
                        || (dto.AppliedTaxPercentage.HasValue && dto.AppliedTaxPercentage.Value > 0)
                        || (dto.SupportChargeAmount.HasValue && dto.SupportChargeAmount.Value > 0);
