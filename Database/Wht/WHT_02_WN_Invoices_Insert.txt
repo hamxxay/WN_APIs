@@ -353,7 +353,7 @@ BEGIN
     BEGIN
         DECLARE @BkSendWht BIT = 0;
         DECLARE @BkWhtRate DECIMAL(9, 4) = NULL;
-        SELECT @BkSendWht = ISNULL(SendWhtInvoice, 0), @BkWhtRate = WHTRate
+        SELECT @BkSendWht = ISNULL(SendWhtInvoice, 0), @BkWhtRate = dbo.WN_WHTaxRate_Resolve(WHTRate)
         FROM dbo.WN_Bookings WITH (NOLOCK)
         WHERE Id = @BookingId;
 

@@ -270,6 +270,10 @@ namespace WorkNest.Application.Services
 
             var shiftType = !string.IsNullOrWhiteSpace(request.ShiftType) ? request.ShiftType : (!string.IsNullOrWhiteSpace(request.OfferingType) ? request.OfferingType : "24_7");
 
+            // WhtRate is the Id of the chosen WN_WHTaxRate row (the dropdown), not a percentage.
+            if (request.SendWhtInvoice && !await _db.IsActiveWhtTaxRateIdAsync(request.WhtRate))
+                return ApiResponse.Fail("Select a WHT rate from the list.");
+
             var result = await _db.InsertBookingAsync(
                 userId, spaceId, pricingId,
                 startOn, endOn,
@@ -521,6 +525,10 @@ namespace WorkNest.Application.Services
             var nextBillingDate = ParseDateSafely(header.TryGetValue("NextBillingDate", out var nbd) ? nbd : nextBillDueDate);
             var billingPeriod = header.TryGetValue("BillingPeriod", out var bp) && bp != null ? bp.ToString() : (header["BillingPeriodLabel"]?.ToString() ?? header["BillingPeriodCode"]?.ToString());
 
+            // WithholdingTaxRate may hold a WN_WHTaxRate Id (new) or a percentage (old): the challan shows the percentage.
+            decimal? challanWhtRaw = header.TryGetValue("WithholdingTaxRate", out var wtrRaw) && wtrRaw is not null && wtrRaw is not DBNull ? Convert.ToDecimal(wtrRaw) : null;
+            decimal challanWhtPercent = challanWhtRaw is > 0 ? await _db.ResolveWhtRatePercentAsync(challanWhtRaw) : 15.00m;
+
             var dto = new ChallanResponseDto
             {
                 ChallanId = Convert.ToInt32(header["ChallanId"]),
@@ -570,7 +578,7 @@ namespace WorkNest.Application.Services
                 DiscountPercentage = header.TryGetValue("DiscountPercentage", out var dp) && dp is not null ? Convert.ToDecimal(dp) : 0,
                 DiscountAmount = header.TryGetValue("DiscountAmount", out var da) && da is not null ? Convert.ToDecimal(da) : 0,
                 SubtotalAmount = header.TryGetValue("SubtotalAmount", out var sa) && sa is not null ? Convert.ToDecimal(sa) : 0,
-                WithholdingTaxRate = header.TryGetValue("WithholdingTaxRate", out var wtr) && wtr is not null && Convert.ToDecimal(wtr) > 0 ? Convert.ToDecimal(wtr) : 15.00m,
+                WithholdingTaxRate = challanWhtPercent,
                 TotalContractAmount = totalContractAmount,
                 TotalPaidAmount = totalPaidAmount,
                 BalanceLeft = balanceLeft,

@@ -421,7 +421,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             decimal ServiceCharges = serviceChargeAmount;
                             decimal RoomRent = Math.Max(0, ((spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) - discountAmount) - ServiceCharges);
                             decimal SalesTax = taxOnAdvanceRent > 0 ? taxOnAdvanceRent : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(ServiceCharges * (taxPct / 100.0m), 2));
-                            decimal rawWht = q.WithholdingTaxRate > 0 ? q.WithholdingTaxRate : 15.00m;
+                            decimal rawWht = q.WhtRatePercent > 0 ? q.WhtRatePercent : (q.WithholdingTaxRate > 0 ? q.WithholdingTaxRate : 15.00m);   // percentage, not the WN_WHTaxRate Id
                             decimal WithholdingTaxRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
 
                             decimal securityDeposit = SecurityDeposit ?? 0m;

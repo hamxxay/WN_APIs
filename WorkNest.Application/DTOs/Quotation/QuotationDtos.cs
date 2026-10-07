@@ -88,7 +88,10 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal TaxAmount { get; set; }
         public decimal TaxAmountOnAdvanceRent { get; set; }
         public decimal TaxAmountOnContract { get; set; }
+        /// <summary>As stored: the WN_WHTaxRate Id when WHT is ticked (new quotations), otherwise a percentage.</summary>
         public decimal WithholdingTaxRate { get; set; } = 15.00m;
+        /// <summary>WithholdingTaxRate as a percentage (resolved through WN_WHTaxRate), for display and the PDF.</summary>
+        public decimal WhtRatePercent { get; set; } = 15.00m;
         public bool SendWhtInvoice { get; set; }
         public decimal TotalPayable { get; set; }
         public string? Remarks { get; set; }

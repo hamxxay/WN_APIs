@@ -1,0 +1,117 @@
+-- ============================================================================================
+-- WN_Bookings.WHTRate and WN_Quotations.WithholdingTaxRate (when WHT is ticked) now hold the Id of the chosen
+-- dbo.WN_WHTaxRate row, not the percentage. Existing bookings keep their percentage (decision: new ones only).
+--
+--   1. New function dbo.WN_WHTaxRate_Resolve(@Value): the WHRate of the WN_WHTaxRate row whose Id = @Value;
+--      when no row has that Id, @Value itself (an old booking/quotation that stored the percentage).
+--   2. dbo.WN_WHTaxRate_GetList gets @IncludeInactive (the API resolves old Ids even if the row is inactive).
+--   3. PATCHES THE LIVE PROCEDURES IN PLACE (only the one expression each; nothing else changes):
+--        WN_Invoices_Insert              @BkWhtRate = WHTRate                      -> resolved through the function
+--        WN_GetBookingInvoiceDetails     COALESCE(q.WithholdingTaxRate, 15.00) ... -> resolved
+--        WN_GetStatementInvoicePdfData   COALESCE(q.WithholdingTaxRate, 15.00) ... -> resolved
+--      A procedure that is already patched is skipped. If an expected expression is not found exactly once,
+--      NOTHING is changed (one transaction) and the message names the procedure.
+-- Note: an old booking whose stored percentage equals an existing WN_WHTaxRate Id would be read as that Id.
+-- Today the Ids are 1 and 2 and old rates are 10-16, so there is no overlap.
+-- Run against SAC400 as ONE statement in DBeaver (select all, execute). Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 1. Resolver
+    EXEC(N'CREATE OR ALTER FUNCTION dbo.WN_WHTaxRate_Resolve (@Value DECIMAL(18,4))
+RETURNS DECIMAL(9,4)
+AS
+BEGIN
+    -- WHT value stored on a booking / quotation: the Id of a dbo.WN_WHTaxRate row (new) or a percentage (old).
+    DECLARE @Rate DECIMAL(9,4) = NULL;
+    IF @Value IS NOT NULL AND @Value > 0 AND @Value = FLOOR(@Value)
+        SELECT TOP 1 @Rate = WHRate FROM dbo.WN_WHTaxRate WITH (NOLOCK) WHERE Id = CAST(@Value AS INT);
+    RETURN COALESCE(@Rate, @Value);
+END');
+
+    -- 2. List (dropdown: active only; the API resolver: all rows)
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_WHTaxRate_GetList
+    @IncludeInactive BIT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Code, Description, WHRate, ProvinceId, WHAccountId, Status
+    FROM dbo.WN_WHTaxRate WITH (NOLOCK)
+    WHERE (@IncludeInactive = 1 OR ISNULL(Status, 1) = 1)
+      AND NULLIF(LTRIM(RTRIM(Description)), '''') IS NOT NULL
+      AND WHRate > 0 AND WHRate < 100
+    ORDER BY Description, Id;
+END');
+
+    -- 3. In-place patches
+    DECLARE @Patch TABLE (Seq INT IDENTITY, ProcName SYSNAME, OldText NVARCHAR(400), NewText NVARCHAR(400));
+    INSERT INTO @Patch (ProcName, OldText, NewText) VALUES
+      (N'WN_Invoices_Insert',            N'@BkWhtRate = WHTRate',
+                                         N'@BkWhtRate = dbo.WN_WHTaxRate_Resolve(WHTRate)'),
+      (N'WN_GetBookingInvoiceDetails',   N'COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate',
+                                         N'COALESCE(dbo.WN_WHTaxRate_Resolve(q.WithholdingTaxRate), 15.00) AS WithholdingTaxRate'),
+      (N'WN_GetStatementInvoicePdfData', N'COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate',
+                                         N'COALESCE(dbo.WN_WHTaxRate_Resolve(q.WithholdingTaxRate), 15.00) AS WithholdingTaxRate');
+
+    DECLARE @i INT = 1, @n INT = (SELECT COUNT(*) FROM @Patch), @proc SYSNAME, @old NVARCHAR(400), @new NVARCHAR(400),
+            @def NVARCHAR(MAX), @msg NVARCHAR(400), @k INT, @p INT, @ws INT, @w NVARCHAR(40), @c NVARCHAR(40), @r INT;
+    DECLARE @Result TABLE (ProcName SYSNAME, Result NVARCHAR(100));
+    WHILE @i <= @n
+    BEGIN
+        SELECT @proc = ProcName, @old = OldText, @new = NewText FROM @Patch WHERE Seq = @i;
+        SET @def = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @proc));
+        IF @def IS NULL
+        BEGIN
+            SET @msg = N'dbo.' + @proc + N' not found. Nothing changed.';
+            THROW 50001, @msg, 1;
+        END
+        IF CHARINDEX(N'WN_WHTaxRate_Resolve', @def) > 0
+            INSERT INTO @Result VALUES (@proc, N'already patched');
+        ELSE
+        BEGIN
+            IF (DATALENGTH(@def) - DATALENGTH(REPLACE(@def, @old, N''))) / DATALENGTH(@old) <> 1
+            BEGIN
+                SET @msg = N'Expected expression not found exactly once in dbo.' + @proc + N'. Nothing changed.';
+                THROW 50002, @msg, 1;
+            END
+            SET @def = REPLACE(@def, @old, @new);
+            -- CREATE [OR ALTER] PROC[EDURE] -> ALTER PROCEDURE (header comments mentioning "create" are skipped)
+            SELECT @k = 0, @p = 0;
+            WHILE 1 = 1
+            BEGIN
+                SET @k = CHARINDEX(N'PROC', @def, @k + 1);
+                IF @k = 0 BREAK;
+                SET @ws = CASE WHEN @k > 40 THEN @k - 40 ELSE 1 END;
+                SET @w  = SUBSTRING(@def, @ws, @k - @ws);
+                SET @c  = UPPER(REPLACE(REPLACE(REPLACE(REPLACE(@w, N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+                IF RIGHT(@c, 6) = N'CREATE' OR RIGHT(@c, 13) = N'CREATEORALTER'
+                BEGIN
+                    SET @r = CHARINDEX(N'ETAERC', REVERSE(UPPER(@w)));
+                    SET @p = @ws + DATALENGTH(@w) / 2 - @r - 5;
+                    BREAK;
+                END
+            END
+            IF @p <= 0 OR @k = 0
+            BEGIN
+                SET @msg = N'CREATE PROCEDURE header not found in dbo.' + @proc + N'. Nothing changed.';
+                THROW 50003, @msg, 1;
+            END
+            SET @def = STUFF(@def, @p, @k - @p, N'ALTER ');
+            EXEC sys.sp_executesql @def;
+            INSERT INTO @Result VALUES (@proc, N'patched');
+        END
+        SET @i = @i + 1;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT ProcName, Result FROM @Result;
+    SELECT 'WN_WHTaxRate_Resolve(2) = ' + CAST(dbo.WN_WHTaxRate_Resolve(2) AS VARCHAR(20)) + '  (Id 2 -> its WHRate);  '
+         + 'WN_WHTaxRate_Resolve(15) = ' + CAST(dbo.WN_WHTaxRate_Resolve(15) AS VARCHAR(20)) + '  (old percentage kept)' AS Check_;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
