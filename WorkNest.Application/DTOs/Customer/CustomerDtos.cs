@@ -13,5 +13,7 @@ namespace WorkNest.Application.DTOs.Customer
         public int? CityId { get; set; }
         public string? Notes { get; set; }
         public bool? IsActive { get; set; }
+        public string? Ntn { get; set; }
+        public string? SecpRegistrationNo { get; set; }
     }
 }

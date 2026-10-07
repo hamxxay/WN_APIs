@@ -99,6 +99,7 @@ namespace WorkNest.Application.Interfaces
             int quotationId
         );
 
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search);
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationsAsync(
             int page,
             int limit,
@@ -233,8 +234,8 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>?> GetCustomerByGuidAsync(string guid);
         Task<IDictionary<string, object?>?> GetCustomerByUserIdAsync(int userId);
         Task<IDictionary<string, object?>?> GetCustomerByEmailAsync(string email);
-        Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null);
-        Task<IDictionary<string, object?>?> UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null);
+        Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? ntn = null, string? secp = null);
+        Task<IDictionary<string, object?>?> UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null, string? ntn = null, string? secp = null);
         Task DeleteCustomerAsync(string guid);
 
         // --- Booking ---
@@ -340,7 +341,7 @@ namespace WorkNest.Application.Interfaces
         Task<string?> GetHikPendingOpPayloadDbAsync(int deviceId, string op, string employeeNo);
         Task QueueHikPendingOpDbAsync(int deviceId, string op, string employeeNo, string payloadJson);
 
-        // --- Hikvision Staff (janitors, office boys, … — tagged machine users without a booking) ---
+        // --- Hikvision Staff (janitors, office boys, â€¦ â€” tagged machine users without a booking) ---
         Task<IEnumerable<IDictionary<string, object?>>> GetHikStaffDbAsync(string? employeeNo = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetHikTagsDbAsync();
         Task<int> AddHikTagDbAsync(string name);

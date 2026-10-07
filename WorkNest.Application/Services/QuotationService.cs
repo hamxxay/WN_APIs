@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -698,6 +698,33 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 });
             }
             return list;
+        }
+
+        public async Task<(IEnumerable<QuotationResponseItemDto> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search)
+        {
+            var (rows, total) = await _db.GetQuotationResponsesAsync(page, limit, search);
+            var list = new List<QuotationResponseItemDto>();
+            foreach (var r in rows)
+            {
+                list.Add(new QuotationResponseItemDto
+                {
+                    Id = Convert.ToInt32(r["Id"]),
+                    QuotationId = Convert.ToInt32(r["QuotationId"]),
+                    Version = r.ContainsKey("Version") && r["Version"] != null && r["Version"] != DBNull.Value ? Convert.ToInt32(r["Version"]) : 1,
+                    ResponseType = r["ResponseType"]?.ToString() ?? "",
+                    Note = r["Note"]?.ToString(),
+                    RespondedByUserId = r.ContainsKey("RespondedByUserId") && r["RespondedByUserId"] != null && r["RespondedByUserId"] != DBNull.Value ? Convert.ToInt32(r["RespondedByUserId"]) : null,
+                    RespondedByCustomerId = r.ContainsKey("RespondedByCustomerId") && r["RespondedByCustomerId"] != null && r["RespondedByCustomerId"] != DBNull.Value ? Convert.ToInt32(r["RespondedByCustomerId"]) : null,
+                    RespondedDate = Convert.ToDateTime(r["RespondedDate"]),
+                    QuotationNumber = r["QuotationNumber"]?.ToString(),
+                    QuotationStatus = r["QuotationStatus"]?.ToString(),
+                    CustomerName = r["CustomerName"]?.ToString(),
+                    CustomerEmail = r["CustomerEmail"]?.ToString(),
+                    CustomerPhone = r["CustomerPhone"]?.ToString(),
+                    SpaceName = r["SpaceName"]?.ToString()
+                });
+            }
+            return (list, total);
         }
 
         public async Task SendQuotationAsync(int quotationId, int? userId)

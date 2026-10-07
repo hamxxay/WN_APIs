@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.Interfaces;
@@ -339,6 +339,16 @@ namespace WorkNest.API.Controllers
         {
             var res = await _quotations.GetActivitiesAsync(quotationId, limit);
             return Ok(ApiResponse.Ok(res));
+        }
+
+        [HttpGet("api/quotation/responses")]
+        [Authorize(Roles = StaffRoles)]
+        [HttpGet("api/quotations/responses")]
+        [HttpGet("api/quotation-responses")]
+        public async Task<IActionResult> GetResponses([FromQuery] int page = 1, [FromQuery] int limit = 20, [FromQuery] string? search = null)
+        {
+            var (rows, total) = await _quotations.GetQuotationResponsesAsync(page, limit, search);
+            return Ok(new { data = rows, total = total, page = page, limit = limit });
         }
 
         [HttpPost("api/quotation/{id:int}/send")]

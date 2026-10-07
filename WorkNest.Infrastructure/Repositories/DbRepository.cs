@@ -415,6 +415,61 @@ namespace WorkNest.Infrastructure.Repositories
             return (rows, total);
         }
 
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationResponsesAsync(
+            int page,
+            int limit,
+            string? search)
+        {
+            await using var c = await Open();
+            int offset = Math.Max(0, (page - 1) * limit);
+
+            string whereClause = "";
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                string escaped = search.Replace("'", "''");
+                whereClause = $"WHERE (q.QuotationNumber LIKE '%{escaped}%' OR c.FirstName LIKE '%{escaped}%' OR c.LastName LIKE '%{escaped}%' OR c.Company LIKE '%{escaped}%' OR c.Email LIKE '%{escaped}%' OR qr.Note LIKE '%{escaped}%' OR qr.ResponseType LIKE '%{escaped}%')";
+            }
+
+            string countSql = $@"
+                SELECT COUNT(1)
+                FROM dbo.WN_QuotationResponses qr WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = qr.QuotationId
+                LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Id = COALESCE(qr.RespondedByCustomerId, q.CustomerId)
+                {whereClause};";
+
+            await using var countCmd = new SqlCommand(countSql, c);
+            int total = Convert.ToInt32(await countCmd.ExecuteScalarAsync());
+
+            string sql = $@"
+                SELECT 
+                    qr.Id,
+                    qr.QuotationId,
+                    qr.Version,
+                    qr.ResponseType,
+                    qr.Note,
+                    qr.RespondedByUserId,
+                    qr.RespondedByCustomerId,
+                    qr.RespondedDate,
+                    q.QuotationNumber,
+                    q.Status AS QuotationStatus,
+                    COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), c.Company, 'Customer') AS CustomerName,
+                    c.Email AS CustomerEmail,
+                    c.PhoneNumber AS CustomerPhone,
+                    s.Name AS SpaceName
+                FROM dbo.WN_QuotationResponses qr WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = qr.QuotationId
+                LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Id = COALESCE(qr.RespondedByCustomerId, q.CustomerId)
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+                {whereClause}
+                ORDER BY qr.RespondedDate DESC
+                OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            var resRows = await ReadAll(r);
+            return (resRows, total);
+        }
+
         public async Task<IDictionary<string, object?>> ConvertQuotationToBookingAsync(
             int quotationId,
             int? createdById)
@@ -2786,7 +2841,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await r.ReadAsync() ? ToDict(r) : null;
         }
 
-        public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null)
+        public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? ntn = null, string? secp = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_Insert", c);
@@ -2801,12 +2856,14 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@CreatedBy", (object?)createdBy ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Company", (object?)company ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@NTN", (object?)ntn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecpRegistrationNo", (object?)secp ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return ToDict(r);
             return new Dictionary<string, object?>();
         }
 
-        public async Task<IDictionary<string, object?>?> UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null)
+        public async Task<IDictionary<string, object?>?> UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null, string? ntn = null, string? secp = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_Update", c);
@@ -2821,6 +2878,8 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@IsActive", isActive.HasValue ? (object)(isActive.Value ? 1 : 0) : DBNull.Value);
             cmd.Parameters.AddWithValue("@Company", (object?)company ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@NTN", (object?)ntn ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecpRegistrationNo", (object?)secp ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? ToDict(r) : null;
         }
@@ -3629,8 +3688,17 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_UpdateAgreementDetails", c);
+            string? firstName = fullName;
+            string? lastName = null;
+            if (!string.IsNullOrWhiteSpace(fullName))
+            {
+                var parts = fullName.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                firstName = parts.Length > 0 ? parts[0] : fullName;
+                lastName = parts.Length > 1 ? parts[1] : null;
+            }
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
-            cmd.Parameters.AddWithValue("@FirstName", (object?)fullName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@FirstName", (object?)firstName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LastName", (object?)lastName ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Cnic", (object?)cnic ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
@@ -4284,8 +4352,8 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         }
 
         /// <summary>
-        /// Active booked rooms per machine employee # — attendants enrolled from Attendants &amp; Access
-        /// (WN_HIK_PersonMap → WN_BookingAttendants → WN_BookingDetails → WN_Customers).
+        /// Active booked rooms per machine employee # â€” attendants enrolled from Attendants &amp; Access
+        /// (WN_HIK_PersonMap â†’ WN_BookingAttendants â†’ WN_BookingDetails â†’ WN_Customers).
         /// </summary>
         public async Task<IEnumerable<IDictionary<string, object?>>> GetHikBookedRoomsDbAsync()
         {
@@ -4466,7 +4534,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await GetOrCreateHikEmployeeNoDbAsync(personId, floor);
         }
 
-        /// <summary>Devices that still have queued ops (any kind) for this machine user — read only.</summary>
+        /// <summary>Devices that still have queued ops (any kind) for this machine user â€” read only.</summary>
         public async Task<HashSet<int>> GetHikPendingOpDeviceIdsForEmployeeDbAsync(string employeeNo)
         {
             await using var c = await Open();
@@ -4702,7 +4770,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         }
 
         /// <summary>
-        /// Challans of the booking behind a booked space — read only.
+        /// Challans of the booking behind a booked space â€” read only.
         /// Result sets: [0] booking (Id, ChallanNumber, ValidityDate), [1] invoices (void = 5 excluded),
         /// [2] booking challans (WN_Challans + amounts from WN_vw_BookingSummary + voucher status from WN_Payments).
         /// </summary>
@@ -4746,7 +4814,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadResultSets(r);
         }
 
-        /// <summary>Booked spaces (WN_BookingDetails) of a booking — read only.</summary>
+        /// <summary>Booked spaces (WN_BookingDetails) of a booking â€” read only.</summary>
         public async Task<IEnumerable<int>> GetBookingDetailIdsForBookingDbAsync(int bookingId)
         {
             await using var c = await Open();
@@ -4763,7 +4831,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return ids;
         }
 
-        // --- Hikvision Staff (janitors, office boys, … — tagged machine users without a booking) ---
+        // --- Hikvision Staff (janitors, office boys, â€¦ â€” tagged machine users without a booking) ---
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetHikStaffDbAsync(string? employeeNo = null)
         {
@@ -4810,7 +4878,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
         /// <summary>
         /// Allocates the next free member employee # (same range and lock as attendants) and records the
-        /// staff member in WN_HIK_Users (CNIC + tag) — the HIK sync keeps that row across its rebuilds.
+        /// staff member in WN_HIK_Users (CNIC + tag) â€” the HIK sync keeps that row across its rebuilds.
         /// </summary>
         public async Task<string> CreateHikStaffDbAsync(string name, string cnic, int? tagId, int floor = 0)
         {

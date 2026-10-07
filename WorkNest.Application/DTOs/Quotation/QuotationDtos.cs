@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using WorkNest.Application.DTOs.Booking;
 
@@ -145,5 +145,23 @@ namespace WorkNest.Application.DTOs.Quotation
         public string Message { get; set; } = string.Empty;
         public string? CustomerNote { get; set; }
         public DateTime CreatedDate { get; set; }
+    }
+
+    public class QuotationResponseItemDto
+    {
+        public int Id { get; set; }
+        public int QuotationId { get; set; }
+        public int Version { get; set; }
+        public string ResponseType { get; set; } = string.Empty;
+        public string? Note { get; set; }
+        public int? RespondedByUserId { get; set; }
+        public int? RespondedByCustomerId { get; set; }
+        public DateTime RespondedDate { get; set; }
+        public string? QuotationNumber { get; set; }
+        public string? QuotationStatus { get; set; }
+        public string? CustomerName { get; set; }
+        public string? CustomerEmail { get; set; }
+        public string? CustomerPhone { get; set; }
+        public string? SpaceName { get; set; }
     }
 }

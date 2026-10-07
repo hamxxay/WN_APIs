@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Quotation;
@@ -19,6 +19,7 @@ namespace WorkNest.Application.Interfaces
         Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById);
         Task<IEnumerable<QuotationResponse>> GetVersionsAsync(int quotationId);
         Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit);
+        Task<(IEnumerable<QuotationResponseItemDto> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search);
         Task SendQuotationAsync(int quotationId, int? userId);
         Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync(bool? activeOnly = null);
     }

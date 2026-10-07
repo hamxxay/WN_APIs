@@ -27,6 +27,10 @@
   "PayFast": {
     "MerchantId": "<merchant-id>",
     "SecuredKey": "<secured-key>"
+  },
+  "Firebase": {
+    "ProjectId": "<firebase-project-id>",
+    "RequireIdToken": false
   }
 }
 ```
