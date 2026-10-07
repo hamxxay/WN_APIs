@@ -27,18 +27,18 @@ namespace WorkNest.API.Controllers
             var all = await _locations.GetAllLocationsAsync();
             if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
             {
-                var claimLocId = User.GetLocationId();
-                if (claimLocId.HasValue)
+                var allowedLocIds = User.GetLocationIds();
+                if (allowedLocIds.Count > 0)
                 {
                     var filtered = all.Where(l =>
                     {
                         if (l is System.Collections.IDictionary dict && dict.Contains("Id") && dict["Id"] != null)
-                            return Convert.ToInt32(dict["Id"]) == claimLocId.Value;
+                            return allowedLocIds.Contains(Convert.ToInt32(dict["Id"]));
                         var prop = l.GetType().GetProperty("Id");
                         if (prop != null)
                         {
                             var v = prop.GetValue(l);
-                            return v != null && Convert.ToInt32(v) == claimLocId.Value;
+                            return v != null && allowedLocIds.Contains(Convert.ToInt32(v));
                         }
                         return false;
                     });
@@ -58,18 +58,18 @@ namespace WorkNest.API.Controllers
             var (items, total) = await _locations.GetLocationsAsync(page, limit, search);
             if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
             {
-                var claimLocId = User.GetLocationId();
-                if (claimLocId.HasValue)
+                var allowedLocIds = User.GetLocationIds();
+                if (allowedLocIds.Count > 0)
                 {
                     var filtered = items.Where(l =>
                     {
                         if (l is System.Collections.IDictionary dict && dict.Contains("Id") && dict["Id"] != null)
-                            return Convert.ToInt32(dict["Id"]) == claimLocId.Value;
+                            return allowedLocIds.Contains(Convert.ToInt32(dict["Id"]));
                         var prop = l.GetType().GetProperty("Id");
                         if (prop != null)
                         {
                             var v = prop.GetValue(l);
-                            return v != null && Convert.ToInt32(v) == claimLocId.Value;
+                            return v != null && allowedLocIds.Contains(Convert.ToInt32(v));
                         }
                         return false;
                     }).ToList();

@@ -46,6 +46,8 @@ namespace WorkNest.API.Filters
                 }
 
                 context.HttpContext.Items["ClaimLocationId"] = claimLocationId.Value;
+                // Staff may be assigned to several locations (location_ids claim); any of them is allowed.
+                var allowedLocationIds = user.GetLocationIds();
 
                 // Validate or overwrite LocationId across action arguments
                 foreach (var argKey in context.ActionArguments.Keys)
@@ -56,9 +58,9 @@ namespace WorkNest.API.Filters
                     // Case 1: Argument itself is LocationId (e.g., int locationId parameter)
                     if (string.Equals(argKey, "locationId", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (argValue is int intVal && intVal > 0 && intVal != claimLocationId.Value)
+                        if (argValue is int intVal && intVal > 0 && !allowedLocationIds.Contains(intVal))
                         {
-                            context.Result = new ObjectResult(ApiResponse.Fail($"Location mismatch. You are bound to Location {claimLocationId.Value}, but request specified Location {intVal}."))
+                            context.Result = new ObjectResult(ApiResponse.Fail($"Location mismatch. You aren't assigned to Location {intVal}."))
                             {
                                 StatusCode = 403
                             };
@@ -73,9 +75,9 @@ namespace WorkNest.API.Filters
                         var propVal = prop.GetValue(argValue);
                         if (propVal is int intPropVal && intPropVal > 0)
                         {
-                            if (intPropVal != claimLocationId.Value)
+                            if (!allowedLocationIds.Contains(intPropVal))
                             {
-                                context.Result = new ObjectResult(ApiResponse.Fail($"Location mismatch. You are bound to Location {claimLocationId.Value}, but request payload specified Location {intPropVal}."))
+                                context.Result = new ObjectResult(ApiResponse.Fail($"Location mismatch. You aren't assigned to Location {intPropVal}."))
                                 {
                                     StatusCode = 403
                                 };

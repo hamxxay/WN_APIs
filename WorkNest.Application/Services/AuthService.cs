@@ -73,7 +73,8 @@ namespace WorkNest.Application.Services
                 await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
             }
 
-            var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId);
+            var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
+                row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
             return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Login successful.");
         }
 
@@ -111,7 +112,8 @@ namespace WorkNest.Application.Services
                     await EnsureCustomerAsync(request.Email, name, null, newId);
                 }
 
-                var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId);
+                var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
+                row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
                 return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Google login successful.");
             }
             catch (Exception ex)
@@ -119,6 +121,16 @@ namespace WorkNest.Application.Services
                 _logger.LogError(ex, "Google login failed for {Email}", request.Email);
                 return ApiResponse.Fail("Google login failed. Please try again.");
             }
+        }
+
+        /// <summary>Every location the user may work in: primary (WN_Users.LocationId) plus WN_UserLocations.</summary>
+        private async Task<List<int>> AllowedLocationsAsync(IDictionary<string, object?> row)
+        {
+            var allowed = new List<int>();
+            if (row.TryGetValue("LocationId", out var loc) && loc is not null) allowed.Add(Convert.ToInt32(loc));
+            if (row.TryGetValue("Id", out var idObj) && idObj is not null)
+                allowed.AddRange((await _db.GetUserLocationIdsAsync(Convert.ToInt32(idObj))).Where(x => !allowed.Contains(x)));
+            return allowed;
         }
 
         public async Task<ApiResponse> GetMeAsync(string email)
@@ -132,6 +144,7 @@ namespace WorkNest.Application.Services
 
             var role = Roles.FromRow(row);
             var locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : (int?)null;
+            var locationIds = Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : new List<int>();
 
             return ApiResponse.Ok(new
             {
@@ -142,6 +155,7 @@ namespace WorkNest.Application.Services
                 role       = role,
                 roles      = new[] { role },
                 locationId = locationId,
+                locationIds = locationIds,
                 customerId = row.TryGetValue("CustomerId",  out var c) ? c?.ToString() : null,
             });
         }

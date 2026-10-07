@@ -78,36 +78,24 @@ namespace WorkNest.API.Controllers
                 if (limit <= 0) limit = 10;
                 int offset = (page - 1) * limit;
 
-                int? effectiveLocationId = locationId;
-                if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
+                async Task<(IEnumerable<Dictionary<string, object?>> Items, int Total)> FetchPage(int pg, int lim, int? locId)
                 {
-                    var claimLocId = User.GetLocationId();
-                    if (claimLocId.HasValue)
-                    {
-                        effectiveLocationId = claimLocId.Value;
-                    }
-                }
+                    using var conn = await OpenConnectionAsync();
+                    using var cmd = new SqlCommand("dbo.WN_GetInvoicesList", conn);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@Page", pg);
+                    cmd.Parameters.AddWithValue("@Limit", lim);
+                    cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("@TypeId", (object?)typeId ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("@LocationId", (object?)locId ?? DBNull.Value);
 
-                using var conn = await OpenConnectionAsync();
-
-                using var cmd = new SqlCommand("dbo.WN_GetInvoicesList", conn);
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.AddWithValue("@Page", page);
-                cmd.Parameters.AddWithValue("@Limit", limit);
-                cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@TypeId", (object?)typeId ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@LocationId", (object?)effectiveLocationId ?? DBNull.Value);
-
-                int totalCount = 0;
-                var items = new List<Dictionary<string, object?>>();
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
+                    int count = 0;
+                    var rows = new List<Dictionary<string, object?>>();
+                    using var reader = await cmd.ExecuteReaderAsync();
                     if (await reader.ReadAsync())
                     {
-                        totalCount = reader.GetInt32(0);
+                        count = reader.GetInt32(0);
                     }
-
                     if (await reader.NextResultAsync())
                     {
                         while (await reader.ReadAsync())
@@ -117,10 +105,14 @@ namespace WorkNest.API.Controllers
                             {
                                 row[reader.GetName(i)] = reader.IsDBNull(i) ? null : WorkNest.Application.Services.DbDateTimeKinds.Normalize(reader.GetName(i), reader.GetValue(i));
                             }
-                            items.Add(row);
+                            rows.Add(row);
                         }
                     }
+                    return (rows, count);
                 }
+
+                // Location-bound staff see every location they are assigned to (merged newest first).
+                var (items, totalCount) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit, FetchPage);
 
                 return Ok(new
                 {

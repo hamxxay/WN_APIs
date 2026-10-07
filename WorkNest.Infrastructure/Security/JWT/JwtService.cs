@@ -1,3 +1,4 @@
+using System.Linq;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -21,7 +22,7 @@ namespace WorkNest.Infrastructure.Security.JWT
         }
 
         /// <summary>Generates a signed JWT for the given user identity.</summary>
-        public string GenerateToken(string userId, string email, string role, int? locationId = null)
+        public string GenerateToken(string userId, string email, string role, int? locationId = null, IEnumerable<int>? locationIds = null)
         {
             if (string.IsNullOrWhiteSpace(_settings.SecretKey))
                 throw new InvalidOperationException("JwtSettings:SecretKey is not configured.");
@@ -47,6 +48,12 @@ namespace WorkNest.Infrastructure.Security.JWT
             {
                 claimsList.Add(new Claim("location_id", locationId.Value.ToString()));
                 claimsList.Add(new Claim("LocationId", locationId.Value.ToString()));
+            }
+            // Every location an Admin / Sales Executive is assigned to (WN_UserLocations); location_id is the primary.
+            var allLocations = (locationIds ?? Enumerable.Empty<int>()).Where(x => x > 0).Distinct().ToList();
+            if (allLocations.Count > 0)
+            {
+                claimsList.Add(new Claim("location_ids", string.Join(",", allLocations)));
             }
 
             var expiryMinutes = _settings.ExpiryMinutes > 0 ? _settings.ExpiryMinutes : 1440;
