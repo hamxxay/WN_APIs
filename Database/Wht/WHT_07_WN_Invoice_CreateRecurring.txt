@@ -94,7 +94,29 @@ BEGIN
             END
         END
 
-        DECLARE @SupportChargeAmount DECIMAL(18,2) = ROUND(@TotalBaseAmount * (@AppliedChargePercentage / 100.0), 2);
+        -- Support charges (included in the rent; PST is charged on them): per-seat rate (default 2000) x capacity
+        -- x months for offices and shared seats, the same as the first invoice. Meeting rooms keep the percentage.
+        DECLARE @Capacity INT = 1, @PerSeatSupportRate DECIMAL(18,2) = NULL, @IsMeetingRoom BIT = 0;
+        SELECT TOP 1
+            @Capacity = COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1),
+            @PerSeatSupportRate = bd.PerSeatSupportRate,
+            @IsMeetingRoom = CASE WHEN st.Name LIKE '%Meeting%' OR st.Name LIKE '%Conference%' OR st.Description LIKE '%Meeting%' THEN 1 ELSE 0 END
+        FROM dbo.WN_Bookings b WITH (NOLOCK)
+        LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+        LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+        WHERE b.Id = @BookingId;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0
+            SELECT TOP 1 @PerSeatSupportRate = FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+            WHERE ChargeTypeId = 4 AND FixedAmount > 0 AND (StartDate IS NULL OR StartDate <= @BillingPeriodStart) AND (EndDate IS NULL OR EndDate >= @BillingPeriodStart)
+            ORDER BY StartDate DESC;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0 SET @PerSeatSupportRate = 2000.00;
+
+        DECLARE @SupportChargeAmount DECIMAL(18,2) = CASE WHEN @IsMeetingRoom = 1
+            THEN ROUND(@TotalBaseAmount * (@AppliedChargePercentage / 100.0), 2)
+            ELSE ROUND(@PerSeatSupportRate * @Capacity * @BillingPeriodMonths, 2) END;
+        IF @SupportChargeAmount > @TotalBaseAmount SET @SupportChargeAmount = @TotalBaseAmount;
         DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
         DECLARE @GrandTotal DECIMAL(18,2) = @TotalBaseAmount + @TaxAmount;
 
@@ -128,6 +150,9 @@ BEGIN
             @BillingPeriodMonths    = @BillingPeriodMonths,
             @BillingPeriodStart     = @BillingPeriodStart,
             @BillingPeriodEnd       = @BillingPeriodEnd,
+            @RoomRentExclTax        = @TotalBaseAmount - @SupportChargeAmount,   -- rent excl. support
+            @ServiceCharges         = @SupportChargeAmount,                      -- support (per seat x capacity x months)
+            @TaxOnServiceCharges    = @TaxAmount,                                -- PST on support
             @SyncCustomerVendor     = 1,
             @InvoiceId              = @InvoiceId OUTPUT,
             @GeneratedInvoiceNumber = @InvNum OUTPUT;

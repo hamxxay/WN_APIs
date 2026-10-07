@@ -63,7 +63,17 @@ BEGIN
         FROM [dbo].[WN_BookingDetails] WITH (NOLOCK)
         WHERE Id = @BookingDetailId;
 
-        DECLARE @SupportCharge DECIMAL(18,2) = ROUND(@SubTotal * (@AppliedChargePercentage / 100.0), 2);
+        -- Support charges for the extra seats (included in the surcharge; PST is charged on them):
+        -- per-seat rate (default 2000) x excess seats x months.
+        DECLARE @PerSeatSupportRate DECIMAL(18,2) = NULL;
+        SELECT TOP 1 @PerSeatSupportRate = PerSeatSupportRate FROM [dbo].[WN_BookingDetails] WITH (NOLOCK) WHERE Id = @BookingDetailId;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0
+            SELECT TOP 1 @PerSeatSupportRate = FixedAmount FROM [dbo].[WN_ChargeTypeRate] WITH (NOLOCK)
+            WHERE ChargeTypeId = 4 AND FixedAmount > 0 AND (StartDate IS NULL OR StartDate <= @AssignedFrom) AND (EndDate IS NULL OR EndDate >= @AssignedFrom)
+            ORDER BY StartDate DESC;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0 SET @PerSeatSupportRate = 2000.00;
+        DECLARE @SupportCharge DECIMAL(18,2) = ROUND(@PerSeatSupportRate * CASE WHEN @ExcessSeatCount > 0 THEN @ExcessSeatCount ELSE 1 END * @SurchargeMonths, 2);
+        IF @SupportCharge > @SubTotal SET @SupportCharge = @SubTotal;
         DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportCharge * (@AppliedTaxPercentage / 100.0), 2);
         DECLARE @GrandTotal DECIMAL(18,2) = @SubTotal + @TaxAmount;
 
@@ -101,6 +111,9 @@ BEGIN
             @SecurityDepositAmount  = 0.00,
             @BillingPeriodStart     = @AssignedFrom,
             @BillingPeriodEnd       = @CycleEnd,
+            @RoomRentExclTax        = @SubTotal - @SupportCharge,   -- surcharge excl. support
+            @ServiceCharges         = @SupportCharge,               -- support for the extra seats
+            @TaxOnServiceCharges    = @TaxAmount,                   -- PST on support
             @SyncCustomerVendor     = 1,
             @InvoiceId              = @InvoiceId OUTPUT,
             @GeneratedInvoiceNumber = @InvoiceNumber OUTPUT;
