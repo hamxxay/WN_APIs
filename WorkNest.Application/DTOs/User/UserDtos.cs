@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 namespace WorkNest.Application.DTOs.User
 {
     public class UserCreateRequest
@@ -14,6 +15,8 @@ namespace WorkNest.Application.DTOs.User
         public int? CompanyId { get; set; }
         public int? CityId { get; set; }
         public int? LocationId { get; set; }
+        /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
+        public List<int>? LocationIds { get; set; }
     }
 
     public class UserUpdateRequest
@@ -24,6 +27,8 @@ namespace WorkNest.Application.DTOs.User
         public int? CompanyId { get; set; }
         public int? CityId { get; set; }
         public int? LocationId { get; set; }
+        /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
+        public List<int>? LocationIds { get; set; }
         public string? Address { get; set; }
         public string? CnicOrPassport { get; set; }
         public string? AvatarUrl { get; set; }
@@ -34,6 +39,8 @@ namespace WorkNest.Application.DTOs.User
     {
         public string Role { get; set; } = string.Empty;
         public int? LocationId { get; set; }
+        /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
+        public List<int>? LocationIds { get; set; }
     }
 
     public class UserDto
@@ -47,6 +54,8 @@ namespace WorkNest.Application.DTOs.User
         public string? CreatedOn { get; set; }
         public string? Role { get; set; }
         public int? LocationId { get; set; }
+        /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
+        public List<int>? LocationIds { get; set; }
     }
 
     public class UserHistoryResponse

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Security.Claims;
 using WorkNest.Common.Constants;
 
@@ -19,6 +20,35 @@ namespace WorkNest.API.Extensions
                 }
             }
             return null;
+        }
+
+        /// <summary>All locations the user is assigned to (location_ids claim), falling back to the single location_id.</summary>
+        public static System.Collections.Generic.List<int> GetLocationIds(this ClaimsPrincipal user)
+        {
+            var ids = new System.Collections.Generic.List<int>();
+            var csv = user?.FindFirst("location_ids")?.Value;
+            if (!string.IsNullOrWhiteSpace(csv))
+                foreach (var part in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    if (int.TryParse(part, out var id) && id > 0 && !ids.Contains(id)) ids.Add(id);
+            var primary = user?.GetLocationId();
+            if (primary is > 0 && !ids.Contains(primary.Value)) ids.Insert(0, primary.Value);
+            return ids;
+        }
+
+        /// <summary>
+        /// Locations a list should cover. Location-bound users: the requested one if it is theirs, otherwise all
+        /// of theirs. Everyone else: the requested one (null = all locations).
+        /// </summary>
+        public static System.Collections.Generic.List<int?> ScopedLocations(this ClaimsPrincipal user, int? requested)
+        {
+            if (user?.Identity?.IsAuthenticated == true && user.IsLocationBoundRole())
+            {
+                var allowed = user.GetLocationIds();
+                if (allowed.Count == 0) return new System.Collections.Generic.List<int?> { -1 }; // matches nothing
+                if (requested is > 0 && allowed.Contains(requested.Value)) return new System.Collections.Generic.List<int?> { requested };
+                return allowed.Select(x => (int?)x).ToList();
+            }
+            return new System.Collections.Generic.List<int?> { requested };
         }
 
         public static string GetRole(this ClaimsPrincipal user)
