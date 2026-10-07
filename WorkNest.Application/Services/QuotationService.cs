@@ -406,7 +406,10 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                     : Math.Round((header.TryGetValue("SupportChargeAmount", out var sca2) && sca2 is not null && Convert.ToDecimal(sca2) > 0 
                         ? Convert.ToDecimal(sca2) 
                         : ((header.TryGetValue("Capacity", out var cVal2) && cVal2 is not null ? Convert.ToInt32(cVal2) : 1) * (header.TryGetValue("BillingPeriodMonths", out var bpmVal2) && bpmVal2 is not null ? Convert.ToInt32(bpmVal2) : 3) * 2000.00m)) * 0.16m, 2),
-                WithholdingTaxRate = header.TryGetValue("WithholdingTaxRate", out var wtr) && wtr is not null && Convert.ToDecimal(wtr) > 0 ? Convert.ToDecimal(wtr) : 15.00m,
+                // the WN_WHTaxRate Id (or an old percentage), under the new WHTRate_ID or the old column name
+                WithholdingTaxRate = (header.TryGetValue("WHTRate_ID", out var wtrNew) && wtrNew is not null && wtrNew is not DBNull ? wtrNew
+                                      : header.TryGetValue("WithholdingTaxRate", out var wtr) && wtr is not null && wtr is not DBNull ? wtr : null) is { } wtrVal
+                                     && Convert.ToDecimal(wtrVal) > 0 ? Convert.ToDecimal(wtrVal) : 15.00m,
                 Remarks = header["Remarks"]?.ToString(),
                 Status = header["Status"]?.ToString(),
                 Version = Convert.ToInt32(header["Version"]),

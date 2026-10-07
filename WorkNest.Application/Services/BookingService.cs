@@ -526,7 +526,9 @@ namespace WorkNest.Application.Services
             var billingPeriod = header.TryGetValue("BillingPeriod", out var bp) && bp != null ? bp.ToString() : (header["BillingPeriodLabel"]?.ToString() ?? header["BillingPeriodCode"]?.ToString());
 
             // WithholdingTaxRate may hold a WN_WHTaxRate Id (new) or a percentage (old): the challan shows the percentage.
-            decimal? challanWhtRaw = header.TryGetValue("WithholdingTaxRate", out var wtrRaw) && wtrRaw is not null && wtrRaw is not DBNull ? Convert.ToDecimal(wtrRaw) : null;
+            var wtrRaw = header.TryGetValue("WHTRate_ID", out var wtrNew) && wtrNew is not null && wtrNew is not DBNull ? wtrNew
+                       : header.TryGetValue("WithholdingTaxRate", out var wtrOld) ? wtrOld : null;   // new / old column name
+            decimal? challanWhtRaw = wtrRaw is not null && wtrRaw is not DBNull ? Convert.ToDecimal(wtrRaw) : null;
             decimal challanWhtPercent = challanWhtRaw is > 0 ? await _db.ResolveWhtRatePercentAsync(challanWhtRaw) : 15.00m;
 
             var dto = new ChallanResponseDto
