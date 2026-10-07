@@ -2796,12 +2796,45 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetWhtRateOptionsAsync()
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetWhtRateOptionsAsync(bool includeInactive = false)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_WHTaxRate_GetList", c);
+            if (includeInactive) cmd.Parameters.AddWithValue("@IncludeInactive", true);   // WHT_13 adds the parameter
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
+        }
+
+        private static (int Id, decimal Rate, bool Active)? WhtRow(IDictionary<string, object?> r)
+        {
+            object? Get(string k) => r.FirstOrDefault(kv => string.Equals(kv.Key, k, StringComparison.OrdinalIgnoreCase)).Value;
+            var id = Get("Id"); var rate = Get("WHRate"); var st = Get("Status");
+            if (id is null || id is DBNull || rate is null || rate is DBNull) return null;
+            bool active = st is null || st is DBNull || Convert.ToInt32(st) != 0;
+            return (Convert.ToInt32(id), Convert.ToDecimal(rate), active);
+        }
+
+        public async Task<decimal> ResolveWhtRatePercentAsync(decimal? value)
+        {
+            if (value is not > 0) return value ?? 0m;
+            if (value.Value != Math.Floor(value.Value)) return value.Value;   // a fraction is always a percentage
+            try
+            {
+                var rows = await GetWhtRateOptionsAsync(includeInactive: true);
+                var match = rows.Select(WhtRow).FirstOrDefault(x => x.HasValue && x.Value.Id == (int)value.Value);
+                return match?.Rate ?? value.Value;
+            }
+            catch (SqlException)
+            {
+                return value.Value;   // list not installed yet: the stored value is a percentage
+            }
+        }
+
+        public async Task<bool> IsActiveWhtTaxRateIdAsync(decimal? value)
+        {
+            if (value is not > 0 || value.Value != Math.Floor(value.Value)) return false;
+            var rows = await GetWhtRateOptionsAsync();
+            return rows.Select(WhtRow).Any(x => x.HasValue && x.Value.Id == (int)value.Value && x.Value.Active);
         }
 
         public async Task UpdateAmountFieldAccountAsync(int id, int? accountId)

@@ -229,7 +229,12 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAmountFieldsAsync();
         Task UpdateAmountFieldAccountAsync(int id, int? accountId);
         /// <summary>Rows of dbo.WN_WHTaxRate (WN_WHTaxRate_GetList).</summary>
-        Task<IEnumerable<IDictionary<string, object?>>> GetWhtRateOptionsAsync();
+        Task<IEnumerable<IDictionary<string, object?>>> GetWhtRateOptionsAsync(bool includeInactive = false);
+        /// <summary>WHT value stored on a booking / quotation -> percentage: the WHRate of the WN_WHTaxRate row with that Id,
+        /// or the value itself when no row has that Id (older records stored the percentage).</summary>
+        Task<decimal> ResolveWhtRatePercentAsync(decimal? value);
+        /// <summary>True when <paramref name="value"/> is the Id of an active WN_WHTaxRate row (what new bookings / quotations store).</summary>
+        Task<bool> IsActiveWhtTaxRateIdAsync(decimal? value);
 
         // --- Customer ---
         Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string? search);

@@ -301,6 +301,10 @@ namespace WorkNest.Application.Services
                 ? request.SecurityDepositOverride.Value
                 : (baseDepositForInsert > 0 ? Math.Max(0, Math.Round(baseDepositForInsert * (1 - (rentDiscountPct / 100m)), 2)) : 0m);
 
+            // With WHT ticked, WithholdingTaxRate is the Id of the chosen WN_WHTaxRate row (the dropdown), not a percentage.
+            if (request.SendWhtInvoice && !await _db.IsActiveWhtTaxRateIdAsync(request.WithholdingTaxRate))
+                throw new InvalidOperationException("Select a WHT rate from the list.");
+
             var result = await _db.InsertQuotationAsync(
                 quotationNumber,
                 request.ValidUntil,
@@ -493,6 +497,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             catch { }
 
             dto.SendWhtInvoice = await _db.GetQuotationSendWhtInvoiceAsync(dto.Id);
+            dto.WhtRatePercent = await _db.ResolveWhtRatePercentAsync(dto.WithholdingTaxRate);
             return dto;
         }
 

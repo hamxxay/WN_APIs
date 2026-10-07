@@ -101,9 +101,10 @@ namespace WorkNest.Application.Validators
         public QuotationRequestWhtValidator()
         {
             When(x => x.SendWhtInvoice, () =>
+                // the Id of the chosen WN_WHTaxRate row (dropdown); the service checks it is an active rate
                 RuleFor(x => x.WithholdingTaxRate)
-                    .NotNull().WithMessage("WHT rate is required when a WHT invoice is generated.")
-                    .InclusiveBetween(0.01m, 99.99m).WithMessage("WHT rate must be between 0.01 and 99.99."));
+                    .NotNull().WithMessage("Select a WHT rate when a WHT invoice is generated.")
+                    .GreaterThan(0m).WithMessage("Select a WHT rate from the list."));
         }
     }
 
@@ -112,9 +113,10 @@ namespace WorkNest.Application.Validators
         public AdminBookingRequestWhtValidator()
         {
             When(x => x.SendWhtInvoice, () =>
+                // the Id of the chosen WN_WHTaxRate row (dropdown); the service checks it is an active rate
                 RuleFor(x => x.WhtRate)
-                    .NotNull().WithMessage("WHT rate is required when a WHT invoice is generated.")
-                    .InclusiveBetween(0.01m, 99.99m).WithMessage("WHT rate must be between 0.01 and 99.99."));
+                    .NotNull().WithMessage("Select a WHT rate when a WHT invoice is generated.")
+                    .GreaterThan(0m).WithMessage("Select a WHT rate from the list."));
         }
     }
 }
