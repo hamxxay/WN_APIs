@@ -1,0 +1,113 @@
+-- ============================================================================================
+-- READ-ONLY invoice integrity check. Changes nothing. Run on SAC400 (select all, execute).
+-- Each result set is one check; an EMPTY result means that check passed.
+-- Void invoices (StatusId 5) are skipped. Amount differences under 1.00 are ignored (paisa rounding).
+-- ============================================================================================
+
+-- 0. Summary: how many invoices fail each check
+;WITH inv AS (
+    SELECT * FROM dbo.WN_Invoices WITH (NOLOCK) WHERE ISNULL(StatusId, 0) <> 5
+),
+vch AS (
+    SELECT i.Id AS InvoiceId, v.Id AS VoucherId, v.TotalAmount,
+           (SELECT SUM(Debit)  FROM dbo.Ledgers l WITH (NOLOCK) WHERE l.VoucherId = v.Id) AS Dr,
+           (SELECT SUM(Credit) FROM dbo.Ledgers l WITH (NOLOCK) WHERE l.VoucherId = v.Id) AS Cr
+    FROM inv i
+    JOIN dbo.Vouchers v WITH (NOLOCK) ON v.RefNo = i.InvoiceNumber AND v.RefId = i.Id
+)
+SELECT '1. Voucher does not balance'                 AS [Check], COUNT(*) AS Invoices FROM vch WHERE ABS(ISNULL(Dr,0) - ISNULL(Cr,0)) >= 1
+UNION ALL SELECT '2. Invoice has no voucher',          COUNT(*) FROM inv i WHERE NOT EXISTS (SELECT 1 FROM dbo.Vouchers v WITH (NOLOCK) WHERE v.RefNo = i.InvoiceNumber AND v.RefId = i.Id)
+UNION ALL SELECT '3. Invoice has 2+ vouchers',         COUNT(*) FROM inv i WHERE (SELECT COUNT(*) FROM dbo.Vouchers v WITH (NOLOCK) WHERE v.RefNo = i.InvoiceNumber AND v.RefId = i.Id) > 1
+UNION ALL SELECT '4. Rent+support+tax+deposit <> total', COUNT(*) FROM inv WHERE (RoomRentExclTax + ServiceCharges + TaxOnServiceCharges) > 0
+          AND ABS(RoomRentExclTax + ServiceCharges + TaxOnServiceCharges + ISNULL(SecurityDepositAmount, 0) - GrandTotal) >= 1
+UNION ALL SELECT '5. PST is not 16% of support',       COUNT(*) FROM inv WHERE ServiceCharges > 0 AND ABS(TaxOnServiceCharges - ROUND(ServiceCharges * 0.16, 2)) >= 1
+UNION ALL SELECT '6. Invoice total <> voucher total',  COUNT(*) FROM vch v JOIN inv i ON i.Id = v.InvoiceId WHERE ABS(ISNULL(v.TotalAmount, 0) - i.GrandTotal) >= 1
+UNION ALL SELECT '7. Deposit on 2+ invoices of a booking', COUNT(*) FROM (SELECT BookingId FROM inv WHERE BookingId IS NOT NULL AND ISNULL(SecurityDepositAmount, 0) > 0 GROUP BY BookingId HAVING COUNT(*) > 1) x
+UNION ALL SELECT '8. Duplicate invoice number',        COUNT(*) FROM (SELECT InvoiceNumber FROM dbo.WN_Invoices WITH (NOLOCK) GROUP BY InvoiceNumber HAVING COUNT(*) > 1) x
+UNION ALL SELECT '9. Same booking billed twice for a period', COUNT(*) FROM (SELECT BookingId, BillingPeriodStart FROM inv WHERE BookingId IS NOT NULL AND BillingPeriodStart IS NOT NULL GROUP BY BookingId, BillingPeriodStart HAVING COUNT(*) > 1) x
+UNION ALL SELECT '10. WHT invoice amounts inconsistent', COUNT(*) FROM inv WHERE InvoiceTypeId = 6 AND WHTRate > 0
+          AND ABS(WHTAmount - (ROUND((RoomRentExclTax + ServiceCharges - WHTAmount) / (1 - WHTRate / 100.0), 2) - (RoomRentExclTax + ServiceCharges - WHTAmount))) >= 1
+UNION ALL SELECT '11. WHT booking with a non-WHT rent invoice', COUNT(*) FROM inv i JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+          WHERE ISNULL(b.SendWhtInvoice, 0) = 1 AND ISNULL(b.WHTRate, 0) > 0 AND i.InvoiceTypeId NOT IN (6, 4, 5) AND i.RoomRentExclTax > 0
+UNION ALL SELECT '12. Paid more than the total',       COUNT(*) FROM inv WHERE ISNULL(PaidTotal, 0) - GrandTotal >= 1
+UNION ALL SELECT '13. Due date before invoice date',   COUNT(*) FROM inv WHERE DueOn < CAST(IssuedOn AS DATE)
+UNION ALL SELECT '14. Sales tax invoice <> invoice support/PST', COUNT(*) FROM inv i JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
+          WHERE i.ServiceCharges > 0 AND (ABS(st.ServiceChargeAmount - i.ServiceCharges) >= 1 OR ABS(st.ServiceChargeTaxAmount - i.TaxOnServiceCharges) >= 1)
+UNION ALL SELECT '15. Lines total <> invoice (excl. tax)', COUNT(*) FROM inv i
+          WHERE EXISTS (SELECT 1 FROM dbo.WN_InvoiceLines l WITH (NOLOCK) WHERE l.InvoiceId = i.Id)
+            AND ABS((SELECT SUM(l.Quantity * l.UnitPrice - ISNULL(l.DiscountAmount, 0)) FROM dbo.WN_InvoiceLines l WITH (NOLOCK) WHERE l.InvoiceId = i.Id)
+                    - (i.GrandTotal - i.TaxOnServiceCharges)) >= 1;
+
+-- Details for every failing check (TOP 50 each). Look only at the ones the summary above shows > 0.
+
+-- 1 / 6. Vouchers that do not balance, or whose total differs from the invoice
+SELECT TOP 50 '1/6 voucher' AS [Check], i.Id, i.InvoiceNumber, i.IssuedOn, i.InvoiceTypeId, i.GrandTotal, v.Id AS VoucherId, v.TotalAmount,
+       (SELECT SUM(Debit) FROM dbo.Ledgers l WITH (NOLOCK) WHERE l.VoucherId = v.Id) AS Debits,
+       (SELECT SUM(Credit) FROM dbo.Ledgers l WITH (NOLOCK) WHERE l.VoucherId = v.Id) AS Credits
+FROM dbo.WN_Invoices i WITH (NOLOCK)
+JOIN dbo.Vouchers v WITH (NOLOCK) ON v.RefNo = i.InvoiceNumber AND v.RefId = i.Id
+WHERE ISNULL(i.StatusId, 0) <> 5
+  AND (ABS(ISNULL((SELECT SUM(Debit) FROM dbo.Ledgers l WITH (NOLOCK) WHERE l.VoucherId = v.Id), 0)
+         - ISNULL((SELECT SUM(Credit) FROM dbo.Ledgers l WITH (NOLOCK) WHERE l.VoucherId = v.Id), 0)) >= 1
+       OR ABS(ISNULL(v.TotalAmount, 0) - i.GrandTotal) >= 1)
+ORDER BY i.Id DESC;
+
+-- 2. Invoices with no voucher (never posted to the ledger)
+SELECT TOP 50 '2 no voucher' AS [Check], i.Id, i.InvoiceNumber, i.IssuedOn, i.InvoiceTypeId, i.GrandTotal, i.StatusId
+FROM dbo.WN_Invoices i WITH (NOLOCK)
+WHERE ISNULL(i.StatusId, 0) <> 5
+  AND NOT EXISTS (SELECT 1 FROM dbo.Vouchers v WITH (NOLOCK) WHERE v.RefNo = i.InvoiceNumber AND v.RefId = i.Id)
+ORDER BY i.Id DESC;
+
+-- 4 / 5. Breakdown does not add up, or PST is not 16% of support
+SELECT TOP 50 '4/5 breakdown' AS [Check], Id, InvoiceNumber, IssuedOn, InvoiceTypeId, RoomRentExclTax, ServiceCharges, TaxOnServiceCharges,
+       SecurityDepositAmount, GrandTotal,
+       RoomRentExclTax + ServiceCharges + TaxOnServiceCharges + ISNULL(SecurityDepositAmount, 0) AS BreakdownSum,
+       ROUND(ServiceCharges * 0.16, 2) AS Expected16PctPST
+FROM dbo.WN_Invoices WITH (NOLOCK)
+WHERE ISNULL(StatusId, 0) <> 5 AND (RoomRentExclTax + ServiceCharges + TaxOnServiceCharges) > 0
+  AND (ABS(RoomRentExclTax + ServiceCharges + TaxOnServiceCharges + ISNULL(SecurityDepositAmount, 0) - GrandTotal) >= 1
+       OR (ServiceCharges > 0 AND ABS(TaxOnServiceCharges - ROUND(ServiceCharges * 0.16, 2)) >= 1))
+ORDER BY Id DESC;
+
+-- 7 / 9. Deposit charged more than once, or a booking billed twice for the same period
+SELECT TOP 50 '7 deposit twice' AS [Check], i.BookingId, i.Id, i.InvoiceNumber, i.IssuedOn, i.SecurityDepositAmount, i.GrandTotal
+FROM dbo.WN_Invoices i WITH (NOLOCK)
+WHERE ISNULL(i.StatusId, 0) <> 5 AND ISNULL(i.SecurityDepositAmount, 0) > 0
+  AND i.BookingId IN (SELECT BookingId FROM dbo.WN_Invoices WITH (NOLOCK) WHERE ISNULL(StatusId, 0) <> 5 AND BookingId IS NOT NULL
+                      AND ISNULL(SecurityDepositAmount, 0) > 0 GROUP BY BookingId HAVING COUNT(*) > 1)
+ORDER BY i.BookingId, i.Id;
+
+SELECT TOP 50 '9 period twice' AS [Check], i.BookingId, i.BillingPeriodStart, i.Id, i.InvoiceNumber, i.IssuedOn, i.GrandTotal, i.StatusId
+FROM dbo.WN_Invoices i WITH (NOLOCK)
+WHERE ISNULL(i.StatusId, 0) <> 5 AND EXISTS (
+    SELECT 1 FROM dbo.WN_Invoices x WITH (NOLOCK)
+    WHERE ISNULL(x.StatusId, 0) <> 5 AND x.BookingId = i.BookingId AND x.BillingPeriodStart = i.BillingPeriodStart AND x.Id <> i.Id)
+ORDER BY i.BookingId, i.BillingPeriodStart, i.Id;
+
+-- 10 / 11. WHT problems
+SELECT TOP 50 '10/11 WHT' AS [Check], i.Id, i.InvoiceNumber, i.IssuedOn, i.BookingId, i.InvoiceTypeId, b.SendWhtInvoice, b.WHTRate AS BookingRate,
+       i.WHTRate, i.RoomRentExclTax, i.ServiceCharges, i.TaxOnServiceCharges, i.WHTAmount, i.GrandTotal
+FROM dbo.WN_Invoices i WITH (NOLOCK)
+LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+WHERE ISNULL(i.StatusId, 0) <> 5
+  AND ( (i.InvoiceTypeId = 6 AND i.WHTRate > 0
+         AND ABS(i.WHTAmount - (ROUND((i.RoomRentExclTax + i.ServiceCharges - i.WHTAmount) / (1 - i.WHTRate / 100.0), 2)
+                                - (i.RoomRentExclTax + i.ServiceCharges - i.WHTAmount))) >= 1)
+     OR (ISNULL(b.SendWhtInvoice, 0) = 1 AND ISNULL(b.WHTRate, 0) > 0 AND i.InvoiceTypeId NOT IN (6, 4, 5) AND i.RoomRentExclTax > 0) )
+ORDER BY i.Id DESC;
+
+-- 12 / 13. Over-paid, or due before issued
+SELECT TOP 50 '12/13 paid/dates' AS [Check], Id, InvoiceNumber, IssuedOn, DueOn, GrandTotal, PaidTotal, StatusId
+FROM dbo.WN_Invoices WITH (NOLOCK)
+WHERE ISNULL(StatusId, 0) <> 5 AND (ISNULL(PaidTotal, 0) - GrandTotal >= 1 OR DueOn < CAST(IssuedOn AS DATE))
+ORDER BY Id DESC;
+
+-- 14. Sales tax (support charges) invoice disagrees with the invoice
+SELECT TOP 50 '14 sales tax invoice' AS [Check], i.Id, i.InvoiceNumber, i.ServiceCharges, i.TaxOnServiceCharges,
+       st.STInvoiceNumber, st.ServiceChargeAmount, st.ServiceChargeTaxAmount, st.GrandTotal AS STGrandTotal
+FROM dbo.WN_Invoices i WITH (NOLOCK)
+JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
+WHERE ISNULL(i.StatusId, 0) <> 5 AND i.ServiceCharges > 0
+  AND (ABS(st.ServiceChargeAmount - i.ServiceCharges) >= 1 OR ABS(st.ServiceChargeTaxAmount - i.TaxOnServiceCharges) >= 1)
+ORDER BY i.Id DESC;
