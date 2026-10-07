@@ -328,7 +328,7 @@ namespace WorkNest.Application.Services
                 securityDepositMonths,
                 calculatedSecDeposit,
                 offeringTypeDbValue,
-                request.WithholdingTaxRate ?? 15.00m,
+                request.SendWhtInvoice ? request.WithholdingTaxRate : null,   // WN_WHTaxRate Id; no WHT rate when not ticked
                 request.SendWhtInvoice ? true : null
             );
 
