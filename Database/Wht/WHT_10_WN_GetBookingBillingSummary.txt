@@ -1,0 +1,23 @@
+-- WHT invoices — part 10. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- WN_GetBookingBillingSummary: WHT invoices (InvoiceTypeId 6) count as rent invoiced / rent paid, like
+-- standard (1) and advance (2) invoices. Only change: IN (1,2) -> IN (1,2,6) on those two lines.
+-- Before running, compare with the live procedure (EXEC sp_helptext 'dbo.WN_GetBookingBillingSummary').
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetBookingBillingSummary]
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT 
+        b.Id AS BookingId,
+        ISNULL(b.SubtotalAmount, 420000.00) AS TotalContractRent,
+        ISNULL((SELECT SUM(GrandTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId IN (1,2,6)), 0.00) AS RentInvoiced,
+        ISNULL((SELECT SUM(PaidTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId IN (1,2,6)), 0.00) AS RentPaid,
+        ISNULL((SELECT SUM(PaidTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId = 2), 0.00) AS AdvanceRentPaid,
+        ISNULL(b.SecurityDepositRequired, 70000.00) AS SecurityDepositRequired,
+        ISNULL((SELECT SUM(SecurityDepositAmount) FROM dbo.WN_Invoices WHERE BookingId = b.Id), 0.00) AS SecurityDepositInvoiced,
+        ISNULL(b.SecurityDepositPaid, 0.00) AS SecurityDepositPaid,
+        (ISNULL(b.SecurityDepositRequired, 70000.00) - ISNULL(b.SecurityDepositPaid, 0.00)) AS SecurityDepositOutstanding
+    FROM dbo.WN_Bookings b
+    WHERE b.Id = @BookingId;
+END;

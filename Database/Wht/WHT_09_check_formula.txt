@@ -1,20 +1,24 @@
 -- WHT invoices — part 9 of 9. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
 -- Run the parts in order: 01 (migration) first, then 02-08.
 -- OPTIONAL read-only check: runs the exact SQL formula on the worked example and a rounding edge case. Changes nothing.
+-- Room rent (rent + support) is grossed up as one amount; the rent line absorbs the increase; support and tax unchanged.
 
-SELECT Example, RentNet, ServiceNet, TaxNet, Rate, RentGross, ServiceGross, TaxGross,
-       RentGross + ServiceGross + TaxGross                                 AS InvoiceTotal,
-       RentNet + ServiceNet + TaxNet                                       AS NetAmount,
-       (RentGross + ServiceGross + TaxGross) - (RentNet + ServiceNet + TaxNet) AS WhtAmount
+SELECT Example, RentExclSupport, Support, Tax, Rate,
+       GrossRoomRent,
+       GrossRoomRent - Support                                AS RentLine,
+       Support                                                AS SupportLine,
+       Tax                                                    AS TaxLine,
+       GrossRoomRent - (RentExclSupport + Support)            AS WhtAmount,
+       (RentExclSupport + Support) + Tax                      AS ARDebit,
+       (RentExclSupport + Support) + Tax + (GrossRoomRent - (RentExclSupport + Support)) AS TotalDebits,
+       (GrossRoomRent - Support) + Support + Tax              AS TotalCredits
 FROM (
-    SELECT Example, RentNet, ServiceNet, TaxNet, Rate,
-           ROUND(RentNet    / CAST(1.0 - Rate / 100.0 AS DECIMAL(18,10)), 2) AS RentGross,
-           ROUND(ServiceNet / CAST(1.0 - Rate / 100.0 AS DECIMAL(18,10)), 2) AS ServiceGross,
-           ROUND(TaxNet     / CAST(1.0 - Rate / 100.0 AS DECIMAL(18,10)), 2) AS TaxGross
+    SELECT Example, RentExclSupport, Support, Tax, Rate,
+           ROUND((RentExclSupport + Support) / CAST(1.0 - Rate / 100.0 AS DECIMAL(18,10)), 2) AS GrossRoomRent
     FROM (VALUES
-        ('Worked example (expect 111111.11 / 11111.11 / 1777.78 / 124000.00 / 111600.00 / 12400.00)',
-                CAST(100000 AS DECIMAL(18,4)), CAST(10000 AS DECIMAL(18,4)), CAST(1600 AS DECIMAL(18,4)), CAST(10 AS DECIMAL(9,4))),
-        ('Rounding edge, 15% (expect 39215.68 / 3921.56 / 627.45 / 43764.69 / 37199.99 / 6564.70)',
-                CAST(33333.33 AS DECIMAL(18,4)), CAST(3333.33 AS DECIMAL(18,4)), CAST(533.33 AS DECIMAL(18,4)), CAST(15 AS DECIMAL(9,4)))
-    ) v(Example, RentNet, ServiceNet, TaxNet, Rate)
+        ('Worked example, 10% (expect Gross 38888.89 / RentLine 36888.89 / Support 2000 / Tax 320 / WHT 3888.89 / AR 35320.00)',
+                CAST(33000 AS DECIMAL(18,4)), CAST(2000 AS DECIMAL(18,4)), CAST(320 AS DECIMAL(18,4)), CAST(10 AS DECIMAL(9,4))),
+        ('Rounding edge, 15% (expect Gross 41176.47 / RentLine 39176.47 / Support 2000 / Tax 320 / WHT 6176.47 / AR 35320.00)',
+                CAST(33000 AS DECIMAL(18,4)), CAST(2000 AS DECIMAL(18,4)), CAST(320 AS DECIMAL(18,4)), CAST(15 AS DECIMAL(9,4)))
+    ) v(Example, RentExclSupport, Support, Tax, Rate)
 ) x;
