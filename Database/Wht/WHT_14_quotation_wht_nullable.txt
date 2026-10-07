@@ -1,0 +1,59 @@
+-- ============================================================================================
+-- TABLE CHANGE (WN_Quotations): let WithholdingTaxRate be NULL, so a quotation WITHOUT WHT stores no rate.
+-- With WHT ticked the column holds the WN_WHTaxRate Id (the API already does this).
+--   1. Drops the column's default (e.g. 15) so new rows don't get a rate by default.
+--   2. Drops CK_WN_Quotations_Wht, makes the column NULLable (same data type), re-adds the same CHECK.
+--   Existing rows are NOT changed (old unticked quotations keep 15; see the optional step at the end).
+-- Run against SAC400 as ONE statement in DBeaver (select all, execute). One transaction. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @sql NVARCHAR(MAX), @type NVARCHAR(100), @dc SYSNAME;
+
+    -- 1. Default constraint on the column (name differs per database)
+    SELECT @dc = dc.name
+    FROM sys.default_constraints dc
+    JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+    WHERE dc.parent_object_id = OBJECT_ID(N'dbo.WN_Quotations') AND c.name = N'WithholdingTaxRate';
+    IF @dc IS NOT NULL
+    BEGIN
+        SET @sql = N'ALTER TABLE dbo.WN_Quotations DROP CONSTRAINT ' + QUOTENAME(@dc) + N';';
+        EXEC sys.sp_executesql @sql;
+    END
+
+    -- 2. NULLable, same type; the CHECK has to be dropped while the column changes
+    IF COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Quotations'), N'WithholdingTaxRate', N'AllowsNull') = 0
+    BEGIN
+        SELECT @type = TYPE_NAME(c.user_type_id)
+                     + CASE WHEN TYPE_NAME(c.user_type_id) IN (N'decimal', N'numeric')
+                            THEN N'(' + CAST(c.precision AS NVARCHAR(5)) + N',' + CAST(c.scale AS NVARCHAR(5)) + N')' ELSE N'' END
+        FROM sys.columns c
+        WHERE c.object_id = OBJECT_ID(N'dbo.WN_Quotations') AND c.name = N'WithholdingTaxRate';
+
+        IF OBJECT_ID(N'dbo.CK_WN_Quotations_Wht', N'C') IS NOT NULL
+            EXEC(N'ALTER TABLE dbo.WN_Quotations DROP CONSTRAINT CK_WN_Quotations_Wht;');
+
+        SET @sql = N'ALTER TABLE dbo.WN_Quotations ALTER COLUMN WithholdingTaxRate ' + @type + N' NULL;';
+        EXEC sys.sp_executesql @sql;
+    END
+
+    IF OBJECT_ID(N'dbo.CK_WN_Quotations_Wht', N'C') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Quotations WITH CHECK ADD CONSTRAINT CK_WN_Quotations_Wht
+              CHECK (SendWhtInvoice = 0 OR (WithholdingTaxRate > 0 AND WithholdingTaxRate < 100));');
+
+    COMMIT TRANSACTION;
+
+    SELECT COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Quotations'), N'WithholdingTaxRate', N'AllowsNull') AS AllowsNull,   -- expect 1
+           (SELECT COUNT(*) FROM sys.default_constraints dc JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+             WHERE dc.parent_object_id = OBJECT_ID(N'dbo.WN_Quotations') AND c.name = N'WithholdingTaxRate') AS DefaultsLeft,   -- expect 0
+           CASE WHEN OBJECT_ID(N'dbo.CK_WN_Quotations_Wht', N'C') IS NOT NULL THEN 'yes' ELSE 'NO' END AS CheckConstraint;  -- expect yes
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+-- OPTIONAL (not run by this script): clear the rate on existing quotations WITHOUT WHT, e.g. 223 and 225:
+-- UPDATE dbo.WN_Quotations SET WithholdingTaxRate = NULL WHERE ISNULL(SendWhtInvoice, 0) = 0;
