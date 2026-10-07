@@ -240,6 +240,18 @@ namespace WorkNest.API.Services
                 dto.BillingPeriodStart = HasColumn(reader, "BillingPeriodStart") && !reader.IsDBNull(reader.GetOrdinal("BillingPeriodStart")) ? reader.GetDateTime(reader.GetOrdinal("BillingPeriodStart")) : (DateTime?)null;
                 dto.BillingPeriodEnd = HasColumn(reader, "BillingPeriodEnd") && !reader.IsDBNull(reader.GetOrdinal("BillingPeriodEnd")) ? reader.GetDateTime(reader.GetOrdinal("BillingPeriodEnd")) : (DateTime?)null;
                 dto.CurrentInvoiceTotal = reader.GetDecimal(reader.GetOrdinal("GrandTotal"));
+                // Same fields as InvoiceController.BuildStatementInvoicePdfDtoAsync, so emailed PDFs match the
+                // downloaded ones (PST total, WHT invoices without the "if tax is withheld" terms).
+                if (HasColumn(reader, "SubTotal") && !reader.IsDBNull(reader.GetOrdinal("SubTotal")))
+                    dto.SubTotal = reader.GetDecimal(reader.GetOrdinal("SubTotal"));
+                if (HasColumn(reader, "DiscountTotal") && !reader.IsDBNull(reader.GetOrdinal("DiscountTotal")))
+                    dto.DiscountTotal = reader.GetDecimal(reader.GetOrdinal("DiscountTotal"));
+                if (HasColumn(reader, "TaxTotal") && !reader.IsDBNull(reader.GetOrdinal("TaxTotal")))
+                    dto.TaxTotal = reader.GetDecimal(reader.GetOrdinal("TaxTotal"));
+                if (HasColumn(reader, "WithholdingTaxRate") && !reader.IsDBNull(reader.GetOrdinal("WithholdingTaxRate")))
+                    dto.WithholdingTaxRate = reader.GetDecimal(reader.GetOrdinal("WithholdingTaxRate"));
+                dto.IsWhtInvoice = HasColumn(reader, "InvoiceTypeId") && !reader.IsDBNull(reader.GetOrdinal("InvoiceTypeId"))
+                    && Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId"))) == 6;
                 dto.CurrencyCode = reader.GetString(reader.GetOrdinal("CurrencyCode"));
                 dto.AccountName = reader.GetString(reader.GetOrdinal("AccountName"));
                 dto.AttnName = reader.IsDBNull(reader.GetOrdinal("AttnName")) ? "" : reader.GetString(reader.GetOrdinal("AttnName"));
