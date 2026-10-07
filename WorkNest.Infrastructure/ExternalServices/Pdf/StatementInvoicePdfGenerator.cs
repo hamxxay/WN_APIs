@@ -430,11 +430,18 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     ? data.CurrentInvoiceTotal
                     : (hasTax ? (totalExclVat + (effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round((data.SupportChargeAmount ?? 0m) * (taxPercentage / 100m), 2))) : totalExclVat);
                 decimal secDeposit = depositTotal > 0 ? depositTotal : data.SecurityDepositAmount;
-                decimal taxableBase = Math.Max(0, invoiceTotal - secDeposit);
+                // Same rule as a WHT invoice: only the room rent (rent + support) is grossed up; PST and the security
+                // deposit are added unchanged. (Was: the PST was grossed up too.)
+                decimal pstInTotal = hasTax
+                    ? (effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round((data.SupportChargeAmount ?? 0m) * (taxPercentage / 100m), 2))
+                    : 0m;
+                decimal roomRentNet = Math.Max(0, invoiceTotal - secDeposit - pstInTotal);
                 decimal rawWht = data.WithholdingTaxRate > 0 ? data.WithholdingTaxRate : 15.00m;
                 decimal withholdingTaxRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
-                decimal grossedUpRent = withholdingTaxRate < 1m ? taxableBase / (1 - withholdingTaxRate) : taxableBase;
-                decimal grossedUpTotal = grossedUpRent + secDeposit;
+                decimal grossedUpRent = withholdingTaxRate < 1m
+                    ? Math.Round(roomRentNet / (1 - withholdingTaxRate), 2, MidpointRounding.AwayFromZero)
+                    : roomRentNet;
+                decimal grossedUpTotal = grossedUpRent + pstInTotal + secDeposit;
 
                 // A WHT invoice is already grossed up: these two terms would quote a second gross-up.
                 if (!data.IsWhtInvoice)
