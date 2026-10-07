@@ -2796,6 +2796,14 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadAll(r);
         }
 
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetWhtRateOptionsAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_WHTaxRate_GetList", c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
         public async Task UpdateAmountFieldAccountAsync(int id, int? accountId)
         {
             await using var c = await Open();

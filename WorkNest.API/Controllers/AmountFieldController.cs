@@ -17,6 +17,10 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/amount-fields")]
         public async Task<IActionResult> GetAll() => Ok(await _svc.GetAllAsync());
 
+        /// <summary>WHT rate options from dbo.WN_WHTaxRate (Description shown, WHRate applied).</summary>
+        [HttpGet("api/amount-fields/wht-rates")]
+        public async Task<IActionResult> GetWhtRates() => Ok(await _svc.GetWhtRatesAsync());
+
         [HttpPatch("api/amount-fields/{id:int}/account")]
         [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> UpdateAccount(int id, [FromBody] AmountFieldUpdateAccountRequest request)

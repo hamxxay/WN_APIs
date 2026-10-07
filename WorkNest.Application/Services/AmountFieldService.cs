@@ -25,6 +25,40 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(result);
         }
 
+        public async Task<ApiResponse> GetWhtRatesAsync()
+        {
+            // dbo.WN_WHTaxRate: Description is shown, WHRate is applied. Rows marked inactive (IsActive / Status
+            // = 0, when the table has such a column) and rates outside 0-100 are left out.
+            static object? Col(IDictionary<string, object?> r, params string[] names)
+            {
+                foreach (var n in names)
+                    foreach (var kv in r)
+                        if (string.Equals(kv.Key, n, StringComparison.OrdinalIgnoreCase)) return kv.Value;
+                return null;
+            }
+            static bool Inactive(object? v) => v is not null && v is not DBNull &&
+                (v is bool b ? !b : decimal.TryParse(v.ToString(), out var d) && d == 0);
+
+            var rows = await _db.GetWhtRateOptionsAsync();
+            var result = rows
+                .Where(r => !Inactive(Col(r, "IsActive", "Status", "Active")))
+                .Select(r =>
+                {
+                    var rate = Col(r, "WHRate", "WHTRate", "Rate");
+                    var id = Col(r, "Id", "WHTaxRateId");
+                    return new WhtRateOptionDto
+                    {
+                        Id = id is not null && id is not DBNull && int.TryParse(id.ToString(), out var i) ? i : null,
+                        Description = Col(r, "Description")?.ToString()?.Trim() ?? "",
+                        Rate = rate is not null && rate is not DBNull && decimal.TryParse(rate.ToString(), out var d) ? d : 0m,
+                    };
+                })
+                .Where(o => o.Rate > 0 && o.Rate < 100 && o.Description.Length > 0)
+                .OrderBy(o => o.Description)
+                .ToList();
+            return ApiResponse.Ok(result);
+        }
+
         public async Task<ApiResponse> UpdateAccountAsync(int id, int? accountId)
         {
             await _db.UpdateAmountFieldAccountAsync(id, accountId);
