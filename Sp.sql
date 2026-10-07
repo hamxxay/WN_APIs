@@ -5714,7 +5714,7 @@ BEGIN
         ISNULL(i.TaxTotal, 0) AS TaxTotal,
         ISNULL(i.GrandTotal, 0) AS GrandTotal,
         ISNULL(i.PaidTotal, 0) AS PaidTotal,
-        ISNULL(i.GrandTotal - i.PaidTotal, 0) AS BalanceDue,
+        ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) AS BalanceDue,
         i.CurrencyCode,
         i.StatusId,
         i.InvoiceTypeId,
@@ -6314,6 +6314,8 @@ BEGIN
         DECLARE @UserId INT;
         DECLARE @MonthlyRent DECIMAL(18,2);
         DECLARE @DiscountAmt DECIMAL(18,2);
+        DECLARE @DiscountPct DECIMAL(9,4);
+        DECLARE @ContractEnd DATE;
         DECLARE @BillingPeriodMonths INT;
         DECLARE @SpaceId INT;
         DECLARE @BookingGuid UNIQUEIDENTIFIER;
@@ -6322,7 +6324,9 @@ BEGIN
         SELECT TOP 1 
             @UserId = b.UserId,
             @MonthlyRent = COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), CASE WHEN ISNULL(b.BillingPeriodMonths, 0) > 0 THEN b.SubtotalAmount / b.BillingPeriodMonths ELSE b.SubtotalAmount END), -- booking's monthly rent (was MonthlyBasePrice, which bookings never fill, falling back to the multi-month subtotal)
-            @DiscountAmt = ISNULL(b.DiscountAmount, 0.00),
+            @DiscountAmt = ISNULL(b.DiscountAmount, 0.00),          -- fixed discount PER MONTH (as on the first invoice)
+            @DiscountPct = ISNULL(b.DiscountPercentage, 0.00),
+            @ContractEnd = CAST(b.EndOn AS DATE),
             @BillingPeriodMonths = ISNULL(b.BillingPeriodMonths, 1),
             @SpaceId = b.SpaceId,
             @BookingGuid = b.IdGUID,
@@ -6339,13 +6343,34 @@ BEGIN
 
         IF @BillingPeriodMonths <= 0 SET @BillingPeriodMonths = 1;
 
-        DECLARE @RentAmount DECIMAL(18,2) = @MonthlyRent * @BillingPeriodMonths;
+        -- Actual length of this period in months: the billing job cuts the last period at the contract end, so it can
+        -- be shorter than a full cycle. Whole months from the period start + remaining days as a fraction of that
+        -- month (same rule as BillingPeriods.MonthsBetween in the API). A full cycle gives @BillingPeriodMonths.
+        DECLARE @PStart DATE = CAST(@BillingPeriodStart AS DATE), @PEnd DATE = CAST(@BillingPeriodEnd AS DATE);
+        DECLARE @WholeMonths INT = 0, @RestStart DATE, @PeriodMonths DECIMAL(9,6);
+        WHILE @WholeMonths < 600 AND DATEADD(DAY, -1, DATEADD(MONTH, @WholeMonths + 1, @PStart)) <= @PEnd
+            SET @WholeMonths = @WholeMonths + 1;
+        SET @RestStart = DATEADD(MONTH, @WholeMonths, @PStart);
+        SET @PeriodMonths = ROUND(@WholeMonths + CASE WHEN @RestStart > @PEnd THEN 0
+                                  ELSE CAST(DATEDIFF(DAY, @RestStart, @PEnd) + 1 AS DECIMAL(18,6)) / DAY(EOMONTH(@RestStart)) END, 6);
+        -- Only a last period cut at the contract end is charged as a part period; every other period is a full cycle
+        -- (periods are anchored to the contract start day, so measuring them could give e.g. 1.1 months).
+        IF @PeriodMonths IS NULL OR @PeriodMonths <= 0 OR @PeriodMonths >= @BillingPeriodMonths
+           OR @ContractEnd IS NULL OR @PEnd <> @ContractEnd
+            SET @PeriodMonths = @BillingPeriodMonths;
+
+        DECLARE @RentAmount DECIMAL(18,2) = ROUND(@MonthlyRent * @PeriodMonths, 2);
+        -- Discount for this period: percentage of the rent, or the fixed monthly discount x months (as on the first
+        -- invoice); was the booking's whole discount taken off every cycle.
+        SET @DiscountAmt = CASE WHEN @DiscountPct > 0 THEN ROUND(@RentAmount * @DiscountPct / 100.0, 2)
+                                ELSE ROUND(@DiscountAmt * @PeriodMonths, 2) END;
+        IF @DiscountAmt > @RentAmount SET @DiscountAmt = @RentAmount;
         DECLARE @DiscountedRent DECIMAL(18,2) = @RentAmount - @DiscountAmt;
         IF @DiscountedRent < 0 SET @DiscountedRent = 0;
 
         -- Attendant Surcharges for this cycle
         DECLARE @AttendantSurchargeSubtotal DECIMAL(18,2) = 0.00;
-        SELECT @AttendantSurchargeSubtotal = ISNULL(SUM(ba.SurchargeApplied * @BillingPeriodMonths), 0.00)
+        SELECT @AttendantSurchargeSubtotal = ISNULL(SUM(ROUND(ba.SurchargeApplied * @PeriodMonths, 2)), 0.00)
         FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
         JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId
         WHERE (bd.BookingGuid = @BookingGuid OR bd.CustomerCode IN (SELECT Code FROM dbo.WN_Customers WHERE UserId = @UserId))
@@ -6412,7 +6437,7 @@ BEGIN
 
         DECLARE @SupportChargeAmount DECIMAL(18,2) = CASE WHEN @IsMeetingRoom = 1
             THEN ROUND(@TotalBaseAmount * (@AppliedChargePercentage / 100.0), 2)
-            ELSE ROUND(@PerSeatSupportRate * @Capacity * @BillingPeriodMonths, 2) END;
+            ELSE ROUND(@PerSeatSupportRate * @Capacity * @PeriodMonths, 2) END;
         IF @SupportChargeAmount > @TotalBaseAmount SET @SupportChargeAmount = @TotalBaseAmount;
         DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
         DECLARE @GrandTotal DECIMAL(18,2) = @TotalBaseAmount + @TaxAmount;
@@ -6461,7 +6486,10 @@ BEGIN
             InvoiceId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, SortOrder
         )
         VALUES (
-            @InvoiceId, 1, 'Recurring Room Rent', @BillingPeriodMonths, @MonthlyRent, @DiscountAmt, @LineTaxRate, @RentAccountId, 1
+            @InvoiceId, 1, 'Recurring Room Rent',
+            CASE WHEN @PeriodMonths = @BillingPeriodMonths THEN @BillingPeriodMonths ELSE 1 END,        -- part period: one line
+            CASE WHEN @PeriodMonths = @BillingPeriodMonths THEN @MonthlyRent ELSE @RentAmount END,      -- for the actual rent
+            @DiscountAmt, @LineTaxRate, @RentAccountId, 1
         );
 
         -- Line Items for Active Attendant Surcharges
@@ -6473,7 +6501,7 @@ BEGIN
             1,
             'Capacity Overage Surcharge for Attendant: ' + p.Name + ' (' + ISNULL(p.IdNumber, '') + ') in ' + ISNULL(bd.SpaceName, 'Workspace'),
             ISNULL(ba.ExcessSeatCount, 1),
-            ba.SurchargeApplied * @BillingPeriodMonths / CASE WHEN ISNULL(ba.ExcessSeatCount, 1) > 0 THEN ba.ExcessSeatCount ELSE 1 END,
+            ROUND(ba.SurchargeApplied * @PeriodMonths, 2) / CASE WHEN ISNULL(ba.ExcessSeatCount, 1) > 0 THEN ba.ExcessSeatCount ELSE 1 END,
             0,
             @LineTaxRate,
             @RentAccountId,
@@ -6751,7 +6779,8 @@ BEGIN
 
         -- The booking's security deposit belongs on its FIRST invoice only. Later invoices (next / recurring / custom /
         -- surcharge) used to get the full deposit forced on too, so they failed the breakdown check or booked it again.
-        IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId)
+        IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId
+                         AND StatusId NOT IN (5, ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5)))  -- cancelled invoices don't count
         BEGIN
             -- If @SecurityDepositAmount was omitted or is smaller than the full required deposit, adopt the full booking deposit
             IF (@SecurityDepositAmount IS NULL OR @SecurityDepositAmount = 0.00) AND @BookingSecReq > 0
@@ -9378,13 +9407,13 @@ BEGIN
     DECLARE @BillingPeriodStart DATETIME2, @BillingPeriodEnd DATETIME2, @MonthlyRent DECIMAL(18,4);
 
     SELECT 
-        @GrandTotal = i.GrandTotal, 
+        @GrandTotal = i.GrandTotal - ISNULL(i.WHTAmount, 0),   -- what the customer pays (WHT invoices: total less WHT)
         @CurrentPaid = i.PaidTotal, 
         @UserId = i.UserId, 
         @BookingId = i.BookingId,
         @BillingPeriodStart = ISNULL(i.BillingPeriodStart, b.StartOn),
         @BillingPeriodEnd = ISNULL(i.BillingPeriodEnd, b.EndOn),
-        @MonthlyRent = ISNULL(NULLIF(i.GrandTotal, 0), b.TotalAmount)
+        @MonthlyRent = COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(i.GrandTotal, 0), b.TotalAmount)   -- months covered by a part payment
     FROM dbo.WN_Invoices i WITH (UPDLOCK) 
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     WHERE i.Id = @InvoiceId;
@@ -9393,6 +9422,13 @@ BEGIN
     BEGIN
         ROLLBACK TRANSACTION;
         RAISERROR('Invoice not found', 16, 1);
+        RETURN;
+    END;
+
+    IF ISNULL(@PaidAmount, 0) <= 0
+    BEGIN
+        ROLLBACK TRANSACTION;
+        RAISERROR('Payment amount must be greater than 0', 16, 1);
         RETURN;
     END;
 
@@ -11636,7 +11672,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     SELECT TOP 1 s.Id AS SuspensionId, s.BookingId, s.SuspendedAt, s.Reason, s.OverrideUntil, s.MachinesBlocked,
-           i.InvoiceNumber, i.DueOn, i.GrandTotal, ISNULL(i.GrandTotal - i.PaidTotal, 0) AS BalanceDue,
+           i.InvoiceNumber, i.DueOn, i.GrandTotal, ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) AS BalanceDue,
            (SELECT TOP 1 o.CreatedByEmail FROM SAC400.dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
              WHERE o.SuspensionId = s.Id ORDER BY o.Id DESC) AS OverrideByEmail,
            (SELECT TOP 1 o.Reason FROM SAC400.dbo.WN_HIK_BookingAccessOverrides o WITH (NOLOCK)
@@ -11751,6 +11787,8 @@ BEGIN
     SELECT TOP 1
         b.Id AS BookingId, b.UserId, b.StartOn, b.EndOn,
         COALESCE(
+            NULLIF(b.MonthlyRent, 0),   -- the booking's own monthly rent first (same as the recurring job); the
+                                        -- quotation / current price list only for bookings that never stored one
             NULLIF(q.MonthlyBasePrice, 0),
             (CASE WHEN q.PerSeatBasePrice > 0 THEN q.PerSeatBasePrice * ISNULL(COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1), 1) ELSE NULL END),
             NULLIF(sp.RoomPrice, 0),
@@ -11808,10 +11846,14 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_GetBookingLastInvoicePeriodEnd]
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- Latest billed period of the booking: cancelled invoices and invoices without a period (custom) don't count,
+    -- so a cancelled period is billed again and a custom invoice doesn't restart billing from the first period.
     SELECT TOP 1 BillingPeriodEnd
     FROM dbo.WN_Invoices WITH (NOLOCK)
     WHERE BookingId = @BookingId
-    ORDER BY Id DESC;
+      AND BillingPeriodEnd IS NOT NULL
+      AND StatusId NOT IN (5, ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5))
+    ORDER BY BillingPeriodEnd DESC, Id DESC;
 END;
 GO
 /****** Object:  StoredProcedure [dbo].[WN_GetCustomerArrears] ******/
@@ -11824,7 +11866,7 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_GetCustomerArrears]
 AS
 BEGIN
     SET NOCOUNT ON;
-    SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) AS Arrears
+    SELECT ISNULL(SUM(GrandTotal - ISNULL(WHTAmount, 0) - PaidTotal), 0) AS Arrears
     FROM dbo.WN_Invoices WITH (NOLOCK)
     WHERE UserId = @UserId AND StatusId NOT IN (2, 5)
       AND StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled'));
@@ -11840,9 +11882,11 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_GetInvoiceByBookingId]
 AS
 BEGIN
     SET NOCOUNT ON;
+    -- The booking's first invoice that is not cancelled (a cancelled one is re-issued as a new invoice).
     SELECT TOP 1 Id, InvoiceNumber, StatusId, GrandTotal
     FROM dbo.WN_Invoices WITH (NOLOCK)
     WHERE BookingId = @BookingId
+      AND StatusId NOT IN (5, ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5))
     ORDER BY Id ASC;
 END;
 GO
@@ -11945,7 +11989,7 @@ BEGIN
     DECLARE @UserId INT;
     SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
     SELECT
-        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
+        ISNULL(SUM(GrandTotal - ISNULL(WHTAmount, 0) - PaidTotal), 0) AS PriorBalance,
         ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
     FROM dbo.WN_Invoices WITH (NOLOCK)
     WHERE UserId = @UserId AND Id < @InvoiceId;

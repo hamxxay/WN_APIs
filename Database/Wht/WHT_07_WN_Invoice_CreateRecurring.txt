@@ -17,6 +17,8 @@ BEGIN
         DECLARE @UserId INT;
         DECLARE @MonthlyRent DECIMAL(18,2);
         DECLARE @DiscountAmt DECIMAL(18,2);
+        DECLARE @DiscountPct DECIMAL(9,4);
+        DECLARE @ContractEnd DATE;
         DECLARE @BillingPeriodMonths INT;
         DECLARE @SpaceId INT;
         DECLARE @BookingGuid UNIQUEIDENTIFIER;
@@ -25,7 +27,9 @@ BEGIN
         SELECT TOP 1 
             @UserId = b.UserId,
             @MonthlyRent = COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), CASE WHEN ISNULL(b.BillingPeriodMonths, 0) > 0 THEN b.SubtotalAmount / b.BillingPeriodMonths ELSE b.SubtotalAmount END), -- booking's monthly rent (was MonthlyBasePrice, which bookings never fill, falling back to the multi-month subtotal)
-            @DiscountAmt = ISNULL(b.DiscountAmount, 0.00),
+            @DiscountAmt = ISNULL(b.DiscountAmount, 0.00),          -- fixed discount PER MONTH (as on the first invoice)
+            @DiscountPct = ISNULL(b.DiscountPercentage, 0.00),
+            @ContractEnd = CAST(b.EndOn AS DATE),
             @BillingPeriodMonths = ISNULL(b.BillingPeriodMonths, 1),
             @SpaceId = b.SpaceId,
             @BookingGuid = b.IdGUID,
@@ -42,13 +46,34 @@ BEGIN
 
         IF @BillingPeriodMonths <= 0 SET @BillingPeriodMonths = 1;
 
-        DECLARE @RentAmount DECIMAL(18,2) = @MonthlyRent * @BillingPeriodMonths;
+        -- Actual length of this period in months: the billing job cuts the last period at the contract end, so it can
+        -- be shorter than a full cycle. Whole months from the period start + remaining days as a fraction of that
+        -- month (same rule as BillingPeriods.MonthsBetween in the API). A full cycle gives @BillingPeriodMonths.
+        DECLARE @PStart DATE = CAST(@BillingPeriodStart AS DATE), @PEnd DATE = CAST(@BillingPeriodEnd AS DATE);
+        DECLARE @WholeMonths INT = 0, @RestStart DATE, @PeriodMonths DECIMAL(9,6);
+        WHILE @WholeMonths < 600 AND DATEADD(DAY, -1, DATEADD(MONTH, @WholeMonths + 1, @PStart)) <= @PEnd
+            SET @WholeMonths = @WholeMonths + 1;
+        SET @RestStart = DATEADD(MONTH, @WholeMonths, @PStart);
+        SET @PeriodMonths = ROUND(@WholeMonths + CASE WHEN @RestStart > @PEnd THEN 0
+                                  ELSE CAST(DATEDIFF(DAY, @RestStart, @PEnd) + 1 AS DECIMAL(18,6)) / DAY(EOMONTH(@RestStart)) END, 6);
+        -- Only a last period cut at the contract end is charged as a part period; every other period is a full cycle
+        -- (periods are anchored to the contract start day, so measuring them could give e.g. 1.1 months).
+        IF @PeriodMonths IS NULL OR @PeriodMonths <= 0 OR @PeriodMonths >= @BillingPeriodMonths
+           OR @ContractEnd IS NULL OR @PEnd <> @ContractEnd
+            SET @PeriodMonths = @BillingPeriodMonths;
+
+        DECLARE @RentAmount DECIMAL(18,2) = ROUND(@MonthlyRent * @PeriodMonths, 2);
+        -- Discount for this period: percentage of the rent, or the fixed monthly discount x months (as on the first
+        -- invoice); was the booking's whole discount taken off every cycle.
+        SET @DiscountAmt = CASE WHEN @DiscountPct > 0 THEN ROUND(@RentAmount * @DiscountPct / 100.0, 2)
+                                ELSE ROUND(@DiscountAmt * @PeriodMonths, 2) END;
+        IF @DiscountAmt > @RentAmount SET @DiscountAmt = @RentAmount;
         DECLARE @DiscountedRent DECIMAL(18,2) = @RentAmount - @DiscountAmt;
         IF @DiscountedRent < 0 SET @DiscountedRent = 0;
 
         -- Attendant Surcharges for this cycle
         DECLARE @AttendantSurchargeSubtotal DECIMAL(18,2) = 0.00;
-        SELECT @AttendantSurchargeSubtotal = ISNULL(SUM(ba.SurchargeApplied * @BillingPeriodMonths), 0.00)
+        SELECT @AttendantSurchargeSubtotal = ISNULL(SUM(ROUND(ba.SurchargeApplied * @PeriodMonths, 2)), 0.00)
         FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
         JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = ba.BookingDetailId
         WHERE (bd.BookingGuid = @BookingGuid OR bd.CustomerCode IN (SELECT Code FROM dbo.WN_Customers WHERE UserId = @UserId))
@@ -115,7 +140,7 @@ BEGIN
 
         DECLARE @SupportChargeAmount DECIMAL(18,2) = CASE WHEN @IsMeetingRoom = 1
             THEN ROUND(@TotalBaseAmount * (@AppliedChargePercentage / 100.0), 2)
-            ELSE ROUND(@PerSeatSupportRate * @Capacity * @BillingPeriodMonths, 2) END;
+            ELSE ROUND(@PerSeatSupportRate * @Capacity * @PeriodMonths, 2) END;
         IF @SupportChargeAmount > @TotalBaseAmount SET @SupportChargeAmount = @TotalBaseAmount;
         DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
         DECLARE @GrandTotal DECIMAL(18,2) = @TotalBaseAmount + @TaxAmount;
@@ -164,7 +189,10 @@ BEGIN
             InvoiceId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, SortOrder
         )
         VALUES (
-            @InvoiceId, 1, 'Recurring Room Rent', @BillingPeriodMonths, @MonthlyRent, @DiscountAmt, @LineTaxRate, @RentAccountId, 1
+            @InvoiceId, 1, 'Recurring Room Rent',
+            CASE WHEN @PeriodMonths = @BillingPeriodMonths THEN @BillingPeriodMonths ELSE 1 END,        -- part period: one line
+            CASE WHEN @PeriodMonths = @BillingPeriodMonths THEN @MonthlyRent ELSE @RentAmount END,      -- for the actual rent
+            @DiscountAmt, @LineTaxRate, @RentAccountId, 1
         );
 
         -- Line Items for Active Attendant Surcharges
@@ -176,7 +204,7 @@ BEGIN
             1,
             'Capacity Overage Surcharge for Attendant: ' + p.Name + ' (' + ISNULL(p.IdNumber, '') + ') in ' + ISNULL(bd.SpaceName, 'Workspace'),
             ISNULL(ba.ExcessSeatCount, 1),
-            ba.SurchargeApplied * @BillingPeriodMonths / CASE WHEN ISNULL(ba.ExcessSeatCount, 1) > 0 THEN ba.ExcessSeatCount ELSE 1 END,
+            ROUND(ba.SurchargeApplied * @PeriodMonths, 2) / CASE WHEN ISNULL(ba.ExcessSeatCount, 1) > 0 THEN ba.ExcessSeatCount ELSE 1 END,
             0,
             @LineTaxRate,
             @RentAccountId,

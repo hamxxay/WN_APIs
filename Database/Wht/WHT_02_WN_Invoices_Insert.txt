@@ -166,7 +166,8 @@ BEGIN
 
         -- The booking's security deposit belongs on its FIRST invoice only. Later invoices (next / recurring / custom /
         -- surcharge) used to get the full deposit forced on too, so they failed the breakdown check or booked it again.
-        IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId)
+        IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId
+                         AND StatusId NOT IN (5, ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5)))  -- cancelled invoices don't count
         BEGIN
             -- If @SecurityDepositAmount was omitted or is smaller than the full required deposit, adopt the full booking deposit
             IF (@SecurityDepositAmount IS NULL OR @SecurityDepositAmount = 0.00) AND @BookingSecReq > 0
