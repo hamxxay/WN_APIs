@@ -1,0 +1,65 @@
+-- ============================================================================================
+-- READ-ONLY diagnostics. Changes nothing. Run on LIVE and on TEST (select all, execute) and compare.
+-- 1. Booking start date for challan WN-20261007-9568 (invoice shows Oct 8-31 instead of Nov 1)
+-- 2. Which procedure versions are installed (new WHT rule, booking create)
+-- 3. HIK: every table / view / procedure the HIK pages need, plus data freshness
+-- ============================================================================================
+
+-- 1. Booking dates: what was stored, and what the quotation said
+SELECT b.Id AS BookingId, b.ChallanNumber, b.StartOn, b.EndOn, b.BookingDate, b.CreatedOn,
+       q.Id AS QuotationId, q.StartDateTime AS QuotationStart, q.EndDateTime AS QuotationEnd
+FROM dbo.WN_Bookings b WITH (NOLOCK)
+LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+WHERE b.ChallanNumber = N'WN-20261007-9568';
+
+-- 2. Procedure versions on this database
+SELECT DB_NAME() AS DatabaseName, @@SERVERNAME AS ServerName,
+       CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.WN_Invoices_Insert')) LIKE '%RoomRentNet%' THEN 'new' ELSE 'OLD' END AS WHT_Invoices_Insert,
+       CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.WN_UpdateInvoiceBreakdown')) LIKE '%RoomRentNet%' THEN 'new' ELSE 'OLD' END AS WHT_UpdateBreakdown,
+       CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.WN_GetBookingBillingSummary')) LIKE '%IN (1,2,6)%' THEN 'new' ELSE 'OLD' END AS BillingSummary,
+       (SELECT modify_date FROM sys.objects WHERE object_id = OBJECT_ID('dbo.WN_Bookings_Insert')) AS WN_Bookings_Insert_Modified,
+       (SELECT modify_date FROM sys.objects WHERE object_id = OBJECT_ID('dbo.WN_Quotations_ConvertToBooking')) AS ConvertToBooking_Modified;
+
+-- 3a. HIK objects the API uses: Missing = the page that needs it fails on this database
+SELECT o.Name, o.Kind,
+       CASE WHEN OBJECT_ID('dbo.' + o.Name) IS NULL THEN 'MISSING' ELSE 'ok' END AS Status,
+       (SELECT modify_date FROM sys.objects WHERE object_id = OBJECT_ID('dbo.' + o.Name)) AS Modified
+FROM (VALUES
+    ('WN_HIK_Devices','table'), ('WN_HIK_Groups','table'), ('WN_HIK_DevCache','table'), ('WN_HIK_Users','table'),
+    ('WN_HIK_Tags','table'), ('WN_HIK_Cards','table'), ('WN_HIK_Visitors','table'), ('WN_HIK_Employees','view'),
+    ('WN_HIK_AccessGrants','table'), ('WN_HIK_PendingOps','table'), ('WN_HIK_Settings','table'), ('WN_HIK_SyncLog','table'),
+    ('WN_HIK_Events','table'), ('WN_HIK_EventCategories','table'), ('WN_HIK_FpVault','table'), ('WN_HIK_FaceVault','table'),
+    ('WN_HIK_PersonMap','table'), ('WN_HIK_BookingAccessOverrides','table'), ('WN_HIK_BookingAccessSuspensions','table'),
+    ('WN_HIK_Device_SetOnline','proc'), ('WN_HIK_Log_Write','proc'), ('WN_HIK_Settings_Get','proc'), ('WN_HIK_Settings_Set','proc'),
+    ('WN_HIK_Expiry_Run','proc'), ('WN_HIK_Grant_SetState','proc'), ('WN_HIK_Grant_PendingEmployees','proc'),
+    ('WN_HIK_PersonMap_Allocate','proc'), ('WN_HIK_Activity_Recent','proc'),
+    ('WN_HIK_AccessSuspension_Run','proc'), ('WN_HIK_AccessSuspension_Extend','proc'),
+    ('WN_HIK_AccessSuspension_GetByBookingDetail','proc'), ('WN_HIK_AccessSuspension_SetApplied','proc')
+) o(Name, Kind)
+ORDER BY CASE WHEN OBJECT_ID('dbo.' + o.Name) IS NULL THEN 0 ELSE 1 END, o.Kind, o.Name;
+
+-- 3b. Columns the API reads that older HIK schemas did not have
+SELECT c.TableName, c.ColumnName,
+       CASE WHEN COL_LENGTH('dbo.' + c.TableName, c.ColumnName) IS NULL THEN 'MISSING' ELSE 'ok' END AS Status
+FROM (VALUES
+    ('WN_HIK_Devices','Host2'), ('WN_HIK_Devices','Code'), ('WN_HIK_Devices','Group_id'), ('WN_HIK_Devices','Device_Name'),
+    ('WN_HIK_DevCache','Users_snapshot'), ('WN_HIK_DevCache','Users_UpdatedOn'), ('WN_HIK_DevCache','Cards_snapshot'),
+    ('WN_HIK_DevCache','Cards_UpdatedOn'), ('WN_HIK_DevCache','Status'),
+    ('WN_HIK_Users','cnic'), ('WN_HIK_Users','tag_id'), ('WN_HIK_Users','machines'), ('WN_HIK_Users','machine_count'),
+    ('WN_HIK_Cards','Employee_no'), ('WN_HIK_Cards','Employee_name'), ('WN_HIK_Cards','Booking_ref')
+) c(TableName, ColumnName)
+ORDER BY CASE WHEN COL_LENGTH('dbo.' + c.TableName, c.ColumnName) IS NULL THEN 0 ELSE 1 END, c.TableName;
+
+-- 3c. Data: the pages show machine data from these; empty or old = nothing (or stale data) on the page
+-- (run dynamically: if a column from 3b is missing, only this part errors, the results above still show)
+EXEC(N'SELECT ''Devices'' AS What, COUNT(*) AS Rows, SUM(CASE WHEN Online = 1 THEN 1 ELSE 0 END) AS Online,
+       CAST(MAX(Last_seen) AS NVARCHAR(30)) AS Latest
+FROM dbo.WN_HIK_Devices WITH (NOLOCK)
+UNION ALL
+SELECT ''Machine snapshots (DevCache)'', COUNT(*), SUM(CASE WHEN Users_snapshot IS NOT NULL THEN 1 ELSE 0 END),
+       CAST(MAX(Users_UpdatedOn) AS NVARCHAR(30))
+FROM dbo.WN_HIK_DevCache WITH (NOLOCK)
+UNION ALL
+SELECT ''Members (WN_HIK_Users)'', COUNT(*), NULL, CAST(MAX(updated_at) AS NVARCHAR(30)) FROM dbo.WN_HIK_Users WITH (NOLOCK)
+UNION ALL
+SELECT ''Pending ops queue'', COUNT(*), NULL, CAST(MAX(created_at) AS NVARCHAR(30)) FROM dbo.WN_HIK_PendingOps WITH (NOLOCK);');
