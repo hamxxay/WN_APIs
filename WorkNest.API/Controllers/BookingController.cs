@@ -109,17 +109,8 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? search = null,
             [FromQuery] int? locationId = null)
         {
-            int? effectiveLocationId = locationId;
-            if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
-            {
-                var claimLocId = User.GetLocationId();
-                if (claimLocId.HasValue)
-                {
-                    effectiveLocationId = claimLocId.Value;
-                }
-            }
-
-            var (items, total) = await _bookings.GetBookingsAsync(page, limit, search, effectiveLocationId);
+            var (items, total) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit,
+                (p, l, loc) => _bookings.GetBookingsAsync(p, l, search, loc));
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
@@ -200,7 +191,7 @@ namespace WorkNest.API.Controllers
                 return BadRequest(new { isSuccessful = false, message = "UserId, UserIdGuid, or CustomerEmail is required." });
 
             var actor = ResolveUserEmail();
-            var result = await _bookings.CreateAdminBookingAsync(request, actor);
+            var result = await _bookings.CreateAdminBookingAsync(request, actor, User.IsLocationBoundRole() ? User.GetLocationIds() : null);
             if (!result.IsSuccessful)
                 return BadRequest(result);
 

@@ -13,7 +13,10 @@ namespace WorkNest.Application.Services
         public async Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null)
         {
             var (rows, total) = await _db.GetUsersAsync(page, limit, search, locationId);
-            var items = rows.Select(r => (object)new
+            var rowList = rows.ToList();
+            var extra = await _db.GetUserLocationsMapAsync(rowList
+                .Where(r => r.TryGetValue("Id", out var v) && v is not null).Select(r => Convert.ToInt32(r["Id"])));
+            var items = rowList.Select(r => (object)new
             {
                 id           = r.TryGetValue("Id",           out var i)  ? i  : null,
                 publicId     = r.TryGetValue("PublicId",     out var g)  ? g?.ToString() : null,
@@ -24,9 +27,49 @@ namespace WorkNest.Application.Services
                 createdOn    = r.TryGetValue("CreatedOn",    out var c)  ? c  : null,
                 role         = Roles.FromRow(r),
                 locationId   = r.TryGetValue("LocationId",   out var loc)&& loc is not null ? Convert.ToInt32(loc) : (int?)null,
-                locationName = r.TryGetValue("LocationName", out var ln) ? ln?.ToString() : null,
+                locationIds  = AllLocations(r, extra).Select(x => x.Id).ToList(),
+                locationName = string.Join(", ", AllLocations(r, extra).Select(x => x.Name).Where(x => x.Length > 0)),
             });
             return (items, total);
+        }
+
+        /// <summary>Primary location (WN_Users) followed by any extra ones from WN_UserLocations, without duplicates.</summary>
+        private static List<(int Id, string Name)> AllLocations(IDictionary<string, object?> r, Dictionary<int, List<(int Id, string Name)>> extra)
+        {
+            var list = new List<(int Id, string Name)>();
+            if (r.TryGetValue("LocationId", out var loc) && loc is not null)
+                list.Add((Convert.ToInt32(loc), r.TryGetValue("LocationName", out var ln) ? ln?.ToString() ?? "" : ""));
+            if (r.TryGetValue("Id", out var idObj) && idObj is not null && extra.TryGetValue(Convert.ToInt32(idObj), out var more))
+                list.AddRange(more.Where(m => list.All(x => x.Id != m.Id)));
+            return list;
+        }
+
+        /// <summary>
+        /// Saves an Admin/Sales Executive's locations: the primary goes to WN_Users.LocationId, the full set to
+        /// WN_UserLocations. Other roles have none. Returns an error message, or null when saved.
+        /// </summary>
+        private async Task<string?> SaveLocationsAsync(int userId, int roleId, int? primary, List<int>? locationIds, int? actorId)
+        {
+            if (!Roles.IsLocationBoundRole(roleId))
+            {
+                await _db.SetUserLocationsAsync(userId, Array.Empty<int>(), actorId);
+                return null;
+            }
+            var set = (locationIds ?? new List<int>()).Where(x => x > 0).ToList();
+            if (primary is > 0 && !set.Contains(primary.Value)) set.Insert(0, primary.Value);
+            if (set.Count == 0) return null;
+            var saved = await _db.SetUserLocationsAsync(userId, set, actorId);
+            if (!saved && set.Count > 1)
+                return "Only the first location was saved. Multiple locations need the WN_UserLocations table (script WN_UserLocations.txt).";
+            return null;
+        }
+
+        /// <summary>Picks the primary location: the given one if it is in the list, otherwise the first of the list.</summary>
+        private static int? PrimaryLocation(int? locationId, List<int>? locationIds)
+        {
+            var list = (locationIds ?? new List<int>()).Where(x => x > 0).ToList();
+            if (list.Count == 0) return locationId;
+            return locationId is > 0 && list.Contains(locationId.Value) ? locationId : list[0];
         }
 
         public async Task<ApiResponse> GetUserByIdAsync(int id)
@@ -57,9 +100,9 @@ namespace WorkNest.Application.Services
         public async Task<ApiResponse> CreateUserAsync(UserCreateRequest request, int? actorId)
         {
             var roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
-            int? finalLocationId = request.LocationId;
+            int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
 
-            if (Roles.IsSuperAdmin(roleId) || roleId == Roles.GeneralId)
+            if (!Roles.IsLocationBoundRole(roleId))
             {
                 finalLocationId = null;
             }
@@ -67,7 +110,7 @@ namespace WorkNest.Application.Services
             {
                 if (!finalLocationId.HasValue || finalLocationId.Value <= 0)
                 {
-                    return ApiResponse.Fail("Location is required for Admin and Sales Executive roles.");
+                    return ApiResponse.Fail("Location is required for Sales Executives.");
                 }
             }
 
@@ -93,18 +136,21 @@ namespace WorkNest.Application.Services
                     null);
             }
 
-            return ApiResponse.Ok(new { id, publicId, email = request.Email, locationId = finalLocationId }, "User created successfully.");
+            string? locationWarning = id.HasValue ? await SaveLocationsAsync(id.Value, roleId, finalLocationId, request.LocationIds, actorId) : null;
+            return ApiResponse.Ok(new { id, publicId, email = request.Email, locationId = finalLocationId },
+                locationWarning ?? "User created successfully.");
         }
 
         public async Task<ApiResponse> UpdateUserAsync(int id, UserUpdateRequest request)
         {
-            int? finalLocationId = request.LocationId;
+            int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
+            int? effectiveRoleId = null;
 
             if (!string.IsNullOrWhiteSpace(request.Role))
             {
                 int roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
 
-                if (Roles.IsSuperAdmin(roleId) || roleId == Roles.GeneralId)
+                if (!Roles.IsLocationBoundRole(roleId))
                 {
                     finalLocationId = null;
                 }
@@ -122,21 +168,30 @@ namespace WorkNest.Application.Services
                 }
 
                 await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId);
+                effectiveRoleId = roleId;
             }
-            else if (request.LocationId.HasValue)
+            else if (finalLocationId.HasValue)
             {
                 var existingUser = await _db.GetUserByIdAsync(id);
                 var existingRoleId = existingUser?.TryGetValue("RoleId", out var rid) == true && rid is not null ? Convert.ToInt32(rid) : Roles.GeneralId;
-                if (Roles.IsSuperAdmin(existingRoleId) || existingRoleId == Roles.GeneralId)
+                if (!Roles.IsLocationBoundRole(existingRoleId))
                 {
                     finalLocationId = null;
                 }
                 await _db.SetUserRoleAndLocationAsync(id, existingRoleId, finalLocationId);
+                effectiveRoleId = existingRoleId;
             }
 
             await _db.UpdateUserAsync(id, request.Name, request.Phone,
                 request.CompanyId, request.CityId, request.Address,
                 request.CnicOrPassport, request.AvatarUrl, request.Notes, finalLocationId);
+
+            // Only touch the location list when the form sent one (or changed the role).
+            if (effectiveRoleId.HasValue && (request.LocationIds != null || !Roles.IsLocationBoundRole(effectiveRoleId.Value)))
+            {
+                var warning = await SaveLocationsAsync(id, effectiveRoleId.Value, finalLocationId, request.LocationIds, null);
+                if (warning != null) return ApiResponse.Ok(warning);
+            }
             return ApiResponse.Ok("User updated.");
         }
 
@@ -166,7 +221,7 @@ namespace WorkNest.Application.Services
             int roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
             int? finalLocationId = request.LocationId;
 
-            if (Roles.IsSuperAdmin(roleId) || roleId == Roles.GeneralId)
+            if (!Roles.IsLocationBoundRole(roleId))
             {
                 finalLocationId = null;
             }
@@ -183,7 +238,7 @@ namespace WorkNest.Application.Services
                     }
                     else
                     {
-                        return ApiResponse.Fail("Location is required when updating role to Admin or Sales Executive.");
+                        return ApiResponse.Fail("Location is required when making a user a Sales Executive.");
                     }
                 }
             }

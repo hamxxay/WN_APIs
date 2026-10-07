@@ -3171,6 +3171,94 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return await ReadAllRowsAsync(r);
         }
 
+        // ---- Extra locations per user (WN_UserLocations). SQL error 208 = table not created yet. ----
+
+        /// <summary>Locations assigned in WN_UserLocations (empty if none or the table doesn't exist yet).</summary>
+        public async Task<List<int>> GetUserLocationIdsAsync(int userId)
+        {
+            var ids = new List<int>();
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand("SELECT LocationId FROM dbo.WN_UserLocations WITH (NOLOCK) WHERE UserId = @UserId", c);
+                cmd.Parameters.AddWithValue("@UserId", userId);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return ids;
+        }
+
+        /// <summary>Assigned locations (id, name) for several users at once, for the Users list.</summary>
+        public async Task<Dictionary<int, List<(int Id, string Name)>>> GetUserLocationsMapAsync(IEnumerable<int> userIds)
+        {
+            var map = new Dictionary<int, List<(int Id, string Name)>>();
+            var idList = userIds.Distinct().ToList();
+            if (idList.Count == 0) return map;
+            try
+            {
+                await using var c = await Open();
+                var names = string.Join(",", idList.Select((_, i) => "@U" + i));
+                await using var cmd = new SqlCommand($@"
+                    SELECT ul.UserId, ul.LocationId, ISNULL(l.Name, '') AS Name
+                    FROM dbo.WN_UserLocations ul WITH (NOLOCK)
+                    LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = ul.LocationId
+                    WHERE ul.UserId IN ({names})", c);
+                for (int i = 0; i < idList.Count; i++) cmd.Parameters.AddWithValue("@U" + i, idList[i]);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    var uid = r.GetInt32(0);
+                    if (!map.TryGetValue(uid, out var list)) map[uid] = list = new List<(int, string)>();
+                    list.Add((r.GetInt32(1), r.GetString(2)));
+                }
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return map;
+        }
+
+        /// <summary>
+        /// Replaces the user's assigned locations. Returns false if WN_UserLocations doesn't exist yet
+        /// (only WN_Users.LocationId is then saved).
+        /// </summary>
+        public async Task<bool> SetUserLocationsAsync(int userId, IReadOnlyCollection<int> locationIds, int? actorId)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var tx = (SqlTransaction)await c.BeginTransactionAsync();
+                await using (var del = new SqlCommand("DELETE FROM dbo.WN_UserLocations WHERE UserId = @UserId", c, tx))
+                {
+                    del.Parameters.AddWithValue("@UserId", userId);
+                    await del.ExecuteNonQueryAsync();
+                }
+                foreach (var locId in locationIds.Distinct())
+                {
+                    await using var ins = new SqlCommand(
+                        "INSERT INTO dbo.WN_UserLocations (UserId, LocationId, CreatedById) VALUES (@UserId, @LocationId, @CreatedById)", c, tx);
+                    ins.Parameters.AddWithValue("@UserId", userId);
+                    ins.Parameters.AddWithValue("@LocationId", locId);
+                    ins.Parameters.AddWithValue("@CreatedById", (object?)actorId ?? DBNull.Value);
+                    await ins.ExecuteNonQueryAsync();
+                }
+                await tx.CommitAsync();
+                return true;
+            }
+            catch (SqlException ex) when (ex.Number == 208)
+            {
+                return false;
+            }
+        }
+
+        public async Task<int?> GetSpaceLocationIdAsync(int spaceId)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT LocationId FROM dbo.WN_Spaces WITH (NOLOCK) WHERE Id = @Id", c);
+            cmd.Parameters.AddWithValue("@Id", spaceId);
+            var v = await cmd.ExecuteScalarAsync();
+            return v is null || v is DBNull ? null : Convert.ToInt32(v);
+        }
+
         public async Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom)
         {
             await using var c = await Open();

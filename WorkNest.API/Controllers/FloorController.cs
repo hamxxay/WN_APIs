@@ -26,10 +26,11 @@ namespace WorkNest.API.Controllers
         {
             if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
             {
-                var claimLocId = User.GetLocationId();
-                if (claimLocId.HasValue)
+                // Any assigned location may be requested; otherwise the primary one.
+                var allowedLocIds = User.GetLocationIds();
+                if (allowedLocIds.Count > 0 && !(locationId is int req && allowedLocIds.Contains(req)))
                 {
-                    locationId = claimLocId.Value;
+                    locationId = allowedLocIds[0];
                 }
             }
             return Ok(await _floors.GetFloorsAsync(locationId));

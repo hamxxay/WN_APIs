@@ -68,6 +68,11 @@ namespace WorkNest.API.Controllers
         {
             int? actorId = await ResolveActorIdAsync();
 
+            // Location-bound staff (Admin / Sales Executive) may only quote spaces in the location they are working in.
+            if (request != null && User.IsLocationBoundRole()
+                && await _db.GetSpaceLocationIdAsync(request.SpaceId) is int spaceLocationId && !User.GetLocationIds().Contains(spaceLocationId))
+                return BadRequest(ApiResponse.Fail("You can only create quotations for the locations you're assigned to."));
+
             try
             {
                 var res = await _quotations.CreateQuotationAsync(request, actorId);
@@ -153,17 +158,8 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? search = null,
             [FromQuery] int? locationId = null)
         {
-            int? effectiveLocationId = locationId;
-            if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
-            {
-                var claimLocId = User.GetLocationId();
-                if (claimLocId.HasValue)
-                {
-                    effectiveLocationId = claimLocId.Value;
-                }
-            }
-
-            var (rows, total) = await _quotations.GetQuotationsAsync(page, limit, search, effectiveLocationId);
+            var (rows, total) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit,
+                (p, l, loc) => _quotations.GetQuotationsAsync(p, l, search, loc));
             return Ok(new { data = rows, total = total, page = page, limit = limit });
         }
 

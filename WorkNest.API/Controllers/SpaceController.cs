@@ -85,18 +85,18 @@ namespace WorkNest.API.Controllers
             var (items, total) = await _spaces.GetSpacesAsync(page, limit, search);
             if (User?.Identity?.IsAuthenticated == true && User.IsLocationBoundRole())
             {
-                var claimLocId = User.GetLocationId();
-                if (claimLocId.HasValue)
+                var allowedLocIds = User.GetLocationIds();
+                if (allowedLocIds.Count > 0)
                 {
                     var filtered = items.Where(s =>
                     {
                         if (s is IDictionary<string, object?> dict && dict.TryGetValue("LocationId", out var loc) && loc != null)
-                            return Convert.ToInt32(loc) == claimLocId.Value;
+                            return allowedLocIds.Contains(Convert.ToInt32(loc));
                         var prop = s.GetType().GetProperty("LocationId") ?? s.GetType().GetProperty("locationId");
                         if (prop != null)
                         {
                             var v = prop.GetValue(s);
-                            return v != null && Convert.ToInt32(v) == claimLocId.Value;
+                            return v != null && allowedLocIds.Contains(Convert.ToInt32(v));
                         }
                         return true;
                     }).ToList();

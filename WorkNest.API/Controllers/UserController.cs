@@ -86,11 +86,22 @@ namespace WorkNest.API.Controllers
         // Only a super admin may create, change or remove a super admin, or grant the super admin role.
         private const string ManageRoles = "admin,Admin,super_admin,SuperAdmin";
 
+        /// <summary>An admin tied to locations may only hand out those locations (super admins: any).</summary>
+        private bool AssignsForeignLocation(int? locationId, List<int>? locationIds)
+        {
+            if (!User.IsLocationBoundRole()) return false;
+            var own = User.GetLocationIds();
+            var requested = (locationIds ?? new List<int>()).Concat(locationId is > 0 ? new[] { locationId.Value } : Array.Empty<int>());
+            return requested.Any(x => x > 0 && !own.Contains(x));
+        }
+
         [Authorize(Roles = ManageRoles)]
         [HttpPost("api/user")]
         public async Task<IActionResult> Create([FromBody] UserCreateRequest request)
         {
             if (GrantsSuperAdmin(request?.Role)) return Forbid();
+            if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
+                return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
             var result = await _users.CreateUserAsync(request!, null);
             return StatusCode(201, result);
         }
@@ -100,6 +111,8 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest request)
         {
             if (GrantsSuperAdmin(request?.Role) || await IsProtectedSuperAdminAsync(id)) return Forbid();
+            if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
+                return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
             return Ok(await _users.UpdateUserAsync(id, request!));
         }
 

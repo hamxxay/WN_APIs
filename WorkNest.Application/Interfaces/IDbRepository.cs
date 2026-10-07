@@ -255,6 +255,10 @@ namespace WorkNest.Application.Interfaces
         Task UpdatePersonAsync(int personId, string name, string email, string phone);
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAttendantsDbAsync(int customerId);
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingAttendantsDbAsync(int bookingDetailId);
+        Task<List<int>> GetUserLocationIdsAsync(int userId);
+        Task<Dictionary<int, List<(int Id, string Name)>>> GetUserLocationsMapAsync(IEnumerable<int> userIds);
+        Task<bool> SetUserLocationsAsync(int userId, IReadOnlyCollection<int> locationIds, int? actorId);
+        Task<int?> GetSpaceLocationIdAsync(int spaceId);
         Task<IEnumerable<IDictionary<string, object?>>> GetActiveAttendantAssignmentCandidatesDbAsync(string email, string idNumber, string phoneKey, string name);
         Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom);
         Task SoftRemoveAttendantFromBookingDbAsync(int bookingDetailId, int personId);

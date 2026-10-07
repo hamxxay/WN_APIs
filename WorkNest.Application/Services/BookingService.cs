@@ -123,7 +123,7 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(result, "Booking created.");
         }
 
-        public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request, string? actorEmail)
+        public async Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request, string? actorEmail, IReadOnlyCollection<int>? allowedLocationIds = null)
         {
             if (request is null)
                 return ApiResponse.Fail("Request body is required.");
@@ -175,6 +175,10 @@ namespace WorkNest.Application.Services
 
             if (spaceId == 0)
                 return ApiResponse.Fail("SpaceId or SpaceIdGuid is required.");
+
+            // Location-bound staff (Admin / Sales Executive) may only book spaces in the location they are working in.
+            if (allowedLocationIds != null && await _db.GetSpaceLocationIdAsync(spaceId) is int spaceLocationId && !allowedLocationIds.Contains(spaceLocationId))
+                return ApiResponse.Fail("You can only create bookings for the locations you're assigned to.");
 
             DateTime startOn = request.StartDateTime ?? ParseFlexibleDate(
                 request.StartDate ?? request.StartOn ?? request.ContractStartDate ?? request.BillingStartDate ?? request.EffectiveFrom);
