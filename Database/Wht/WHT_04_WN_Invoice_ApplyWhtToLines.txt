@@ -5,9 +5,10 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Invoice_ApplyWhtToLines]
     @InvoiceId INT
 AS
 BEGIN
-    -- Grosses up the non-deposit lines of a WHT invoice (InvoiceTypeId 6) the same way WN_Invoices_Insert grossed
-    -- up its header: UnitPrice and DiscountAmount / (1 - WhtRate/100), rounded to 2 dp. Security deposit lines
-    -- (ChargeTypeId 2) are not grossed up. Does nothing for normal invoices. Call ONCE, after the lines are inserted.
+    -- Grosses up the room rent lines (ChargeTypeId 1, which carry rent + support) of a WHT invoice (InvoiceTypeId 6)
+    -- the same way WN_Invoices_Insert grossed up its header: UnitPrice and DiscountAmount / (1 - WhtRate/100), rounded
+    -- to 2 dp. Security deposit (2), sales tax (3) and support/services (4) lines are not grossed up.
+    -- Does nothing for normal invoices. Call ONCE, after the lines are inserted.
     SET NOCOUNT ON;
     DECLARE @WhtRate DECIMAL(9,4) = NULL;
     SELECT @WhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
@@ -18,6 +19,6 @@ BEGIN
        SET UnitPrice      = ROUND(UnitPrice / @WhtDivisor, 2),
            DiscountAmount = ROUND(ISNULL(DiscountAmount, 0) / @WhtDivisor, 2)
      WHERE InvoiceId = @InvoiceId
-       AND ChargeTypeId <> 2;
+       AND ChargeTypeId = 1;
     RETURN 0;
 END;

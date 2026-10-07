@@ -1,0 +1,94 @@
+-- ============================================================================================
+-- One-off correction: INV-2026-00379 (challan WN-20261007-9568) was created by the OLD WHT procedure,
+-- which also grossed up support and tax. Re-states it with the current rule (room rent grossed up as one
+-- amount, rent line absorbs the increase, support and tax unchanged).
+--
+--                 RentLine     Support     Tax       WHT        GrandTotal   AR (customer pays)
+--   now (wrong)   147628.08    11764.71    1882.35   24191.27   511275.14    487083.87
+--   correct       149392.79    10000.00    1600.00   23908.92   510992.79    487083.87  (unchanged)
+--
+-- Voucher: Cr Rent +1764.71, Cr Services -1764.71, Cr Sales tax -282.35, Dr WHT -282.35. AR and the
+-- customer ledger do not change. The sales tax (support charges) invoice is corrected to 10000 + 1600.
+--
+-- Run as ONE statement (select all, execute). One transaction: every row is checked against the wrong
+-- values first; if anything does not match exactly, NOTHING is changed and the reason is shown.
+-- Run WHT_ALL_IN_ONE.txt (current version) on this database first, so new invoices use the right rule.
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @InvoiceId INT = 379, @InvNo NVARCHAR(50) = N'INV-2026-00379';
+
+    -- 1. Invoice header must still hold the wrong values
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (UPDLOCK)
+                   WHERE Id = @InvoiceId AND InvoiceNumber = @InvNo AND InvoiceTypeId = 6 AND WHTRate = 15
+                     AND RoomRentExclTax = 147628.08 AND ServiceCharges = 11764.71 AND TaxOnServiceCharges = 1882.35
+                     AND WHTAmount = 24191.27 AND GrandTotal = 511275.14)
+        THROW 50001, 'Invoice 379 does not hold the expected wrong values (already corrected, or changed since). Nothing changed.', 1;
+
+    -- 2. Its voucher and the four ledger lines that change
+    DECLARE @VoucherId INT, @n INT;
+    SELECT @n = COUNT(*), @VoucherId = MAX(Id) FROM dbo.Vouchers WITH (UPDLOCK) WHERE RefNo = @InvNo AND RefId = @InvoiceId;
+    IF @n <> 1 THROW 50002, 'Expected exactly one voucher with RefNo INV-2026-00379. Nothing changed.', 1;
+
+    IF (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = @VoucherId AND Description LIKE 'Rent - Invoice %' AND Credit = 147628.08 AND Debit = 0) <> 1
+        THROW 50003, 'Rent ledger line (credit 147628.08) not found exactly once. Nothing changed.', 1;
+    IF (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = @VoucherId AND Description LIKE 'Services Income - Invoice %' AND Credit = 11764.71 AND Debit = 0) <> 1
+        THROW 50004, 'Services income ledger line (credit 11764.71) not found exactly once. Nothing changed.', 1;
+    IF (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = @VoucherId AND Description LIKE 'Sales Tax - Invoice %' AND Credit = 1882.35 AND Debit = 0) <> 1
+        THROW 50005, 'Sales tax ledger line (credit 1882.35) not found exactly once. Nothing changed.', 1;
+    IF (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = @VoucherId AND Description LIKE 'Withholding Tax %' AND Debit = 24191.27 AND Credit = 0) <> 1
+        THROW 50006, 'WHT ledger line (debit 24191.27) not found exactly once. Nothing changed.', 1;
+
+    -- 3. Correct the voucher lines
+    UPDATE dbo.Ledgers SET Credit = 149392.79 WHERE VoucherId = @VoucherId AND Description LIKE 'Rent - Invoice %'            AND Credit = 147628.08;
+    UPDATE dbo.Ledgers SET Credit = 10000.00  WHERE VoucherId = @VoucherId AND Description LIKE 'Services Income - Invoice %' AND Credit = 11764.71;
+    UPDATE dbo.Ledgers SET Credit = 1600.00   WHERE VoucherId = @VoucherId AND Description LIKE 'Sales Tax - Invoice %'       AND Credit = 1882.35;
+    UPDATE dbo.Ledgers SET Debit  = 23908.92  WHERE VoucherId = @VoucherId AND Description LIKE 'Withholding Tax %'           AND Debit  = 24191.27;
+    UPDATE dbo.Vouchers SET TotalAmount = 510992.79 WHERE Id = @VoucherId AND TotalAmount = 511275.14;
+
+    DECLARE @Dr DECIMAL(18,2), @Cr DECIMAL(18,2);
+    SELECT @Dr = SUM(Debit), @Cr = SUM(Credit) FROM dbo.Ledgers WHERE VoucherId = @VoucherId;
+    IF @Dr <> @Cr OR @Dr <> 510992.79
+        THROW 50007, 'Voucher would not balance at 510992.79 after the correction. Nothing changed.', 1;
+
+    -- 4. Invoice header
+    UPDATE dbo.WN_Invoices
+       SET RoomRentExclTax     = 149392.79,
+           ServiceCharges      = 10000.00,
+           TaxOnServiceCharges = 1600.00,
+           TaxTotal            = 1600.00,
+           WHTAmount           = 23908.92,
+           SubTotal            = 149392.79 + 10000.00 + ISNULL(DiscountTotal, 0),
+           GrandTotal          = 510992.79,
+           UpdatedOn           = SYSUTCDATETIME()
+     WHERE Id = @InvoiceId;
+
+    -- 5. Sales tax (support charges) invoice, if it was already generated
+    UPDATE dbo.WN_CustomerSTInvoice
+       SET RoomRentAmount         = 149392.79,
+           ServiceChargeAmount    = 10000.00,
+           ServiceChargeTaxAmount = 1600.00,
+           SubTotal               = 10000.00,
+           TaxTotal               = 1600.00,
+           GrandTotal             = 11600.00
+     WHERE CustomerInvoiceId = @InvoiceId;
+
+    COMMIT TRANSACTION;
+
+    -- Results
+    SELECT 'Corrected' AS Result, InvoiceNumber, InvoiceTypeId, WHTRate, RoomRentExclTax AS RentLine, ServiceCharges AS SupportLine,
+           TaxOnServiceCharges AS TaxLine, WHTAmount, GrandTotal, GrandTotal - WHTAmount AS ARDebit
+    FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId;
+    SELECT VoucherId, Description, Debit, Credit FROM dbo.Ledgers WITH (NOLOCK) WHERE VoucherId = @VoucherId;
+    SELECT STInvoiceNumber, ServiceChargeAmount, ServiceChargeTaxAmount, GrandTotal
+    FROM dbo.WN_CustomerSTInvoice WITH (NOLOCK) WHERE CustomerInvoiceId = @InvoiceId;
+    SELECT CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.WN_Invoices_Insert')) LIKE '%RoomRentNet%'
+                THEN 'WN_Invoices_Insert: NEW rule installed'
+                ELSE 'WN_Invoices_Insert: OLD rule - run WHT_ALL_IN_ONE.txt before creating more WHT invoices' END AS ProcedureCheck;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

@@ -4569,7 +4569,17 @@ BEGIN
         FROM [dbo].[WN_BookingDetails] WITH (NOLOCK)
         WHERE Id = @BookingDetailId;
 
-        DECLARE @SupportCharge DECIMAL(18,2) = ROUND(@SubTotal * (@AppliedChargePercentage / 100.0), 2);
+        -- Support charges for the extra seats (included in the surcharge; PST is charged on them):
+        -- per-seat rate (default 2000) x excess seats x months.
+        DECLARE @PerSeatSupportRate DECIMAL(18,2) = NULL;
+        SELECT TOP 1 @PerSeatSupportRate = PerSeatSupportRate FROM [dbo].[WN_BookingDetails] WITH (NOLOCK) WHERE Id = @BookingDetailId;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0
+            SELECT TOP 1 @PerSeatSupportRate = FixedAmount FROM [dbo].[WN_ChargeTypeRate] WITH (NOLOCK)
+            WHERE ChargeTypeId = 4 AND FixedAmount > 0 AND (StartDate IS NULL OR StartDate <= @AssignedFrom) AND (EndDate IS NULL OR EndDate >= @AssignedFrom)
+            ORDER BY StartDate DESC;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0 SET @PerSeatSupportRate = 2000.00;
+        DECLARE @SupportCharge DECIMAL(18,2) = ROUND(@PerSeatSupportRate * CASE WHEN @ExcessSeatCount > 0 THEN @ExcessSeatCount ELSE 1 END * @SurchargeMonths, 2);
+        IF @SupportCharge > @SubTotal SET @SupportCharge = @SubTotal;
         DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportCharge * (@AppliedTaxPercentage / 100.0), 2);
         DECLARE @GrandTotal DECIMAL(18,2) = @SubTotal + @TaxAmount;
 
@@ -4607,6 +4617,9 @@ BEGIN
             @SecurityDepositAmount  = 0.00,
             @BillingPeriodStart     = @AssignedFrom,
             @BillingPeriodEnd       = @CycleEnd,
+            @RoomRentExclTax        = @SubTotal - @SupportCharge,   -- surcharge excl. support
+            @ServiceCharges         = @SupportCharge,               -- support for the extra seats
+            @TaxOnServiceCharges    = @TaxAmount,                   -- PST on support
             @SyncCustomerVendor     = 1,
             @InvoiceId              = @InvoiceId OUTPUT,
             @GeneratedInvoiceNumber = @InvoiceNumber OUTPUT;
@@ -5483,8 +5496,8 @@ BEGIN
     SELECT 
         b.Id AS BookingId,
         ISNULL(b.SubtotalAmount, 420000.00) AS TotalContractRent,
-        ISNULL((SELECT SUM(GrandTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId IN (1,2)), 0.00) AS RentInvoiced,
-        ISNULL((SELECT SUM(PaidTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId IN (1,2)), 0.00) AS RentPaid,
+        ISNULL((SELECT SUM(GrandTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId IN (1,2,6)), 0.00) AS RentInvoiced,
+        ISNULL((SELECT SUM(PaidTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId IN (1,2,6)), 0.00) AS RentPaid,
         ISNULL((SELECT SUM(PaidTotal) FROM dbo.WN_Invoices WHERE BookingId = b.Id AND InvoiceTypeId = 2), 0.00) AS AdvanceRentPaid,
         ISNULL(b.SecurityDepositRequired, 70000.00) AS SecurityDepositRequired,
         ISNULL((SELECT SUM(SecurityDepositAmount) FROM dbo.WN_Invoices WHERE BookingId = b.Id), 0.00) AS SecurityDepositInvoiced,
@@ -6378,7 +6391,29 @@ BEGIN
             END
         END
 
-        DECLARE @SupportChargeAmount DECIMAL(18,2) = ROUND(@TotalBaseAmount * (@AppliedChargePercentage / 100.0), 2);
+        -- Support charges (included in the rent; PST is charged on them): per-seat rate (default 2000) x capacity
+        -- x months for offices and shared seats, the same as the first invoice. Meeting rooms keep the percentage.
+        DECLARE @Capacity INT = 1, @PerSeatSupportRate DECIMAL(18,2) = NULL, @IsMeetingRoom BIT = 0;
+        SELECT TOP 1
+            @Capacity = COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1),
+            @PerSeatSupportRate = bd.PerSeatSupportRate,
+            @IsMeetingRoom = CASE WHEN st.Name LIKE '%Meeting%' OR st.Name LIKE '%Conference%' OR st.Description LIKE '%Meeting%' THEN 1 ELSE 0 END
+        FROM dbo.WN_Bookings b WITH (NOLOCK)
+        LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+        LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+        WHERE b.Id = @BookingId;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0
+            SELECT TOP 1 @PerSeatSupportRate = FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+            WHERE ChargeTypeId = 4 AND FixedAmount > 0 AND (StartDate IS NULL OR StartDate <= @BillingPeriodStart) AND (EndDate IS NULL OR EndDate >= @BillingPeriodStart)
+            ORDER BY StartDate DESC;
+        IF @PerSeatSupportRate IS NULL OR @PerSeatSupportRate <= 0 SET @PerSeatSupportRate = 2000.00;
+
+        DECLARE @SupportChargeAmount DECIMAL(18,2) = CASE WHEN @IsMeetingRoom = 1
+            THEN ROUND(@TotalBaseAmount * (@AppliedChargePercentage / 100.0), 2)
+            ELSE ROUND(@PerSeatSupportRate * @Capacity * @BillingPeriodMonths, 2) END;
+        IF @SupportChargeAmount > @TotalBaseAmount SET @SupportChargeAmount = @TotalBaseAmount;
         DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
         DECLARE @GrandTotal DECIMAL(18,2) = @TotalBaseAmount + @TaxAmount;
 
@@ -6412,6 +6447,9 @@ BEGIN
             @BillingPeriodMonths    = @BillingPeriodMonths,
             @BillingPeriodStart     = @BillingPeriodStart,
             @BillingPeriodEnd       = @BillingPeriodEnd,
+            @RoomRentExclTax        = @TotalBaseAmount - @SupportChargeAmount,   -- rent excl. support
+            @ServiceCharges         = @SupportChargeAmount,                      -- support (per seat x capacity x months)
+            @TaxOnServiceCharges    = @TaxAmount,                                -- PST on support
             @SyncCustomerVendor     = 1,
             @InvoiceId              = @InvoiceId OUTPUT,
             @GeneratedInvoiceNumber = @InvNum OUTPUT;
@@ -6888,9 +6926,10 @@ BEGIN
     END
 
     -- 11b. Withholding tax (WHT) invoice: the booking has SendWhtInvoice = 1 (rate snapshotted on the booking).
-    --      Rent, service charges and the tax on them are grossed up so that, after the customer withholds WhtRate%,
-    --      the net received is unchanged: Gross = ROUND(Net / (1 - WhtRate/100), 2) (= Net * k, k = 1 / (1 - r)).
-    --      WhtAmount is derived by subtraction so the voucher always balances. The security deposit is NOT grossed up.
+    --      Room rent (rent + support) is grossed up as ONE amount so that, after the customer withholds WhtRate%,
+    --      the net received is unchanged: GrossRoomRent = ROUND(RoomRentNet / (1 - WhtRate/100), 2).
+    --      The rent line absorbs the whole increase: RentLine = GrossRoomRent - SupportCharge. Support charges (fixed
+    --      in the DB), the tax on them and the security deposit are NOT grossed up. WhtAmount = GrossRoomRent - RoomRentNet.
     --      Bookings without the flag skip this block entirely.
     DECLARE @IsWhtInvoice BIT = 0;
     DECLARE @WhtNetAmount DECIMAL(18, 4) = 0.0000;
@@ -6906,12 +6945,10 @@ BEGIN
         BEGIN
             DECLARE @WhtDivisor DECIMAL(18, 10) = 1.0 - (@BkWhtRate / 100.0);
             SET @IsWhtInvoice        = 1;
-            SET @WhtNetAmount        = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges;
-            SET @RoomRentExclTax     = ROUND(@RoomRentExclTax / @WhtDivisor, 2);
-            SET @ServiceCharges      = ROUND(@ServiceCharges / @WhtDivisor, 2);
-            SET @TaxOnServiceCharges = ROUND(@TaxOnServiceCharges / @WhtDivisor, 2);
+            SET @WhtNetAmount        = @RoomRentExclTax + @ServiceCharges;                         -- RoomRentNet
+            SET @RoomRentExclTax     = ROUND(@WhtNetAmount / @WhtDivisor, 2) - @ServiceCharges;    -- RentLine = GrossRoomRent - Support
             SET @WHTRate             = @BkWhtRate;
-            SET @WHTAmount           = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @WhtNetAmount;
+            SET @WHTAmount           = (@RoomRentExclTax + @ServiceCharges) - @WhtNetAmount;       -- GrossRoomRent - RoomRentNet
             SET @TaxTotal            = @TaxOnServiceCharges;
             SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + @DiscountTotal;   -- discount is applied before the gross-up
             SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + @SecAmt;
@@ -11871,6 +11908,7 @@ BEGIN
              THEN COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0))
              ELSE 0 END AS SecurityDepositAmount,
         COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate,
+        i.InvoiceTypeId,                                    -- 6 = WHT invoice (already grossed up)
         st.PublicId AS STPublicId,
         st.STInvoiceNumber
     FROM dbo.WN_Invoices i WITH (NOLOCK)
@@ -11925,9 +11963,10 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Invoice_ApplyWhtToLines]
     @InvoiceId INT
 AS
 BEGIN
-    -- Grosses up the non-deposit lines of a WHT invoice (InvoiceTypeId 6) the same way WN_Invoices_Insert grossed
-    -- up its header: UnitPrice and DiscountAmount / (1 - WhtRate/100), rounded to 2 dp. Security deposit lines
-    -- (ChargeTypeId 2) are not grossed up. Does nothing for normal invoices. Call ONCE, after the lines are inserted.
+    -- Grosses up the room rent lines (ChargeTypeId 1, which carry rent + support) of a WHT invoice (InvoiceTypeId 6)
+    -- the same way WN_Invoices_Insert grossed up its header: UnitPrice and DiscountAmount / (1 - WhtRate/100), rounded
+    -- to 2 dp. Security deposit (2), sales tax (3) and support/services (4) lines are not grossed up.
+    -- Does nothing for normal invoices. Call ONCE, after the lines are inserted.
     SET NOCOUNT ON;
     DECLARE @WhtRate DECIMAL(9,4) = NULL;
     SELECT @WhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
@@ -11938,7 +11977,7 @@ BEGIN
        SET UnitPrice      = ROUND(UnitPrice / @WhtDivisor, 2),
            DiscountAmount = ROUND(ISNULL(DiscountAmount, 0) / @WhtDivisor, 2)
      WHERE InvoiceId = @InvoiceId
-       AND ChargeTypeId <> 2;
+       AND ChargeTypeId = 1;
     RETURN 0;
 END;
 GO
@@ -11960,10 +11999,11 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- WHT invoices (InvoiceTypeId 6): gross up non-deposit lines like the invoice header. Normal invoices unchanged.
+    -- WHT invoices (InvoiceTypeId 6): gross up room rent lines (ChargeTypeId 1) like the invoice header; deposit,
+    -- tax and support lines stay as given. Normal invoices unchanged.
     DECLARE @InvWhtRate DECIMAL(9,4) = NULL;
     SELECT @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
-    IF @InvWhtRate > 0 AND @InvWhtRate < 100 AND @ChargeTypeId <> 2
+    IF @InvWhtRate > 0 AND @InvWhtRate < 100 AND @ChargeTypeId = 1
     BEGIN
         SET @UnitPrice      = ROUND(@UnitPrice / (1.0 - (@InvWhtRate / 100.0)), 2);
         SET @DiscountAmount = ROUND(ISNULL(@DiscountAmount, 0) / (1.0 - (@InvWhtRate / 100.0)), 2);
@@ -12031,18 +12071,19 @@ BEGIN
     SET NOCOUNT ON;
 
     -- WHT invoices (InvoiceTypeId 6) keep their grossed-up amounts when callers rewrite the breakdown with net
-    -- figures (e.g. re-sending the first invoice). Same formula as WN_Invoices_Insert; normal invoices unchanged.
+    -- figures (e.g. re-sending the first invoice). Same formula as WN_Invoices_Insert: rent + support grossed up as
+    -- one amount, the rent line absorbs the increase; support and tax unchanged. Normal invoices unchanged.
     DECLARE @InvType INT = NULL, @InvWhtRate DECIMAL(9,4) = NULL, @InvWhtAmount DECIMAL(18,4) = NULL;
     SELECT @InvType = InvoiceTypeId, @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId;
     IF @InvType = 6 AND @InvWhtRate > 0 AND @InvWhtRate < 100
-       AND (ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0)) > 0
+       AND (ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0)) > 0
     BEGIN
         DECLARE @WhtDivisor DECIMAL(18,10) = 1.0 - (@InvWhtRate / 100.0);
-        DECLARE @NetAmount DECIMAL(18,4) = ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0);
-        SET @RoomRentExclTax     = ROUND(ISNULL(@RoomRentExclTax, 0) / @WhtDivisor, 2);
-        SET @ServiceCharges      = ROUND(ISNULL(@ServiceCharges, 0) / @WhtDivisor, 2);
-        SET @TaxOnServiceCharges = ROUND(ISNULL(@TaxOnServiceCharges, 0) / @WhtDivisor, 2);
-        SET @InvWhtAmount        = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @NetAmount;
+        DECLARE @NetAmount DECIMAL(18,4) = ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0);   -- RoomRentNet
+        SET @ServiceCharges      = ISNULL(@ServiceCharges, 0);
+        SET @TaxOnServiceCharges = ISNULL(@TaxOnServiceCharges, 0);
+        SET @RoomRentExclTax     = ROUND(@NetAmount / @WhtDivisor, 2) - @ServiceCharges;          -- RentLine
+        SET @InvWhtAmount        = (@RoomRentExclTax + @ServiceCharges) - @NetAmount;
         SET @TaxTotal            = @TaxOnServiceCharges;
         SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + ISNULL(@DiscountTotal, 0);
         SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + ISNULL(@SecurityDepositAmount, 0);

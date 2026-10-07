@@ -341,9 +341,10 @@ BEGIN
     END
 
     -- 11b. Withholding tax (WHT) invoice: the booking has SendWhtInvoice = 1 (rate snapshotted on the booking).
-    --      Rent, service charges and the tax on them are grossed up so that, after the customer withholds WhtRate%,
-    --      the net received is unchanged: Gross = ROUND(Net / (1 - WhtRate/100), 2) (= Net * k, k = 1 / (1 - r)).
-    --      WhtAmount is derived by subtraction so the voucher always balances. The security deposit is NOT grossed up.
+    --      Room rent (rent + support) is grossed up as ONE amount so that, after the customer withholds WhtRate%,
+    --      the net received is unchanged: GrossRoomRent = ROUND(RoomRentNet / (1 - WhtRate/100), 2).
+    --      The rent line absorbs the whole increase: RentLine = GrossRoomRent - SupportCharge. Support charges (fixed
+    --      in the DB), the tax on them and the security deposit are NOT grossed up. WhtAmount = GrossRoomRent - RoomRentNet.
     --      Bookings without the flag skip this block entirely.
     DECLARE @IsWhtInvoice BIT = 0;
     DECLARE @WhtNetAmount DECIMAL(18, 4) = 0.0000;
@@ -359,12 +360,10 @@ BEGIN
         BEGIN
             DECLARE @WhtDivisor DECIMAL(18, 10) = 1.0 - (@BkWhtRate / 100.0);
             SET @IsWhtInvoice        = 1;
-            SET @WhtNetAmount        = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges;
-            SET @RoomRentExclTax     = ROUND(@RoomRentExclTax / @WhtDivisor, 2);
-            SET @ServiceCharges      = ROUND(@ServiceCharges / @WhtDivisor, 2);
-            SET @TaxOnServiceCharges = ROUND(@TaxOnServiceCharges / @WhtDivisor, 2);
+            SET @WhtNetAmount        = @RoomRentExclTax + @ServiceCharges;                         -- RoomRentNet
+            SET @RoomRentExclTax     = ROUND(@WhtNetAmount / @WhtDivisor, 2) - @ServiceCharges;    -- RentLine = GrossRoomRent - Support
             SET @WHTRate             = @BkWhtRate;
-            SET @WHTAmount           = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @WhtNetAmount;
+            SET @WHTAmount           = (@RoomRentExclTax + @ServiceCharges) - @WhtNetAmount;       -- GrossRoomRent - RoomRentNet
             SET @TaxTotal            = @TaxOnServiceCharges;
             SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + @DiscountTotal;   -- discount is applied before the gross-up
             SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + @SecAmt;

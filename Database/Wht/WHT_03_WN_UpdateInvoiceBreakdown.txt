@@ -27,18 +27,19 @@ BEGIN
     SET NOCOUNT ON;
 
     -- WHT invoices (InvoiceTypeId 6) keep their grossed-up amounts when callers rewrite the breakdown with net
-    -- figures (e.g. re-sending the first invoice). Same formula as WN_Invoices_Insert; normal invoices unchanged.
+    -- figures (e.g. re-sending the first invoice). Same formula as WN_Invoices_Insert: rent + support grossed up as
+    -- one amount, the rent line absorbs the increase; support and tax unchanged. Normal invoices unchanged.
     DECLARE @InvType INT = NULL, @InvWhtRate DECIMAL(9,4) = NULL, @InvWhtAmount DECIMAL(18,4) = NULL;
     SELECT @InvType = InvoiceTypeId, @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId;
     IF @InvType = 6 AND @InvWhtRate > 0 AND @InvWhtRate < 100
-       AND (ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0)) > 0
+       AND (ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0)) > 0
     BEGIN
         DECLARE @WhtDivisor DECIMAL(18,10) = 1.0 - (@InvWhtRate / 100.0);
-        DECLARE @NetAmount DECIMAL(18,4) = ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0) + ISNULL(@TaxOnServiceCharges, 0);
-        SET @RoomRentExclTax     = ROUND(ISNULL(@RoomRentExclTax, 0) / @WhtDivisor, 2);
-        SET @ServiceCharges      = ROUND(ISNULL(@ServiceCharges, 0) / @WhtDivisor, 2);
-        SET @TaxOnServiceCharges = ROUND(ISNULL(@TaxOnServiceCharges, 0) / @WhtDivisor, 2);
-        SET @InvWhtAmount        = (@RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges) - @NetAmount;
+        DECLARE @NetAmount DECIMAL(18,4) = ISNULL(@RoomRentExclTax, 0) + ISNULL(@ServiceCharges, 0);   -- RoomRentNet
+        SET @ServiceCharges      = ISNULL(@ServiceCharges, 0);
+        SET @TaxOnServiceCharges = ISNULL(@TaxOnServiceCharges, 0);
+        SET @RoomRentExclTax     = ROUND(@NetAmount / @WhtDivisor, 2) - @ServiceCharges;          -- RentLine
+        SET @InvWhtAmount        = (@RoomRentExclTax + @ServiceCharges) - @NetAmount;
         SET @TaxTotal            = @TaxOnServiceCharges;
         SET @SubTotal            = @RoomRentExclTax + @ServiceCharges + ISNULL(@DiscountTotal, 0);
         SET @GrandTotal          = @RoomRentExclTax + @ServiceCharges + @TaxOnServiceCharges + ISNULL(@SecurityDepositAmount, 0);

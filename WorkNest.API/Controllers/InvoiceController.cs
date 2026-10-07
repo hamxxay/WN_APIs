@@ -22,6 +22,9 @@ namespace WorkNest.API.Controllers
     [ValidateLocationScope]
     public class InvoiceController : ControllerBase
     {
+        /// <summary>Every invoice is due this many days after its invoice date (the invoice date is the day it is issued).</summary>
+        public const int InvoiceDueDays = 7;
+
         private readonly IPaymentService _payments;
         private readonly IBookingService _bookings;
         private readonly IDbRepository _db;
@@ -334,6 +337,8 @@ namespace WorkNest.API.Controllers
                         dto.SupportChargeAmount = reader.GetDecimal(reader.GetOrdinal("SupportChargeAmount"));
                     if (HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount")))
                         dto.SecurityDepositAmount = reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"));
+                    dto.IsWhtInvoice = HasColumn(reader, "InvoiceTypeId") && !reader.IsDBNull(reader.GetOrdinal("InvoiceTypeId"))
+                        && Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId"))) == 6;
                     if (HasColumn(reader, "WithholdingTaxRate") && !reader.IsDBNull(reader.GetOrdinal("WithholdingTaxRate")))
                         dto.WithholdingTaxRate = reader.GetDecimal(reader.GetOrdinal("WithholdingTaxRate"));
                     if (HasColumn(reader, "STPublicId") && !reader.IsDBNull(reader.GetOrdinal("STPublicId")))
@@ -1086,7 +1091,8 @@ namespace WorkNest.API.Controllers
                 // or emailing anything — the admin preview window shows these figures.
                 if (preview)
                 {
-                    var invoiceDate = (issuedOn?.Date is DateTime pd && pd <= _clock.Today) ? pd : _clock.Today;
+                    // Invoice date is always today; due 7 days later.
+                    var invoiceDate = _clock.Today;
                     return Ok(new
                     {
                         isSuccessful = true,
@@ -1094,6 +1100,7 @@ namespace WorkNest.API.Controllers
                         {
                             bookingId,
                             issuedOn = invoiceDate.ToString("yyyy-MM-dd"),
+                            dueOn = invoiceDate.AddDays(InvoiceDueDays).ToString("yyyy-MM-dd"),
                             periodStart = periodStart.ToString("yyyy-MM-dd"),
                             periodEnd = periodEnd.ToString("yyyy-MM-dd"),
                             description = mainLineDescription,
@@ -1169,7 +1176,7 @@ namespace WorkNest.API.Controllers
                         upCmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
                         upCmd.Parameters.AddWithValue("@AccountsCoaId", (object?)rentAccountId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@DueOn", startOn.HasValue ? startOn.Value : _clock.Today);
+                        upCmd.Parameters.AddWithValue("@DueOn", DBNull.Value); // re-send keeps the invoice's own dates
                         await upCmd.ExecuteNonQueryAsync();
                     }
 
@@ -1218,8 +1225,8 @@ namespace WorkNest.API.Controllers
                 {
                     BookingId = bookingId,
                     UserId = userId,
-                    IssuedOn = (issuedOn?.Date is DateTime d && d <= _clock.Today) ? d : _clock.Today, // agreement date when given
-                    DueOn = startOn.HasValue ? startOn.Value : _clock.Today,
+                    IssuedOn = _clock.Today,                              // invoice date: today
+                    DueOn = _clock.Today.AddDays(InvoiceDueDays),         // due: invoice date + 7 days
                     Notes = $"Initial Payment Invoice for Booking #{bookingId} - {spaceName}",
                     SendEmail = true,
                     BillingPeriodStart = periodStart,
@@ -1439,8 +1446,8 @@ namespace WorkNest.API.Controllers
                 }
 
                 DateTime today = _clock.Today;
-                // Recurring invoice due on the last day of the going month
-                DateTime recurringDueDate = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
+                // Due 7 days after the invoice date (same rule as every invoice)
+                DateTime recurringDueDate = today.AddDays(InvoiceDueDays);
 
                 var dto = new CreateCustomInvoiceDto
                 {
@@ -1531,7 +1538,7 @@ namespace WorkNest.API.Controllers
         public int? BookingId { get; set; }
         public int UserId { get; set; }
         public DateTime IssuedOn { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Today;
-        public DateTime DueOn { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Today.AddDays(15);
+        public DateTime DueOn { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Today.AddDays(InvoiceController.InvoiceDueDays);
         public string? CurrencyCode { get; set; } = "PKR";
         public string? Notes { get; set; }
         public bool SendEmail { get; set; } = true;

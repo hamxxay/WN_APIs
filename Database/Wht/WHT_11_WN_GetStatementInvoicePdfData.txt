@@ -1,0 +1,92 @@
+-- WHT invoices — part 11. Run against SAC400 as ONE statement (select all, then execute). No GO / USE.
+-- WN_GetStatementInvoicePdfData: also returns i.InvoiceTypeId, so the invoice PDF can leave out the
+-- "If tax is withheld..." and "Withholding tax is not applicable on the Security Deposit" terms on WHT
+-- invoices (type 6), which are already grossed up. Only change: one added column.
+-- Before running, compare with the live procedure (EXEC sp_helptext 'dbo.WN_GetStatementInvoicePdfData').
+CREATE OR ALTER PROCEDURE [dbo].[WN_GetStatementInvoicePdfData]
+    @InvoiceId INT
+AS
+BEGIN
+    SELECT TOP 1
+        i.Id,
+        i.InvoiceNumber,
+        i.UserId,
+        i.BookingId,
+        i.IssuedOn,
+        i.DueOn,
+        COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn) AS BillingPeriodStart,
+        COALESCE(i.BillingPeriodEnd, b.EndOn, i.DueOn) AS BillingPeriodEnd,
+        ISNULL(i.GrandTotal, 0) AS GrandTotal,
+        ISNULL(i.PaidTotal, 0) AS PaidTotal,
+        ISNULL(i.SubTotal, 0) AS SubTotal,
+        ISNULL(i.DiscountTotal, 0) AS DiscountTotal,
+        ISNULL(i.TaxTotal, 0) AS TaxTotal,
+        ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AccountName,
+        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(bd.CustomerName)), ''), u.Name, '') AS AttnName,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Address)), ''), NULLIF(LTRIM(RTRIM(u.Address)), ''), '') AS BillingAddress,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Code)), ''), NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''), NULLIF(LTRIM(RTRIM(bd.CustomerCode)), ''), '') AS AccountNumber,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.CnicOrPassport)), ''), NULLIF(LTRIM(RTRIM(c.NTN)), ''), NULLIF(LTRIM(RTRIM(u.CnicOrPassport)), ''), '') AS SntnNtnNic,
+        COALESCE(loc.Name, br.[Description], comp.CompanyName, '') AS CenterName,
+        COALESCE(comp.CompanyName, br.[Description], loc.Name, '') AS VendorLegalName,
+        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(comp.AddressLine1, '') + ' ' + ISNULL(comp.AddressLine2, ''))), ''), loc.Address, '') AS VendorAddress,
+        COALESCE(comp.Contact, '') AS VendorPhone,
+        COALESCE(comp.Fax, '') AS VendorFax,
+        COALESCE(comp.NTN, '') AS VendorNtn,
+        ISNULL(NULLIF(bd.AppliedChargePercentage, 0), 10.00) AS AppliedChargePercentage,
+        ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) AS AppliedTaxPercentage,
+        COALESCE(
+            NULLIF(st.ServiceChargeAmount, 0),
+            NULLIF(i.ServiceCharges, 0),
+            NULLIF(bd.SupportChargeAmount, 0),
+            CASE WHEN ISNULL(i.TaxTotal, 0) > 0 THEN ROUND(i.TaxTotal / (ISNULL(NULLIF(bd.AppliedTaxPercentage, 0), 16.00) / 100.0), 2) ELSE 0 END
+        ) AS SupportChargeAmount,
+        CASE WHEN ISNULL(i.SecurityDepositAmount, 0) > 0 -- only the invoice that bills the deposit (recurring invoices have none)
+             THEN COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0))
+             ELSE 0 END AS SecurityDepositAmount,
+        COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate,
+        i.InvoiceTypeId,                                    -- 6 = WHT invoice (already grossed up)
+        st.PublicId AS STPublicId,
+        st.STInvoiceNumber
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    LEFT JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+    LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON (
+        (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND c.Code = b.CustomerCode)
+        OR (bd.CustomerCode IS NOT NULL AND bd.CustomerCode <> '' AND c.Code = bd.CustomerCode)
+        OR (i.UserId IS NOT NULL AND i.UserId > 0 AND c.UserId = i.UserId)
+        OR (u.Email IS NOT NULL AND u.Email <> '' AND c.Email = u.Email)
+    ) AND (c.IsActive = 1 OR c.IsActive IS NULL)
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+    LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
+    LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId, u.CompanyId)
+    WHERE i.Id = @InvoiceId;
+    SELECT
+        l.ChargeTypeId,
+        l.Description,
+        ISNULL(l.Quantity, 1) AS Quantity,
+        ISNULL(l.UnitPrice, 0) AS UnitPrice,
+        (l.Quantity * l.UnitPrice - l.DiscountAmount) AS PriceExclVat,
+        l.TaxAmount AS VatAmount,
+        l.LineTotal AS TotalInclVat,
+        l.TaxRate,
+        ISNULL(ct.Label, 'Business Support Services') AS CategoryName
+    FROM dbo.WN_InvoiceLines l WITH (NOLOCK)
+    LEFT JOIN dbo.WN_ChargeTypes ct WITH (NOLOCK) ON ct.Id = l.ChargeTypeId
+    WHERE l.InvoiceId = @InvoiceId
+    ORDER BY l.SortOrder, l.Id;
+    DECLARE @UserId INT;
+    SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
+    SELECT
+        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
+        ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE UserId = @UserId AND Id < @InvoiceId;
+    SELECT TOP 1 Description AS BankName, ShortDesc AS BankAccountNumber
+    FROM dbo.AccountsCOA WITH (NOLOCK)
+    WHERE AccountNature = 'Bank' OR Description LIKE '%Bank%';
+END;

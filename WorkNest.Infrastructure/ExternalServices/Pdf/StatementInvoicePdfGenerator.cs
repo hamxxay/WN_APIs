@@ -40,6 +40,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public decimal? AppliedTaxPercentage { get; set; }
         public decimal SecurityDepositAmount { get; set; }
         public decimal WithholdingTaxRate { get; set; } = 15.00m;
+        /// <summary>WHT invoice (InvoiceTypeId 6): amounts are already grossed up, so the "if tax is withheld" terms are left out.</summary>
+        public bool IsWhtInvoice { get; set; }
         public string CurrencyCode { get; set; } = "PKR";
 
         public string? SupportChargesInvoiceUrl { get; set; }
@@ -434,8 +436,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 decimal grossedUpRent = withholdingTaxRate < 1m ? taxableBase / (1 - withholdingTaxRate) : taxableBase;
                 decimal grossedUpTotal = grossedUpRent + secDeposit;
 
-                tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(7.5f).Bold().FontColor("#000000");
-                if (secDeposit > 0)
+                // A WHT invoice is already grossed up: these two terms would quote a second gross-up.
+                if (!data.IsWhtInvoice)
+                    tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(7.5f).Bold().FontColor("#000000");
+                if (secDeposit > 0 && !data.IsWhtInvoice)
                 {
                     tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(7.5f).Bold().FontColor("#000000");
                 }

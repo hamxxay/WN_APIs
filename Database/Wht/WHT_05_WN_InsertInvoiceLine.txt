@@ -14,10 +14,11 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- WHT invoices (InvoiceTypeId 6): gross up non-deposit lines like the invoice header. Normal invoices unchanged.
+    -- WHT invoices (InvoiceTypeId 6): gross up room rent lines (ChargeTypeId 1) like the invoice header; deposit,
+    -- tax and support lines stay as given. Normal invoices unchanged.
     DECLARE @InvWhtRate DECIMAL(9,4) = NULL;
     SELECT @InvWhtRate = WHTRate FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @InvoiceId AND InvoiceTypeId = 6;
-    IF @InvWhtRate > 0 AND @InvWhtRate < 100 AND @ChargeTypeId <> 2
+    IF @InvWhtRate > 0 AND @InvWhtRate < 100 AND @ChargeTypeId = 1
     BEGIN
         SET @UnitPrice      = ROUND(@UnitPrice / (1.0 - (@InvWhtRate / 100.0)), 2);
         SET @DiscountAmount = ROUND(ISNULL(@DiscountAmount, 0) / (1.0 - (@InvWhtRate / 100.0)), 2);
