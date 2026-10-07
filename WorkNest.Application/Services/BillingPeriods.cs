@@ -73,6 +73,24 @@ namespace WorkNest.Application.Services
         /// Inclusive end date of a <paramref name="months"/>-month period starting on
         /// <paramref name="periodStart"/>, anchored to the contract start (no month-end drift).
         /// </summary>
+        /// <summary>
+        /// Length of the inclusive period <paramref name="start"/>..<paramref name="endInclusive"/> in months: whole
+        /// months (anchored to the start day) plus the remaining days as a fraction of that month. A full 3-month
+        /// cycle gives 3; Oct 1 - Nov 15 gives 1.5. Same rule as WN_Invoice_CreateRecurring (last partial cycle).
+        /// </summary>
+        public static decimal MonthsBetween(DateTime start, DateTime endInclusive)
+        {
+            start = start.Date; endInclusive = endInclusive.Date;
+            if (endInclusive < start) return 0m;
+            int m = 0;
+            while (AnchorAdd(start, m + 1, start.Day).AddDays(-1) <= endInclusive) m++;
+            var restStart = AnchorAdd(start, m, start.Day);
+            if (restStart > endInclusive) return m;
+            int restDays = (endInclusive - restStart).Days + 1;
+            int dim = DateTime.DaysInMonth(restStart.Year, restStart.Month);
+            return Math.Round(m + (decimal)restDays / dim, 6);
+        }
+
         public static DateTime PeriodEnd(DateTime? contractStart, DateTime periodStart, int months)
         {
             if (months <= 0) months = 1;

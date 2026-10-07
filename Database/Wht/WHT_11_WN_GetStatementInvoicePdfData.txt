@@ -82,7 +82,7 @@ BEGIN
     DECLARE @UserId INT;
     SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
     SELECT
-        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
+        ISNULL(SUM(GrandTotal - ISNULL(WHTAmount, 0) - PaidTotal), 0) AS PriorBalance,
         ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
     FROM dbo.WN_Invoices WITH (NOLOCK)
     WHERE UserId = @UserId AND Id < @InvoiceId;

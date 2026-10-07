@@ -2470,9 +2470,9 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                   JOIN @Spaces sp ON sp.Id = b.SpaceId
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33);
 
-                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT);
+                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4));
                 INSERT INTO @Inv
-                SELECT i.Id, i.InvoiceNumber, i.BookingId, i.UserId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), i.StatusId
+                SELECT i.Id, i.InvoiceNumber, i.BookingId, i.UserId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), i.StatusId, ISNULL(i.WHTAmount, 0)
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                  WHERE i.StatusId NOT IN ({voids})
@@ -2486,9 +2486,9 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     (SELECT COUNT(*) FROM @Live WHERE StartOn <= @Now AND EndOn >= @Now) AS ActiveBookings,
                     (SELECT COUNT(*) FROM @Live WHERE StartOn <= @MonthAgo AND EndOn >= @MonthAgo) AS ActiveBookingsLastMonth,
                     (SELECT COUNT(*) FROM @Live WHERE StatusId IN (1, 5) AND EndOn >= @Now) AS PendingConfirmations,
-                    (SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open})) AS Outstanding,
+                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open})) AS Outstanding, -- WHT is withheld by the customer, not owed
                     (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open})) AS OutstandingCount,
-                    (SELECT ISNULL(SUM(GrandTotal - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueAmount,
+                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueAmount,
                     (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueCount,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart) AS InvoicedThisMonth,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevMonthStart)) AS InvoicedLastMonth,
@@ -2515,7 +2515,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                  ORDER BY m.MStart;
 
                 -- [2] overdue invoices
-                SELECT TOP 6 i.BookingId, i.InvoiceNumber AS Reference, i.DueOn AS [Date], (i.GrandTotal - i.PaidTotal) AS Amount,
+                SELECT TOP 6 i.BookingId, i.InvoiceNumber AS Reference, i.DueOn AS [Date], (i.GrandTotal - i.WhtAmount - i.PaidTotal) AS Amount,
                        sp.Name AS Space, cust.Name AS Customer
                   FROM @Inv i
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
@@ -2552,7 +2552,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 SELECT b.Bucket, b.SortOrder, ISNULL(SUM(x.Balance), 0) AS Amount, COUNT(x.Id) AS Invoices
                   FROM (VALUES ('Not due', 0), ('1-30 days', 1), ('31-60 days', 2), ('61-90 days', 3), ('90+ days', 4)) b(Bucket, SortOrder)
                   LEFT JOIN (
-                        SELECT i.Id, (i.GrandTotal - i.PaidTotal) AS Balance,
+                        SELECT i.Id, (i.GrandTotal - i.WhtAmount - i.PaidTotal) AS Balance,
                                CASE WHEN i.DueOn IS NULL OR i.DueOn >= @Today THEN 0
                                     WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 30 THEN 1
                                     WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 60 THEN 2
@@ -3512,7 +3512,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                     ISNULL(i.TaxTotal, 0) AS TaxTotal,
                     ISNULL(i.GrandTotal, 0) AS GrandTotal,
                     ISNULL(i.PaidTotal, 0) AS PaidTotal,
-                    ISNULL(i.GrandTotal - i.PaidTotal, 0) AS BalanceDue,
+                    ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) AS BalanceDue,
                     i.CurrencyCode,
                     i.StatusId,
                     i.InvoiceTypeId,

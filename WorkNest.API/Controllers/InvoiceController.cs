@@ -615,9 +615,14 @@ namespace WorkNest.API.Controllers
                     subTotal = req.SubTotal.Value;
                 }
 
-                if (req.DiscountTotal.HasValue && req.DiscountTotal.Value > 0 && discountTotal == 0)
+                // First / next invoices send the rent line already net of the discount and pass the discount
+                // separately; custom invoices send gross lines with line discounts. Keep subTotal GROSS either way
+                // (the invoice stores SubTotal before discount: GrandTotal = SubTotal - DiscountTotal + Tax + Deposit).
+                bool linesNetOfDiscount = discountTotal == 0 && req.DiscountTotal.HasValue && req.DiscountTotal.Value > 0;
+                if (linesNetOfDiscount)
                 {
-                    discountTotal = req.DiscountTotal.Value;
+                    discountTotal = req.DiscountTotal!.Value;
+                    subTotal = req.SubTotal.HasValue && req.SubTotal.Value > 0 ? req.SubTotal.Value : subTotal + discountTotal;
                 }
 
                 decimal serviceChargeAmount = req.ServiceCharges ?? (taxTotal > 0 ? Math.Round(taxTotal / 0.16m, 2, MidpointRounding.AwayFromZero) : 0m);
@@ -669,7 +674,11 @@ namespace WorkNest.API.Controllers
                     using var lineCmd = new SqlCommand("dbo.WN_InsertInvoiceLine", conn);
                     lineCmd.CommandType = CommandType.StoredProcedure;
                     lineCmd.Parameters.AddWithValue("@InvoiceId", newInvoiceId);
-                    lineCmd.Parameters.AddWithValue("@ChargeTypeId", line.ChargeTypeId > 0 ? line.ChargeTypeId : (byte)1);
+                    // A "Security Deposit" line sent without a charge type is a deposit (2), never rent: WHT must not gross it up.
+                    // (same test as the deposit total above; the line DTO defaults ChargeTypeId to 1).
+                    bool isDepositLine = line.ChargeTypeId == 2 || (!string.IsNullOrWhiteSpace(line.Description)
+                                         && line.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase));
+                    lineCmd.Parameters.AddWithValue("@ChargeTypeId", isDepositLine ? (byte)2 : (line.ChargeTypeId > 0 ? line.ChargeTypeId : (byte)1));
                     lineCmd.Parameters.AddWithValue("@Description", string.IsNullOrWhiteSpace(line.Description) ? "Custom Charge" : line.Description);
                     lineCmd.Parameters.AddWithValue("@Quantity", line.Quantity > 0 ? line.Quantity : 1);
                     lineCmd.Parameters.AddWithValue("@UnitPrice", line.UnitPrice);
@@ -683,7 +692,7 @@ namespace WorkNest.API.Controllers
                 using var updateCmd = new SqlCommand("dbo.WN_UpdateInvoiceBreakdown", conn);
                 updateCmd.CommandType = CommandType.StoredProcedure;
                 updateCmd.Parameters.AddWithValue("@InvoiceId", newInvoiceId);
-                updateCmd.Parameters.AddWithValue("@SubTotal", subTotal - discountTotal);
+                updateCmd.Parameters.AddWithValue("@SubTotal", subTotal);   // gross, before discount (was net minus the discount again)
                 updateCmd.Parameters.AddWithValue("@DiscountTotal", discountTotal);
                 updateCmd.Parameters.AddWithValue("@TaxTotal", taxTotal);
                 updateCmd.Parameters.AddWithValue("@GrandTotal", grandTotal);
@@ -691,7 +700,7 @@ namespace WorkNest.API.Controllers
                 updateCmd.Parameters.AddWithValue("@BillingPeriodEnd", (object?)req.BillingPeriodEnd ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@AdvanceRentMonths", (object?)req.AdvanceRentMonths ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)req.SecurityDepositMonths ?? DBNull.Value);
-                updateCmd.Parameters.AddWithValue("@SecurityDepositAmount", req.SecurityDepositAmount ?? 0m);
+                updateCmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDepositAmount);   // incl. a deposit taken from the lines
                 updateCmd.Parameters.AddWithValue("@RoomRentExclTax", roomRentAmount);
                 updateCmd.Parameters.AddWithValue("@ServiceCharges", serviceChargeAmount);
                 updateCmd.Parameters.AddWithValue("@TaxOnServiceCharges", taxOnServiceCharges);
@@ -1121,7 +1130,6 @@ namespace WorkNest.API.Controllers
                 }
 
                 int existingId = 0;
-                bool existingLocked = false;
                 using (var checkCmd = new SqlCommand("dbo.WN_GetInvoiceByBookingId", conn))
                 {
                     checkCmd.CommandType = CommandType.StoredProcedure;
@@ -1133,91 +1141,11 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
+                // An existing first invoice (not cancelled) is sent again exactly as it was posted. Rewriting its
+                // amounts here left its ledger voucher and sales tax invoice on the old figures; to change an
+                // unpaid invoice, cancel it and send the first invoice again (a new invoice is created).
                 if (existingId > 0)
                 {
-                    const string lockSql = @"SELECT CASE WHEN ISNULL(PaidTotal, 0) > 0 OR StatusId IN (2, 3, 5)
-                                                          OR StatusId IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK)
-                                                                          WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Partial', 'Cancelled'))
-                                                        THEN 1 ELSE 0 END
-                                               FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id;";
-                    using var lockCmd = new SqlCommand(lockSql, conn);
-                    lockCmd.Parameters.AddWithValue("@Id", existingId);
-                    existingLocked = Convert.ToInt32(await lockCmd.ExecuteScalarAsync() ?? 0) == 1;
-                }
-
-                // A paid, part-paid or cancelled invoice is final: never rewrite its amounts or due date —
-                // just send it again as it is.
-                if (existingId > 0 && existingLocked)
-                {
-                    return await SendInvoiceEmail(existingId);
-                }
-
-                if (existingId > 0)
-                {
-                    using (var upCmd = new SqlCommand("dbo.WN_UpdateInvoiceBreakdown", conn))
-                    {
-                        upCmd.CommandType = CommandType.StoredProcedure;
-                        upCmd.Parameters.AddWithValue("@InvoiceId", existingId);
-                        upCmd.Parameters.AddWithValue("@SubTotal", expectedSubtotal);
-                        upCmd.Parameters.AddWithValue("@DiscountTotal", appliedDiscount);
-                        upCmd.Parameters.AddWithValue("@TaxTotal", taxTotal);
-                        upCmd.Parameters.AddWithValue("@GrandTotal", expectedGrandTotal);
-                        upCmd.Parameters.AddWithValue("@BillingPeriodStart", (object?)periodStart ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@BillingPeriodEnd", (object?)periodEnd ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@AdvanceRentMonths", calc.BillingPeriodMonths);
-                        upCmd.Parameters.AddWithValue("@SecurityDepositMonths", (object?)secMonths ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@SecurityDepositAmount", securityDeposit);
-                        upCmd.Parameters.AddWithValue("@RoomRentExclTax", roomRentExclusive);
-                        upCmd.Parameters.AddWithValue("@ServiceCharges", supportCharge);
-                        upCmd.Parameters.AddWithValue("@TaxOnServiceCharges", taxTotal);
-                        upCmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@AccountsCoaId", (object?)rentAccountId ?? DBNull.Value);
-                        upCmd.Parameters.AddWithValue("@DueOn", DBNull.Value); // re-send keeps the invoice's own dates
-                        await upCmd.ExecuteNonQueryAsync();
-                    }
-
-                    using (var delCmd = new SqlCommand("dbo.WN_DeleteInvoiceLines", conn))
-                    {
-                        delCmd.CommandType = CommandType.StoredProcedure;
-                        delCmd.Parameters.AddWithValue("@InvoiceId", existingId);
-                        await delCmd.ExecuteNonQueryAsync();
-                    }
-
-                    using (var insCmd = new SqlCommand("dbo.WN_InsertInvoiceLine", conn))
-                    {
-                        insCmd.CommandType = CommandType.StoredProcedure;
-                        insCmd.Parameters.AddWithValue("@InvoiceId", existingId);
-                        insCmd.Parameters.AddWithValue("@ChargeTypeId", (byte)1);
-                        insCmd.Parameters.AddWithValue("@Description", mainLineDescription);
-                        insCmd.Parameters.AddWithValue("@Quantity", 1m);
-                        insCmd.Parameters.AddWithValue("@UnitPrice", calc.NetRent);
-                        insCmd.Parameters.AddWithValue("@DiscountAmount", 0m);
-                        insCmd.Parameters.AddWithValue("@TaxRate", 0m);
-                        insCmd.Parameters.AddWithValue("@SortOrder", (short)1);
-                        await insCmd.ExecuteNonQueryAsync();
-                    }
-
-                    if (securityDeposit > 0)
-                    {
-                        using (var depCmd = new SqlCommand("dbo.WN_InsertInvoiceLine", conn))
-                        {
-                            depCmd.CommandType = CommandType.StoredProcedure;
-                            depCmd.Parameters.AddWithValue("@InvoiceId", existingId);
-                            depCmd.Parameters.AddWithValue("@ChargeTypeId", (byte)2);
-                            depCmd.Parameters.AddWithValue("@Description", secDepositDescription);
-                            depCmd.Parameters.AddWithValue("@Quantity", secDepositQty);
-                            depCmd.Parameters.AddWithValue("@UnitPrice", secDepositUnitPrice);
-                            depCmd.Parameters.AddWithValue("@DiscountAmount", 0m);
-                            depCmd.Parameters.AddWithValue("@TaxRate", 0m);
-                            depCmd.Parameters.AddWithValue("@SortOrder", (short)2);
-                            await depCmd.ExecuteNonQueryAsync();
-                        }
-                    }
-
                     return await SendInvoiceEmail(existingId);
                 }
 
@@ -1301,6 +1229,57 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GenerateNextInvoiceForBooking(int bookingId)
         {
+            // Read-the-last-period-then-insert is not atomic: a double click or two staff members could both bill the
+            // same period (two invoices, two vouchers). Serialise per booking with a session-owned application lock,
+            // same as the first invoice; the second request then sees the first one's period and bills the next.
+            var lockResource = $"WN_NextInvoice_{bookingId}";
+            await using var lockConn = new SqlConnection(GetConnectionString());
+            await lockConn.OpenAsync();
+            bool lockTaken = false;
+            try
+            {
+                using (var getLock = new SqlCommand("sp_getapplock", lockConn))
+                {
+                    getLock.CommandType = CommandType.StoredProcedure;
+                    getLock.CommandTimeout = 60;
+                    getLock.Parameters.AddWithValue("@Resource", lockResource);
+                    getLock.Parameters.AddWithValue("@LockMode", "Exclusive");
+                    getLock.Parameters.AddWithValue("@LockOwner", "Session");
+                    getLock.Parameters.AddWithValue("@LockTimeout", 30000);
+                    var ret = getLock.Parameters.Add("@ReturnValue", SqlDbType.Int);
+                    ret.Direction = ParameterDirection.ReturnValue;
+                    await getLock.ExecuteNonQueryAsync();
+                    var code = ret.Value is int c ? c : -999;
+                    if (code < 0)
+                        return Conflict(new { isSuccessful = false, message = "The next invoice for this booking is already being created — try again in a moment." });
+                    lockTaken = true;
+                }
+
+                return await GenerateNextInvoiceCoreAsync(bookingId);
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    try
+                    {
+                        using var releaseLock = new SqlCommand("sp_releaseapplock", lockConn);
+                        releaseLock.CommandType = CommandType.StoredProcedure;
+                        releaseLock.Parameters.AddWithValue("@Resource", lockResource);
+                        releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
+                        await releaseLock.ExecuteNonQueryAsync();
+                    }
+                    catch
+                    {
+                        // Drop the pooled physical connection so its session (and the lock it owns) really ends.
+                        SqlConnection.ClearPool(lockConn);
+                    }
+                }
+            }
+        }
+
+        private async Task<IActionResult> GenerateNextInvoiceCoreAsync(int bookingId)
+        {
             try
             {
                 using var conn = await OpenConnectionAsync();
@@ -1377,6 +1356,21 @@ namespace WorkNest.API.Controllers
                 // Anchored to the contract start so month-end starts don't drift (see BillingPeriods).
                 DateTime periodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(startOn, periodStart, billingMonths);
 
+                // Never bill past the contract: stop once it has ended, and cut the last period at the contract end
+                // (same cap as the billing job), charging only the months/days actually in that period.
+                if (endOn.HasValue && periodStart.Date >= endOn.Value.Date)
+                    return BadRequest(new { isSuccessful = false, message = $"The contract ended on {endOn.Value:MMM d, yyyy}; there is no further period to invoice." });
+                decimal cycleMonths = billingMonths;   // a normal period is always a full cycle
+                if (endOn.HasValue && periodEnd.Date > endOn.Value.Date)
+                {
+                    periodEnd = endOn.Value.Date;
+                    if (!isMeetingRoom)
+                    {
+                        decimal partial = WorkNest.Application.Services.BillingPeriods.MonthsBetween(periodStart, periodEnd);
+                        if (partial > 0 && partial < billingMonths) cycleMonths = partial;
+                    }
+                }
+
                 int cMonthsCycle = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
                     ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
                     : 12;
@@ -1396,7 +1390,7 @@ namespace WorkNest.API.Controllers
                     ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
                     : 12;
 
-                decimal grossAdvanceRent = monthlyRent * billingMonths;
+                decimal grossAdvanceRent = Math.Round(monthlyRent * cycleMonths, 2);
                 decimal appliedDiscount = 0m;
                 if (discountPercentage > 0)
                 {
@@ -1404,14 +1398,9 @@ namespace WorkNest.API.Controllers
                 }
                 else if (discountAmount > 0)
                 {
-                    if (discountAmount > grossAdvanceRent && contractMonths > billingMonths)
-                    {
-                        appliedDiscount = Math.Round(discountAmount * ((decimal)billingMonths / contractMonths), 2);
-                    }
-                    else
-                    {
-                        appliedDiscount = discountAmount;
-                    }
+                    // Fixed discount is per month, the same as the first invoice (InvoiceCalculationEngine):
+                    // amount x months in this period; meeting rooms take it once.
+                    appliedDiscount = Math.Round(Math.Min(isMeetingRoom ? discountAmount : discountAmount * cycleMonths, grossAdvanceRent), 2);
                 }
 
                 decimal discountedBase = Math.Max(0, grossAdvanceRent - appliedDiscount);
@@ -1425,8 +1414,9 @@ namespace WorkNest.API.Controllers
                 {
                     decimal rate = perSeatSupportRate > 0 ? perSeatSupportRate : 2000.00m;
                     int cap = spaceCapacity > 0 ? spaceCapacity : 1;
-                    supportCharge = Math.Round(rate * cap * billingMonths, 2);
+                    supportCharge = Math.Round(rate * cap * cycleMonths, 2);
                 }
+                if (supportCharge > discountedBase) supportCharge = discountedBase;   // support is part of the rent
                 decimal taxTotal = Math.Round(supportCharge * (taxRate / 100.0m), 2);
                 decimal roomRentExclusive = Math.Max(0, discountedBase - supportCharge);
                 decimal effectiveTaxRateOnRent = (discountedBase > 0) 
