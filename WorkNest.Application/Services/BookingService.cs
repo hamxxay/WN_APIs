@@ -767,7 +767,7 @@ namespace WorkNest.Application.Services
                 LocationName          = dto?.LocationName ?? "",
                 StartOn               = dto?.StartOn ?? _clock.Today,
                 EndOn                 = dto?.EndOn ?? _clock.Today,
-                DueOn                 = dto?.StartOn ?? _clock.Today,
+                DueOn                 = _clock.Today.AddDays(7), // invoice date + 7 days, like every invoice
                 AdvanceRentMonths     = advanceMonths,
                 SecurityDepositMonths = secDepositMonths,
                 AdvanceRentTotal      = advTotal,

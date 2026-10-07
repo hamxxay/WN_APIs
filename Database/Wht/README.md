@@ -26,6 +26,7 @@ instead of replacing it.
 | `WN_Invoice_ApplyWhtToLines` (new) | same for lines inserted directly by the three procedures below |
 | `WN_CreateAdvanceInvoice`, `WN_Invoice_CreateRecurring`, `WN_CreateSurchargeInvoice` | one `EXEC WN_Invoice_ApplyWhtToLines` before COMMIT |
 | `WN_GetBookingBillingSummary` | WHT invoices (type 6) count as rent invoiced / paid (`WHT_10`, also in the all-in-one) |
+| `WN_GetStatementInvoicePdfData` | also returns `InvoiceTypeId`; the PDF leaves out terms "If tax is withheld…" and "Withholding tax is not applicable on the Security Deposit" on WHT invoices (`WHT_11`, also in the all-in-one) |
 
 Formula (C# twin: `WorkNest.Application/Services/WhtCalculator.cs`, tests in `WorkNest.Tests`).
 Room rent (rent + support) is grossed up as ONE amount and the rent line absorbs the whole increase:

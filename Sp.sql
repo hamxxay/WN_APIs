@@ -11870,6 +11870,7 @@ BEGIN
              THEN COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0))
              ELSE 0 END AS SecurityDepositAmount,
         COALESCE(q.WithholdingTaxRate, 15.00) AS WithholdingTaxRate,
+        i.InvoiceTypeId,                                    -- 6 = WHT invoice (already grossed up)
         st.PublicId AS STPublicId,
         st.STInvoiceNumber
     FROM dbo.WN_Invoices i WITH (NOLOCK)
