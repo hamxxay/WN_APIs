@@ -7,7 +7,7 @@
 
 -- >>> FILL IN: Id of the new "Withholding Tax Receivable" GL account (create it in the chart of accounts first).
 --     Leave NULL to install everything now and set the account later by running this script again.
-DECLARE @WhtAccountId INT = NULL;   -- <<< e.g. 2861
+DECLARE @WhtAccountId INT = 2;      -- WITHHOLDING TAX DEDUCTED (AccountsCOA Id 2)
 DECLARE @Location1Id  INT = 1;      -- location 2 currently uses a copy of location 1's accounts
 DECLARE @Location2Id  INT = 2;
 
@@ -1601,6 +1601,11 @@ BEGIN
 END;');
 
     COMMIT TRANSACTION;
+
+    -- Proof of what was installed, and where (run it on the database the invoices are created in).
+    SELECT DB_NAME() AS InstalledIntoDatabase, @@SERVERNAME AS ServerName,
+           CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.WN_Invoices_Insert')) LIKE '%RoomRentNet%'
+                THEN 'NEW WHT rule active' ELSE 'OLD WHT rule still active' END AS WhtRule;
 
     IF @WhtAccountId IS NULL
         SELECT 'Installed. WHT GL account NOT set yet: set @WhtAccountId at the top and run this script again before creating WHT invoices.' AS Result;

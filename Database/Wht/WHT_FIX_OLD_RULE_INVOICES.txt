@@ -1,0 +1,135 @@
+-- ============================================================================================
+-- Correct WHT invoices created by the OLD rule (support and tax were grossed up too):
+-- INV-2026-00378, 379, 380, 383, 384, 385, 387, 388.
+-- Re-states each with the current rule: room rent (rent + support) grossed up as one amount, the rent line
+-- absorbs the increase, support and tax are not grossed up. What the customer pays does not change.
+--
+-- How: the old rule stored ROUND(net / (1 - r), 2) for rent, support and tax, so each net amount comes back
+-- exactly as ROUND(stored * (1 - r), 2). Then:
+--   GrossRoomRent = ROUND((RentNet + SupportNet) / (1 - r), 2);  RentLine = GrossRoomRent - SupportNet
+--   Support = SupportNet; Tax = TaxNet; WHT = GrossRoomRent - (RentNet + SupportNet); deposit unchanged.
+-- Voucher: the Rent, Services income, Sales tax and WHT lines are re-stated; AR and the customer ledger
+-- do not change. The sales tax (support charges) invoice, if generated, is corrected too.
+--
+-- Run as ONE statement (select all, execute) on the database the invoices are in, AFTER WHT_ALL_IN_ONE.txt.
+-- One transaction. Every invoice is checked first (still old-rule amounts, customer total unchanged,
+-- exactly one voucher, each ledger line found once with the old amount, voucher balances after).
+-- If ANY check fails, NOTHING is changed and the message names the invoice.
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @Ids TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Ids (Id) VALUES (378), (379), (380), (383), (384), (385), (387), (388);
+
+    DECLARE @Fix TABLE (
+        Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), Rate DECIMAL(9,4),
+        OldRent DECIMAL(18,2), OldSupport DECIMAL(18,2), OldTax DECIMAL(18,2), OldWht DECIMAL(18,2), OldTotal DECIMAL(18,2),
+        Deposit DECIMAL(18,2), RentNet DECIMAL(18,2), SupportNet DECIMAL(18,2), TaxNet DECIMAL(18,2),
+        Gross DECIMAL(18,2), NewRent DECIMAL(18,2), NewWht DECIMAL(18,2), NewTotal DECIMAL(18,2), VoucherId INT NULL);
+
+    INSERT INTO @Fix (Id, InvoiceNumber, Rate, OldRent, OldSupport, OldTax, OldWht, OldTotal, Deposit, RentNet, SupportNet, TaxNet)
+    SELECT i.Id, i.InvoiceNumber, i.WHTRate,
+           i.RoomRentExclTax, i.ServiceCharges, i.TaxOnServiceCharges, i.WHTAmount, i.GrandTotal,
+           i.GrandTotal - (i.RoomRentExclTax + i.ServiceCharges + i.TaxOnServiceCharges),
+           ROUND(i.RoomRentExclTax     * (1 - i.WHTRate / 100.0), 2),
+           ROUND(i.ServiceCharges      * (1 - i.WHTRate / 100.0), 2),
+           ROUND(i.TaxOnServiceCharges * (1 - i.WHTRate / 100.0), 2)
+    FROM dbo.WN_Invoices i WITH (UPDLOCK)
+    JOIN @Ids x ON x.Id = i.Id
+    WHERE i.InvoiceTypeId = 6 AND i.WHTRate > 0 AND i.WHTRate < 100;
+
+    DECLARE @msg NVARCHAR(2048);
+    IF (SELECT COUNT(*) FROM @Fix) <> (SELECT COUNT(*) FROM @Ids)
+    BEGIN
+        SELECT @msg = 'Not a WHT invoice (type 6 with a rate): Id ' + CAST(MIN(x.Id) AS NVARCHAR(10)) + '. Nothing changed.'
+        FROM @Ids x WHERE NOT EXISTS (SELECT 1 FROM @Fix f WHERE f.Id = x.Id);
+        THROW 50001, @msg, 1;
+    END
+
+    UPDATE @Fix
+       SET Gross = ROUND((RentNet + SupportNet) / (1 - Rate / 100.0), 2);
+    UPDATE @Fix
+       SET NewRent  = Gross - SupportNet,
+           NewWht   = Gross - (RentNet + SupportNet),
+           NewTotal = Gross + TaxNet + Deposit;
+
+    -- Still old-rule amounts? (WHT = everything grossed up minus everything net)
+    SELECT TOP 1 @msg = InvoiceNumber + ' does not hold old-rule amounts (already corrected?). Nothing changed.'
+    FROM @Fix WHERE OldWht <> (OldRent + OldSupport + OldTax) - (RentNet + SupportNet + TaxNet);
+    IF @msg IS NOT NULL THROW 50002, @msg, 1;
+
+    -- What the customer pays must not change.
+    SELECT TOP 1 @msg = InvoiceNumber + ': customer total would change. Nothing changed.'
+    FROM @Fix WHERE (OldTotal - OldWht) <> (NewTotal - NewWht);
+    IF @msg IS NOT NULL THROW 50003, @msg, 1;
+
+    -- Exactly one voucher per invoice.
+    UPDATE f SET VoucherId = v.Id
+    FROM @Fix f
+    CROSS APPLY (SELECT MAX(Id) AS Id, COUNT(*) AS n FROM dbo.Vouchers WITH (UPDLOCK) WHERE RefNo = f.InvoiceNumber AND RefId = f.Id) v
+    WHERE v.n = 1;
+    SELECT TOP 1 @msg = InvoiceNumber + ': expected exactly one voucher. Nothing changed.' FROM @Fix WHERE VoucherId IS NULL;
+    IF @msg IS NOT NULL THROW 50004, @msg, 1;
+
+    -- Each of the four ledger lines found exactly once with its old amount.
+    SELECT TOP 1 @msg = f.InvoiceNumber + ': ' + c.Line + ' ledger line not found exactly once with the old amount. Nothing changed.'
+    FROM @Fix f
+    CROSS APPLY (VALUES
+        ('Rent',            (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = f.VoucherId AND Description LIKE 'Rent - Invoice %'            AND Credit = f.OldRent    AND Debit = 0)),
+        ('Services income', (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = f.VoucherId AND Description LIKE 'Services Income - Invoice %' AND Credit = f.OldSupport AND Debit = 0)),
+        ('Sales tax',       (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = f.VoucherId AND Description LIKE 'Sales Tax - Invoice %'       AND Credit = f.OldTax     AND Debit = 0)),
+        ('WHT',             (SELECT COUNT(*) FROM dbo.Ledgers WITH (UPDLOCK) WHERE VoucherId = f.VoucherId AND Description LIKE 'Withholding Tax %'           AND Debit  = f.OldWht     AND Credit = 0))
+    ) c(Line, n)
+    WHERE c.n <> 1;
+    IF @msg IS NOT NULL THROW 50005, @msg, 1;
+
+    -- Re-state the voucher lines
+    UPDATE l SET Credit = f.NewRent    FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Rent - Invoice %'            AND l.Credit = f.OldRent;
+    UPDATE l SET Credit = f.SupportNet FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Services Income - Invoice %' AND l.Credit = f.OldSupport;
+    UPDATE l SET Credit = f.TaxNet     FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Sales Tax - Invoice %'       AND l.Credit = f.OldTax;
+    UPDATE l SET Debit  = f.NewWht     FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Withholding Tax %'           AND l.Debit  = f.OldWht;
+    UPDATE v SET TotalAmount = f.NewTotal FROM dbo.Vouchers v JOIN @Fix f ON f.VoucherId = v.Id WHERE v.TotalAmount = f.OldTotal;
+
+    -- Every voucher balances at the new total
+    SELECT TOP 1 @msg = f.InvoiceNumber + ': voucher would not balance after the correction. Nothing changed.'
+    FROM @Fix f
+    CROSS APPLY (SELECT SUM(Debit) AS Dr, SUM(Credit) AS Cr FROM dbo.Ledgers WHERE VoucherId = f.VoucherId) t
+    WHERE t.Dr <> t.Cr OR t.Dr <> f.NewTotal;
+    IF @msg IS NOT NULL THROW 50006, @msg, 1;
+
+    -- Invoice headers
+    UPDATE i
+       SET RoomRentExclTax     = f.NewRent,
+           ServiceCharges      = f.SupportNet,
+           TaxOnServiceCharges = f.TaxNet,
+           TaxTotal            = f.TaxNet,
+           WHTAmount           = f.NewWht,
+           SubTotal            = f.NewRent + f.SupportNet + ISNULL(i.DiscountTotal, 0),
+           GrandTotal          = f.NewTotal,
+           UpdatedOn           = SYSUTCDATETIME()
+    FROM dbo.WN_Invoices i JOIN @Fix f ON f.Id = i.Id;
+
+    -- Sales tax (support charges) invoices, where already generated
+    UPDATE st
+       SET RoomRentAmount         = f.NewRent,
+           ServiceChargeAmount    = f.SupportNet,
+           ServiceChargeTaxAmount = f.TaxNet,
+           SubTotal               = f.SupportNet,
+           TaxTotal               = f.TaxNet,
+           GrandTotal             = f.SupportNet + f.TaxNet
+    FROM dbo.WN_CustomerSTInvoice st JOIN @Fix f ON f.Id = st.CustomerInvoiceId;
+
+    COMMIT TRANSACTION;
+
+    -- Results: before -> after for every invoice
+    SELECT 'Corrected' AS Result, f.InvoiceNumber, f.Rate,
+           f.OldRent, f.NewRent, f.OldSupport, f.SupportNet AS NewSupport, f.OldTax, f.TaxNet AS NewTax,
+           f.OldWht, f.NewWht, f.OldTotal, f.NewTotal, f.NewTotal - f.NewWht AS CustomerPays
+    FROM @Fix f ORDER BY f.Id;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
