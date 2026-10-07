@@ -296,7 +296,9 @@ namespace WorkNest.Infrastructure.Repositories
                 if (monthlyBasePrice.HasValue) updateParts.Add("MonthlyBasePrice = @MBP");
                 if (maxDiscountPercent.HasValue) updateParts.Add("MaxDiscountPercent = @MDP");
                 if (!string.IsNullOrWhiteSpace(offeringType)) updateParts.Add("OfferingType = @OT");
+                // WHT ticked: the WN_WHTaxRate Id. Not ticked: no WHT rate at all (NULL; skipped if the column is NOT NULL).
                 if (withholdingTaxRate.HasValue) updateParts.Add("WithholdingTaxRate = @WTR");
+                else updateParts.Add("WithholdingTaxRate = CASE WHEN COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Quotations'), 'WithholdingTaxRate', 'AllowsNull') = 1 THEN NULL ELSE WithholdingTaxRate END");
                 if (sendWhtInvoice == true) updateParts.Add("SendWhtInvoice = 1"); // only when ticked: untouched quotations keep the default 0
 
                 var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
@@ -507,7 +509,10 @@ namespace WorkNest.Infrastructure.Repositories
                     ? Convert.ToDecimal(dvObj)
                     : (quotation.TryGetValue("DiscountAmount", out var daObj) && daObj != null ? Convert.ToDecimal(daObj) : 0m);
                 decimal subtotal = quotation.TryGetValue("SubtotalAmount", out var stObj) && stObj != null ? Convert.ToDecimal(stObj) : 0m;
-                decimal whtRate = quotation.TryGetValue("WithholdingTaxRate", out var whtObj) && whtObj != null ? Convert.ToDecimal(whtObj) : 15.00m;
+                // The booking gets the quotation's WN_WHTaxRate Id only when the quotation has WHT ticked; otherwise no WHT rate.
+                bool quotationSendsWht = await GetQuotationSendWhtInvoiceAsync(quotationId);
+                decimal? whtRate = quotationSendsWht && quotation.TryGetValue("WithholdingTaxRate", out var whtObj) && whtObj != null && whtObj is not DBNull
+                    ? Convert.ToDecimal(whtObj) : null;
 
                 decimal resolvedMonthlyRent = monthlyPrice > 0 ? monthlyPrice : (perSeatPrice > 0 ? perSeatPrice * Math.Max(1, capacity) : (subtotal > 0 && bpm > 0 ? subtotal / bpm : 0m));
                 if (resolvedMonthlyRent <= 0 && subtotal > 0) resolvedMonthlyRent = subtotal;
@@ -561,7 +566,7 @@ namespace WorkNest.Infrastructure.Repositories
                 syncCmd.Parameters.AddWithValue("@DiscountType", discountType);
                 syncCmd.Parameters.AddWithValue("@DiscountPct", discountPct);
                 syncCmd.Parameters.AddWithValue("@DiscountVal", discountVal);
-                syncCmd.Parameters.AddWithValue("@WhtRate", whtRate);
+                syncCmd.Parameters.AddWithValue("@WhtRate", (object?)whtRate ?? DBNull.Value);
                 syncCmd.Parameters.AddWithValue("@BookingId", bookingId);
                 syncCmd.Parameters.AddWithValue("@QuotationId", quotationId);
                 await syncCmd.ExecuteNonQueryAsync();
