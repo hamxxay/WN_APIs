@@ -1,5 +1,12 @@
 namespace WorkNest.Application.DTOs.Auth
 {
+    /// <summary>Signed-in user's own editable profile fields (PUT api/auth/me).</summary>
+    public class UpdateMyProfileRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+    }
+
     public class UserSyncRequest
     {
         /// <summary>Firebase ID token (user.getIdToken()) — proves the person signed in with Firebase.</summary>

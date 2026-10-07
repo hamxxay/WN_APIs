@@ -119,6 +119,22 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        [HttpPut("api/auth/me")]
+        public async Task<IActionResult> UpdateMe([FromBody] UpdateMyProfileRequest request)
+        {
+            // Only the signed-in user's own profile, identified from the JWT.
+            var email = User.FindFirst(ClaimTypes.Email)?.Value
+                        ?? User.FindFirst("email")?.Value
+                        ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Email)?.Value;
+
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "Sign in required." });
+
+            var result = await _auth.UpdateMeAsync(email, request ?? new UpdateMyProfileRequest());
+            if (!result.IsSuccessful) return BadRequest(result);
+            return Ok(result);
+        }
+
         [HttpPost("api/auth/logout")]
         [AllowAnonymous]
         public IActionResult Logout() => Ok(_auth.Logout());
