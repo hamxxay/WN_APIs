@@ -6,7 +6,7 @@
 --
 -- 1. SAFETY CHECK FIRST: any other procedure / view / function that still uses the old column names is listed
 --    and NOTHING is changed (send me the list). Set @Force = 1 only after those are handled.
--- 2. Renames the two columns (constraints and defaults follow automatically).
+-- 2. Renames the two columns; CK_WN_Bookings_Wht / CK_WN_Quotations_Wht are dropped and re-added on WHTRate_ID.
 -- 3. Patches the three procedures that read them, in place (one expression each):
 --      WN_Invoices_Insert             dbo.WN_WHTaxRate_Resolve(WHTRate)              -> (WHTRate_ID)
 --      WN_GetBookingInvoiceDetails    dbo.WN_WHTaxRate_Resolve(q.WithholdingTaxRate) -> (q.WHTRate_ID)
@@ -43,14 +43,55 @@ BEGIN
     RETURN;
 END
 
+-- Objects SCHEMA-BOUND to the columns (views / functions WITH SCHEMABINDING, computed columns) block a rename
+-- (error 15336). They are listed with their definition so they can be recreated; nothing is changed.
+DECLARE @Bound TABLE (ObjectName SYSNAME, ObjectType NVARCHAR(60), OnTable SYSNAME, ColumnUsed SYSNAME NULL, Definition NVARCHAR(MAX));
+INSERT INTO @Bound
+SELECT OBJECT_NAME(d.referencing_id), o.type_desc, OBJECT_NAME(d.referenced_id), COL_NAME(d.referenced_id, d.referenced_minor_id),
+       OBJECT_DEFINITION(d.referencing_id)
+FROM sys.sql_expression_dependencies d
+JOIN sys.objects o ON o.object_id = d.referencing_id
+WHERE d.is_schema_bound_reference = 1
+  AND OBJECT_NAME(d.referencing_id) NOT IN (N'CK_WN_Bookings_Wht', N'CK_WN_Quotations_Wht')   -- dropped and re-added below
+  AND ((d.referenced_id = OBJECT_ID(N'dbo.WN_Bookings')   AND (d.referenced_minor_id = 0 OR COL_NAME(d.referenced_id, d.referenced_minor_id) = N'WHTRate'))
+    OR (d.referenced_id = OBJECT_ID(N'dbo.WN_Quotations') AND (d.referenced_minor_id = 0 OR COL_NAME(d.referenced_id, d.referenced_minor_id) = N'WithholdingTaxRate')))
+UNION ALL
+SELECT name, N'COMPUTED_COLUMN', OBJECT_NAME(object_id), NULL, definition
+FROM sys.computed_columns
+WHERE object_id IN (OBJECT_ID(N'dbo.WN_Bookings'), OBJECT_ID(N'dbo.WN_Quotations'))
+  AND (definition LIKE N'%WHTRate%' OR definition LIKE N'%WithholdingTaxRate%');
+
+IF EXISTS (SELECT 1 FROM @Bound)
+BEGIN
+    SELECT DISTINCT ObjectName, ObjectType, OnTable, ColumnUsed, Definition,
+           'schema-bound to the table: NOTHING was changed. Send this list (with Definition).' AS Result
+    FROM @Bound ORDER BY ObjectName;
+    RETURN;
+END
+
 BEGIN TRY
     BEGIN TRANSACTION;
 
-    -- 2. Rename
+    -- 2. Rename. The WHT CHECK constraints use the columns, so they are dropped first and re-added (same rule)
+    --    on WHTRate_ID afterwards.
     IF COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate_ID') IS NULL
+    BEGIN
+        IF OBJECT_ID(N'dbo.CK_WN_Bookings_Wht', N'C') IS NOT NULL
+            EXEC(N'ALTER TABLE dbo.WN_Bookings DROP CONSTRAINT CK_WN_Bookings_Wht;');
         EXEC sys.sp_rename N'dbo.WN_Bookings.WHTRate', N'WHTRate_ID', N'COLUMN';
+    END
     IF COL_LENGTH(N'dbo.WN_Quotations', N'WithholdingTaxRate') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WHTRate_ID') IS NULL
+    BEGIN
+        IF OBJECT_ID(N'dbo.CK_WN_Quotations_Wht', N'C') IS NOT NULL
+            EXEC(N'ALTER TABLE dbo.WN_Quotations DROP CONSTRAINT CK_WN_Quotations_Wht;');
         EXEC sys.sp_rename N'dbo.WN_Quotations.WithholdingTaxRate', N'WHTRate_ID', N'COLUMN';
+    END
+    IF OBJECT_ID(N'dbo.CK_WN_Bookings_Wht', N'C') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Bookings WITH CHECK ADD CONSTRAINT CK_WN_Bookings_Wht
+              CHECK (SendWhtInvoice = 0 OR (WHTRate_ID > 0 AND WHTRate_ID < 100));');
+    IF OBJECT_ID(N'dbo.CK_WN_Quotations_Wht', N'C') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Quotations WITH CHECK ADD CONSTRAINT CK_WN_Quotations_Wht
+              CHECK (SendWhtInvoice = 0 OR (WHTRate_ID > 0 AND WHTRate_ID < 100));');
 
     -- 3. Patch the readers in place
     DECLARE @Patch TABLE (Seq INT IDENTITY, ProcName SYSNAME, OldText NVARCHAR(400), NewText NVARCHAR(400));
@@ -112,7 +153,9 @@ BEGIN TRY
 
     SELECT ProcName, Result FROM @Result;
     SELECT CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate_ID') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate') IS NULL THEN 'yes' ELSE 'NO' END AS Bookings_WHTRate_ID,
-           CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'WHTRate_ID') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WithholdingTaxRate') IS NULL THEN 'yes' ELSE 'NO' END AS Quotations_WHTRate_ID;
+           CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'WHTRate_ID') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WithholdingTaxRate') IS NULL THEN 'yes' ELSE 'NO' END AS Quotations_WHTRate_ID,
+           (SELECT definition FROM sys.check_constraints WHERE name = N'CK_WN_Bookings_Wht') AS Bookings_Check,
+           (SELECT definition FROM sys.check_constraints WHERE name = N'CK_WN_Quotations_Wht') AS Quotations_Check;
 END TRY
 BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
