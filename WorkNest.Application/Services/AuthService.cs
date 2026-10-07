@@ -148,6 +148,27 @@ namespace WorkNest.Application.Services
 
         public ApiResponse Logout() => ApiResponse.Ok("Logged out successfully.");
 
+        /// <summary>
+        /// Updates the signed-in user's own name and phone only (role, location and the rest are untouched:
+        /// WN_Users_Update keeps every NULL parameter as-is). Unlike sync, it never creates a customer record.
+        /// </summary>
+        public async Task<ApiResponse> UpdateMeAsync(string email, UpdateMyProfileRequest request)
+        {
+            var name = (request.Name ?? "").Trim();
+            var phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+            if (name.Length == 0) return ApiResponse.Fail("Name is required.");
+            if (name.Length > 200) return ApiResponse.Fail("Name must be 200 characters or fewer.");
+            if (phone != null && (phone.Length > 20 || !System.Text.RegularExpressions.Regex.IsMatch(phone, @"^\+?[0-9 ()-]{7,20}$")))
+                return ApiResponse.Fail("Enter a valid phone number.");
+
+            var row = await _db.GetUserByEmailAsync(email);
+            if (row is null || !row.TryGetValue("Id", out var idObj) || idObj is null)
+                return ApiResponse.Fail("User not found.");
+
+            await _db.UpdateUserAsync(Convert.ToInt32(idObj), name, phone, null, null, null, null, null, null);
+            return await GetMeAsync(email);
+        }
+
         private static string ResolveName(string? name, string? firstName, string? lastName, string email)
         {
             if (!string.IsNullOrWhiteSpace(name))

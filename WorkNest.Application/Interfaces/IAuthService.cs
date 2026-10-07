@@ -11,6 +11,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> LoginAsync(UserLoginRequest request);
         Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request);
         Task<ApiResponse> GetMeAsync(string email);
+        Task<ApiResponse> UpdateMeAsync(string email, UpdateMyProfileRequest request);
         ApiResponse Logout();
     }
 }
