@@ -3143,6 +3143,17 @@ BEGIN
 
         DECLARE @TotalAmount DECIMAL(18,2) = @DiscountedRent + @DiscountedDeposit + @SupportChargeAmount + @TaxAmount;
         DECLARE @ChallanNum NVARCHAR(50) = 'WN-' + CONVERT(NVARCHAR(8), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)), 112) + '-' + RIGHT(CAST(ABS(CHECKSUM(NEWID())) AS NVARCHAR(10)), 4);
+        -- The 4 digits are random: re-roll until the number is unused today (a repeat failed the booking on
+        -- UQ_WN_Challans_ChallanNumber). Runs inside this procedure's transaction, so the range locks also stop
+        -- two bookings saved at the same moment from taking the same number.
+        DECLARE @ChallanTries INT = 0;
+        WHILE EXISTS (SELECT 1 FROM dbo.WN_Challans WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber = @ChallanNum)
+           OR EXISTS (SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber = @ChallanNum)
+        BEGIN
+            SET @ChallanTries = @ChallanTries + 1;
+            IF @ChallanTries > 200 THROW 50020, 'Could not generate a unique challan number. Please try again.', 1;
+            SET @ChallanNum = LEFT(@ChallanNum, 12) + RIGHT('0000' + CAST(ABS(CHECKSUM(NEWID())) % 10000 AS NVARCHAR(4)), 4);
+        END
         DECLARE @ChallanValidUntil DATETIME2 = DATEADD(day, 7, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)));
         DECLARE @CreatedByGuid UNIQUEIDENTIFIER = NULL;
         IF @CreatedById IS NOT NULL

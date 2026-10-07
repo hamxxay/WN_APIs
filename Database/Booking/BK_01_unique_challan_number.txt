@@ -1,0 +1,68 @@
+-- ============================================================================================
+-- Fix: "Violation of UNIQUE KEY constraint 'UQ_WN_Challans_ChallanNumber'" when creating a booking.
+-- WN_Bookings_Insert makes challan numbers as WN-YYYYMMDD- + 4 RANDOM digits and never checked for a repeat;
+-- with many bookings in a day two drew the same digits and the second booking failed.
+--
+-- This PATCHES THE LIVE PROCEDURE IN PLACE: it reads the current WN_Bookings_Insert from the database, adds a
+-- "re-roll until unused" loop right after the challan-number line, and saves it. Nothing else in the procedure
+-- changes (safe even if the live version differs from Sp.sql). Same number format as before.
+-- If the expected line is not found exactly once, NOTHING is changed and the reason is shown.
+-- Run against SAC400 as ONE statement in DBeaver (select all, execute). Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+DECLARE @def NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Bookings_Insert'));
+DECLARE @old NVARCHAR(200) = N'RIGHT(CAST(ABS(CHECKSUM(NEWID())) AS NVARCHAR(10)), 4);';
+DECLARE @new NVARCHAR(MAX) = N'
+        -- The 4 digits are random: re-roll until the number is unused today (a repeat failed the booking on
+        -- UQ_WN_Challans_ChallanNumber). Runs inside this procedure''s transaction, so the range locks also stop
+        -- two bookings saved at the same moment from taking the same number.
+        DECLARE @ChallanTries INT = 0;
+        WHILE EXISTS (SELECT 1 FROM dbo.WN_Challans WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber = @ChallanNum)
+           OR EXISTS (SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber = @ChallanNum)
+        BEGIN
+            SET @ChallanTries = @ChallanTries + 1;
+            IF @ChallanTries > 200 THROW 50020, ''Could not generate a unique challan number. Please try again.'', 1;
+            SET @ChallanNum = LEFT(@ChallanNum, 12) + RIGHT(''0000'' + CAST(ABS(CHECKSUM(NEWID())) % 10000 AS NVARCHAR(4)), 4);
+        END';
+
+IF @def IS NULL
+    THROW 50001, 'dbo.WN_Bookings_Insert not found on this database. Nothing changed.', 1;
+
+IF CHARINDEX(N'@ChallanTries', @def) > 0
+BEGIN
+    SELECT 'Already patched: WN_Bookings_Insert already re-rolls duplicate challan numbers.' AS Result;
+    RETURN;
+END
+
+IF (DATALENGTH(@def) - DATALENGTH(REPLACE(@def, @old, N''))) / DATALENGTH(@old) <> 1
+    THROW 50002, 'The challan-number line was not found exactly once in the live WN_Bookings_Insert. Nothing changed.', 1;
+
+SET @def = REPLACE(@def, @old, @old + @new);
+
+-- CREATE [OR ALTER] PROCEDURE ...  ->  ALTER PROCEDURE ...
+-- The header is the first "PROC"/"PROCEDURE" whose preceding text (ignoring spaces / tabs / line breaks) ends in CREATE or
+-- CREATE OR ALTER; comments above the procedure that mention "create" or "procedure" are skipped.
+DECLARE @k INT = 0, @p INT = 0, @ws INT, @w NVARCHAR(40), @c NVARCHAR(40), @r INT;
+WHILE 1 = 1
+BEGIN
+    SET @k = CHARINDEX(N'PROC', @def, @k + 1);                       -- matches PROC and PROCEDURE
+    IF @k = 0 BREAK;
+    SET @ws = CASE WHEN @k > 40 THEN @k - 40 ELSE 1 END;
+    SET @w  = SUBSTRING(@def, @ws, @k - @ws);
+    SET @c  = UPPER(REPLACE(REPLACE(REPLACE(REPLACE(@w, N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+    IF RIGHT(@c, 6) = N'CREATE' OR RIGHT(@c, 13) = N'CREATEORALTER'
+    BEGIN
+        SET @r = CHARINDEX(N'ETAERC', REVERSE(UPPER(@w)));            -- last CREATE in the text before PROC
+        SET @p = @ws + DATALENGTH(@w) / 2 - @r - 5;                    -- position of its C
+        BREAK;
+    END
+END
+IF @p <= 0 OR @k = 0
+    THROW 50003, 'Could not find the CREATE PROCEDURE header. Nothing changed.', 1;
+SET @def = STUFF(@def, @p, @k - @p, N'ALTER ');
+
+EXEC sys.sp_executesql @def;
+
+SELECT CASE WHEN CHARINDEX(N'@ChallanTries', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Bookings_Insert'))) > 0
+            THEN 'Patched: new bookings re-roll a challan number that is already used.'
+            ELSE 'NOT patched' END AS Result, DB_NAME() AS DatabaseName;

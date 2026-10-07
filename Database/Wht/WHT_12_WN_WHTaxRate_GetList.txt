@@ -1,0 +1,20 @@
+-- ============================================================================================
+-- WHT rate dropdown (Create Booking / Create Quotation) from dbo.WN_WHTaxRate.
+-- The dropdown shows Description; picking one applies its WHRate. Only active rows (Status = 1) with a
+-- Description and a rate between 0 and 100 are listed.
+-- New procedure only (read-only); no table is created or altered.
+-- Run against SAC400 as ONE statement in DBeaver (select all, execute). Safe to run again.
+-- ============================================================================================
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_WHTaxRate_GetList
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Code, Description, WHRate, ProvinceId, WHAccountId, Status
+    FROM dbo.WN_WHTaxRate WITH (NOLOCK)
+    WHERE ISNULL(Status, 1) = 1
+      AND NULLIF(LTRIM(RTRIM(Description)), '''') IS NOT NULL
+      AND WHRate > 0 AND WHRate < 100
+    ORDER BY Description, Id;
+END');
+
+EXEC dbo.WN_WHTaxRate_GetList;   -- lists the WHT rates the dropdown will show
