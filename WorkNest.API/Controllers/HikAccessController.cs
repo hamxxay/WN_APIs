@@ -10,7 +10,7 @@ namespace WorkNest.API.Controllers
     /// Read-only over the HIK tables; event times are the terminals' local time.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
     [ValidateLocationScope]
     public class HikAccessController : ControllerBase
     {

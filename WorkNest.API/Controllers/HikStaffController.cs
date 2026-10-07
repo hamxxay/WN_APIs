@@ -12,7 +12,7 @@ namespace WorkNest.API.Controllers
     /// Every Entrance machine is always included; room machines are chosen per staff member.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
     [ValidateLocationScope]
     public class HikStaffController : ControllerBase
     {

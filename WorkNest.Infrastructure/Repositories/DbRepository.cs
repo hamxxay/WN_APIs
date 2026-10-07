@@ -4335,14 +4335,18 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                             d.Last_seen AS last_seen
                         FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
                         LEFT JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id";
-            if (!string.IsNullOrWhiteSpace(location))
+            var shouldFilterLocation = !string.IsNullOrWhiteSpace(location)
+                && !int.TryParse(location, out _)
+                && !string.Equals(location, "all", StringComparison.OrdinalIgnoreCase);
+
+            if (shouldFilterLocation)
             {
                 sql += " WHERE d.Location = @Location";
             }
             sql += " ORDER BY d.Device_Name";
 
             await using var cmd = new SqlCommand(sql, conn);
-            if (!string.IsNullOrWhiteSpace(location))
+            if (shouldFilterLocation)
             {
                 cmd.Parameters.AddWithValue("@Location", location);
             }
@@ -4367,16 +4371,20 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
 
         public async Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null)
         {
+            var shouldFilterLocation = !string.IsNullOrWhiteSpace(location)
+                && !int.TryParse(location, out _)
+                && !string.Equals(location, "all", StringComparison.OrdinalIgnoreCase);
+
             // Prefer the machines' real user lists, cached by the HIK sync engine (UserInfo incl. numOfFP/numOfFace).
             await using (var cacheConn = await Open())
             {
                 var cacheSql = @"SELECT d.Id, dc.Users_snapshot
                                  FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
                                  LEFT JOIN dbo.WN_HIK_DevCache dc WITH (NOLOCK) ON dc.Device_id = d.Id"
-                               + (string.IsNullOrWhiteSpace(location) ? "" : " WHERE d.Location = @Location")
+                               + (shouldFilterLocation ? " WHERE d.Location = @Location" : "")
                                + " ORDER BY d.Id";
                 await using var cacheCmd = new SqlCommand(cacheSql, cacheConn);
-                if (!string.IsNullOrWhiteSpace(location)) cacheCmd.Parameters.AddWithValue("@Location", location);
+                if (shouldFilterLocation) cacheCmd.Parameters.AddWithValue("@Location", location);
                 var cached = new List<(int, string?)>();
                 await using (var cr = await cacheCmd.ExecuteReaderAsync())
                 {
@@ -4398,14 +4406,14 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                         FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
                         LEFT JOIN dbo.WN_HIK_AccessGrants g WITH (NOLOCK) ON g.device_id = d.Id
                         LEFT JOIN dbo.WN_HIK_Employees e WITH (NOLOCK) ON e.id = g.employee_id";
-            if (!string.IsNullOrWhiteSpace(location))
+            if (shouldFilterLocation)
             {
                 sql += " WHERE d.Location = @Location";
             }
             sql += " ORDER BY d.Id, e.employee_no";
 
             await using var cmd = new SqlCommand(sql, conn);
-            if (!string.IsNullOrWhiteSpace(location))
+            if (shouldFilterLocation)
             {
                 cmd.Parameters.AddWithValue("@Location", location);
             }
