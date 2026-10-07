@@ -297,8 +297,9 @@ namespace WorkNest.Infrastructure.Repositories
                 if (maxDiscountPercent.HasValue) updateParts.Add("MaxDiscountPercent = @MDP");
                 if (!string.IsNullOrWhiteSpace(offeringType)) updateParts.Add("OfferingType = @OT");
                 // WHT ticked: the WN_WHTaxRate Id. Not ticked: no WHT rate at all (NULL; skipped if the column is NOT NULL).
-                if (withholdingTaxRate.HasValue) updateParts.Add("WithholdingTaxRate = @WTR");
-                else updateParts.Add("WithholdingTaxRate = CASE WHEN COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Quotations'), 'WithholdingTaxRate', 'AllowsNull') = 1 THEN NULL ELSE WithholdingTaxRate END");
+                var qWhtCol = await WhtIdColumnAsync(c, "dbo.WN_Quotations", "WithholdingTaxRate");
+                if (withholdingTaxRate.HasValue) updateParts.Add($"{qWhtCol} = @WTR");
+                else updateParts.Add($"{qWhtCol} = CASE WHEN COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Quotations'), '{qWhtCol}', 'AllowsNull') = 1 THEN NULL ELSE {qWhtCol} END");
                 if (sendWhtInvoice == true) updateParts.Add("SendWhtInvoice = 1"); // only when ticked: untouched quotations keep the default 0
 
                 var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
@@ -511,8 +512,8 @@ namespace WorkNest.Infrastructure.Repositories
                 decimal subtotal = quotation.TryGetValue("SubtotalAmount", out var stObj) && stObj != null ? Convert.ToDecimal(stObj) : 0m;
                 // The booking gets the quotation's WN_WHTaxRate Id only when the quotation has WHT ticked; otherwise no WHT rate.
                 bool quotationSendsWht = await GetQuotationSendWhtInvoiceAsync(quotationId);
-                decimal? whtRate = quotationSendsWht && quotation.TryGetValue("WithholdingTaxRate", out var whtObj) && whtObj != null && whtObj is not DBNull
-                    ? Convert.ToDecimal(whtObj) : null;
+                var whtObj = WhtIdValue(quotation, "WithholdingTaxRate");
+                decimal? whtRate = quotationSendsWht && whtObj is not null ? Convert.ToDecimal(whtObj) : null;
 
                 decimal resolvedMonthlyRent = monthlyPrice > 0 ? monthlyPrice : (perSeatPrice > 0 ? perSeatPrice * Math.Max(1, capacity) : (subtotal > 0 && bpm > 0 ? subtotal / bpm : 0m));
                 if (resolvedMonthlyRent <= 0 && subtotal > 0) resolvedMonthlyRent = subtotal;
@@ -557,6 +558,7 @@ namespace WorkNest.Infrastructure.Repositories
                         SecurityDepositAmount = @SecurityDeposit
                     WHERE BookingId = @BookingId;";
 
+                syncSql = syncSql.Replace("WHTRate = @WhtRate", (await WhtIdColumnAsync(c, "dbo.WN_Bookings", "WHTRate")) + " = @WhtRate");
                 await using var syncCmd = new SqlCommand(syncSql, c);
                 syncCmd.Parameters.AddWithValue("@MonthlyRent", resolvedMonthlyRent);
                 syncCmd.Parameters.AddWithValue("@SubtotalAmount", subtotal > 0 ? subtotal : (resolvedMonthlyRent * bpm));
@@ -1257,7 +1259,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 if (securityDepositOverride.HasValue) updateParts.Add("SecurityDepositOverride = @SDO");
                 if (floorId.HasValue) updateParts.Add("FloorId = @FID");
                 if (!string.IsNullOrWhiteSpace(shiftType)) updateParts.Add("ShiftType = @ST");
-                if (sendWhtInvoice && whtRate is > 0) { updateParts.Add("SendWhtInvoice = 1"); updateParts.Add("WHTRate = @WHTR"); } // rate snapshot
+                if (sendWhtInvoice && whtRate is > 0) { updateParts.Add("SendWhtInvoice = 1"); updateParts.Add((await WhtIdColumnAsync(c, "dbo.WN_Bookings", "WHTRate")) + " = @WHTR"); } // rate snapshot
 
                 var updateSql = $@"
                     UPDATE dbo.WN_Bookings 
@@ -2817,6 +2819,25 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             if (id is null || id is DBNull || rate is null || rate is DBNull) return null;
             bool active = st is null || st is DBNull || Convert.ToInt32(st) != 0;
             return (Convert.ToInt32(id), Convert.ToDecimal(rate), active);
+        }
+
+        /// <summary>
+        /// Column holding the chosen WN_WHTaxRate Id: WHTRate_ID (after WHT_15 renamed it) or the old name
+        /// (WN_Bookings.WHTRate / WN_Quotations.WithholdingTaxRate), so the API works before and after the rename.
+        /// </summary>
+        private static async Task<string> WhtIdColumnAsync(SqlConnection c, string table, string oldName)
+        {
+            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH(@T, 'WHTRate_ID') IS NOT NULL THEN 'WHTRate_ID' ELSE @O END", c);
+            cmd.Parameters.AddWithValue("@T", table);
+            cmd.Parameters.AddWithValue("@O", oldName);
+            return (string)(await cmd.ExecuteScalarAsync() ?? oldName);
+        }
+
+        /// <summary>The WHT rate Id from a quotation / booking row, under the new (WHTRate_ID) or old column name.</summary>
+        public static object? WhtIdValue(IDictionary<string, object?> row, string oldName)
+        {
+            if (row.TryGetValue("WHTRate_ID", out var v) && v is not null && v is not DBNull) return v;
+            return row.TryGetValue(oldName, out var o) && o is not null && o is not DBNull ? o : null;
         }
 
         public async Task<decimal> ResolveWhtRatePercentAsync(decimal? value)

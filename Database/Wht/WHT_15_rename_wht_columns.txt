@@ -1,0 +1,120 @@
+-- ============================================================================================
+-- TABLE CHANGE: rename the WHT rate Id columns to WHTRate_ID
+--   dbo.WN_Bookings.WHTRate                 -> WHTRate_ID
+--   dbo.WN_Quotations.WithholdingTaxRate    -> WHTRate_ID
+-- (WN_Invoices.WHTRate is NOT renamed: an invoice keeps the percentage it was issued with.)
+--
+-- 1. SAFETY CHECK FIRST: any other procedure / view / function that still uses the old column names is listed
+--    and NOTHING is changed (send me the list). Set @Force = 1 only after those are handled.
+-- 2. Renames the two columns (constraints and defaults follow automatically).
+-- 3. Patches the three procedures that read them, in place (one expression each):
+--      WN_Invoices_Insert             dbo.WN_WHTaxRate_Resolve(WHTRate)              -> (WHTRate_ID)
+--      WN_GetBookingInvoiceDetails    dbo.WN_WHTaxRate_Resolve(q.WithholdingTaxRate) -> (q.WHTRate_ID)
+--      WN_GetStatementInvoicePdfData  dbo.WN_WHTaxRate_Resolve(q.WithholdingTaxRate) -> (q.WHTRate_ID)
+--    (their output column keeps the name WithholdingTaxRate, which the API reads)
+-- The API works with both the old and the new column names, so it can be deployed before or after this script.
+-- Run against SAC400 as ONE statement in DBeaver (select all, execute). One transaction. Safe to run again.
+-- ============================================================================================
+DECLARE @Force BIT = 0;   -- 1 = rename even if the check below lists other modules
+
+SET XACT_ABORT ON;
+
+-- 1. Other modules that still use the old names (parameters and output aliases are ignored)
+DECLARE @Patched TABLE (Name SYSNAME PRIMARY KEY);
+INSERT INTO @Patched VALUES (N'WN_Invoices_Insert'), (N'WN_GetBookingInvoiceDetails'), (N'WN_GetStatementInvoicePdfData'), (N'WN_WHTaxRate_Resolve');
+
+DECLARE @Others TABLE (ModuleName SYSNAME, UsesColumn NVARCHAR(60));
+INSERT INTO @Others
+SELECT OBJECT_NAME(m.object_id), N'WN_Quotations.WithholdingTaxRate'
+FROM sys.sql_modules m
+WHERE OBJECT_NAME(m.object_id) NOT IN (SELECT Name FROM @Patched)
+  AND m.definition LIKE N'%WN_Quotations%'
+  AND REPLACE(REPLACE(m.definition, N'AS WithholdingTaxRate', N''), N'@WithholdingTaxRate', N'') LIKE N'%WithholdingTaxRate%'
+UNION ALL
+SELECT OBJECT_NAME(m.object_id), N'WN_Bookings.WHTRate'
+FROM sys.sql_modules m
+WHERE OBJECT_NAME(m.object_id) NOT IN (SELECT Name FROM @Patched)
+  AND m.definition LIKE N'%WN_Bookings%'
+  AND REPLACE(REPLACE(REPLACE(m.definition, N'WHTRate_ID', N''), N'@WHTRate', N''), N'AS WHTRate', N'') LIKE N'%WHTRate%';
+
+IF EXISTS (SELECT 1 FROM @Others) AND @Force = 0
+BEGIN
+    SELECT ModuleName, UsesColumn, 'still uses the old column name: NOTHING was changed. Send this list.' AS Result FROM @Others ORDER BY ModuleName;
+    RETURN;
+END
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 2. Rename
+    IF COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate_ID') IS NULL
+        EXEC sys.sp_rename N'dbo.WN_Bookings.WHTRate', N'WHTRate_ID', N'COLUMN';
+    IF COL_LENGTH(N'dbo.WN_Quotations', N'WithholdingTaxRate') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WHTRate_ID') IS NULL
+        EXEC sys.sp_rename N'dbo.WN_Quotations.WithholdingTaxRate', N'WHTRate_ID', N'COLUMN';
+
+    -- 3. Patch the readers in place
+    DECLARE @Patch TABLE (Seq INT IDENTITY, ProcName SYSNAME, OldText NVARCHAR(400), NewText NVARCHAR(400));
+    INSERT INTO @Patch (ProcName, OldText, NewText) VALUES
+      (N'WN_Invoices_Insert',            N'dbo.WN_WHTaxRate_Resolve(WHTRate)',              N'dbo.WN_WHTaxRate_Resolve(WHTRate_ID)'),
+      (N'WN_GetBookingInvoiceDetails',   N'dbo.WN_WHTaxRate_Resolve(q.WithholdingTaxRate)', N'dbo.WN_WHTaxRate_Resolve(q.WHTRate_ID)'),
+      (N'WN_GetStatementInvoicePdfData', N'dbo.WN_WHTaxRate_Resolve(q.WithholdingTaxRate)', N'dbo.WN_WHTaxRate_Resolve(q.WHTRate_ID)');
+
+    DECLARE @i INT = 1, @n INT = (SELECT COUNT(*) FROM @Patch), @proc SYSNAME, @old NVARCHAR(400), @new NVARCHAR(400),
+            @def NVARCHAR(MAX), @msg NVARCHAR(400), @k INT, @p INT, @ws INT, @w NVARCHAR(40), @c NVARCHAR(40), @r INT;
+    DECLARE @Result TABLE (ProcName SYSNAME, Result NVARCHAR(100));
+    WHILE @i <= @n
+    BEGIN
+        SELECT @proc = ProcName, @old = OldText, @new = NewText FROM @Patch WHERE Seq = @i;
+        SET @def = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @proc));
+        IF @def IS NULL
+        BEGIN
+            SET @msg = N'dbo.' + @proc + N' not found. Nothing changed.';
+            THROW 50001, @msg, 1;
+        END
+        IF CHARINDEX(@new, @def) > 0
+            INSERT INTO @Result VALUES (@proc, N'already uses WHTRate_ID');
+        ELSE
+        BEGIN
+            IF (DATALENGTH(@def) - DATALENGTH(REPLACE(@def, @old, N''))) / DATALENGTH(@old) <> 1
+            BEGIN
+                SET @msg = N'Expected expression not found exactly once in dbo.' + @proc + N' (run WHT_13 first). Nothing changed.';
+                THROW 50002, @msg, 1;
+            END
+            SET @def = REPLACE(@def, @old, @new);
+            SELECT @k = 0, @p = 0;
+            WHILE 1 = 1
+            BEGIN
+                SET @k = CHARINDEX(N'PROC', @def, @k + 1);
+                IF @k = 0 BREAK;
+                SET @ws = CASE WHEN @k > 40 THEN @k - 40 ELSE 1 END;
+                SET @w  = SUBSTRING(@def, @ws, @k - @ws);
+                SET @c  = UPPER(REPLACE(REPLACE(REPLACE(REPLACE(@w, N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+                IF RIGHT(@c, 6) = N'CREATE' OR RIGHT(@c, 13) = N'CREATEORALTER'
+                BEGIN
+                    SET @r = CHARINDEX(N'ETAERC', REVERSE(UPPER(@w)));
+                    SET @p = @ws + DATALENGTH(@w) / 2 - @r - 5;
+                    BREAK;
+                END
+            END
+            IF @p <= 0 OR @k = 0
+            BEGIN
+                SET @msg = N'CREATE PROCEDURE header not found in dbo.' + @proc + N'. Nothing changed.';
+                THROW 50003, @msg, 1;
+            END
+            SET @def = STUFF(@def, @p, @k - @p, N'ALTER ');
+            EXEC sys.sp_executesql @def;
+            INSERT INTO @Result VALUES (@proc, N'patched');
+        END
+        SET @i = @i + 1;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT ProcName, Result FROM @Result;
+    SELECT CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate_ID') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate') IS NULL THEN 'yes' ELSE 'NO' END AS Bookings_WHTRate_ID,
+           CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'WHTRate_ID') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WithholdingTaxRate') IS NULL THEN 'yes' ELSE 'NO' END AS Quotations_WHTRate_ID;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
