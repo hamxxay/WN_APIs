@@ -25,7 +25,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/dashboard/overview")]
         public async Task<IActionResult> Overview([FromQuery] int? locationId, [FromQuery] string? period)
         {
-            var scope = User.IsSuperAdmin() ? (locationId > 0 ? locationId : null) : User.GetLocationId();
+            var scope = User.IsLocationBoundRole() ? User.GetLocationId() : (locationId > 0 ? locationId : null);
             return Ok(await _dashboard.GetOverviewAsync(scope, period));
         }
 
@@ -54,7 +54,7 @@ namespace WorkNest.API.Controllers
             if (!isAdmin && !isSalesExecutive)
                 return Ok(new Dictionary<string, int>()); // e.g. receptionist: no admin sidebar routes
 
-            var scope = User.IsSuperAdmin() ? null : User.GetLocationId();
+            var scope = User.IsLocationBoundRole() ? User.GetLocationId() : null;
             var badges = await _dashboard.GetNavBadgesAsync(scope, includeMachines: isAdmin, User.GetEmail());
             if (!isAdmin)
                 badges = badges.Where(kv => SalesExecutiveRoutes.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -87,7 +87,7 @@ namespace WorkNest.API.Controllers
                 ? r.Where(x => allowed.Contains(x, StringComparer.OrdinalIgnoreCase)).ToList()
                 : allowed.ToList();
 
-            var scope = User.IsSuperAdmin() ? null : User.GetLocationId();
+            var scope = User.IsLocationBoundRole() ? User.GetLocationId() : null;
             if (!await _dashboard.MarkNavBadgesReadAsync(scope, email, routes))
                 return StatusCode(503, new { isSuccessful = false, message = "Mark as read is not set up yet: the WN_NAV_BadgeReads table is missing." });
             return Ok(new { isSuccessful = true });

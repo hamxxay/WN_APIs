@@ -34,8 +34,9 @@ namespace WorkNest.API.Controllers
         }
 
         private string GetCurrentUserRole() => User.GetRole();
-        private int? GetCurrentLocationId() => User.GetLocationId();
-        private bool IsSuperAdmin() => User.IsSuperAdmin();
+        // Only Sales Executives are limited to their location; Admins and Super Admins see every location.
+        private int? GetCurrentLocationId() => User.IsLocationBoundRole() ? User.GetLocationId() : null;
+        private bool SeesAllLocations() => !User.IsLocationBoundRole();
         private bool CanVerify() => Roles.IsAdminRole(GetCurrentUserRole());
 
         /// <summary>
@@ -47,7 +48,7 @@ namespace WorkNest.API.Controllers
             [FromQuery] int limit = 20,
             [FromQuery] string? search = null)
         {
-            var (items, total) = await _kycService.GetCustomerKycListAsync(page, limit, search, GetCurrentLocationId(), IsSuperAdmin());
+            var (items, total) = await _kycService.GetCustomerKycListAsync(page, limit, search, GetCurrentLocationId(), SeesAllLocations());
             return Ok(new { items, total, page, limit });
         }
 
@@ -57,7 +58,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> CustomerKyc(string id)
         {
-            var model = await _kycService.GetCustomerKycPortalAsync(id, GetCurrentLocationId(), IsSuperAdmin(), CanVerify());
+            var model = await _kycService.GetCustomerKycPortalAsync(id, GetCurrentLocationId(), SeesAllLocations(), CanVerify());
             if (model == null)
             {
                 return NotFound(new { message = "Customer not found or access is unauthorized for your location." });
@@ -86,7 +87,7 @@ namespace WorkNest.API.Controllers
                 request.File,
                 GetCurrentUserId(),
                 GetCurrentLocationId(),
-                IsSuperAdmin()
+                SeesAllLocations()
             );
 
             if (!success)
@@ -111,7 +112,7 @@ namespace WorkNest.API.Controllers
                 GetCurrentUserId(),
                 GetCurrentUserRole(),
                 GetCurrentLocationId(),
-                IsSuperAdmin()
+                SeesAllLocations()
             );
 
             if (!success)
@@ -141,7 +142,7 @@ namespace WorkNest.API.Controllers
                 GetCurrentUserId(),
                 GetCurrentUserRole(),
                 GetCurrentLocationId(),
-                IsSuperAdmin()
+                SeesAllLocations()
             );
 
             if (!success)
@@ -162,7 +163,7 @@ namespace WorkNest.API.Controllers
             var (stream, contentType, fileName, error) = await _kycService.DownloadDocumentAsync(
                 id,
                 GetCurrentLocationId(),
-                IsSuperAdmin() // anonymous visitors used to be treated as super admin here
+                SeesAllLocations() // anonymous visitors used to be treated as super admin here
             );
 
             if (stream == null)
@@ -187,7 +188,7 @@ namespace WorkNest.API.Controllers
                 documentTypeId,
                 slotNo,
                 GetCurrentLocationId(),
-                IsSuperAdmin()
+                SeesAllLocations()
             );
 
             return Ok(history);
