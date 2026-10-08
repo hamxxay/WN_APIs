@@ -1,0 +1,125 @@
+-- ============================================================================================
+-- TABLE CHANGE: rename the WHT rate Id columns to WHTaxId
+--   dbo.WN_Bookings.WHTRate_ID      -> WHTaxId
+--   dbo.WN_Quotations.WHTRate_ID    -> WHTaxId
+-- (WN_Invoices.WHTRate is NOT renamed: an invoice keeps the percentage snapshot it was issued with.)
+--
+-- 1. Drops CK_WN_Bookings_Wht / CK_WN_Quotations_Wht check constraints.
+-- 2. Renames the two columns to WHTaxId.
+-- 3. Re-adds the check constraints on WHTaxId.
+-- 4. Patches the three procedures that read them:
+--      WN_Invoices_Insert             dbo.WN_WHTaxRate_Resolve(WHTRate_ID)   -> (WHTaxId)
+--      WN_GetBookingInvoiceDetails    dbo.WN_WHTaxRate_Resolve(q.WHTRate_ID) -> (q.WHTaxId)
+--      WN_GetStatementInvoicePdfData  dbo.WN_WHTaxRate_Resolve(q.WHTRate_ID) -> (q.WHTaxId)
+-- Run against SAC400 as ONE statement in DBeaver (select all, execute). One transaction. Safe to run again.
+-- ============================================================================================
+
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 1. Drop check constraints
+    IF OBJECT_ID(N'dbo.CK_WN_Bookings_Wht', N'C') IS NOT NULL
+        EXEC(N'ALTER TABLE dbo.WN_Bookings DROP CONSTRAINT CK_WN_Bookings_Wht;');
+
+    IF OBJECT_ID(N'dbo.CK_WN_Quotations_Wht', N'C') IS NOT NULL
+        EXEC(N'ALTER TABLE dbo.WN_Quotations DROP CONSTRAINT CK_WN_Quotations_Wht;');
+
+    -- 2. Rename column WHTRate_ID -> WHTaxId on dbo.WN_Bookings (or WHTRate if from old schema)
+    IF COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate_ID') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTaxId') IS NULL
+    BEGIN
+        EXEC sys.sp_rename N'dbo.WN_Bookings.WHTRate_ID', N'WHTaxId', N'COLUMN';
+    END
+    ELSE IF COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTaxId') IS NULL
+    BEGIN
+        EXEC sys.sp_rename N'dbo.WN_Bookings.WHTRate', N'WHTaxId', N'COLUMN';
+    END
+
+    -- 3. Rename column WHTRate_ID -> WHTaxId on dbo.WN_Quotations (or WithholdingTaxRate if from old schema)
+    IF COL_LENGTH(N'dbo.WN_Quotations', N'WHTRate_ID') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WHTaxId') IS NULL
+    BEGIN
+        EXEC sys.sp_rename N'dbo.WN_Quotations.WHTRate_ID', N'WHTaxId', N'COLUMN';
+    END
+    ELSE IF COL_LENGTH(N'dbo.WN_Quotations', N'WithholdingTaxRate') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WHTaxId') IS NULL
+    BEGIN
+        EXEC sys.sp_rename N'dbo.WN_Quotations.WithholdingTaxRate', N'WHTaxId', N'COLUMN';
+    END
+
+    -- 4. Re-add check constraints on WHTaxId
+    IF OBJECT_ID(N'dbo.CK_WN_Bookings_Wht', N'C') IS NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTaxId') IS NOT NULL
+        EXEC(N'ALTER TABLE dbo.WN_Bookings WITH CHECK ADD CONSTRAINT CK_WN_Bookings_Wht
+              CHECK (SendWhtInvoice = 0 OR (WHTaxId > 0 AND WHTaxId < 100));');
+
+    IF OBJECT_ID(N'dbo.CK_WN_Quotations_Wht', N'C') IS NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WHTaxId') IS NOT NULL
+        EXEC(N'ALTER TABLE dbo.WN_Quotations WITH CHECK ADD CONSTRAINT CK_WN_Quotations_Wht
+              CHECK (SendWhtInvoice = 0 OR (WHTaxId > 0 AND WHTaxId < 100));');
+
+    -- 5. Patch the 3 stored procedures that read the column
+    DECLARE @Patch TABLE (Seq INT IDENTITY, ProcName SYSNAME, OldText NVARCHAR(400), NewText NVARCHAR(400));
+    INSERT INTO @Patch (ProcName, OldText, NewText) VALUES
+      (N'WN_Invoices_Insert',            N'dbo.WN_WHTaxRate_Resolve(WHTRate_ID)',   N'dbo.WN_WHTaxRate_Resolve(WHTaxId)'),
+      (N'WN_GetBookingInvoiceDetails',   N'dbo.WN_WHTaxRate_Resolve(q.WHTRate_ID)', N'dbo.WN_WHTaxRate_Resolve(q.WHTaxId)'),
+      (N'WN_GetStatementInvoicePdfData', N'dbo.WN_WHTaxRate_Resolve(q.WHTRate_ID)', N'dbo.WN_WHTaxRate_Resolve(q.WHTaxId)');
+
+    DECLARE @i INT = 1, @n INT = (SELECT COUNT(*) FROM @Patch), @proc SYSNAME, @old NVARCHAR(400), @new NVARCHAR(400),
+            @def NVARCHAR(MAX), @msg NVARCHAR(400), @k INT, @p INT, @ws INT, @w NVARCHAR(40), @c NVARCHAR(40), @r INT;
+    DECLARE @Result TABLE (ProcName SYSNAME, Result NVARCHAR(100));
+    WHILE @i <= @n
+    BEGIN
+        SELECT @proc = ProcName, @old = OldText, @new = NewText FROM @Patch WHERE Seq = @i;
+        SET @def = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @proc));
+        IF @def IS NULL
+        BEGIN
+            SET @msg = N'dbo.' + @proc + N' not found. Nothing changed.';
+            THROW 50001, @msg, 1;
+        END
+        IF CHARINDEX(@new, @def) > 0
+            INSERT INTO @Result VALUES (@proc, N'already uses WHTaxId');
+        ELSE
+        BEGIN
+            IF CHARINDEX(@old, @def) = 0
+            BEGIN
+                SET @msg = N'Old text ' + @old + N' not found in dbo.' + @proc;
+                THROW 50002, @msg, 1;
+            END
+            SET @def = REPLACE(@def, @old, @new);
+            SELECT @k = 0, @p = 0;
+            WHILE 1 = 1
+            BEGIN
+                SET @k = CHARINDEX(N'PROC', @def, @k + 1);
+                IF @k = 0 BREAK;
+                SET @ws = CASE WHEN @k > 40 THEN @k - 40 ELSE 1 END;
+                SET @w  = SUBSTRING(@def, @ws, @k - @ws);
+                SET @c  = UPPER(REPLACE(REPLACE(REPLACE(REPLACE(@w, N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+                IF RIGHT(@c, 6) = N'CREATE' OR RIGHT(@c, 13) = N'CREATEORALTER'
+                BEGIN
+                    SET @r = CHARINDEX(N'ETAERC', REVERSE(UPPER(@w)));
+                    SET @p = @ws + DATALENGTH(@w) / 2 - @r - 5;
+                    BREAK;
+                END
+            END
+            IF @p <= 0 OR @k = 0
+            BEGIN
+                SET @msg = N'CREATE PROCEDURE header not found in dbo.' + @proc;
+                THROW 50003, @msg, 1;
+            END
+            SET @def = STUFF(@def, @p, @k - @p, N'ALTER ');
+            EXEC sys.sp_executesql @def;
+            INSERT INTO @Result VALUES (@proc, N'patched');
+        END
+        SET @i = @i + 1;
+    END
+
+    COMMIT TRANSACTION;
+
+    SELECT ProcName, Result FROM @Result;
+    SELECT CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'WHTaxId') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Bookings', N'WHTRate_ID') IS NULL THEN 'yes' ELSE 'NO' END AS Bookings_WHTaxId,
+           CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'WHTaxId') IS NOT NULL AND COL_LENGTH(N'dbo.WN_Quotations', N'WHTRate_ID') IS NULL THEN 'yes' ELSE 'NO' END AS Quotations_WHTaxId,
+           (SELECT definition FROM sys.check_constraints WHERE name = N'CK_WN_Bookings_Wht') AS Bookings_Check,
+           (SELECT definition FROM sys.check_constraints WHERE name = N'CK_WN_Quotations_Wht') AS Quotations_Check;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    DECLARE @errMsg NVARCHAR(4000) = ERROR_MESSAGE(), @errLine INT = ERROR_LINE();
+    RAISERROR('Error at line %d: %s', 16, 1, @errLine, @errMsg);
+END CATCH;

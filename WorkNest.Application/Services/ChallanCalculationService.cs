@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using WorkNest.Application.DTOs.Booking;
@@ -61,6 +61,8 @@ namespace WorkNest.Application.Services
         public List<QuotationDetailDto>? QuotationDetails { get; set; }
         public bool IsQuotation { get; set; } = false;
         public bool DisableProration { get; set; } = false;
+        public bool SendWhtInvoice { get; set; } = false;
+        public decimal WhtRatePercent { get; set; } = 0m;
     }
 
     public class ChallanCalculationResult
@@ -84,6 +86,9 @@ namespace WorkNest.Application.Services
         public decimal TaxAmountOnContract { get; set; }
         public decimal DiscountAmount { get; set; }
         public decimal TotalPayable { get; set; }
+        public decimal WhtAmount { get; set; }
+        public bool IsWhtInvoice { get; set; }
+        public decimal WhtRatePercent { get; set; }
         public bool IsProrated { get; set; }
         public decimal ProratedCurrentMonthAmount { get; set; }
         public List<ChallanFieldDto> Fields { get; set; } = new();
@@ -122,15 +127,37 @@ namespace WorkNest.Application.Services
 
             var engineResult = InvoiceCalculationEngine.CalculateInvoice(req);
 
+            decimal firstCycleRent = engineResult.Rent;
+            decimal monthlyRent = engineResult.MonthlyRent;
+            decimal totalContractRent = engineResult.MonthlyRent * engineResult.ContractPeriodMonths;
+            decimal discountAmount = engineResult.Discount;
+            decimal whtAmount = 0m;
+            bool isWht = input.SendWhtInvoice && input.WhtRatePercent > 0m && input.WhtRatePercent < 100m;
+
+            if (isWht)
+            {
+                decimal divisor = 1m - (input.WhtRatePercent / 100.0m);
+                firstCycleRent = Math.Round(engineResult.Rent / divisor, 2, MidpointRounding.AwayFromZero);
+                monthlyRent = Math.Round(engineResult.MonthlyRent / divisor, 2, MidpointRounding.AwayFromZero);
+                totalContractRent = Math.Round((engineResult.MonthlyRent * engineResult.ContractPeriodMonths) / divisor, 2, MidpointRounding.AwayFromZero);
+                if (engineResult.Discount > 0)
+                {
+                    discountAmount = Math.Round(engineResult.Discount / divisor, 2, MidpointRounding.AwayFromZero);
+                }
+                whtAmount = Math.Round((firstCycleRent - discountAmount) - (engineResult.Rent - engineResult.Discount), 2, MidpointRounding.AwayFromZero);
+            }
+
+            decimal totalPayable = Math.Round(firstCycleRent - discountAmount + engineResult.Tax + engineResult.DepositAfterDiscount, 2, MidpointRounding.AwayFromZero);
+
             var res = new ChallanCalculationResult
             {
                 SpaceType = engineResult.SpaceType,
                 BillingType = engineResult.BillingType,
                 BillingBasis = engineResult.BillingBasis,
-                BaseRent = engineResult.Rent,
-                FirstCycleRent = engineResult.Rent,
-                TotalContractRent = engineResult.MonthlyRent * engineResult.ContractPeriodMonths,
-                MonthlyRent = engineResult.MonthlyRent,
+                BaseRent = firstCycleRent,
+                FirstCycleRent = firstCycleRent,
+                TotalContractRent = totalContractRent,
+                MonthlyRent = monthlyRent,
                 ContractPeriodMonths = engineResult.ContractPeriodMonths,
                 BillingPeriodMonths = engineResult.BillingPeriodMonths,
                 SecurityDeposit = engineResult.DepositAfterDiscount,
@@ -141,8 +168,11 @@ namespace WorkNest.Application.Services
                 TaxAmount = engineResult.Tax,
                 TaxAmountOnAdvanceRent = engineResult.Tax,
                 TaxAmountOnContract = Math.Round(req.PerSeatSupportRate * (req.Capacity > 0 ? req.Capacity : 1) * engineResult.ContractPeriodMonths * (req.AppliedTaxPercentage / 100.0m), 2, MidpointRounding.AwayFromZero),
-                DiscountAmount = engineResult.Discount,
-                TotalPayable = engineResult.GrandTotal,
+                DiscountAmount = discountAmount,
+                TotalPayable = totalPayable,
+                WhtAmount = whtAmount,
+                IsWhtInvoice = isWht,
+                WhtRatePercent = isWht ? input.WhtRatePercent : 0m,
                 IsProrated = engineResult.IsProrated,
                 ProratedCurrentMonthAmount = engineResult.ProratedCurrentMonthAmount
             };
@@ -262,6 +292,13 @@ namespace WorkNest.Application.Services
                 fields.Add(new ChallanFieldDto { Key = "totalAmount", Label = "TOTAL INITIAL AMOUNT PAYABLE", Value = FormatCurrency(res.TotalPayable) });
             }
 
+            if (res.IsWhtInvoice && res.WhtAmount > 0)
+            {
+                fields.Add(new ChallanFieldDto { Key = "whtRate", Label = "Withholding Tax Rate", Value = $"{res.WhtRatePercent:G29}%" });
+                fields.Add(new ChallanFieldDto { Key = "whtAmount", Label = $"Withholding Tax ({res.WhtRatePercent:G29}%)", Value = FormatCurrency(res.WhtAmount) });
+                fields.Add(new ChallanFieldDto { Key = "netPayable", Label = "Net Payable (After Tax Withheld)", Value = FormatCurrency(res.TotalPayable - res.WhtAmount) });
+            }
+
             res.Fields = fields;
         }
 
@@ -313,6 +350,8 @@ namespace WorkNest.Application.Services
                 qContractMonths = q.BillingPeriodMonths;
             }
 
+            decimal whtRate = q.WhtRatePercent > 0 ? q.WhtRatePercent : (q.WithholdingTaxRate > 0 && q.WithholdingTaxRate < 100 ? q.WithholdingTaxRate : 0m);
+
             var input = new ChallanCalculationInput
             {
                 SpaceTypeName = q.SpaceTypeName,
@@ -339,17 +378,24 @@ namespace WorkNest.Application.Services
                 ExplicitBillingType = q.BillingType,
                 QuotationDetails = q.Details,
                 IsQuotation = true,
-                DisableProration = true
+                DisableProration = true,
+                SendWhtInvoice = q.SendWhtInvoice,
+                WhtRatePercent = whtRate
             };
 
             var calc = Calculate(input);
 
             q.SpaceType = calc.SpaceType;
             q.BillingType = calc.BillingType;
-            q.SubtotalAmount = calc.FirstCycleRent;
+            q.SubtotalAmount = calc.TotalContractRent > 0 ? calc.TotalContractRent : calc.FirstCycleRent;
             q.TotalContractAmount = calc.TotalContractRent;
             q.MonthlyRent = calc.MonthlyRent;
             q.CurrentCycleAmount = calc.FirstCycleRent;
+            if (calc.IsWhtInvoice && q.Capacity.HasValue && q.Capacity.Value > 0)
+            {
+                q.MonthlyBasePrice = calc.MonthlyRent;
+                q.PerSeatBasePrice = Math.Round(calc.MonthlyRent / q.Capacity.Value, 2, MidpointRounding.AwayFromZero);
+            }
             q.SecurityDeposit = calc.SecurityDeposit;
             q.PerSeatSupportRate = calc.PerSeatSupportRate;
             q.AppliedChargePercentage = calc.AppliedChargePercentage;
@@ -359,9 +405,41 @@ namespace WorkNest.Application.Services
             q.TaxAmountOnAdvanceRent = calc.TaxAmountOnAdvanceRent;
             q.TaxAmountOnContract = calc.TaxAmountOnContract;
             q.DiscountAmount = calc.DiscountAmount;
+            q.WhtAmount = calc.WhtAmount;
             q.TotalPayable = calc.TotalPayable;
             q.TotalAmount = calc.TotalPayable;
             q.Fields = calc.Fields;
+
+            // Sync Details lines for Room Rent if WHT gross-up is applied
+            if (calc.IsWhtInvoice && q.Details != null && q.Details.Count > 0)
+            {
+                var rentLine = q.Details.FirstOrDefault(d => string.Equals(d.FeeType, "RoomRent", StringComparison.OrdinalIgnoreCase));
+                if (rentLine != null)
+                {
+                    if (calc.SpaceType == "MeetingRoom")
+                    {
+                        decimal hours = rentLine.Quantity > 0 ? rentLine.Quantity : 1m;
+                        rentLine.UnitPrice = Math.Round(calc.FirstCycleRent / hours, 2, MidpointRounding.AwayFromZero);
+                        rentLine.Amount = calc.FirstCycleRent;
+                    }
+                    else
+                    {
+                        rentLine.UnitPrice = calc.MonthlyRent;
+                        rentLine.Amount = Math.Round(calc.MonthlyRent * rentLine.Quantity, 2, MidpointRounding.AwayFromZero);
+                    }
+                }
+            }
+
+            if (q.Contract != null)
+            {
+                q.Contract.MonthlyRent = calc.MonthlyRent;
+                q.Contract.CurrentCycleAmount = calc.FirstCycleRent;
+                q.Contract.TotalContractAmount = calc.TotalContractRent;
+                q.Contract.BalanceLeft = Math.Max(0, calc.TotalContractRent - calc.FirstCycleRent);
+                q.Contract.TaxAmount = calc.TaxAmountOnAdvanceRent;
+                q.Contract.TaxAmountOnAdvanceRent = calc.TaxAmountOnAdvanceRent;
+                q.Contract.TaxAmountOnContract = calc.TaxAmountOnContract;
+            }
         }
 
         public static void ApplyToChallan(ChallanResponseDto c)

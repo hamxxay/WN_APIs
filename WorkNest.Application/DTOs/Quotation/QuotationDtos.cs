@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using WorkNest.Application.DTOs.Booking;
 
@@ -93,6 +93,7 @@ namespace WorkNest.Application.DTOs.Quotation
         /// <summary>WithholdingTaxRate as a percentage (resolved through WN_WHTaxRate), for display and the PDF.</summary>
         public decimal WhtRatePercent { get; set; } = 15.00m;
         public bool SendWhtInvoice { get; set; }
+        public decimal WhtAmount { get; set; }
         public decimal TotalPayable { get; set; }
         public string? Remarks { get; set; }
         public string? Status { get; set; }

@@ -12,7 +12,7 @@ IF OBJECT_ID('dbo.CK_WN_Quotations_Wht', 'C') IS NULL
 -- 2. Bookings: WHT flag + rate snapshot. WN_Bookings.WHTRate is written by the API today; added only if missing.
 IF COL_LENGTH('dbo.WN_Bookings', 'SendWhtInvoice') IS NULL
     EXEC(N'ALTER TABLE dbo.WN_Bookings ADD SendWhtInvoice BIT NOT NULL CONSTRAINT DF_WN_Bookings_SendWhtInvoice DEFAULT (0);');
-IF COL_LENGTH('dbo.WN_Bookings', 'WHTRate') IS NULL AND COL_LENGTH('dbo.WN_Bookings', 'WHTRate_ID') IS NULL   -- renamed to WHTRate_ID by WHT_15
+IF COL_LENGTH('dbo.WN_Bookings', 'WHTRate') IS NULL AND COL_LENGTH('dbo.WN_Bookings', 'WHTRate_ID') IS NULL AND COL_LENGTH('dbo.WN_Bookings', 'WHTaxId') IS NULL   -- renamed to WHTaxId
     EXEC(N'ALTER TABLE dbo.WN_Bookings ADD WHTRate DECIMAL(5,2) NULL;');
 IF OBJECT_ID('dbo.CK_WN_Bookings_Wht', 'C') IS NULL
     EXEC(N'ALTER TABLE dbo.WN_Bookings WITH CHECK ADD CONSTRAINT CK_WN_Bookings_Wht

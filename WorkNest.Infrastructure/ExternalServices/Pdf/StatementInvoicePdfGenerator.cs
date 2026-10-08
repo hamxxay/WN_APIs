@@ -165,7 +165,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         //     {
         //         r.RelativeItem().Column(c =>
         //         {
-        //             c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#888888");
+        //             c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#000000");
         //             c.Item().Text(data.AccountName).Bold().FontSize(10).FontColor("#1a1a2e");
         //             if (!string.IsNullOrWhiteSpace(data.AttnName))
         //                 c.Item().Text($"Attn: {data.AttnName}").FontColor("#444444");
@@ -475,7 +475,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         //     {
         //         r.RelativeItem().Column(c =>
         //         {
-        //             c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#888888");
+        //             c.Item().Text("ACCOUNT DETAILS").FontSize(8).Bold().FontColor("#000000");
         //             c.Item().Text(data.AccountName).Bold().FontSize(10).FontColor("#1a1a2e");
         //             if (!string.IsNullOrWhiteSpace(data.AttnName))
         //                 c.Item().Text($"Attn: {data.AttnName}").FontColor("#444444");

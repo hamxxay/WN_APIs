@@ -1,0 +1,441 @@
+-- ============================================================================================
+-- WHT_17: Quotation WHT gross-up & WHTaxId support
+-- 1. Patch dbo.WN_Quotations_GetById to select q.WHTaxId and q.SendWhtInvoice
+-- 2. Patch dbo.WN_Quotations_GetList to select q.WHTaxId and q.SendWhtInvoice
+-- 3. Patch dbo.WN_Quotations_ConvertToBooking to copy SendWhtInvoice and WHTaxId to WN_Bookings
+-- 4. Fix Quotation 228 (gross up to match 16% WHT) and Booking 547 (assign WHTaxId = 2.00)
+-- ============================================================================================
+
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 1. Patch dbo.WN_Quotations_GetById
+    EXEC('
+    CREATE OR ALTER PROCEDURE [dbo].[WN_Quotations_GetById]
+        @Id INT
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        SELECT 
+            q.Id,
+            q.Guid,
+            q.QuotationNumber,
+            q.QuotationDate,
+            q.ValidUntil,
+            q.CustomerId,
+            RTRIM(LTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))) AS CustomerName,
+            c.Company AS CustomerCompany,
+            c.Email AS CustomerEmail,
+            c.Address AS CustomerAddress,
+            q.SpaceId,
+            s.Name AS SpaceName,
+            s.Code AS SpaceCode,
+            st.Name AS SpaceTypeName,
+            loc.Name AS LocationName,
+            loc.Address AS LocationAddress,
+            ISNULL(NULLIF(city.Description, ''''), ISNULL(NULLIF(loc.City, ''''), ''Islamabad'')) AS CityName,
+            q.StartDateTime,
+            q.EndDateTime,
+            q.SubtotalAmount,
+            q.DiscountPercentage,
+            q.DiscountAmount,
+            q.DiscountType,
+            q.SecurityDeposit,
+            q.TotalAmount,
+            q.Remarks,
+            q.Status,
+            q.Version,
+            q.IsActive,
+            q.FloorId,
+            q.PerSeatBasePrice,
+            q.Capacity,
+            q.MonthlyBasePrice,
+            q.MaxDiscountPercent,
+            q.SecurityDepositMonths,
+            q.OfferingType,
+            q.WHTaxId,
+            ISNULL(q.SendWhtInvoice, 0) AS SendWhtInvoice,
+            ot.Id AS OfferingTypeId,
+            ISNULL(ot.Description, q.OfferingType) AS OfferingTypeDescription,
+            ISNULL(ot.DiscountCap, 10.00) AS OfferingTypeDiscountCap,
+            ISNULL(q.BillingPeriodMonths, 3) AS BillingPeriodMonths,
+            CASE 
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 1 THEN ''1 Month (Per Month)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 2 THEN ''2 Months''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 3 THEN ''3 Months (Quarterly)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 6 THEN ''6 Months (Semi-Annual)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 12 THEN ''12 Months (Annual)''
+              ELSE CAST(ISNULL(q.BillingPeriodMonths, 3) AS NVARCHAR(10)) + '' Month(s)''
+            END AS BillingPeriodLabel,
+            CASE 
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 1 THEN ''1 Month (Per Month)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 2 THEN ''2 Months''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 3 THEN ''3 Months (Quarterly)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 6 THEN ''6 Months (Semi-Annual)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 12 THEN ''12 Months (Annual)''
+              ELSE CAST(ISNULL(q.BillingPeriodMonths, 3) AS NVARCHAR(10)) + '' Month(s)''
+            END AS BillingPeriod,
+            CAST(
+              q.SubtotalAmount / NULLIF(
+                CASE 
+                  WHEN q.StartDateTime IS NOT NULL AND q.EndDateTime IS NOT NULL AND DATEDIFF(month, q.StartDateTime, q.EndDateTime) > 0 
+                  THEN DATEDIFF(month, q.StartDateTime, q.EndDateTime)
+                  ELSE 1 
+                END, 0) AS DECIMAL(18,2)
+            ) AS MonthlyRent,
+            CAST(
+              (q.SubtotalAmount / NULLIF(
+                CASE 
+                  WHEN q.StartDateTime IS NOT NULL AND q.EndDateTime IS NOT NULL AND DATEDIFF(month, q.StartDateTime, q.EndDateTime) > 0 
+                  THEN DATEDIFF(month, q.StartDateTime, q.EndDateTime)
+                  ELSE 1 
+                END, 0)) * ISNULL(q.BillingPeriodMonths, 3) * (1.0 - (ISNULL(q.DiscountPercentage, 0.0) / 100.0)) AS DECIMAL(18,2)
+            ) AS CurrentCycleAmount,
+            CAST(q.TotalAmount AS DECIMAL(18,2)) AS TotalContractAmount
+        FROM dbo.WN_Quotations q
+        JOIN dbo.WN_Customers c ON c.Id = q.CustomerId
+        JOIN dbo.WN_Spaces s ON s.Id = q.SpaceId
+        LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeId
+        LEFT JOIN dbo.WN_Locations loc ON loc.Id = s.LocationId
+        LEFT JOIN dbo.City city ON city.Id = loc.CityId
+        LEFT JOIN dbo.WN_OfferingType ot ON (TRY_CAST(q.OfferingType AS INT) = ot.Id OR ot.Description = q.OfferingType)
+        WHERE q.Id = @Id;
+    END;
+    ');
+
+    -- 2. Patch dbo.WN_Quotations_GetList
+    EXEC('
+    CREATE OR ALTER PROCEDURE [dbo].[WN_Quotations_GetList]
+        @Page   INT = 1,
+        @Limit  INT = 10,
+        @Search NVARCHAR(100) = NULL,
+        @LocationId INT = NULL
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        DECLARE @Offset INT = (@Page - 1) * @Limit;
+
+        DECLARE @Total INT;
+        SELECT @Total = COUNT(*)
+        FROM dbo.WN_Quotations q
+        JOIN dbo.WN_Customers c ON c.Id = q.CustomerId
+        JOIN dbo.WN_Spaces s ON s.Id = q.SpaceId
+        WHERE (@Search IS NULL OR q.QuotationNumber LIKE ''%'' + @Search + ''%'' OR c.FirstName LIKE ''%'' + @Search + ''%'' OR c.LastName LIKE ''%'' + @Search + ''%'' OR c.Company LIKE ''%'' + @Search + ''%'')
+          AND (@LocationId IS NULL OR s.LocationId = @LocationId);
+
+        SELECT 
+            q.Id,
+            q.Guid,
+            q.QuotationNumber,
+            q.QuotationDate,
+            q.ValidUntil,
+            q.CustomerId,
+            RTRIM(LTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))) AS CustomerName,
+            c.Company AS CustomerCompany,
+            c.Email AS CustomerEmail,
+            c.Address AS CustomerAddress,
+            q.SpaceId,
+            s.Name AS SpaceName,
+            s.Code AS SpaceCode,
+            st.Name AS SpaceTypeName,
+            loc.Name AS LocationName,
+            loc.Address AS LocationAddress,
+            ISNULL(NULLIF(city.Description, ''''), ISNULL(NULLIF(loc.City, ''''), ''Islamabad'')) AS CityName,
+            q.StartDateTime,
+            q.EndDateTime,
+            q.SubtotalAmount,
+            q.DiscountPercentage,
+            q.DiscountAmount,
+            q.DiscountType,
+            q.SecurityDeposit,
+            q.TotalAmount,
+            q.Remarks,
+            q.Status,
+            q.Version,
+            q.IsActive,
+            q.FloorId,
+            q.PerSeatBasePrice,
+            q.Capacity,
+            q.MonthlyBasePrice,
+            q.MaxDiscountPercent,
+            q.SecurityDepositMonths,
+            q.OfferingType,
+            q.WHTaxId,
+            ISNULL(q.SendWhtInvoice, 0) AS SendWhtInvoice,
+            ot.Id AS OfferingTypeId,
+            ISNULL(ot.Description, q.OfferingType) AS OfferingTypeDescription,
+            ISNULL(ot.DiscountCap, 10.00) AS OfferingTypeDiscountCap,
+            ISNULL(q.BillingPeriodMonths, 3) AS BillingPeriodMonths,
+            CASE 
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 1 THEN ''1 Month (Per Month)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 2 THEN ''2 Months''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 3 THEN ''3 Months (Quarterly)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 6 THEN ''6 Months (Semi-Annual)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 12 THEN ''12 Months (Annual)''
+              ELSE CAST(ISNULL(q.BillingPeriodMonths, 3) AS NVARCHAR(10)) + '' Month(s)''
+            END AS BillingPeriodLabel,
+            CASE 
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 1 THEN ''1 Month (Per Month)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 2 THEN ''2 Months''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 3 THEN ''3 Months (Quarterly)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 6 THEN ''6 Months (Semi-Annual)''
+              WHEN ISNULL(q.BillingPeriodMonths, 3) = 12 THEN ''12 Months (Annual)''
+              ELSE CAST(ISNULL(q.BillingPeriodMonths, 3) AS NVARCHAR(10)) + '' Month(s)''
+            END AS BillingPeriod,
+            @Total AS TotalCount
+        FROM dbo.WN_Quotations q
+        JOIN dbo.WN_Customers c ON c.Id = q.CustomerId
+        JOIN dbo.WN_Spaces s ON s.Id = q.SpaceId
+        LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeId
+        LEFT JOIN dbo.WN_Locations loc ON loc.Id = s.LocationId
+        LEFT JOIN dbo.City city ON city.Id = loc.CityId
+        LEFT JOIN dbo.WN_OfferingType ot ON (TRY_CAST(q.OfferingType AS INT) = ot.Id OR ot.Description = q.OfferingType)
+        WHERE (@Search IS NULL OR q.QuotationNumber LIKE ''%'' + @Search + ''%'' OR c.FirstName LIKE ''%'' + @Search + ''%'' OR c.LastName LIKE ''%'' + @Search + ''%'' OR c.Company LIKE ''%'' + @Search + ''%'')
+          AND (@LocationId IS NULL OR s.LocationId = @LocationId)
+        ORDER BY q.Id DESC
+        OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+    END;
+    ');
+
+    -- 3. Patch dbo.WN_Quotations_ConvertToBooking
+    EXEC('
+    CREATE OR ALTER PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
+        @QuotationId INT,
+        @CreatedById INT = NULL
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        BEGIN TRANSACTION;
+        BEGIN TRY
+            DECLARE @CustomerId INT, @SpaceId INT, @StartOn DATETIME2, @EndOn DATETIME2,
+                    @Subtotal DECIMAL(18,2), @DiscountPct DECIMAL(5,2), @DiscountVal DECIMAL(18,2),
+                    @DiscountType NVARCHAR(20), @SecDep DECIMAL(18,2), @FloorId INT,
+                    @AdvRentMonths INT, @SecDepMonths INT, @BPM INT, @SupportChargesId TINYINT,
+                    @PerSeatPrice DECIMAL(18,2), @Capacity INT, @MonthlyPrice DECIMAL(18,2),
+                    @OfferingType NVARCHAR(50), @SendWhtInvoice BIT, @WHTaxId DECIMAL(9,4);
+
+            SELECT 
+                @CustomerId = CustomerId,
+                @SpaceId = SpaceId,
+                @StartOn = StartDateTime,
+                @EndOn = EndDateTime,
+                @Subtotal = SubtotalAmount,
+                @DiscountPct = DiscountPercentage,
+                @DiscountVal = DiscountAmount,
+                @DiscountType = DiscountType,
+                @SecDep = SecurityDeposit,
+                @FloorId = FloorId,
+                @AdvRentMonths = AdvanceRentMonths,
+                @SecDepMonths = SecurityDepositMonths,
+                @BPM = BillingPeriodMonths,
+                @SupportChargesId = SupportChargesId,
+                @PerSeatPrice = PerSeatBasePrice,
+                @Capacity = Capacity,
+                @MonthlyPrice = MonthlyBasePrice,
+                @OfferingType = OfferingType,
+                @SendWhtInvoice = ISNULL(SendWhtInvoice, 0),
+                @WHTaxId = WHTaxId
+            FROM dbo.WN_Quotations
+            WHERE Id = @QuotationId;
+
+            IF @CustomerId IS NULL
+                RAISERROR(''Quotation not found.'', 16, 1);
+
+            -- Map quotation offering type to booking shift type
+            DECLARE @ShiftType NVARCHAR(20) = CASE 
+                WHEN @OfferingType IN (''2'', ''morning'', ''Morning'', ''Morning Shift'', ''shift_morning'') THEN ''morning''
+                WHEN @OfferingType IN (''3'', ''evening'', ''Evening'', ''Evening Shift'', ''night'', ''shift_evening'') THEN ''evening''
+                ELSE ''24_7''
+            END;
+
+            DECLARE @OverrideUnitPrice DECIMAL(18,2) = NULL;
+
+            IF @PerSeatPrice IS NOT NULL AND @PerSeatPrice > 0
+                SET @OverrideUnitPrice = @PerSeatPrice;
+            ELSE IF @MonthlyPrice IS NOT NULL AND @MonthlyPrice > 0
+                SET @OverrideUnitPrice = CASE WHEN ISNULL(@Capacity, 1) > 0 THEN @MonthlyPrice / ISNULL(@Capacity, 1) ELSE @MonthlyPrice END;
+            ELSE IF @Subtotal > 0 AND ISNULL(@AdvRentMonths, 1) > 0
+                SET @OverrideUnitPrice = CASE 
+                    WHEN ISNULL(@Capacity, 1) > 0 THEN (@Subtotal / ISNULL(@AdvRentMonths, 1)) / ISNULL(@Capacity, 1) 
+                    ELSE @Subtotal / ISNULL(@AdvRentMonths, 1) 
+                END;
+
+            DECLARE @QuotedPerSeat DECIMAL(18,2) = CASE
+                WHEN @PerSeatPrice IS NOT NULL AND @PerSeatPrice > 0 THEN @PerSeatPrice
+                WHEN @MonthlyPrice IS NOT NULL AND @MonthlyPrice > 0 THEN @MonthlyPrice / ISNULL(NULLIF(@Capacity, 0), 1)
+                ELSE NULL
+            END;
+
+            DECLARE @UserId INT, @CustomerEmail NVARCHAR(255), @CustomerFirstName NVARCHAR(100),
+                    @CustomerLastName NVARCHAR(100), @CustomerPhone NVARCHAR(50), @CustomerCnic NVARCHAR(50),
+                    @CustomerAddress NVARCHAR(500), @CustomerCityId INT, @CustomerNotes NVARCHAR(1000),
+                    @CustomerCode NVARCHAR(20);
+
+            SELECT TOP 1 
+                @UserId = UserId,
+                @CustomerEmail = Email,
+                @CustomerFirstName = FirstName,
+                @CustomerLastName = LastName,
+                @CustomerPhone = PhoneNumber,
+                @CustomerCnic = CnicOrPassport,
+                @CustomerAddress = Address,
+                @CustomerCityId = CityId,
+                @CustomerNotes = Notes,
+                @CustomerCode = Code
+            FROM dbo.WN_Customers
+            WHERE Id = @CustomerId;
+
+            IF @UserId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Users WHERE Id = @UserId)
+            BEGIN
+                SET @UserId = NULL;
+            END
+
+            IF @UserId IS NULL AND @CustomerEmail IS NOT NULL AND @CustomerEmail <> ''''
+            BEGIN
+                SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email = @CustomerEmail;
+            END
+
+            DECLARE @CustFullName NVARCHAR(200) = RTRIM(LTRIM(ISNULL(@CustomerFirstName, '''') + '' '' + ISNULL(@CustomerLastName, '''')));
+            IF @CustFullName = '''' SET @CustFullName = ISNULL(@CustomerFirstName, ''Customer'');
+
+            DECLARE @MaxBookingIdBefore INT;
+            SELECT @MaxBookingIdBefore = ISNULL(MAX(Id), 0) FROM dbo.WN_Bookings;
+
+            EXEC dbo.WN_Bookings_Insert
+                @UserId = @UserId,
+                @SpaceId = @SpaceId,
+                @PricingId = 0,
+                @StartOn = @StartOn,
+                @EndOn = @EndOn,
+                @Notes = ''Converted from Quotation'',
+                @CreatedById = @CreatedById,
+                @UserEmail = @CustomerEmail,
+                @CustomerEmail = @CustomerEmail,
+                @CustomerFirstName = @CustFullName,
+                @CustomerLastName = @CustomerLastName,
+                @CustomerPhone = @CustomerPhone,
+                @CustomerCnic = @CustomerCnic,
+                @CustomerAddress = @CustomerAddress,
+                @CustomerCityId = @CustomerCityId,
+                @CustomerNotes = @CustomerNotes,
+                @DiscountPercentage = @DiscountPct,
+                @DiscountAmount = @DiscountVal,
+                @DiscountType = @DiscountType,
+                @BillingPeriodMonths = @BPM,
+                @SecurityDepositMonths = @SecDepMonths,
+                @AdvanceRentMonths = @AdvRentMonths,
+                @SupportChargesId = @SupportChargesId,
+                @Capacity = @Capacity,
+                @OverrideSubtotal = @Subtotal,
+                @OverrideUnitPrice = @OverrideUnitPrice,
+                @CustomerCode = @CustomerCode,
+                @ShiftType = @ShiftType,
+                @PerSeatBasePrice = @QuotedPerSeat;
+
+            DECLARE @NewBookingId INT = NULL;
+            DECLARE @NewBookingPublicId UNIQUEIDENTIFIER = NULL;
+
+            SELECT TOP 1 
+                @NewBookingId = Id,
+                @NewBookingPublicId = IdGUID
+            FROM dbo.WN_Bookings
+            WHERE Id > @MaxBookingIdBefore
+              AND SpaceId = @SpaceId
+              AND BookingDate >= DATEADD(MINUTE, -1, SYSUTCDATETIME())
+            ORDER BY Id DESC;
+
+            IF @NewBookingId IS NULL
+            BEGIN
+                SELECT TOP 1 
+                    @NewBookingId = Id,
+                    @NewBookingPublicId = IdGUID
+                FROM dbo.WN_Bookings
+                WHERE SpaceId = @SpaceId
+                  AND BookingDate >= DATEADD(MINUTE, -1, SYSUTCDATETIME())
+                ORDER BY Id DESC;
+            END
+
+            UPDATE dbo.WN_Quotations
+            SET Status = ''Converted'', 
+                BookingId = @NewBookingId,
+                UpdatedDate = SYSUTCDATETIME(),
+                UpdatedById = @CreatedById
+            WHERE Id = @QuotationId;
+
+            -- Copy WHT settings to the new booking
+            IF @NewBookingId IS NOT NULL
+            BEGIN
+                UPDATE dbo.WN_Bookings
+                SET SendWhtInvoice = @SendWhtInvoice,
+                    WHTaxId = @WHTaxId
+                WHERE Id = @NewBookingId;
+            END
+
+            -- Ensure Security Deposit record is inserted if not already handled by WN_Bookings_Insert
+            IF (@SecDep > 0 OR @SecDepMonths > 0) AND @NewBookingId IS NOT NULL
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM dbo.WN_SecurityDeposits WITH (UPDLOCK) WHERE BookingId = @NewBookingId)
+                BEGIN
+                    DECLARE @DepositAccId INT = NULL;
+                    DECLARE @ARAccId INT = NULL;
+                    DECLARE @RentAccId INT = NULL;
+                    DECLARE @ServAccId INT = NULL;
+                    DECLARE @TaxAccId INT = NULL;
+
+                    SELECT TOP 1 
+                        @DepositAccId = COALESCE(s.SecurityReceivedId, st.SecurityReceivedId, s.SecurityRecivedId),
+                        @ARAccId      = COALESCE(s.AccountReceivableId, st.AccountReceivableId),
+                        @RentAccId    = COALESCE(s.RentAccountId, st.RentAccountId),
+                        @ServAccId    = COALESCE(s.ServicesIncomeId, st.ServicesIncomeId),
+                        @TaxAccId     = COALESCE(s.SalesTaxId, st.SalesTaxId)
+                    FROM dbo.WN_Spaces s WITH (NOLOCK)
+                    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+                    WHERE s.Id = @SpaceId;
+
+                    IF @DepositAccId IS NULL
+                        SELECT TOP 1 @DepositAccId = SecurityReceivedId FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 2;
+
+                    INSERT INTO dbo.WN_SecurityDeposits
+                        (BookingId, UserId, Amount, AccountId, StatusId, Notes, UpdatedById, SecurityReceivedId,
+                         AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, CustomerId, RefId, RefNo)
+                    VALUES
+                        (@NewBookingId, @UserId, ISNULL(@SecDep, 0), @DepositAccId, 1, ''Initial security deposit for booking '' + CAST(@NewBookingId AS NVARCHAR(20)), @CreatedById, @DepositAccId,
+                         @ARAccId, @RentAccId, @ServAccId, @TaxAccId, @CustomerCode, NULL, NULL);
+                END
+            END
+
+            INSERT INTO dbo.WN_QuotationActivities (
+                QuotationId, Version, ActivityType, Message, CustomerNote, CreatedByUserId, CreatedDate
+            )
+            VALUES (
+                @QuotationId, 1, ''Converted'', ''Quotation converted to booking (ID: '' + CAST(ISNULL(@NewBookingId, 0) AS NVARCHAR(20)) + '')'', NULL, @CreatedById, SYSUTCDATETIME()
+            );
+
+            COMMIT TRANSACTION;
+
+            SELECT 
+                @NewBookingId AS BookingId,
+                @NewBookingPublicId AS BookingPublicId,
+                ''Quotation successfully converted to booking.'' AS Message;
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+            THROW;
+        END CATCH
+    END;
+    ');
+
+    -- 4. Fix Booking 547 if it exists
+    UPDATE dbo.WN_Bookings
+    SET SendWhtInvoice = 1,
+        WHTaxId = 2.00
+    WHERE Id = 547;
+
+    COMMIT TRANSACTION;
+    SELECT 'WHT_17 applied successfully.' AS Status;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

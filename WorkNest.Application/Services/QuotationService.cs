@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -32,7 +32,7 @@ namespace WorkNest.Application.Services
             return null;
         }
 
-        private async Task<(decimal Hourly, decimal Daily, decimal Monthly, decimal SecurityDeposit, string Category, string SpaceName, string SpaceCode, int Capacity, decimal MaxDiscountPercent)> ResolveSpaceDetailsAsync(int spaceId)
+        private async Task<(decimal Hourly, decimal Daily, decimal Monthly, decimal SecurityDeposit, string Category, string SpaceName, string SpaceCode, int Capacity, decimal MaxDiscountPercent, string SpaceTypeName)> ResolveSpaceDetailsAsync(int spaceId)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
             var spaceRow = rows.FirstOrDefault(r => Convert.ToInt32(r["Id"]) == spaceId);
@@ -76,7 +76,7 @@ namespace WorkNest.Application.Services
                 if (hourly == 0) hourly = 6000;
             }
 
-            return (hourly, daily, monthly, secDeposit, category, spaceName, spaceCode, capacity, maxDiscountPercent);
+            return (hourly, daily, monthly, secDeposit, category, spaceName, spaceCode, capacity, maxDiscountPercent, spaceRow["SpaceTypeName"]?.ToString() ?? "");
         }
 
         public async Task<QuotationResponse> CreateQuotationAsync(QuotationRequest request, int? createdById)
@@ -173,6 +173,19 @@ namespace WorkNest.Application.Services
                 ? (monthlyBasePrice > 0 ? (discountValue / monthlyBasePrice) * 100m : 0m)
                 : discountPercentage;
 
+            string spaceTypeName = !string.IsNullOrWhiteSpace(spaceDetails.SpaceTypeName)
+                ? spaceDetails.SpaceTypeName.Trim()
+                : (spaceDetails.Category == "PrivateOffice" ? "Private Office" : (spaceDetails.Category == "MeetingRoom" ? "Meeting Room" : "Shared Space"));
+
+            if (spaceTypeName.EndsWith(" Rent", StringComparison.OrdinalIgnoreCase))
+            {
+                spaceTypeName = spaceTypeName.Substring(0, spaceTypeName.Length - 5).Trim();
+            }
+
+            string lineItemDescription = spaceTypeName.Contains("facility", StringComparison.OrdinalIgnoreCase)
+                ? $"{spaceTypeName} (including support service charges)"
+                : $"{spaceTypeName} facility (including support service charges)";
+
             if (spaceDetails.Category == "MeetingRoom")
             {
                 var diff = request.EndDateTime - request.StartDateTime;
@@ -190,7 +203,7 @@ namespace WorkNest.Application.Services
                     details.Add(new QuotationDetailDto
                     {
                         FeeType = "RoomRent",
-                        Description = $"Meeting Room Rent ",
+                        Description = lineItemDescription,
                         Quantity = days,
                         UnitPrice = spaceDetails.Daily,
                         Amount = amount
@@ -205,7 +218,7 @@ namespace WorkNest.Application.Services
                     details.Add(new QuotationDetailDto
                     {
                         FeeType = "RoomRent",
-                        Description = $"Meeting Room Rent",
+                        Description = lineItemDescription,
                         Quantity = (decimal)totalHours,
                         UnitPrice = rate,
                         Amount = amount
@@ -225,7 +238,7 @@ namespace WorkNest.Application.Services
                 details.Add(new QuotationDetailDto
                 {
                     FeeType = "RoomRent",
-                    Description = $"Private Office",
+                    Description = lineItemDescription,
                     Quantity = months,
                     UnitPrice = monthlyRentOfRoom,
                     Amount = rentAmount
@@ -266,7 +279,7 @@ namespace WorkNest.Application.Services
                 details.Add(new QuotationDetailDto
                 {
                     FeeType = "RoomRent",
-                    Description = $"Shared Space",
+                    Description = lineItemDescription,
                     Quantity = months,
                     UnitPrice = monthlyBasePrice,
                     Amount = rentAmount
@@ -406,8 +419,9 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                     : Math.Round((header.TryGetValue("SupportChargeAmount", out var sca2) && sca2 is not null && Convert.ToDecimal(sca2) > 0 
                         ? Convert.ToDecimal(sca2) 
                         : ((header.TryGetValue("Capacity", out var cVal2) && cVal2 is not null ? Convert.ToInt32(cVal2) : 1) * (header.TryGetValue("BillingPeriodMonths", out var bpmVal2) && bpmVal2 is not null ? Convert.ToInt32(bpmVal2) : 3) * 2000.00m)) * 0.16m, 2),
-                // the WN_WHTaxRate Id (or an old percentage), under the new WHTRate_ID or the old column name
-                WithholdingTaxRate = (header.TryGetValue("WHTRate_ID", out var wtrNew) && wtrNew is not null && wtrNew is not DBNull ? wtrNew
+                // the WN_WHTaxRate Id (or an old percentage), under WHTaxId, WHTRate_ID, or the old column name
+                WithholdingTaxRate = (header.TryGetValue("WHTaxId", out var wtrTaxId) && wtrTaxId is not null && wtrTaxId is not DBNull ? wtrTaxId
+                                      : header.TryGetValue("WHTRate_ID", out var wtrNew) && wtrNew is not null && wtrNew is not DBNull ? wtrNew
                                       : header.TryGetValue("WithholdingTaxRate", out var wtr) && wtr is not null && wtr is not DBNull ? wtr : null) is { } wtrVal
                                      && Convert.ToDecimal(wtrVal) > 0 ? Convert.ToDecimal(wtrVal) : 15.00m,
                 Remarks = header["Remarks"]?.ToString(),
@@ -425,15 +439,42 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
 
             foreach (var row in detailsRows)
             {
+                string feeType = row["FeeType"]?.ToString() ?? "";
+                string description = row["Description"]?.ToString() ?? "";
+
+                bool isSecurityDeposit = string.Equals(feeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) ||
+                                         description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase);
+
+                if (!isSecurityDeposit && !description.Contains("(including support service charges)", StringComparison.OrdinalIgnoreCase))
+                {
+                    string baseName = !string.IsNullOrWhiteSpace(dto.SpaceTypeName)
+                        ? dto.SpaceTypeName.Trim()
+                        : (!string.IsNullOrWhiteSpace(description) ? description.Trim() : "Space");
+
+                    if (baseName.EndsWith(" Rent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        baseName = baseName.Substring(0, baseName.Length - 5).Trim();
+                    }
+
+                    description = baseName.Contains("facility", StringComparison.OrdinalIgnoreCase)
+                        ? $"{baseName} (including support service charges)"
+                        : $"{baseName} facility (including support service charges)";
+                }
+
                 dto.Details.Add(new QuotationDetailDto
                 {
-                    FeeType = row["FeeType"]?.ToString() ?? "",
-                    Description = row["Description"]?.ToString() ?? "",
+                    FeeType = feeType,
+                    Description = description,
                     Quantity = Convert.ToDecimal(row["Quantity"]),
                     UnitPrice = Convert.ToDecimal(row["UnitPrice"]),
                     Amount = Convert.ToDecimal(row["Amount"])
                 });
             }
+
+            dto.SendWhtInvoice = header.TryGetValue("SendWhtInvoice", out var swi) && swi is not null && swi != DBNull.Value
+                ? Convert.ToBoolean(swi)
+                : await _db.GetQuotationSendWhtInvoiceAsync(dto.Id);
+            dto.WhtRatePercent = dto.SendWhtInvoice ? await _db.ResolveWhtRatePercentAsync(dto.WithholdingTaxRate) : 0m;
 
             ChallanCalculationService.ApplyToQuotation(dto);
 
@@ -499,8 +540,6 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             }
             catch { }
 
-            dto.SendWhtInvoice = await _db.GetQuotationSendWhtInvoiceAsync(dto.Id);
-            dto.WhtRatePercent = await _db.ResolveWhtRatePercentAsync(dto.WithholdingTaxRate);
             return dto;
         }
 

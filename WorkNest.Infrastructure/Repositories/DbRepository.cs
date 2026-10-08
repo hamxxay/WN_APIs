@@ -2822,20 +2822,21 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         }
 
         /// <summary>
-        /// Column holding the chosen WN_WHTaxRate Id: WHTRate_ID (after WHT_15 renamed it) or the old name
-        /// (WN_Bookings.WHTRate / WN_Quotations.WithholdingTaxRate), so the API works before and after the rename.
+        /// Column holding the chosen WN_WHTaxRate Id: WHTaxId (after rename) or WHTRate_ID or the old name
+        /// (WN_Bookings.WHTRate / WN_Quotations.WithholdingTaxRate), so the API works across schema versions.
         /// </summary>
         private static async Task<string> WhtIdColumnAsync(SqlConnection c, string table, string oldName)
         {
-            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH(@T, 'WHTRate_ID') IS NOT NULL THEN 'WHTRate_ID' ELSE @O END", c);
+            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH(@T, 'WHTaxId') IS NOT NULL THEN 'WHTaxId' WHEN COL_LENGTH(@T, 'WHTRate_ID') IS NOT NULL THEN 'WHTRate_ID' ELSE @O END", c);
             cmd.Parameters.AddWithValue("@T", table);
             cmd.Parameters.AddWithValue("@O", oldName);
             return (string)(await cmd.ExecuteScalarAsync() ?? oldName);
         }
 
-        /// <summary>The WHT rate Id from a quotation / booking row, under the new (WHTRate_ID) or old column name.</summary>
+        /// <summary>The WHT rate Id from a quotation / booking row, under WHTaxId, WHTRate_ID, or the old column name.</summary>
         public static object? WhtIdValue(IDictionary<string, object?> row, string oldName)
         {
+            if (row.TryGetValue("WHTaxId", out var t) && t is not null && t is not DBNull) return t;
             if (row.TryGetValue("WHTRate_ID", out var v) && v is not null && v is not DBNull) return v;
             return row.TryGetValue(oldName, out var o) && o is not null && o is not DBNull ? o : null;
         }

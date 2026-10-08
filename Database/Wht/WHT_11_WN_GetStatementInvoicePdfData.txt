@@ -44,7 +44,7 @@ BEGIN
         CASE WHEN ISNULL(i.SecurityDepositAmount, 0) > 0 -- only the invoice that bills the deposit (recurring invoices have none)
              THEN COALESCE(NULLIF(q.SecurityDeposit, 0), NULLIF(b.SecurityDepositOverride, 0), NULLIF(b.SecurityDepositRequired, 0), NULLIF(i.SecurityDepositAmount, 0), ISNULL(bd.SecurityDeposit, 0))
              ELSE 0 END AS SecurityDepositAmount,
-        COALESCE(dbo.WN_WHTaxRate_Resolve(q.WHTRate_ID), 15.00) AS WithholdingTaxRate,
+        COALESCE(dbo.WN_WHTaxRate_Resolve(q.WHTaxId), 15.00) AS WithholdingTaxRate,
         i.InvoiceTypeId,                                    -- 6 = WHT invoice (already grossed up)
         st.PublicId AS STPublicId,
         st.STInvoiceNumber

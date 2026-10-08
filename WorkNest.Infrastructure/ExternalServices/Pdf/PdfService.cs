@@ -59,13 +59,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                         col.Item().Row(row =>
                         {
-                            row.RelativeItem().Column(c =>
+                            row.RelativeItem(1.5f).Column(c =>
                             {
-                                c.Item().Text("Customer Details").FontSize(9).Bold().FontColor("#888888");
-                                c.Item().Text($"Attn: {q.CustomerName ?? "-"}").FontColor("#444444");
+                                c.Item().Text("Customer Details").FontSize(9).Bold().FontColor("#000000");
+                                c.Item().Text($"Attn: {q.CustomerName ?? "-"}").FontColor("#000000");
                                 if (!string.IsNullOrWhiteSpace(q.CustomerCompany))
                                 {
-                                    c.Item().Text($"Customer Name: {q.CustomerCompany}").FontColor("#1a1a2e");
+                                    c.Item().Text($"Customer Name: {q.CustomerCompany}").FontColor("#000000");
                                 }
                                 if (!string.IsNullOrWhiteSpace(q.CustomerAddress))
                                 {
@@ -73,9 +73,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 }
                                 // c.Item().Text($"Email: {q.CustomerEmail ?? "-"}").FontColor("#555555");
                             });
-                            row.RelativeItem().Column(c =>
+
+                            row.RelativeItem(1.0f).Column(c =>
                             {
-                                c.Item().Text("Quotation For").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text("Quotation For").FontSize(9).Bold().FontColor("#000000");
                                 c.Item().Text(q.SpaceName ?? q.SpaceCode ?? "-");
                                 c.Item().Text(q.SpaceTypeName ?? "-").FontColor("#555555");
 
@@ -89,21 +90,23 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 if (string.IsNullOrWhiteSpace(locationDisplay)) locationDisplay = "-";
                                 c.Item().Text(locationDisplay).FontColor("#555555");
                             });
-                            row.RelativeItem().Column(c =>
+
+                            row.RelativeItem(0.85f).Column(c =>
                             {
-                                c.Item().AlignRight().Text("PERIOD").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text("PERIOD").FontSize(9).Bold().FontColor("#000000");
                                 if (spaceType == "MeetingRoom")
                                 {
-                                    c.Item().AlignRight().Text($"From: {q.StartDateTime:dd MMM yyyy hh:mm tt}");
-                                    c.Item().AlignRight().Text($"To:   {q.EndDateTime:dd MMM yyyy hh:mm tt}");
+                                    c.Item().Text($"From: {q.StartDateTime:dd MMM yyyy hh:mm tt}");
+                                    c.Item().Text($"To:   {q.EndDateTime:dd MMM yyyy hh:mm tt}");
                                 }
                                 else
                                 {
-                                    c.Item().AlignRight().Text($"From: {q.StartDateTime:dd MMM yyyy}");
-                                    c.Item().AlignRight().Text($"To:   {q.EndDateTime:dd MMM yyyy}");
+                                    c.Item().Text($"From: {q.StartDateTime:dd MMM yyyy}");
+                                    c.Item().Text($"To:   {q.EndDateTime:dd MMM yyyy}");
                                 }
                             });
                         });
+
 
                         col.Item().LineHorizontal(1).LineColor("#e0e0e0");
 
@@ -166,86 +169,86 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         decimal initialPayable = Math.Max(0, (spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) + secDeposit + taxOnAdvanceRent - discountAmount);
 
                         // Dynamic Summary Ribbon
-                        col.Item().Background("#f8fafc").Border(1).BorderColor("#e2e8f0").Padding(8).Row(row =>
-                        {
-                            if (spaceType == "MeetingRoom")
-                            {
-                                var timeSpan = q.EndDateTime - q.StartDateTime;
-                                double hours = Math.Max(1, Math.Ceiling(timeSpan.TotalHours));
-                                row.RelativeItem().Column(c =>
-                                {
-                                    c.Item().Text("BOOKING RENT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {q.SubtotalAmount:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
-                                    c.Item().Text("Base Booking Rent").FontSize(7f).FontColor("#64748b");
-                                });
-                                row.RelativeItem().Column(c =>
-                                {
-                                    c.Item().Text("DURATION").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"{hours} Hour(s)").Bold().FontSize(9.5f).FontColor("#2563eb");
-                                    c.Item().Text("Booking Length").FontSize(7f).FontColor("#64748b");
-                                });
-                                row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
-                                {
-                                    c.Item().Text("TOTAL PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                    c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
-                                    c.Item().Text("Rent + Tax").FontSize(7f).FontColor("#1e40af");
-                                });
-                            }
-                            else if (spaceType == "SharedSpace")
-                            {
-                                // row.RelativeItem().Column(c =>
-                                // {
-                                //     c.Item().Text("TOTAL CONTRACT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                //     c.Item().Text($"PKR {totalContract:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
-                                //     c.Item().Text($"{contractMonths} Month(s) Total").FontSize(7f).FontColor("#64748b");
-                                // });
-                                row.RelativeItem().Column(c =>
-                                {
-                                    c.Item().Text("MONTHLY RENT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {monthlyRent:N0}").Bold().FontSize(9.5f).FontColor("#2563eb");
-                                    c.Item().Text("per month").FontSize(7f).FontColor("#64748b");
-                                });
-                                // row.RelativeItem().Column(c =>
-                                // {
-                                //     c.Item().Text("1ST CYCLE RENT").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                //     c.Item().Text($"PKR {firstCycleRent:N0}").Bold().FontSize(9.5f).FontColor("#1d4ed8");
-                                //     c.Item().Text($"First {billingMonths} Months").FontSize(7f).FontColor("#1e40af");
-                                // });
-                                // row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
-                                // {
-                                //     c.Item().Text("1ST CYCLE PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                //     c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
-                                //     c.Item().Text("Rent + Tax").FontSize(7f).FontColor("#1e40af");
-                                // });
-                            }
-                            else // PrivateRoom
-                            {
-                                // row.RelativeItem().Column(c =>
-                                // {
-                                //     c.Item().Text("TOTAL CONTRACT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                //     c.Item().Text($"PKR {totalContract:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
-                                //     c.Item().Text($"{contractMonths} Month(s) Total").FontSize(7f).FontColor("#64748b");
-                                // });
-                                row.RelativeItem().Column(c =>
-                                {
-                                    c.Item().Text("Private Office Charges").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {monthlyRent:N0}").Bold().FontSize(9.5f).FontColor("#2563eb");
-                                    c.Item().Text("per month").FontSize(7f).FontColor("#64748b");
-                                });
-                                row.RelativeItem().Column(c =>
-                                {
-                                    c.Item().Text("SECURITY DEPOSIT").FontSize(7.5f).Bold().FontColor("#64748b");
-                                    c.Item().Text($"PKR {secDeposit:N0}").Bold().FontSize(9.5f).FontColor("#d97706");
-                                    c.Item().Text("Refundable").FontSize(7f).FontColor("#64748b");
-                                });
-                                // row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
-                                // {
-                                //     c.Item().Text("1ST CYCLE PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
-                                //     c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
-                                //     c.Item().Text("Rent + Deposit + Tax").FontSize(7f).FontColor("#1e40af");
-                                // });
-                            }
-                        });
+                        // col.Item().Background("#f8fafc").Border(1).BorderColor("#e2e8f0").Padding(8).Row(row =>
+                        // {
+                        //     if (spaceType == "MeetingRoom")
+                        //     {
+                        //         var timeSpan = q.EndDateTime - q.StartDateTime;
+                        //         double hours = Math.Max(1, Math.Ceiling(timeSpan.TotalHours));
+                        //         row.RelativeItem().Column(c =>
+                        //         {
+                        //             c.Item().Text("BOOKING RENT").FontSize(7.5f).Bold().FontColor("#64748b");
+                        //             c.Item().Text($"PKR {q.SubtotalAmount:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
+                        //             c.Item().Text("Base Booking Rent").FontSize(7f).FontColor("#64748b");
+                        //         });
+                        //         row.RelativeItem().Column(c =>
+                        //         {
+                        //             c.Item().Text("DURATION").FontSize(7.5f).Bold().FontColor("#64748b");
+                        //             c.Item().Text($"{hours} Hour(s)").Bold().FontSize(9.5f).FontColor("#2563eb");
+                        //             c.Item().Text("Booking Length").FontSize(7f).FontColor("#64748b");
+                        //         });
+                        //         row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
+                        //         {
+                        //             c.Item().Text("TOTAL PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
+                        //             c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
+                        //             c.Item().Text("Rent + Tax").FontSize(7f).FontColor("#1e40af");
+                        //         });
+                        //     }
+                        //     else if (spaceType == "SharedSpace")
+                        //     {
+                        //         // row.RelativeItem().Column(c =>
+                        //         // {
+                        //         //     c.Item().Text("TOTAL CONTRACT").FontSize(7.5f).Bold().FontColor("#64748b");
+                        //         //     c.Item().Text($"PKR {totalContract:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
+                        //         //     c.Item().Text($"{contractMonths} Month(s) Total").FontSize(7f).FontColor("#64748b");
+                        //         // });
+                        //         row.RelativeItem().Column(c =>
+                        //         {
+                        //             c.Item().Text("MONTHLY RENT").FontSize(7.5f).Bold().FontColor("#64748b");
+                        //             c.Item().Text($"PKR {monthlyRent:N0}").Bold().FontSize(9.5f).FontColor("#2563eb");
+                        //             c.Item().Text("per month").FontSize(7f).FontColor("#64748b");
+                        //         });
+                        //         // row.RelativeItem().Column(c =>
+                        //         // {
+                        //         //     c.Item().Text("1ST CYCLE RENT").FontSize(7.5f).Bold().FontColor("#1e40af");
+                        //         //     c.Item().Text($"PKR {firstCycleRent:N0}").Bold().FontSize(9.5f).FontColor("#1d4ed8");
+                        //         //     c.Item().Text($"First {billingMonths} Months").FontSize(7f).FontColor("#1e40af");
+                        //         // });
+                        //         // row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
+                        //         // {
+                        //         //     c.Item().Text("1ST CYCLE PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
+                        //         //     c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
+                        //         //     c.Item().Text("Rent + Tax").FontSize(7f).FontColor("#1e40af");
+                        //         // });
+                        //     }
+                        //     else // PrivateRoom
+                        //     {
+                        //         // row.RelativeItem().Column(c =>
+                        //         // {
+                        //         //     c.Item().Text("TOTAL CONTRACT").FontSize(7.5f).Bold().FontColor("#64748b");
+                        //         //     c.Item().Text($"PKR {totalContract:N0}").Bold().FontSize(9.5f).FontColor("#0f172a");
+                        //         //     c.Item().Text($"{contractMonths} Month(s) Total").FontSize(7f).FontColor("#64748b");
+                        //         // });
+                        //         row.RelativeItem().Column(c =>
+                        //         {
+                        //             c.Item().Text("Private Office Charges").FontSize(7.5f).Bold().FontColor("#64748b");
+                        //             c.Item().Text($"PKR {monthlyRent:N0}").Bold().FontSize(9.5f).FontColor("#2563eb");
+                        //             c.Item().Text("per month").FontSize(7f).FontColor("#64748b");
+                        //         });
+                        //         row.RelativeItem().Column(c =>
+                        //         {
+                        //             c.Item().Text("SECURITY DEPOSIT").FontSize(7.5f).Bold().FontColor("#64748b");
+                        //             c.Item().Text($"PKR {secDeposit:N0}").Bold().FontSize(9.5f).FontColor("#d97706");
+                        //             c.Item().Text("Refundable").FontSize(7f).FontColor("#64748b");
+                        //         });
+                        //         // row.RelativeItem().Background("#eff6ff").Padding(4).Column(c =>
+                        //         // {
+                        //         //     c.Item().Text("1ST CYCLE PAYABLE").FontSize(7.5f).Bold().FontColor("#1e40af");
+                        //         //     c.Item().Text($"PKR {initialPayable:N0}").Bold().FontSize(9.5f).FontColor("#1e40af");
+                        //         //     c.Item().Text("Rent + Deposit + Tax").FontSize(7f).FontColor("#1e40af");
+                        //         // });
+                        //     }
+                        // });
 
                         col.Item().Table(table =>
                         {
@@ -262,8 +265,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 var durationHeader = spaceType == "MeetingRoom" ? "Duration" : "No. of Months";
                                 foreach (var h in new[] { "S.No", "Description", durationHeader, "Unit Price", "Amount" })
-                                    header.Cell().Background("#1a1a2e").Padding(6)
-                                        .Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                                {
+                                    var cell = header.Cell().Border(1).BorderColor("#000000").Background(Colors.White).Padding(6);
+                                    if (h == durationHeader || h == "Unit Price" || h == "Amount")
+                                    {
+                                        cell.AlignRight().Text(h).FontColor("#000000").Bold().FontSize(9);
+                                    }
+                                    else
+                                    {
+                                        cell.Text(h).FontColor("#000000").Bold().FontSize(9);
+                                    }
+                                }
                             });
 
                             bool alt = false;
@@ -274,7 +286,32 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 {
                                     var bg = alt ? "#f9f9f9" : "#ffffff";
                                     table.Cell().Background(bg).Padding(6).Text(sno++.ToString());
-                                    table.Cell().Background(bg).Padding(6).Text(d.Description);
+
+                                    bool isSecurityDeposit = string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) || 
+                                                             (d.Description != null && d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase));
+
+                                    string desc = d.Description ?? "";
+                                    if (!isSecurityDeposit)
+                                    {
+                                        if (!desc.Contains("(including support service charges)", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            string baseName = !string.IsNullOrWhiteSpace(q.SpaceTypeName) ? q.SpaceTypeName.Trim() : (!string.IsNullOrWhiteSpace(desc) ? desc.Trim() : "Facility");
+                                            if (baseName.EndsWith(" Rent", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                baseName = baseName.Substring(0, baseName.Length - 5).Trim();
+                                            }
+                                            if (!baseName.Contains("facility", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                desc = $"{baseName} facility (including support service charges)";
+                                            }
+                                            else
+                                            {
+                                                desc = $"{baseName} (including support service charges)";
+                                            }
+                                        }
+                                    }
+
+                                    table.Cell().Background(bg).Padding(6).Text(desc);
 
                                     string qtyLabel;
                                     decimal unitPrice = d.UnitPrice > 0 ? d.UnitPrice : monthlyRent;
@@ -286,9 +323,6 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                     }
                                     else
                                     {
-                                        bool isSecurityDeposit = string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) || 
-                                                                 (d.Description != null && d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase));
-                                        
                                         if (isSecurityDeposit)
                                         {
                                             decimal qty = d.Quantity > 0 ? d.Quantity : (q.SecurityDepositMonths > 0 ? q.SecurityDepositMonths : 1);
@@ -315,7 +349,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 var bg = "#ffffff";
                                 table.Cell().Background(bg).Padding(6).Text("1");
-                                table.Cell().Background(bg).Padding(6).Text("Room Rent");
+
+                                string fallbackName = !string.IsNullOrWhiteSpace(q.SpaceTypeName) ? q.SpaceTypeName : "Space";
+                                if (fallbackName.EndsWith(" Rent", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    fallbackName = fallbackName.Substring(0, fallbackName.Length - 5);
+                                }
+                                string fallbackDesc = fallbackName.Contains("facility", StringComparison.OrdinalIgnoreCase)
+                                    ? $"{fallbackName} (including support service charges)"
+                                    : $"{fallbackName} facility (including support service charges)";
+
+                                table.Cell().Background(bg).Padding(6).Text(fallbackDesc);
                                 if (spaceType == "MeetingRoom")
                                 {
                                     var timeSpan = q.EndDateTime - q.StartDateTime;
@@ -338,15 +382,15 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 c.Item().Row(r =>
                                 {
-                                    r.ConstantItem(220).AlignRight().Text($"Advance Room Rent ({billingMonths} Mos):");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {firstCycleRent:N0}").Bold();
+                                    r.ConstantItem(220).AlignRight().Text($"Advance Rent ({billingMonths} Mos):");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {firstCycleRent:N0}").Bold();
                                 });
                                 if (secDeposit > 0)
                                 {
                                     c.Item().Row(r =>
                                     {
-                                        r.ConstantItem(220).AlignRight().Text("Security Deposit (Refundable):");
-                                        r.ConstantItem(120).AlignRight().Text($"PKR {secDeposit:N0}").Bold().FontColor("#d97706");
+                                        r.ConstantItem(220).AlignRight().Text("Security Deposit:");
+                                        r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {secDeposit:N0}").Bold().FontColor("#000000");
                                     });
                                 }
                             }
@@ -355,7 +399,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text("Booking Rent Amount:");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {q.SubtotalAmount:N0}").Bold();
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {q.SubtotalAmount:N0}").Bold();
                                 });
                             }
 
@@ -363,31 +407,47 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 c.Item().Row(r =>
                                 {
-                                    r.ConstantItem(220).AlignRight().Text($"Provincial Sales Tax ({taxPct:G29}%):").FontColor("#15803d");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {taxOnAdvanceRent:N0}").FontColor("#15803d");
+                                    r.ConstantItem(220).AlignRight().Text($"PST(on support services) ({taxPct:G29}%):").FontColor("#000000");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {taxOnAdvanceRent:N0}").FontColor("#000000");
                                 });
                             }
                             if (discountAmount > 0)
                             {
                                 c.Item().Row(r =>
                                 {
-                                    r.ConstantItem(220).AlignRight().Text("Discount:").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {discountAmount:N0}").FontColor("#e74c3c");
+                                    r.ConstantItem(220).AlignRight().Text("Discount:").FontColor("#000000");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"- PKR {discountAmount:N0}").FontColor("#000000");
                                 });
                             }
-                            c.Item().LineHorizontal(1).LineColor("#1a1a2e");
+                            c.Item().LineHorizontal(1).LineColor("#000000");
                             c.Item().Row(r =>
                             {
                                 r.ConstantItem(220).AlignRight().Text("TOTAL INITIAL AMOUNT PAYABLE:").Bold().FontSize(11);
-                                r.ConstantItem(120).AlignRight().Text($"PKR {initialPayable:N0}").Bold().FontSize(11).FontColor("#1d4ed8");
+                                r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {initialPayable:N0}").Bold().FontSize(11).FontColor("#000000");
                             });
+
+                            if (q.SendWhtInvoice && q.WhtAmount > 0)
+                            {
+                                decimal rawWhtTotal = q.WhtRatePercent > 0 ? q.WhtRatePercent : (q.WithholdingTaxRate > 0 ? q.WithholdingTaxRate : 15.00m);
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(220).AlignRight().Text($"Less Withholding Tax ({rawWhtTotal:G29}%):").FontColor("#000000");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"- PKR {q.WhtAmount:N0}").FontColor("#000000");
+                                });
+                                c.Item().LineHorizontal(1).LineColor("#000000");
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(220).AlignRight().Text("NET PAYABLE AMOUNT:").Bold().FontSize(11);
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {Math.Max(0, initialPayable - q.WhtAmount):N0}").Bold().FontSize(11).FontColor("#000000");
+                                });
+                            }
                         });
 
                         if (!string.IsNullOrWhiteSpace(q.Remarks))
                         {
                             col.Item().Background("#f5f5f5").Padding(10).Column(c =>
                             {
-                                c.Item().Text("Remarks").Bold().FontSize(9).FontColor("#888888");
+                                c.Item().Text("Remarks").Bold().FontSize(9).FontColor("#000000");
                                 c.Item().Text(q.Remarks);
                             });
                         }
@@ -398,16 +458,16 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             tc.Spacing(2);
                             int itemNum = 1;
                             tc.Item().Text($"{itemNum++}. The price is exclusive of all tax.").FontSize(8).FontColor("#495057");
-                            tc.Item().Text($"{itemNum++}. The room rent is inclusive of support service charges").FontSize(8).FontColor("#495057");
+                            tc.Item().Text($"{itemNum++}. The {spaceType} facility charges are inclusive of support service charges of PKR {supportCharge:N0}.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. This quotation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#495057");
                             if (spaceType == "PrivateRoom" || secDeposit > 0)
                             {
-                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(8).FontColor("#495057");
+                                tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to terms of agreement.").FontSize(8).FontColor("#495057");
                             }
                             if (spaceType != "MeetingRoom")
                             {
-                                tc.Item().Text($"{itemNum++}. Room charges will be paid in advance for {billingMonths} month(s).").FontSize(8).FontColor("#495057");
+                                tc.Item().Text($"{itemNum++}. {spaceType} facility charges will be paid in advance for {billingMonths} month(s).").FontSize(8).FontColor("#495057");
                             }
                             tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(8).FontColor("#495057");
@@ -425,15 +485,28 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             decimal WithholdingTaxRate = rawWht > 1m ? (rawWht / 100.0m) : rawWht;
 
                             decimal securityDeposit = SecurityDeposit ?? 0m;
-                            decimal taxableBase = RoomRent + ServiceCharges + SalesTax;
-                            decimal grossedUpRent = WithholdingTaxRate < 1m ? taxableBase / (1 - WithholdingTaxRate) : taxableBase;
-                            decimal grossedUpTotal = grossedUpRent + securityDeposit;
-                            decimal baseAmount = taxableBase + securityDeposit;
 
-                            tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(8).Bold().FontColor("#495057");
-                            if (SecurityDeposit.HasValue && securityDeposit > 0)
+                            if (q.SendWhtInvoice)
                             {
-                                tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                                decimal whtAmt = q.WhtAmount > 0 ? q.WhtAmount : Math.Round((spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) * WithholdingTaxRate, 2);
+                                decimal netPayable = Math.Max(0, initialPayable - whtAmt);
+                                tc.Item().Text($"{itemNum++}. This quotation is grossed up for Withholding Tax (WHT) at {rawWht:G29}%. The customer shall withhold PKR {whtAmt:N0} and pay net PKR {netPayable:N0}.").FontSize(8).Bold().FontColor("#495057");
+                                if (SecurityDeposit.HasValue && securityDeposit > 0)
+                                {
+                                    tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                                }
+                            }
+                            else
+                            {
+                                decimal roomRentNet = RoomRent + ServiceCharges;
+                                decimal grossRentOnly = WithholdingTaxRate < 1m ? Math.Round(roomRentNet / (1m - WithholdingTaxRate), 2, MidpointRounding.AwayFromZero) : roomRentNet;
+                                decimal grossedUpTotal = grossRentOnly + SalesTax + securityDeposit;
+
+                                tc.Item().Text($"{itemNum++}. If tax is withheld, the customer shall pay PKR {grossedUpTotal:N0}").FontSize(8).Bold().FontColor("#495057");
+                                if (SecurityDeposit.HasValue && securityDeposit > 0)
+                                {
+                                    tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(8).Bold().FontColor("#495057");
+                                }
                             }
                         });
                     });
@@ -488,7 +561,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             row.RelativeItem().Column(inner =>
                             {
-                                inner.Item().Text("CUSTOMER").FontSize(9).Bold().FontColor("#888888");
+                                inner.Item().Text("CUSTOMER").FontSize(9).Bold().FontColor("#000000");
                                 inner.Item().Text("attn: " + (c.CustomerName ?? "-")).Bold();
                                 inner.Item().Text("Company: " + (c.CustomerCompany ?? "-"));
                                 inner.Item().Text("Email: " + (c.CustomerEmail ?? "-")).FontColor("#555555");
@@ -496,7 +569,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             });
                             row.RelativeItem().Column(inner =>
                             {
-                                inner.Item().Text("SPACE").FontSize(9).Bold().FontColor("#888888");
+                                inner.Item().Text("SPACE").FontSize(9).Bold().FontColor("#000000");
                                 inner.Item().Text(c.SpaceName ?? c.SpaceCode ?? "-").Bold();
                                 inner.Item().Text(c.SpaceTypeName ?? "-").FontColor("#555555");
                                 string cityName = !string.IsNullOrWhiteSpace(c.CityName) ? c.CityName : "Islamabad";
@@ -511,7 +584,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             });
                             row.RelativeItem().Column(inner =>
                             {
-                                inner.Item().AlignRight().Text("BOOKING DETAILS").FontSize(9).Bold().FontColor("#888888");
+                                inner.Item().AlignRight().Text("BOOKING DETAILS").FontSize(9).Bold().FontColor("#000000");
                                 if (spaceType == "MeetingRoom")
                                 {
                                     inner.Item().AlignRight().Text($"From: {c.StartOn:dd MMM yyyy hh:mm tt}");
@@ -552,8 +625,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             table.Header(header =>
                             {
                                 foreach (var h in new[] { "S.No", "Description", "Office Number", "Unit Price", "Add Ons", "Discount", "Total" })
-                                    header.Cell().Background("#1a1a2e").Padding(6)
-                                        .Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                                {
+                                    var cell = header.Cell().Background("#1a1a2e").Padding(6);
+                                    if (h == "Office Number" || h == "Unit Price" || h == "Add Ons" || h == "Discount" || h == "Total")
+                                    {
+                                        cell.AlignRight().Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                                    }
+                                    else
+                                    {
+                                        cell.Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                                    }
+                                }
                             });
 
                             bool alt = false;
@@ -600,14 +682,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Advance Rent ({c.BillingPeriodMonths} Month(s)):");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.CurrentCycleAmount:N0}");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.CurrentCycleAmount:N0}");
                                 });
                                 if (spaceType == "PrivateRoom" && c.SecurityDeposit > 0)
                                 {
                                     inner.Item().Row(r =>
                                     {
-                                        r.ConstantItem(220).AlignRight().Text("Security Deposit (Refundable):");
-                                        r.ConstantItem(120).AlignRight().Text($"PKR {c.SecurityDeposit:N0}").FontColor("#d97706");
+                                        r.ConstantItem(220).AlignRight().Text("Security Deposit:");
+                                        r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.SecurityDeposit:N0}").FontColor("#d97706");
                                     });
                                 }
                             }
@@ -616,7 +698,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text("Booking Rent Amount:");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.SubtotalAmount:N0}").Bold();
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.SubtotalAmount:N0}").Bold();
                                 });
                             }
 
@@ -625,7 +707,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Provincial Sales Tax (PST):").FontColor("#15803d");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {c.TaxAmount:N0}").FontColor("#15803d");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.TaxAmount:N0}").FontColor("#15803d");
                                 });
                             }
                             if (c.DiscountAmount > 0)
@@ -633,21 +715,21 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 inner.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text($"Discount:").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {c.DiscountAmount:N0}").FontColor("#e74c3c");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"- PKR {c.DiscountAmount:N0}").FontColor("#e74c3c");
                                 });
                             }
                             inner.Item().LineHorizontal(1).LineColor("#1a1a2e");
                             inner.Item().Row(r =>
                             {
                                 r.ConstantItem(220).AlignRight().Text("TOTAL INITIAL AMOUNT PAYABLE:").Bold().FontSize(11);
-                                r.ConstantItem(120).AlignRight().Text($"PKR {c.TotalPayable:N0}").Bold().FontSize(11).FontColor("#1d4ed8");
+                                r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.TotalPayable:N0}").Bold().FontSize(11).FontColor("#1d4ed8");
                             });
                         });
                         if (!string.IsNullOrWhiteSpace(c.ChallanNotes))
                         {
                             col.Item().Background("#f5f5f5").Padding(10).Column(inner =>
                             {
-                                inner.Item().Text("Notes").Bold().FontSize(9).FontColor("#888888");
+                                inner.Item().Text("Notes").Bold().FontSize(9).FontColor("#000000");
                                 inner.Item().Text(c.ChallanNotes);
                             });
                         }
@@ -730,7 +812,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             row.RelativeItem().Column(c =>
                             {
-                                c.Item().Text("CUSTOMER").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text("CUSTOMER").FontSize(9).Bold().FontColor("#000000");
                                 c.Item().Text(inv.CustomerName ?? "-").Bold();
                                 c.Item().Text(inv.CustomerEmail ?? "-").FontColor("#555555");
                                 if (!string.IsNullOrWhiteSpace(inv.CustomerCode))
@@ -738,14 +820,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             });
                             row.RelativeItem().Column(c =>
                             {
-                                c.Item().Text("SPACE").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text("SPACE").FontSize(9).Bold().FontColor("#000000");
                                 c.Item().Text(inv.SpaceName ?? "-").Bold();
                                 c.Item().Text(inv.SpaceTypeName ?? "-").FontColor("#555555");
                                 c.Item().Text(inv.LocationName ?? "-").FontColor("#555555");
                             });
                             row.RelativeItem().Column(c =>
                             {
-                                c.Item().Text("BOOKING PERIOD").FontSize(9).Bold().FontColor("#888888");
+                                c.Item().Text("BOOKING PERIOD").FontSize(9).Bold().FontColor("#000000");
                                 c.Item().Text($"From: {inv.StartOn:dd MMM yyyy}");
                                 c.Item().Text($"To:   {inv.EndOn:dd MMM yyyy}");
                             });
@@ -764,8 +846,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             table.Header(header =>
                             {
                                 foreach (var h in new[] { "Description", "Amount (PKR)" })
-                                    header.Cell().Background("#1a1a2e").Padding(6)
-                                        .Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                                {
+                                    var cell = header.Cell().Background("#1a1a2e").Padding(6);
+                                    if (h == "Amount (PKR)")
+                                    {
+                                        cell.AlignRight().Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                                    }
+                                    else
+                                    {
+                                        cell.Text(h).FontColor(Colors.White).Bold().FontSize(9);
+                                    }
+                                }
                             });
 
                             bool alt = false;
@@ -802,14 +893,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             c.Item().Row(r =>
                             {
                                 r.ConstantItem(160).AlignRight().Text("Advance Rent:");
-                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N0}");
+                                r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {inv.AdvanceRentTotal:N0}");
                             });
                             if (inv.SecurityDepositTotal > 0)
                             {
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(160).AlignRight().Text("Security Deposit:");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N0}");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N0}");
                                 });
                             }
                             if (inv.TaxTotal > 0)
@@ -817,7 +908,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(160).AlignRight().Text($"Provincial Sales Tax ({inv.AppliedTaxPercentage:G29}%):").FontColor("#15803d");
-                                    r.ConstantItem(120).AlignRight().Text($"PKR {inv.TaxTotal:N0}").FontColor("#15803d");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {inv.TaxTotal:N0}").FontColor("#15803d");
                                 });
                             }
                             if (inv.DiscountAmount > 0)
@@ -825,14 +916,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(160).AlignRight().Text("Discount:").FontColor("#e74c3c");
-                                    r.ConstantItem(120).AlignRight().Text($"- PKR {inv.DiscountAmount:N0}").FontColor("#e74c3c");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"- PKR {inv.DiscountAmount:N0}").FontColor("#e74c3c");
                                 });
                             }
                             c.Item().LineHorizontal(1).LineColor("#1a1a2e");
                             c.Item().Row(r =>
                             {
                                 r.ConstantItem(160).AlignRight().Text("Total Payable:").Bold().FontSize(12);
-                                r.ConstantItem(120).AlignRight().Text($"PKR {inv.TotalPayable:N0}").Bold().FontSize(12).FontColor("#1a1a2e");
+                                r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {inv.TotalPayable:N0}").Bold().FontSize(12).FontColor("#1a1a2e");
                             });
                         });
 
@@ -840,7 +931,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         {
                             col.Item().Background("#f5f5f5").Padding(10).Column(c =>
                             {
-                                c.Item().Text("Notes").Bold().FontSize(9).FontColor("#888888");
+                                c.Item().Text("Notes").Bold().FontSize(9).FontColor("#000000");
                                 c.Item().Text(inv.Notes);
                             });
                         }
@@ -924,7 +1015,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         c.Item().AlignRight().Text("Email: sales@worknestpk.com").FontSize(8.5f).FontColor("#475569");
                     });
                 });
-                col.Item().PaddingTop(6).LineHorizontal(1.5f).LineColor("#1a1a2e");
+                col.Item().PaddingTop(6).LineHorizontal(1.5f).LineColor("#000000");
             });
         }
 
