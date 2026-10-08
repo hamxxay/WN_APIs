@@ -32,9 +32,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public string? OfferingType { get; set; } = "1";
         public decimal? PerSeatSupportRate { get; set; }
         public int? FloorId { get; set; }
-        public decimal? WithholdingTaxRate { get; set; } = 15.00m;
-        /// <summary>Generate Withholding Tax (WHT) invoices for the booking made from this quotation (rate = WithholdingTaxRate).</summary>
-        public bool SendWhtInvoice { get; set; }
+        // WHT is no longer chosen on the quotation: it is chosen on the Initial Invoice Preview (send-initial-invoice).
         public string? Remarks { get; set; }
         public DateTime ValidUntil { get; set; }
     }

@@ -922,10 +922,19 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/invoice/send-initial/{bookingId:int}")]
         [Authorize(Roles = StaffRoles)]
         [HttpPost("api/booking/{bookingId:int}/send-initial-invoice")]
-        public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId, [FromQuery] DateTime? issuedOn = null, [FromQuery] bool preview = false)
+        public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId, [FromQuery] DateTime? issuedOn = null, [FromQuery] bool preview = false,
+            [FromQuery] string? invoiceType = null, [FromQuery] decimal? whTaxId = null)
         {
+            // invoiceType (optional, chosen on the Initial Invoice Preview): "standard" or "wht" (whTaxId = the WN_WHTaxRate Id).
+            // Omitted: the booking's own WHT setting is used, as before.
+            if (invoiceType is not null && invoiceType != "standard" && invoiceType != "wht")
+                return BadRequest(new { isSuccessful = false, message = "invoiceType must be 'standard' or 'wht'." });
+            if (invoiceType == "wht" && !await _db.IsActiveWhtTaxRateIdAsync(whTaxId))
+                return BadRequest(new { isSuccessful = false, message = "Select a WHT rate from the list." });
+            decimal? chosenWhTaxId = invoiceType == "wht" ? whTaxId : null;
+
             // Preview saves nothing, so it never takes the lock.
-            if (preview) return await SendInitialInvoiceCoreAsync(bookingId, issuedOn, preview);
+            if (preview) return await SendInitialInvoiceCoreAsync(bookingId, issuedOn, preview, invoiceType, chosenWhTaxId);
 
             // Check-then-insert below (WN_GetInvoiceByBookingId, then create) is not atomic: two clicks / concurrent
             // requests could both see no invoice and each create an invoice + ledger voucher. Serialise per booking
@@ -955,7 +964,7 @@ namespace WorkNest.API.Controllers
                     lockTaken = true;
                 }
 
-                return await SendInitialInvoiceCoreAsync(bookingId, issuedOn, preview);
+                return await SendInitialInvoiceCoreAsync(bookingId, issuedOn, preview, invoiceType, chosenWhTaxId);
             }
             finally
             {
@@ -978,7 +987,8 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        private async Task<IActionResult> SendInitialInvoiceCoreAsync(int bookingId, DateTime? issuedOn, bool preview)
+        private async Task<IActionResult> SendInitialInvoiceCoreAsync(int bookingId, DateTime? issuedOn, bool preview,
+            string? invoiceType = null, decimal? chosenWhTaxId = null)
         {
             try
             {
@@ -1102,6 +1112,37 @@ namespace WorkNest.API.Controllers
                 {
                     // Invoice date is always today; due 7 days later.
                     var invoiceDate = _clock.Today;
+
+                    // WHT: the booking's current choice (preselects the preview's dropdowns), and the choice previewed.
+                    var (bookingSendsWht, bookingWhTaxId) = await _db.GetBookingWhtAsync(bookingId);
+                    decimal? previewWhTaxId = invoiceType is null ? bookingWhTaxId : chosenWhTaxId;
+                    decimal whtRatePercent = 0m, whtAmount = 0m, whtGrossUp = 0m, previewGrandTotal = expectedGrandTotal;
+                    if (previewWhTaxId is > 0)
+                    {
+                        whtRatePercent = await _db.ResolveWhtRatePercentAsync(previewWhTaxId);
+                        if (whtRatePercent > 0m && whtRatePercent < 100m)
+                        {
+                            // Same inputs WN_Invoices_Insert grosses up (step 11 rounding absorbed into the rent first).
+                            decimal rentForWht = roomRentExclusive > 0
+                                ? expectedGrandTotal - supportCharge - taxTotal - securityDeposit
+                                : roomRentExclusive;
+                            var wht = WorkNest.Application.Services.WhtCalculator.Calculate(rentForWht, supportCharge, taxTotal, whtRatePercent);
+                            whtAmount = wht.WhtAmount;
+                            whtGrossUp = wht.RentLine - rentForWht;
+                            previewGrandTotal = wht.RentLine + wht.SupportLine + wht.TaxLine + securityDeposit;
+                        }
+                    }
+                    bool isWhtPreview = whtAmount > 0m;
+
+                    // An existing first invoice is only re-sent as posted: the preview's WHT choice cannot change it.
+                    bool hasExistingInvoice = false;
+                    using (var exCmd = new SqlCommand("dbo.WN_GetInvoiceByBookingId", conn))
+                    {
+                        exCmd.CommandType = CommandType.StoredProcedure;
+                        exCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                        using var exR = await exCmd.ExecuteReaderAsync();
+                        hasExistingInvoice = await exR.ReadAsync();
+                    }
                     return Ok(new
                     {
                         isSuccessful = true,
@@ -1124,7 +1165,15 @@ namespace WorkNest.API.Controllers
                             serviceCharge = supportCharge,
                             securityDeposit,
                             securityDepositMonths = secMonths,
-                            grandTotal = expectedGrandTotal
+                            grandTotal = previewGrandTotal,
+                            hasExistingInvoice,
+                            bookingWhTaxId = bookingSendsWht ? bookingWhTaxId : null,
+                            isWhtInvoice = isWhtPreview,
+                            whTaxId = isWhtPreview ? previewWhTaxId : null,
+                            whtRatePercent = isWhtPreview ? whtRatePercent : 0m,
+                            whtGrossUp,
+                            whtAmount,
+                            netPayableAfterWht = previewGrandTotal - whtAmount
                         }
                     });
                 }
@@ -1148,6 +1197,12 @@ namespace WorkNest.API.Controllers
                 {
                     return await SendInvoiceEmail(existingId);
                 }
+
+                // WHT chosen on the Initial Invoice Preview: saved on the booking (the WN_WHTaxRate Id, not the rate)
+                // before the invoice is created, so WN_Invoices_Insert grosses it up and issues InvoiceTypeId 6.
+                // Standard clears it. Omitted: the booking keeps its own setting.
+                if (invoiceType is not null)
+                    await _db.SetBookingWhtAsync(bookingId, chosenWhTaxId);
 
                 var dto = new CreateCustomInvoiceDto
                 {
