@@ -1,0 +1,37 @@
+-- ============================================================================================
+-- Creates the view dbo.WN_HIK_Employees (cards + visitors) when it is missing.
+-- Used by the Access Dashboard, Access Analytics, expiring members and WN_HIK_Activity_Recent.
+-- Run in the database the API uses (select it in DBeaver first). Runs as ONE statement.
+-- Only CREATEs the view; if it already exists nothing is changed. No table is modified.
+-- ============================================================================================
+SET NOCOUNT ON;
+
+IF OBJECT_ID(N'dbo.WN_HIK_Employees', N'V') IS NOT NULL
+BEGIN
+    SELECT 'dbo.WN_HIK_Employees already exists - nothing changed.' AS Result;
+    RETURN;
+END
+
+IF OBJECT_ID(N'dbo.WN_HIK_Cards', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_HIK_Visitors', N'U') IS NULL
+BEGIN
+    SELECT 'dbo.WN_HIK_Cards or dbo.WN_HIK_Visitors is missing in this database - nothing changed.' AS Result;
+    RETURN;
+END
+
+EXEC(N'
+CREATE VIEW dbo.WN_HIK_Employees AS
+  SELECT Id AS id, Employee_no AS employee_no, Name AS name, Card_no AS card_no,
+         CAST(NULL AS NVARCHAR(260)) AS face_path, Valid_begin AS valid_begin, Valid_end AS valid_end,
+         Auto_delete AS auto_delete,
+         CAST(CASE WHEN Status = 1 THEN ''active'' ELSE ''expired'' END AS NVARCHAR(16)) AS status,
+         Notes AS notes, CAST(''card'' AS NVARCHAR(16)) AS kind, Booking_ref AS booking_ref, Created_at AS created_at,
+         Created_by AS created_by, Updated_by AS updated_by, Updated_on AS updated_on
+  FROM dbo.WN_HIK_Cards
+  UNION ALL
+  SELECT id, employee_no, name, card_no, face_path, valid_begin, valid_end, auto_delete, status, notes,
+         CAST(''visitor'' AS NVARCHAR(16)) AS kind, booking_ref, created_at,
+         CAST(NULL AS INT), CAST(NULL AS INT), CAST(NULL AS DATETIME2(0))
+  FROM dbo.WN_HIK_Visitors;
+');
+
+SELECT 'dbo.WN_HIK_Employees created.' AS Result, COUNT(*) AS RowsInView FROM dbo.WN_HIK_Employees WITH (NOLOCK);
