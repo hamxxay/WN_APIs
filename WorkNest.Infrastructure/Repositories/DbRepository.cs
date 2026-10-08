@@ -296,10 +296,10 @@ namespace WorkNest.Infrastructure.Repositories
                 if (monthlyBasePrice.HasValue) updateParts.Add("MonthlyBasePrice = @MBP");
                 if (maxDiscountPercent.HasValue) updateParts.Add("MaxDiscountPercent = @MDP");
                 if (!string.IsNullOrWhiteSpace(offeringType)) updateParts.Add("OfferingType = @OT");
-                // WHT ticked: the WN_WHTaxRate Id. Not ticked: no WHT rate at all (NULL; skipped if the column is NOT NULL).
-                var qWhtCol = await WhtIdColumnAsync(c, "dbo.WN_Quotations", "WithholdingTaxRate");
-                if (withholdingTaxRate.HasValue) updateParts.Add($"{qWhtCol} = @WTR");
-                else updateParts.Add($"{qWhtCol} = CASE WHEN COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Quotations'), '{qWhtCol}', 'AllowsNull') = 1 THEN NULL ELSE {qWhtCol} END");
+                // WHT columns are only written when a value is passed (Create Quotation no longer passes one: WHT is
+                // chosen on the Initial Invoice Preview), so WN_Quotations.WHTaxId keeps its default.
+                if (withholdingTaxRate.HasValue)
+                    updateParts.Add($"{await WhtIdColumnAsync(c, "dbo.WN_Quotations", "WithholdingTaxRate")} = @WTR");
                 if (sendWhtInvoice == true) updateParts.Add("SendWhtInvoice = 1"); // only when ticked: untouched quotations keep the default 0
 
                 var updateSql = $"UPDATE dbo.WN_Quotations SET {string.Join(", ", updateParts)} WHERE Id = @QID";
@@ -3265,6 +3265,33 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 return v is not null && v is not DBNull && Convert.ToBoolean(v);
             }
             catch (SqlException ex) when (ex.Number == 207) { return false; }
+        }
+
+        public async Task<(bool SendWht, decimal? WhTaxId)> GetBookingWhtAsync(int bookingId)
+        {
+            await using var c = await Open();
+            var col = await WhtIdColumnAsync(c, "dbo.WN_Bookings", "WHTRate");
+            await using var cmd = new SqlCommand($"SELECT ISNULL(SendWhtInvoice, 0) AS SendWhtInvoice, {col} AS WhTaxId FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @Id", c);
+            cmd.Parameters.AddWithValue("@Id", bookingId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return (false, null);
+            bool send = Convert.ToBoolean(r["SendWhtInvoice"]);
+            decimal? id = r["WhTaxId"] is DBNull ? null : Convert.ToDecimal(r["WhTaxId"]);
+            return send && id is > 0 ? (true, id) : (false, null);
+        }
+
+        public async Task SetBookingWhtAsync(int bookingId, decimal? whTaxId)
+        {
+            await using var c = await Open();
+            var col = await WhtIdColumnAsync(c, "dbo.WN_Bookings", "WHTRate");
+            // Standard: flag off and no Id (the column may be NOT NULL on older schemas: then it is left as is).
+            var sql = whTaxId is > 0
+                ? $"UPDATE dbo.WN_Bookings SET SendWhtInvoice = 1, {col} = @W WHERE Id = @Id"
+                : $"UPDATE dbo.WN_Bookings SET SendWhtInvoice = 0, {col} = CASE WHEN COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Bookings'), '{col}', 'AllowsNull') = 1 THEN NULL ELSE {col} END WHERE Id = @Id";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@Id", bookingId);
+            if (whTaxId is > 0) cmd.Parameters.AddWithValue("@W", whTaxId.Value);
+            await cmd.ExecuteNonQueryAsync();
         }
 
         // ---- Extra locations per user (WN_UserLocations). SQL error 208 = table not created yet. ----
