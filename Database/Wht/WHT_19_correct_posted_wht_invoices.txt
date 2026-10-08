@@ -1,0 +1,107 @@
+-- ============================================================================================
+-- CORRECTION of WHT invoices (InvoiceTypeId 6) already posted the old way. NOT RUN YET - review first.
+-- @Apply = 0 (default): PREVIEW only - shows what would change, changes nothing.
+-- @Apply = 1: applies it in ONE transaction; any check failing rolls everything back.
+--
+-- Old posting (6 lines): Dr AR = total - WHT, Dr WHT (WHAccountId / mapping WHT account), Cr Rent, Services, Tax, Deposit.
+-- New posting (5 lines, as WHT_19): Dr AR = invoice total; Cr Rent (unchanged: already the rent line incl. gross-up),
+-- Services, Tax, Deposit (unchanged). So per voucher:
+--   1. delete the WHT debit line ("Withholding Tax ..." description),
+--   2. AR debit += that amount (AR = invoice GrandTotal),
+--   3. accounts re-pointed to the booked space's type (fallback space), as WHT_19 posts them,
+--   4. every line re-described "WHTax invoice - <No> - <Customer> | <line>",
+--   5. voucher TypeId -> 2,
+--   6. customer ledger debit -> invoice GrandTotal (table dbo.CustomerLedger - see note; skipped if not found).
+-- Only invoices whose voucher has exactly one WHT line equal to WN_Invoices.WHTAmount are touched.
+-- ============================================================================================
+DECLARE @Apply BIT = 0;
+
+SET XACT_ABORT ON;
+SET NOCOUNT ON;
+
+DECLARE @Fix TABLE (InvoiceId INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), VoucherId INT, GrandTotal DECIMAL(18,2), WhtAmount DECIMAL(18,2),
+                    WhtLineId INT, ArLineId INT, NewAR INT, NewRent INT, NewServ INT, NewTax INT, NewSec INT, Tag NVARCHAR(220));
+
+INSERT INTO @Fix (InvoiceId, InvoiceNumber, VoucherId, GrandTotal, WhtAmount, WhtLineId, ArLineId)
+SELECT i.Id, i.InvoiceNumber, v.Id, i.GrandTotal, i.WHTAmount,
+       (SELECT MAX(l.Id) FROM dbo.Ledgers l WHERE l.VoucherId = v.Id AND l.Description LIKE 'Withholding Tax %'),
+       (SELECT MAX(l.Id) FROM dbo.Ledgers l WHERE l.VoucherId = v.Id AND l.Description LIKE 'Accounts Receivable - Invoice %')
+FROM dbo.WN_Invoices i
+JOIN dbo.Vouchers v ON v.RefNo = i.InvoiceNumber AND v.RefId = i.Id
+WHERE i.InvoiceTypeId = 6 AND ISNULL(i.WHTAmount, 0) > 0
+  AND ISNULL(i.StatusId, 0) <> 5
+  AND (SELECT COUNT(*) FROM dbo.Ledgers l WHERE l.VoucherId = v.Id AND l.Description LIKE 'Withholding Tax %' AND l.Debit = i.WHTAmount) = 1
+  AND (SELECT COUNT(*) FROM dbo.Ledgers l WHERE l.VoucherId = v.Id AND l.Description LIKE 'Accounts Receivable - Invoice %') = 1;
+
+-- accounts as WHT_19 resolves them (SpaceType -> Space) and the description tag
+UPDATE f SET
+    NewAR   = COALESCE(NULLIF(st.AccountReceivableId, 0), NULLIF(s.AccountReceivableId, 0)),
+    NewRent = COALESCE(NULLIF(st.RentAccountId, 0),       NULLIF(s.RentAccountId, 0)),
+    NewServ = COALESCE(NULLIF(st.ServicesIncomeId, 0),    NULLIF(s.ServicesIncomeId, 0)),
+    NewTax  = COALESCE(NULLIF(st.SalesTaxId, 0),          NULLIF(s.SalesTaxId, 0)),
+    NewSec  = COALESCE(NULLIF(st.SecurityReceivedId, 0),  NULLIF(s.SecurityReceivedId, 0), NULLIF(s.SecurityRecivedId, 0)),
+    Tag     = LEFT('WHTax invoice - ' + f.InvoiceNumber
+                   + ISNULL(' - ' + NULLIF(LTRIM(RTRIM(SUBSTRING(al.Description, CHARINDEX(f.InvoiceNumber, al.Description) + LEN(f.InvoiceNumber) + 3, 200))), ''), ''), 220)
+FROM @Fix f
+JOIN dbo.WN_Invoices i ON i.Id = f.InvoiceId
+JOIN dbo.WN_Bookings b ON b.Id = i.BookingId
+JOIN dbo.WN_Spaces s ON s.Id = b.SpaceId
+LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeId
+JOIN dbo.Ledgers al ON al.Id = f.ArLineId;
+
+-- PREVIEW: per invoice, old -> new
+SELECT f.InvoiceNumber, f.VoucherId, f.GrandTotal, f.WhtAmount AS WhtLineRemoved,
+       al.Debit AS OldARDebit, f.GrandTotal AS NewARDebit,
+       al.AccountId AS OldARAccount, f.NewAR, f.NewRent, f.NewServ, f.NewTax, f.NewSec, f.Tag AS NewDescriptionTag,
+       CASE WHEN f.NewAR IS NULL OR f.NewRent IS NULL THEN 'SKIP: account missing on SpaceType and Space'
+            WHEN ABS(al.Debit + f.WhtAmount - f.GrandTotal) >= 0.01 THEN 'SKIP: AR + WHT <> invoice total'
+            ELSE 'will be corrected' END AS Action
+FROM @Fix f JOIN dbo.Ledgers al ON al.Id = f.ArLineId
+ORDER BY f.InvoiceId;
+
+IF @Apply = 0
+BEGIN
+    SELECT 'PREVIEW only - nothing changed. Set @Apply = 1 to correct the rows marked "will be corrected".' AS Result;
+    RETURN;
+END
+
+DELETE f FROM @Fix f JOIN dbo.Ledgers al ON al.Id = f.ArLineId
+WHERE f.NewAR IS NULL OR f.NewRent IS NULL OR ABS(al.Debit + f.WhtAmount - f.GrandTotal) >= 0.01;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DELETE l FROM dbo.Ledgers l JOIN @Fix f ON f.WhtLineId = l.Id;                                   -- 1. WHT line
+    UPDATE l SET Debit = f.GrandTotal, AccountId = f.NewAR, Description = LEFT(f.Tag + ' | Accounts Receivable', 255)
+    FROM dbo.Ledgers l JOIN @Fix f ON f.ArLineId = l.Id;                                             -- 2./3./4. AR
+    UPDATE l SET AccountId = f.NewRent, Description = LEFT(f.Tag + ' | Rent', 255)
+    FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Rent - Invoice %';
+    UPDATE l SET AccountId = COALESCE(f.NewServ, l.AccountId), Description = LEFT(f.Tag + ' | Services Income', 255)
+    FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Services Income - Invoice %';
+    UPDATE l SET AccountId = COALESCE(f.NewTax, l.AccountId), Description = LEFT(f.Tag + ' | Sales Tax', 255)
+    FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Sales Tax - Invoice %';
+    UPDATE l SET AccountId = COALESCE(f.NewSec, l.AccountId), Description = LEFT(f.Tag + ' | Security Received', 255)
+    FROM dbo.Ledgers l JOIN @Fix f ON f.VoucherId = l.VoucherId WHERE l.Description LIKE 'Security Received - Invoice %';
+    UPDATE v SET TypeId = 2 FROM dbo.Vouchers v JOIN @Fix f ON f.VoucherId = v.Id;                   -- 5.
+
+    -- 6. customer ledger (table name / columns assumed from CustomerLedger_Insert: Debit, RefNo, RefId)
+    IF OBJECT_ID(N'dbo.CustomerLedger', N'U') IS NOT NULL
+        EXEC(N'UPDATE cl SET Debit = i.GrandTotal
+               FROM dbo.CustomerLedger cl
+               JOIN dbo.WN_Invoices i ON i.InvoiceNumber = cl.RefNo AND i.Id = cl.RefId
+               WHERE i.InvoiceTypeId = 6 AND cl.Debit > 0 AND cl.Debit <> i.GrandTotal;');
+
+    -- every corrected voucher: exactly 5 or fewer lines (no WHT line), Dr = Cr = invoice total
+    IF EXISTS (SELECT 1 FROM @Fix f
+               CROSS APPLY (SELECT SUM(Debit) Dr, SUM(Credit) Cr, SUM(CASE WHEN Description LIKE 'Withholding Tax %' THEN 1 ELSE 0 END) W
+                            FROM dbo.Ledgers WHERE VoucherId = f.VoucherId) t
+               WHERE t.Dr <> t.Cr OR ABS(t.Dr - f.GrandTotal) >= 0.01 OR t.W > 0)
+        THROW 50001, 'A corrected voucher would not balance at the invoice total. Nothing changed.', 1;
+
+    COMMIT TRANSACTION;
+    SELECT COUNT(*) AS InvoicesCorrected FROM @Fix;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

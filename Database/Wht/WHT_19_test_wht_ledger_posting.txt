@@ -1,0 +1,94 @@
+-- ============================================================================================
+-- TEST for WHT_19 (WHT invoice ledger posting). Changes NOTHING: everything runs in one transaction that is
+-- ROLLED BACK at the end (the test invoices, vouchers, ledger lines and the booking edit all disappear).
+--
+-- Set @TestBookingId to an existing booking that:
+--   * already has at least one invoice (so step 4 does not replace the test deposit with the booking's deposit),
+--   * is on a space whose space type (or the space) has the five accounts set.
+-- The booking is temporarily marked SendWHTInvoice = 1 with WHTaxId = 10 / 12. No WN_WHTaxRate row has those Ids,
+-- so WN_WHTaxRate_Resolve reads them as 10% / 12% (the "old percentage" path) - no rate rows are needed.
+--
+-- Inputs (both cases): rent 100000, service 10000, tax 1600, deposit 50000.
+-- Expected (ledger follows the invoice: G = ROUND((rent + service)/(1 - r), 2) + tax):
+--   10%: G = 123822.22; Dr AR 173822.22; Cr Rent 112222.22, Services 10000.00, Tax 1600.00, Deposit 50000.00
+--   12%: G = 126600.00; Dr AR 176600.00; Cr Rent 115000.00, Services 10000.00, Tax 1600.00, Deposit 50000.00
+-- Each case also checks: exactly 5 lines, Dr = Cr, voucher TypeId 2, every line tagged "WHTax invoice", no line on
+-- a WN_WHTaxRate.WHAccountId account, accounts = SpaceType (fallback Space), voucher total = invoice total.
+-- Run as ONE statement in DBeaver.
+-- ============================================================================================
+DECLARE @TestBookingId INT = 0;   -- <<< set an existing booking Id
+
+SET XACT_ABORT ON;
+SET NOCOUNT ON;
+IF NOT EXISTS (SELECT 1 FROM dbo.WN_Bookings WHERE Id = @TestBookingId)
+BEGIN
+    SELECT 'Set @TestBookingId to an existing booking first.' AS Result;
+    RETURN;
+END
+
+DECLARE @Results TABLE (TestCase NVARCHAR(20), [Check] NVARCHAR(60), Expected NVARCHAR(60), Actual NVARCHAR(60), Pass BIT);
+DECLARE @Lines TABLE (TestCase NVARCHAR(20), AccountId INT, Description NVARCHAR(255), Debit DECIMAL(18,2), Credit DECIMAL(18,2));
+
+BEGIN TRANSACTION;   -- rolled back at the end
+
+DECLARE @UserId INT = (SELECT UserId FROM dbo.WN_Bookings WHERE Id = @TestBookingId);
+DECLARE @SpaceId INT = (SELECT SpaceId FROM dbo.WN_Bookings WHERE Id = @TestBookingId);
+DECLARE @StId INT = (SELECT SpaceTypeId FROM dbo.WN_Spaces WHERE Id = @SpaceId);
+-- expected accounts: SpaceType, falling back to Space
+DECLARE @eAR INT, @eRent INT, @eServ INT, @eTax INT, @eSec INT;
+SELECT @eAR = COALESCE(NULLIF(st.AccountReceivableId, 0), NULLIF(s.AccountReceivableId, 0)),
+       @eRent = COALESCE(NULLIF(st.RentAccountId, 0), NULLIF(s.RentAccountId, 0)),
+       @eServ = COALESCE(NULLIF(st.ServicesIncomeId, 0), NULLIF(s.ServicesIncomeId, 0)),
+       @eTax = COALESCE(NULLIF(st.SalesTaxId, 0), NULLIF(s.SalesTaxId, 0)),
+       @eSec = COALESCE(NULLIF(st.SecurityReceivedId, 0), NULLIF(s.SecurityReceivedId, 0), NULLIF(s.SecurityRecivedId, 0))
+FROM dbo.WN_Spaces s LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeId
+WHERE s.Id = @SpaceId;
+
+DECLARE @Case INT = 1, @Rate DECIMAL(9,2), @Tc NVARCHAR(20), @InvId INT, @InvNo NVARCHAR(50), @Vid INT,
+        @ExpG DECIMAL(18,2), @ExpRent DECIMAL(18,2);
+WHILE @Case <= 2
+BEGIN
+    SET @Rate = CASE @Case WHEN 1 THEN 10 ELSE 12 END;
+    SET @Tc = CONCAT('WHT ', CAST(@Rate AS INT), '%');
+    SET @ExpG = ROUND(110000 / (1 - @Rate / 100.0), 2) + 1600;          -- 123822.22 / 126600.00
+    SET @ExpRent = ROUND(110000 / (1 - @Rate / 100.0), 2) - 10000;      -- 112222.22 / 115000.00
+    SELECT @InvId = NULL, @InvNo = CONCAT('TEST-WHT19-', CAST(@Rate AS INT), '-', @TestBookingId), @Vid = NULL;
+
+    UPDATE dbo.WN_Bookings SET SendWHTInvoice = 1, WHTaxId = @Rate WHERE Id = @TestBookingId;
+
+    EXEC dbo.WN_Invoices_Insert
+        @UserId = @UserId, @BookingId = @TestBookingId, @InvoiceNumber = @InvNo,
+        @SubTotal = 110000, @DiscountTotal = 0, @TaxTotal = 1600, @GrandTotal = 161600,
+        @SecurityDepositAmount = 50000, @RoomRentExclTax = 100000, @ServiceCharges = 10000, @TaxOnServiceCharges = 1600,
+        @PostToLedger = 1, @SyncCustomerVendor = 0,
+        @InvoiceId = @InvId OUTPUT, @GeneratedInvoiceNumber = @InvNo OUTPUT, @VoucherId = @Vid OUTPUT;
+
+    INSERT INTO @Lines SELECT @Tc, AccountId, Description, Debit, Credit FROM dbo.Ledgers WHERE VoucherId = @Vid;
+
+    DECLARE @Dr DECIMAL(18,2) = (SELECT SUM(Debit) FROM dbo.Ledgers WHERE VoucherId = @Vid);
+    DECLARE @Cr DECIMAL(18,2) = (SELECT SUM(Credit) FROM dbo.Ledgers WHERE VoucherId = @Vid);
+    INSERT INTO @Results VALUES
+      (@Tc, 'Invoice type 6',            '6', (SELECT CAST(InvoiceTypeId AS NVARCHAR(10)) FROM dbo.WN_Invoices WHERE Id = @InvId), NULL),
+      (@Tc, 'Exactly 5 ledger lines',    '5', CAST((SELECT COUNT(*) FROM dbo.Ledgers WHERE VoucherId = @Vid) AS NVARCHAR(10)), NULL),
+      (@Tc, 'Dr Account Receivable',     CAST(@ExpG + 50000 AS NVARCHAR(30)), CAST(CAST((SELECT SUM(Debit) FROM dbo.Ledgers WHERE VoucherId = @Vid AND AccountId = @eAR) AS DECIMAL(18,2)) AS NVARCHAR(30)), NULL),
+      (@Tc, 'Cr Rent',                   CAST(@ExpRent AS NVARCHAR(30)), CAST(CAST((SELECT SUM(Credit) FROM dbo.Ledgers WHERE VoucherId = @Vid AND AccountId = @eRent) AS DECIMAL(18,2)) AS NVARCHAR(30)), NULL),
+      (@Tc, 'Cr Services Income',        '10000.00', CAST(CAST((SELECT SUM(Credit) FROM dbo.Ledgers WHERE VoucherId = @Vid AND AccountId = @eServ) AS DECIMAL(18,2)) AS NVARCHAR(30)), NULL),
+      (@Tc, 'Cr Sales Tax',              '1600.00',  CAST(CAST((SELECT SUM(Credit) FROM dbo.Ledgers WHERE VoucherId = @Vid AND AccountId = @eTax) AS DECIMAL(18,2)) AS NVARCHAR(30)), NULL),
+      (@Tc, 'Cr Security Received',      '50000.00', CAST(CAST((SELECT SUM(Credit) FROM dbo.Ledgers WHERE VoucherId = @Vid AND AccountId = @eSec) AS DECIMAL(18,2)) AS NVARCHAR(30)), NULL),
+      (@Tc, 'Total Dr = total Cr',       CAST(@Dr AS NVARCHAR(30)), CAST(@Cr AS NVARCHAR(30)), NULL),
+      (@Tc, 'Voucher total = invoice',   (SELECT CAST(CAST(GrandTotal AS DECIMAL(18,2)) AS NVARCHAR(30)) FROM dbo.WN_Invoices WHERE Id = @InvId),
+                                         (SELECT CAST(CAST(TotalAmount AS DECIMAL(18,2)) AS NVARCHAR(30)) FROM dbo.Vouchers WHERE Id = @Vid), NULL),
+      (@Tc, 'Voucher TypeId',            '2', (SELECT CAST(TypeId AS NVARCHAR(10)) FROM dbo.Vouchers WHERE Id = @Vid), NULL),
+      (@Tc, 'Lines tagged WHTax invoice','5', CAST((SELECT COUNT(*) FROM dbo.Ledgers WHERE VoucherId = @Vid AND Description LIKE 'WHTax invoice - %') AS NVARCHAR(10)), NULL),
+      (@Tc, 'Lines on a WHAccountId',    '0', CAST((SELECT COUNT(*) FROM dbo.Ledgers WHERE VoucherId = @Vid
+                                                    AND AccountId IN (SELECT WHAccountId FROM dbo.WN_WHTaxRate WHERE WHAccountId > 0)) AS NVARCHAR(10)), NULL);
+    SET @Case = @Case + 1;
+END
+
+ROLLBACK TRANSACTION;   -- nothing is kept
+
+UPDATE @Results SET Pass = CASE WHEN Expected = Actual THEN 1 ELSE 0 END;
+SELECT TestCase, [Check], Expected, Actual, CASE WHEN Pass = 1 THEN 'PASS' ELSE 'FAIL' END AS Result FROM @Results;
+SELECT * FROM @Lines ORDER BY TestCase, Debit DESC, Credit DESC;
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM @Results WHERE Pass = 0) THEN 'ALL PASS' ELSE 'SOME CHECKS FAILED' END AS Summary,
+       @eAR AS ARAccount, @eRent AS RentAccount, @eServ AS ServicesAccount, @eTax AS SalesTaxAccount, @eSec AS SecurityAccount;
