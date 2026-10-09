@@ -2444,7 +2444,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         /// [5] receivables aging, [6] occupancy by space type, [7] top customers, [8] lease expiries next 6 months.
         /// Live bookings = BookingStatusId 1, 2, 5, 33 (old + WN_BookingStatuses pending / confirmed).
         /// </summary>
-        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(int? locationId, int endingSoonDays,
+        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null)
         {
             // Period: this month / quarter / year (calendar, to date). Comparisons are against the previous period;
@@ -2455,6 +2455,9 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             // Status IDs are ints from code (OrderStatus lookups), never user input.
             static string List(IEnumerable<int> ids) { var l = ids.Distinct().ToList(); return l.Count == 0 ? "-1" : string.Join(",", l); }
             var open = List(openInvoiceStatusIds); var paid = List(paidStatusIds); var voids = List(voidStatusIds);
+            // Location filter: null = all locations; otherwise only spaces in those locations (ints, never user text).
+            var spaceLocFilter = locationIds is null ? "1 = 1" : $"s.LocationId IN ({List(locationIds)})";
+            var invLocFilter = locationIds is null ? "1 = 1" : "b.SpaceId IN (SELECT Id FROM @Spaces)";
             await using var c = await Open();
             var sql = $@"
                 DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) wall-clock time from the app clock
@@ -2472,7 +2475,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 INSERT INTO @Spaces (Id, Name)
                 SELECT s.Id, COALESCE(NULLIF(s.Name, ''), s.Code)
                   FROM dbo.WN_Spaces s WITH (NOLOCK)
-                 WHERE s.Status = 1 AND (@Loc IS NULL OR s.LocationId = @Loc);
+                 WHERE s.Status = 1 AND {spaceLocFilter};
 
                 DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, StartOn DATETIME2(0), EndOn DATETIME2(0), StatusId INT, UserId INT NULL, CustomerCode NVARCHAR(50) NULL, TotalAmount DECIMAL(18,2) NULL);
                 INSERT INTO @Live
@@ -2487,7 +2490,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                  WHERE i.StatusId NOT IN ({voids})
-                   AND (@Loc IS NULL OR b.SpaceId IN (SELECT Id FROM @Spaces));
+                   AND {invLocFilter};
 
                 -- [0] headline numbers
                 SELECT
@@ -2611,7 +2614,6 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                   FROM f
                  ORDER BY f.MStart;";
             await using var cmd = new SqlCommand(sql, c) { CommandTimeout = 60 };
-            cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
             cmd.Parameters.Add("@Days", SqlDbType.Int).Value = endingSoonDays;
             cmd.Parameters.Add("@PMonths", SqlDbType.Int).Value = months;
             cmd.Parameters.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow ?? _clock.Now;

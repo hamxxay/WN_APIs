@@ -38,7 +38,8 @@ try
         lc.ReadFrom.Configuration(ctx.Configuration));
 
     // ── Controllers + JSON camelCase ──────────────────────────────────────────
-    builder.Services.AddControllers()
+    // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
+    builder.Services.AddControllers(o => o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>())
         .AddJsonOptions(o =>
         {
             o.JsonSerializerOptions.PropertyNamingPolicy  = System.Text.Json.JsonNamingPolicy.CamelCase;

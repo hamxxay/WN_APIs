@@ -6,7 +6,8 @@ namespace WorkNest.Application.Interfaces
     public interface IDashboardService
     {
         Task<ApiResponse> GetSummaryAsync();
-        Task<DashboardOverviewDto> GetOverviewAsync(int? locationId, string? period = null);
+        /// <param name="locationIds">Locations to total; null = all locations.</param>
+        Task<DashboardOverviewDto> GetOverviewAsync(IReadOnlyCollection<int>? locationIds, string? period = null);
 
         /// <summary>
         /// Admin sidebar badges: counts of items waiting on staff, keyed by sidebar route ("/admin/bookings" ...).
