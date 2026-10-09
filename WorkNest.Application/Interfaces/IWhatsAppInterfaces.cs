@@ -20,7 +20,8 @@ namespace WorkNest.Application.Interfaces
         Task<(int ContactId, int ConversationId)> EnsureConversationAsync(string phone, string? name);
         /// <summary>Saves a message. False when this WhatsApp message id was already saved (Meta re-delivery).</summary>
         Task<bool> AddMessageAsync(int conversationId, string direction, string messageType, string? text, string? whatsAppMessageId, int? sentByUserId);
-        Task<(string State, string? Data)?> GetBotStateAsync(string phone);
+        /// <summary>Where the customer is in the bot menu, and how many minutes ago they last wrote to the bot.</summary>
+        Task<(string State, string? Data, int MinutesSinceUpdate)?> GetBotStateAsync(string phone);
         Task SaveBotStateAsync(string phone, string state, string? data);
 
         Task<(List<WhatsAppConversationDto> Items, int Total)> GetConversationsAsync(int page, int limit, string? search);

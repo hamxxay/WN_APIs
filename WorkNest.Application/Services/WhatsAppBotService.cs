@@ -40,6 +40,27 @@ namespace WorkNest.Application.Services
 
         private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
+        /// <summary>A message after this many quiet minutes starts a new conversation (welcome menu, no "invalid option").</summary>
+        private const int NewSessionAfterMinutes = 30;
+
+        private static readonly HashSet<string> Greetings = new(StringComparer.Ordinal)
+        {
+            "hi", "hy", "helo", "hey", "heya", "hai", "hiya", "yo", "start", "menu",
+            "salam", "salaam", "aoa", "asalamualaikum", "asalamoalaikum", "asalamualikum", "aslamualaikum", "aslamoalaikum",
+            "goodmorning", "godmorning", "goodafternoon", "godafternoon", "goodevening", "godevening", "gm"
+        };
+
+        /// <summary>"Hellllooooo", "hiii!!", "Assalam o Alaikum", "Good morning" … all count as a greeting.</summary>
+        private static bool IsGreeting(string lower)
+        {
+            var letters = new string(lower.Where(char.IsLetter).ToArray());
+            if (letters.Length == 0) return false;
+            var squeezed = Regex.Replace(letters, @"(.)\1+", "$1");   // hellloooo -> helo, hiiii -> hi
+            return Greetings.Contains(letters) || Greetings.Contains(squeezed)
+                   || squeezed.StartsWith("asalam") || squeezed.StartsWith("aslam") || squeezed.StartsWith("salam")
+                   || (squeezed.StartsWith("helo") && squeezed.Length <= 8) || (squeezed.StartsWith("hey") && squeezed.Length <= 6);
+        }
+
         public WhatsAppBotService(IWhatsAppRepository repo, IWhatsAppClient client, IDbRepository db, IContactService contacts,
             IComplaintService complaints, IConfiguration config, ILogger<WhatsAppBotService> logger)
         {
@@ -69,6 +90,8 @@ namespace WorkNest.Application.Services
             public BotData Data = new();
             public readonly List<string> Texts = new();
             public readonly List<(Branch Branch, WhatsAppBranchOptions Options)> Pins = new();
+            /// <summary>First message from this customer, or the first after a quiet spell: greet, never "invalid option".</summary>
+            public bool NewSession;
             public void Reset(string state = "main_menu") { State = state; Data = new BotData(); }
         }
 
@@ -84,7 +107,11 @@ namespace WorkNest.Application.Services
                 return; // the same message delivered again by Meta: already answered
 
             var saved = await _repo.GetBotStateAsync(phone);
-            var turn = new Turn { State = saved?.State ?? "main_menu" };
+            var turn = new Turn
+            {
+                State = saved?.State ?? "main_menu",
+                NewSession = saved == null || saved.Value.MinutesSinceUpdate >= NewSessionAfterMinutes
+            };
             if (!string.IsNullOrWhiteSpace(saved?.Data))
             {
                 try { turn.Data = JsonSerializer.Deserialize<BotData>(saved.Value.Data!, Json) ?? new BotData(); } catch { turn.Data = new BotData(); }
@@ -278,7 +305,7 @@ namespace WorkNest.Application.Services
 
             // Main menu (and anything unexpected).
             t.Reset();
-            if (lower is "hi" or "hello" or "hey" or "salam" or "assalamualaikum" or "aoa")
+            if (IsGreeting(lower))
             {
                 t.Texts.Add("Hello!\n\n" + MainMenu());
             }
@@ -300,6 +327,11 @@ namespace WorkNest.Application.Services
             else if (lower is "reception" or "talk to reception" or "contact" or "phone")
             {
                 t.Texts.Add(ReceptionText(branches));
+            }
+            else if (t.NewSession)
+            {
+                // First message (or first after a while) that isn't a menu choice: just welcome them.
+                t.Texts.Add(MainMenu());
             }
             else
             {
