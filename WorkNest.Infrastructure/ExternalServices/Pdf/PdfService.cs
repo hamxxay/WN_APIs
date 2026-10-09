@@ -706,7 +706,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 inner.Item().Row(r =>
                                 {
-                                    r.ConstantItem(220).AlignRight().Text($"PST on Support Services ({taxPct:G29}%):" ).FontColor("#000000ff");
+                                    r.ConstantItem(220).AlignRight().Text($"PST on Support Services ({(c.AppliedTaxPercentage > 0 ? c.AppliedTaxPercentage : 16.00m):G29}%):" ).FontColor("#000000ff");
                                     r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.TaxAmount:N0}").FontColor("#000000ff");
                                 });
                             }
