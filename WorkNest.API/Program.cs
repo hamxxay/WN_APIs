@@ -192,6 +192,8 @@ try
     builder.Services.AddScoped<IGalleryService, GalleryService>();
     builder.Services.AddScoped<ISpaceConfigService, SpaceConfigService>();
     builder.Services.AddScoped<IDashboardService, DashboardService>();
+    builder.Services.AddScoped<IRoleDashboardRepository, WorkNest.Infrastructure.Repositories.RoleDashboardRepository>();
+    builder.Services.AddScoped<IRoleDashboardService, RoleDashboardService>();
     builder.Services.AddScoped<IPlanFeatureService, PlanFeatureService>();
     builder.Services.AddScoped<IBranchService, BranchService>();
     builder.Services.AddScoped<IFloorService, FloorService>();

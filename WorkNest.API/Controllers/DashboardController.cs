@@ -10,7 +10,12 @@ namespace WorkNest.API.Controllers
     public class DashboardController : ControllerBase
     {
         private readonly IDashboardService _dashboard;
-        public DashboardController(IDashboardService dashboard) => _dashboard = dashboard;
+        private readonly IRoleDashboardService _roleDashboard;
+        public DashboardController(IDashboardService dashboard, IRoleDashboardService roleDashboard)
+        {
+            _dashboard = dashboard;
+            _roleDashboard = roleDashboard;
+        }
 
         [HttpGet("api/dashboard/summary")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
@@ -25,25 +30,43 @@ namespace WorkNest.API.Controllers
         /// </summary>
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
         [HttpGet("api/dashboard/overview")]
-        public async Task<IActionResult> Overview([FromQuery] int? locationId, [FromQuery] string? locationIds, [FromQuery] string? period)
+        public async Task<IActionResult> Overview([FromQuery] int? locationId, [FromQuery] string? locationIds, [FromQuery] string? period) =>
+            Ok(await _dashboard.GetOverviewAsync(Scope(locationId, locationIds), period));
+
+        /// <summary>
+        /// Role-based dashboard sections (same location rules as the overview). Sales executive: sales pipeline,
+        /// tour inquiries &amp; follow-ups, renewals and collections. Admin: team &amp; service. Super admin: team &amp;
+        /// service, location comparison, staff overview and system health (company-wide).
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpGet("api/dashboard/role")]
+        public async Task<IActionResult> Role([FromQuery] int? locationId, [FromQuery] string? locationIds, [FromQuery] string? period)
+        {
+            var role = User.IsSuperAdmin() ? "super_admin"
+                : User.IsAdminOrSuperAdmin() ? "admin"
+                : "sales_executive";
+            return Ok(await _roleDashboard.GetAsync(role, Scope(locationId, locationIds), period));
+        }
+
+        /// <summary>
+        /// Locations to total: the asked-for ones, none = all. Location-bound roles (admin, sales executive) only ever
+        /// get their own locations: asked-for locations outside them are ignored, and none (or none of theirs) means
+        /// all of theirs.
+        /// </summary>
+        private List<int>? Scope(int? locationId, string? locationIds)
         {
             var requested = (locationIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(x => int.TryParse(x, out var id) ? id : 0)
                 .Append(locationId ?? 0)
                 .Where(id => id > 0).Distinct().ToList();
 
-            List<int>? scope;
             if (User.IsLocationBoundRole())
             {
                 var allowed = User.GetLocationIds();
                 var mine = requested.Where(allowed.Contains).ToList();
-                scope = mine.Count > 0 ? mine : (allowed.Count > 0 ? allowed.ToList() : new List<int> { -1 }); // -1 matches nothing
+                return mine.Count > 0 ? mine : (allowed.Count > 0 ? allowed.ToList() : new List<int> { -1 }); // -1 matches nothing
             }
-            else
-            {
-                scope = requested.Count > 0 ? requested : null;
-            }
-            return Ok(await _dashboard.GetOverviewAsync(scope, period));
+            return requested.Count > 0 ? requested : null;
         }
 
         // Sidebar routes a sales executive may open (same list as SALES_EXECUTIVE_ROUTES in WorkNest_FE admin.guard.ts).
