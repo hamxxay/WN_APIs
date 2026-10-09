@@ -11484,7 +11484,7 @@ BEGIN
            OR u.Name        LIKE '%' + @Search + '%'
            OR u.Email       LIKE '%' + @Search + '%'
            OR u.PhoneNumber LIKE '%' + @Search + '%')
-    ORDER BY u.CreatedOn DESC
+    ORDER BY ISNULL(u.CreatedOn, '1970-01-01') DESC, u.Id DESC
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO

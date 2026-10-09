@@ -337,13 +337,17 @@ namespace WorkNest.Infrastructure.Repositories
             return result;
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null, int? locationId = null)
         {
             await using var c = await Open();
-            string sql = "SELECT Id, Description, DiscountCap, ISNULL(Status, 1) AS Status FROM dbo.WN_OfferingType";
+            string sql = "SELECT Id, Description, DiscountCap, ISNULL(Status, 1) AS Status, LocationId FROM dbo.WN_OfferingType WHERE 1=1";
             if (activeOnly.HasValue)
             {
-                sql += activeOnly.Value ? " WHERE ISNULL(Status, 1) = 1" : " WHERE ISNULL(Status, 1) = 0";
+                sql += activeOnly.Value ? " AND ISNULL(Status, 1) = 1" : " AND ISNULL(Status, 1) = 0";
+            }
+            if (locationId.HasValue && locationId.Value > 0)
+            {
+                sql += $" AND (LocationId = {locationId.Value} OR LocationId IS NULL)";
             }
             sql += " ORDER BY Id ASC";
             await using var cmd = new SqlCommand(sql, c);

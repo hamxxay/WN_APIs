@@ -90,7 +90,7 @@ namespace WorkNest.Application.Interfaces
             decimal? withholdingTaxRate = null,
             bool? sendWhtInvoice = null
         );
-        Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null);
+        Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null, int? locationId = null);
         Task<IDictionary<string, object?>?> GetQuotationByIdAsync(
             int quotationId,
             string? userEmail = null
