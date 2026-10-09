@@ -1,3 +1,4 @@
+using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
 
@@ -262,7 +263,8 @@ namespace WorkNest.Application.Interfaces
         Task UpdateAccessCardAsync(string id, int? locationId, int? customerId, int? bookingId, int? spaceId, string? cardNumber, DateTime? startDate, DateTime? endDate, int? status, int? updatedById);
         Task DeleteAccessCardAsync(string id);
         Task GenerateAccessCardsForBookingDbAsync(int bookingId, int? createdById = null);
-        Task ExecuteRawSqlAsync(string sql);
+        Task InsertQuotationDetailsAsync(int quotationId, IEnumerable<QuotationDetailDto> details, int? createdById);
+        Task GenerateBookingMeetingRoomEntitlementsIfPrivateAsync(int bookingId);
 
         // --- Attendants & Access Control ---
         Task<(int PersonId, Guid PersonGuid)> AddAttendantSpAsync(string name, string email, string phone, string idType, string idNumber, int customerId);

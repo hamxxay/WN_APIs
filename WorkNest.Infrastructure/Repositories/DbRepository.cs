@@ -1,3 +1,4 @@
+using WorkNest.Application.DTOs.Quotation;
 
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -599,18 +600,23 @@ namespace WorkNest.Infrastructure.Repositories
                 throw new InvalidOperationException($"Quotation is in '{status}' state and cannot be accepted (must be Sent).");
 
             string qNo = q["QuotationNumber"]?.ToString() ?? "";
-            await ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = 'Accepted', UpdatedDate = GETUTCDATE() WHERE Id = {quotationId}");
+            await UpdateQuotationStatusAsync(quotationId, "Accepted");
 
-            string noteSql = string.IsNullOrWhiteSpace(note) ? "NULL" : $"'{note.Replace("'", "''")}'";
-            string uIdSql = userId.HasValue ? userId.Value.ToString() : "NULL";
-            await ExecuteRawSqlAsync($@"
+            const string respSql = @"
 INSERT INTO dbo.WN_QuotationResponses (QuotationId, Version, ResponseType, Note, RespondedByUserId, RespondedByCustomerId, RespondedDate)
-VALUES ({quotationId}, {version}, 'Accepted', {noteSql}, {uIdSql}, {customerId}, GETUTCDATE())");
+VALUES (@QuotationId, @Version, 'Accepted', @Note, @UserId, @CustomerId, SYSUTCDATETIME())";
+            await using (var respCmd = new SqlCommand(respSql, c))
+            {
+                respCmd.Parameters.AddWithValue("@QuotationId", quotationId);
+                respCmd.Parameters.AddWithValue("@Version", version);
+                respCmd.Parameters.AddWithValue("@Note", (object?)note ?? DBNull.Value);
+                respCmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
+                respCmd.Parameters.AddWithValue("@CustomerId", customerId);
+                await respCmd.ExecuteNonQueryAsync();
+            }
 
             string msg = $"Quotation {qNo} (Version {version}) was accepted by the customer.";
-            await ExecuteRawSqlAsync($@"
-INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CustomerNote, CreatedByUserId, CreatedDate)
-VALUES ({quotationId}, {version}, 'Accepted', '{msg.Replace("'", "''")}', {noteSql}, {uIdSql}, GETUTCDATE())");
+            await AddQuotationActivityAsync(quotationId, version, "Accepted", msg, userId, note);
 
             return new Dictionary<string, object?>
             {
@@ -640,18 +646,23 @@ VALUES ({quotationId}, {version}, 'Accepted', '{msg.Replace("'", "''")}', {noteS
                 throw new InvalidOperationException($"Quotation is in '{status}' state and cannot be declined (must be Sent).");
 
             string qNo = q["QuotationNumber"]?.ToString() ?? "";
-            await ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = 'Declined', UpdatedDate = GETUTCDATE() WHERE Id = {quotationId}");
+            await UpdateQuotationStatusAsync(quotationId, "Declined");
 
-            string noteSql = $"'{note.Replace("'", "''")}'";
-            string uIdSql = userId.HasValue ? userId.Value.ToString() : "NULL";
-            await ExecuteRawSqlAsync($@"
+            const string respSql = @"
 INSERT INTO dbo.WN_QuotationResponses (QuotationId, Version, ResponseType, Note, RespondedByUserId, RespondedByCustomerId, RespondedDate)
-VALUES ({quotationId}, {version}, 'Declined', {noteSql}, {uIdSql}, {customerId}, GETUTCDATE())");
+VALUES (@QuotationId, @Version, 'Declined', @Note, @UserId, @CustomerId, SYSUTCDATETIME())";
+            await using (var respCmd = new SqlCommand(respSql, c))
+            {
+                respCmd.Parameters.AddWithValue("@QuotationId", quotationId);
+                respCmd.Parameters.AddWithValue("@Version", version);
+                respCmd.Parameters.AddWithValue("@Note", note);
+                respCmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
+                respCmd.Parameters.AddWithValue("@CustomerId", customerId);
+                await respCmd.ExecuteNonQueryAsync();
+            }
 
             string msg = $"Quotation {qNo} (Version {version}) was declined by the customer.";
-            await ExecuteRawSqlAsync($@"
-INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CustomerNote, CreatedByUserId, CreatedDate)
-VALUES ({quotationId}, {version}, 'Declined', '{msg.Replace("'", "''")}', {noteSql}, {uIdSql}, GETUTCDATE())");
+            await AddQuotationActivityAsync(quotationId, version, "Declined", msg, userId, note);
 
             return new Dictionary<string, object?>
             {
@@ -679,45 +690,67 @@ VALUES ({quotationId}, {version}, 'Declined', '{msg.Replace("'", "''")}', {noteS
                                    .Max();
             int newVersion = maxVersion + 1;
 
-            string createdBySql = createdById.HasValue ? createdById.Value.ToString() : "NULL";
-            string validUntilSql = Convert.ToDateTime(source["ValidUntil"]).ToString("yyyy-MM-dd HH:mm:ss");
-            string startSql = Convert.ToDateTime(source["StartDateTime"]).ToString("yyyy-MM-dd HH:mm:ss");
-            string endSql = Convert.ToDateTime(source["EndDateTime"]).ToString("yyyy-MM-dd HH:mm:ss");
+            // Restrict discount type to fixed accepted values only
+            string rawDiscountType = source.TryGetValue("DiscountType", out var dtObj) && dtObj != null ? dtObj.ToString()!.Trim() : "Percentage";
+            string discountType = rawDiscountType.Equals("Amount", StringComparison.OrdinalIgnoreCase) || rawDiscountType.Equals("Fixed", StringComparison.OrdinalIgnoreCase)
+                ? (rawDiscountType.Equals("Fixed", StringComparison.OrdinalIgnoreCase) ? "Fixed" : "Amount")
+                : "Percentage";
 
-            string insertSql = $@"
+            const string insertSql = @"
 INSERT INTO dbo.WN_Quotations (
     QuotationNumber, ValidUntil, CustomerId, SpaceId, StartDateTime, EndDateTime,
     SubtotalAmount, DiscountPercentage, DiscountAmount, TotalAmount, Remarks, Status,
     Version, IsActive, CreatedById, DiscountType, SecurityDeposit, FloorId, BillingPeriodMonths
 )
 VALUES (
-    '{qNo}', '{validUntilSql}', {source["CustomerId"]}, {source["SpaceId"]}, '{startSql}', '{endSql}',
-    {source["SubtotalAmount"]}, {source["DiscountPercentage"]}, {source["DiscountAmount"]}, {source["TotalAmount"]},
-    {(source["Remarks"] != null ? $"'{source["Remarks"]!.ToString()!.Replace("'", "''")}'" : "NULL")}, 'Draft',
-    {newVersion}, 1, {createdBySql}, '{(source.TryGetValue("DiscountType", out var dt) ? dt : "Percentage")}',
-    {(source.TryGetValue("SecurityDeposit", out var sd) ? sd : 0)}, {(source.TryGetValue("FloorId", out var fid) && fid != null ? fid : "NULL")},
-    {(source.TryGetValue("BillingPeriodMonths", out var bpm) && bpm != null ? bpm : 3)}
+    @QuotationNumber, @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
+    @SubtotalAmount, @DiscountPercentage, @DiscountAmount, @TotalAmount, @Remarks, 'Draft',
+    @Version, 1, @CreatedById, @DiscountType, @SecurityDeposit, @FloorId, @BillingPeriodMonths
 );
 SELECT SCOPE_IDENTITY() AS NewId;";
 
             await using var cmd = new SqlCommand(insertSql, c);
+            cmd.Parameters.AddWithValue("@QuotationNumber", qNo);
+            cmd.Parameters.AddWithValue("@ValidUntil", Convert.ToDateTime(source["ValidUntil"]));
+            cmd.Parameters.AddWithValue("@CustomerId", source["CustomerId"]);
+            cmd.Parameters.AddWithValue("@SpaceId", source["SpaceId"]);
+            cmd.Parameters.AddWithValue("@StartDateTime", Convert.ToDateTime(source["StartDateTime"]));
+            cmd.Parameters.AddWithValue("@EndDateTime", Convert.ToDateTime(source["EndDateTime"]));
+            cmd.Parameters.AddWithValue("@SubtotalAmount", source["SubtotalAmount"]);
+            cmd.Parameters.AddWithValue("@DiscountPercentage", source["DiscountPercentage"]);
+            cmd.Parameters.AddWithValue("@DiscountAmount", source["DiscountAmount"]);
+            cmd.Parameters.AddWithValue("@TotalAmount", source["TotalAmount"]);
+            cmd.Parameters.AddWithValue("@Remarks", source["Remarks"] ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Version", newVersion);
+            cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@DiscountType", discountType);
+            cmd.Parameters.AddWithValue("@SecurityDeposit", source.TryGetValue("SecurityDeposit", out var sd) && sd != null ? sd : 0);
+            cmd.Parameters.AddWithValue("@FloorId", source.TryGetValue("FloorId", out var fid) && fid != null ? fid : DBNull.Value);
+            cmd.Parameters.AddWithValue("@BillingPeriodMonths", source.TryGetValue("BillingPeriodMonths", out var bpm) && bpm != null ? bpm : 3);
+
             var newIdObj = await cmd.ExecuteScalarAsync();
             int newQuotationId = Convert.ToInt32(newIdObj);
 
             var details = await GetQuotationDetailsAsync(quotationId);
+            const string detSql = @"
+INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity, UnitPrice, Amount, CreatedById)
+VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @CreatedById)";
+
             foreach (var d in details)
             {
-                string desc = d["Description"]?.ToString()?.Replace("'", "''") ?? "";
-                string detSql = $@"
-INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity, UnitPrice, Amount, CreatedById)
-VALUES ({newQuotationId}, '{d["FeeType"]}', '{desc}', {d["Quantity"]}, {d["UnitPrice"]}, {d["Amount"]}, {createdBySql})";
-                await ExecuteRawSqlAsync(detSql);
+                await using var detCmd = new SqlCommand(detSql, c);
+                detCmd.Parameters.AddWithValue("@QuotationId", newQuotationId);
+                detCmd.Parameters.AddWithValue("@FeeType", d["FeeType"] ?? DBNull.Value);
+                detCmd.Parameters.AddWithValue("@Description", d["Description"] ?? DBNull.Value);
+                detCmd.Parameters.AddWithValue("@Quantity", d["Quantity"] ?? 1);
+                detCmd.Parameters.AddWithValue("@UnitPrice", d["UnitPrice"] ?? 0);
+                detCmd.Parameters.AddWithValue("@Amount", d["Amount"] ?? 0);
+                detCmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+                await detCmd.ExecuteNonQueryAsync();
             }
 
             string msg = $"Version {newVersion} created from Version {srcVersion}.";
-            await ExecuteRawSqlAsync($@"
-INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CreatedByUserId, CreatedDate)
-VALUES ({newQuotationId}, {newVersion}, 'VersionCreated', '{msg.Replace("'", "''")}', {createdBySql}, GETUTCDATE())");
+            await AddQuotationActivityAsync(newQuotationId, newVersion, "VersionCreated", msg, createdById);
 
             return new Dictionary<string, object?>
             {
@@ -762,13 +795,10 @@ VALUES ({newQuotationId}, {newVersion}, 'VersionCreated', '{msg.Replace("'", "''
             string qNo = q["QuotationNumber"]?.ToString() ?? "";
             int ver = Convert.ToInt32(q["Version"]);
 
-            await ExecuteRawSqlAsync($"UPDATE dbo.WN_Quotations SET Status = '{status}', UpdatedDate = GETUTCDATE() WHERE Id = {quotationId}");
+            await UpdateQuotationStatusAsync(quotationId, status);
 
-            string uIdSql = userId.HasValue ? userId.Value.ToString() : "NULL";
             string msg = $"Quotation {qNo} (Version {ver}) status changed to {status}.";
-            await ExecuteRawSqlAsync($@"
-INSERT INTO dbo.WN_QuotationActivities (QuotationId, Version, ActivityType, Message, CreatedByUserId, CreatedDate)
-VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETUTCDATE())");
+            await AddQuotationActivityAsync(quotationId, ver, "Sent", msg, userId);
         }
 
         public async Task<(int? Id, string? PublicId)> GetUserIdByEmailAsync(string email)
@@ -2815,8 +2845,19 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         public async Task<bool> SaveNavBadgeReadsDbAsync(string userEmail, IDictionary<string, List<string>> itemsByRoute)
         {
             await using var c = await Open();
-            await using (var check = new SqlCommand("SELECT CASE WHEN OBJECT_ID(N'dbo.WN_NAV_BadgeReads', N'U') IS NULL THEN 0 ELSE 1 END", c))
-                if (Convert.ToInt32(await check.ExecuteScalarAsync()) == 0) return false;
+            const string ensureTableSql = @"
+                IF OBJECT_ID(N'dbo.WN_NAV_BadgeReads', N'U') IS NULL
+                BEGIN
+                    CREATE TABLE dbo.WN_NAV_BadgeReads (
+                        UserEmail NVARCHAR(200) NOT NULL,
+                        RouteKey NVARCHAR(100) NOT NULL,
+                        ReadItems NVARCHAR(MAX) NULL,
+                        ReadAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                        CONSTRAINT PK_WN_NAV_BadgeReads PRIMARY KEY CLUSTERED (UserEmail, RouteKey)
+                    );
+                END";
+            await using (var ensureCmd = new SqlCommand(ensureTableSql, c))
+                await ensureCmd.ExecuteNonQueryAsync();
 
             const string sql = @"
                 UPDATE dbo.WN_NAV_BadgeReads SET ReadItems = @Items, ReadAt = SYSUTCDATETIME()
@@ -3113,10 +3154,63 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             return (header, lines);
         }
 
-        public async Task ExecuteRawSqlAsync(string sql)
+        public async Task InsertQuotationDetailsAsync(int quotationId, IEnumerable<QuotationDetailDto> details, int? createdById)
         {
             await using var c = await Open();
+            const string sql = @"
+INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity, UnitPrice, Amount, CreatedById)
+VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @CreatedById)";
+
+            foreach (var det in details)
+            {
+                await using var cmd = new SqlCommand(sql, c);
+                cmd.Parameters.AddWithValue("@QuotationId", quotationId);
+                cmd.Parameters.AddWithValue("@FeeType", (object?)det.FeeType ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Description", (object?)det.Description ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Quantity", det.Quantity);
+                cmd.Parameters.AddWithValue("@UnitPrice", det.UnitPrice);
+                cmd.Parameters.AddWithValue("@Amount", det.Amount);
+                cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+                await cmd.ExecuteNonQueryAsync();
+            }
+        }
+
+        public async Task GenerateBookingMeetingRoomEntitlementsIfPrivateAsync(int bookingId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+DECLARE @UId INT = NULL;
+DECLARE @Start DATETIME2 = NULL;
+DECLARE @End DATETIME2 = NULL;
+DECLARE @IsPrivate BIT = 0;
+
+SELECT 
+    @UId = b.UserId,
+    @Start = b.StartOn,
+    @End = b.EndOn,
+    @IsPrivate = CASE 
+        WHEN st.CategoryId = 1 
+          OR LOWER(ISNULL(st.Name, '')) LIKE '%private%'
+          OR LOWER(ISNULL(st.DisplayName, '')) LIKE '%private%'
+          OR LOWER(ISNULL(s.CategoryCode, '')) LIKE '%private%'
+          OR LOWER(ISNULL(s.Name, '')) LIKE '%private%'
+        THEN 1 ELSE 0 END
+FROM dbo.WN_Bookings b
+JOIN dbo.WN_Spaces s ON s.Id = b.SpaceId
+LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeIdInt OR st.IdGUID = s.SpaceTypeId
+WHERE b.Id = @BookingId;
+
+IF @IsPrivate = 1 AND @UId IS NOT NULL AND @UId > 0 AND @Start IS NOT NULL AND @End IS NOT NULL
+BEGIN
+    EXEC dbo.WN_BookingMeetingRoomEntitlements_Generate 
+        @BookingId = @BookingId, 
+        @UserId = @UId, 
+        @StartOn = @Start, 
+        @EndOn = @End;
+END";
+
             await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@BookingId", bookingId);
             await cmd.ExecuteNonQueryAsync();
         }
 

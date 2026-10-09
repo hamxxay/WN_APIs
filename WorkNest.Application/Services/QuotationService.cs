@@ -347,13 +347,7 @@ namespace WorkNest.Application.Services
             int quotationId = Convert.ToInt32(result["Id"]);
 
             // Insert quotation details
-            foreach (var det in details)
-            {
-                string sql = $@"
-INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity, UnitPrice, Amount, CreatedById) " +
-                             $"VALUES ({quotationId}, '{det.FeeType}', '{det.Description.Replace("'", "''")}', {det.Quantity}, {det.UnitPrice}, {det.Amount}, {(createdById.HasValue ? createdById.Value.ToString() : "NULL")})";
-                await _db.ExecuteRawSqlAsync(sql);
-            }
+            await _db.InsertQuotationDetailsAsync(quotationId, details, createdById);
 
             var response = await GetQuotationByIdAsync(quotationId);
             return response ?? throw new InvalidOperationException("Failed to retrieve generated quotation.");
@@ -643,40 +637,7 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 try
                 {
                     int bookingId = Convert.ToInt32(bid);
-                    string sql = $@"
-
-                        DECLARE @BId INT = {bookingId};
-                        DECLARE @UId INT = NULL;
-                        DECLARE @Start DATETIME2 = NULL;
-                        DECLARE @End DATETIME2 = NULL;
-                        DECLARE @IsPrivate BIT = 0;
-
-                        SELECT 
-                            @UId = b.UserId,
-                            @Start = b.StartOn,
-                            @End = b.EndOn,
-                            @IsPrivate = CASE 
-                                WHEN st.CategoryId = 1 
-                                  OR LOWER(ISNULL(st.Name, '')) LIKE '%private%'
-                                  OR LOWER(ISNULL(st.DisplayName, '')) LIKE '%private%'
-                                  OR LOWER(ISNULL(s.CategoryCode, '')) LIKE '%private%'
-                                  OR LOWER(ISNULL(s.Name, '')) LIKE '%private%'
-                                THEN 1 ELSE 0 END
-                        FROM dbo.WN_Bookings b
-                        JOIN dbo.WN_Spaces s ON s.Id = b.SpaceId
-                        LEFT JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeIdInt OR st.IdGUID = s.SpaceTypeId
-                        WHERE b.Id = @BId;
-
-                        IF @IsPrivate = 1 AND @UId IS NOT NULL AND @UId > 0 AND @Start IS NOT NULL AND @End IS NOT NULL
-                        BEGIN
-                            EXEC dbo.WN_BookingMeetingRoomEntitlements_Generate 
-                                @BookingId = @BId, 
-                                @UserId = @UId, 
-                                @StartOn = @Start, 
-                                @EndOn = @End;
-                        END";
-
-                    await _db.ExecuteRawSqlAsync(sql);
+                    await _db.GenerateBookingMeetingRoomEntitlementsIfPrivateAsync(bookingId);
                 }
                 catch
                 {

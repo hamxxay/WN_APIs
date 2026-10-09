@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Mail;
 using System.Text;
 using Microsoft.Extensions.Configuration;
@@ -211,7 +211,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail, "WorkNest Billing"),
-                    Subject    = $"Your WorkNest {docType} — {challanNumber}",
+                    Subject    = $"Your WorkNest {docType} â€” {challanNumber}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -392,22 +392,28 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
             try
             {
+                string encCustomerName = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(customerName) ? "Valued Customer" : customerName);
+                string encSpaceName = WebUtility.HtmlEncode(spaceName ?? "");
+                string encAttendantName = WebUtility.HtmlEncode(attendantName ?? "");
+                string encAttendantIdNumber = WebUtility.HtmlEncode(attendantIdNumber ?? "");
+                string encInvoiceNumber = WebUtility.HtmlEncode(invoiceNumber ?? "");
+
                 var mail = new MailMessage();
                 mail.From = new MailAddress(fromEmail, "WorkNest Billing");
                 mail.To.Add(toEmail);
-                mail.Subject = $"WorkNest Custom Invoice — Capacity Overage Surcharge";
+                mail.Subject = $"WorkNest Custom Invoice â€” Capacity Overage Surcharge";
                 mail.IsBodyHtml = true;
 
                 string body = $@"
                 <div style=""font-family: Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;"">
                     <h2 style=""color: #0ea5e9; margin-top: 0;"">WorkNest Custom Invoice</h2>
-                    <p>Dear <strong>{customerName}</strong>,</p>
+                    <p>Dear <strong>{encCustomerName}</strong>,</p>
                     <p>An over-capacity attendant assignment has been recorded for your booking space at WorkNest. Below are the custom invoice details for the capacity overage surcharge (taxable like Room Rent: 16% PST on 10% support charges):</p>
                     
                     <table style=""width: 100%; border-collapse: collapse; margin: 20px 0; background: #f8fafc; border-radius: 8px;"">
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Invoice Number:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{invoiceNumber}</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Space Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{spaceName}</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Attendant Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{attendantName} (ID: {attendantIdNumber})</td></tr>
+                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Invoice Number:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{encInvoiceNumber}</td></tr>
+                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Space Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{encSpaceName}</td></tr>
+                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Attendant Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{encAttendantName} (ID: {encAttendantIdNumber})</td></tr>
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Excess Seat Count:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{excessSeatCount} seat(s) over capacity</td></tr>
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Room Rent Surcharge SubTotal:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {surchargeAmount:N0}</td></tr>
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Support Services Component (10%):</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {supportCharge:N0}</td></tr>
@@ -415,10 +421,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                         <tr><td style=""padding: 10px;""><strong>Grand Total Payable:</strong></td><td style=""padding: 10px; color: #0284c7; font-size: 1.1em; font-weight bold;"">PKR {grandTotal:N0}</td></tr>
                     </table>
 
-                    <p style=""font-size: 0.9em; color: #64748b;"">Formula applied: <code>0.5 × Seat Price × Excess Seat Count</code> + 16% PST on 10% Support Services. Statement PDF generated via QuestPDF is attached.</p>
+                    <p style=""font-size: 0.9em; color: #64748b;"">Formula applied: <code>0.5 Ã— Seat Price Ã— Excess Seat Count</code> + 16% PST on 10% Support Services. Statement PDF generated via QuestPDF is attached.</p>
                     <p>Thank you for choosing WorkNest.</p>
                     <hr style=""border: none; border-top: 1px solid #e2e8f0; margin-top: 30px;"" />
-                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces • Automated Billing System</p>
+                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces â€¢ Automated Billing System</p>
                 </div>";
 
                 mail.Body = body;
@@ -452,21 +458,24 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
             try
             {
+                string encCustomerName = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(customerName) ? "Valued Customer" : customerName);
+                string encQuotationNumber = WebUtility.HtmlEncode(quotationNumber ?? "");
+
                 using var mail = new MailMessage();
                 mail.From = new MailAddress(fromEmail, "WorkNest Office Spaces");
                 mail.To.Add(new MailAddress(toEmail));
-                mail.Subject = $"WorkNest — Coworking Space Use Agreement ({customerName})";
+                mail.Subject = $"WorkNest â€” Coworking Space Use Agreement ({customerName})";
                 mail.IsBodyHtml = true;
 
                 string body = $@"
                 <div style=""font-family: Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;"">
                     <h2 style=""color: #2563eb; margin-top: 0;"">Coworking Space Use Agreement</h2>
-                    <p>Dear <strong>{customerName}</strong>,</p>
-                    <p>Please find attached your Coworking Space Use Agreement for quotation <strong>{quotationNumber}</strong>.</p>
+                    <p>Dear <strong>{encCustomerName}</strong>,</p>
+                    <p>Please find attached your Coworking Space Use Agreement for quotation <strong>{encQuotationNumber}</strong>.</p>
                     <p>Kindly review, sign, and return a copy to complete your workspace booking confirmation.</p>
                     <p>Thank you for partnering with WorkNest.</p>
                     <hr style=""border: none; border-top: 1px solid #e2e8f0; margin-top: 30px;"" />
-                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces • Automated System</p>
+                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces â€¢ Automated System</p>
                 </div>";
 
                 mail.Body = body;
@@ -581,7 +590,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 mail.To.Add(new MailAddress(toEmail));
 
                 bool isAlert = string.Equals(type, "Alert", StringComparison.OrdinalIgnoreCase);
-                mail.Subject = isAlert ? $"[URGENT ALERT] {title} — WorkNest" : $"{title} — WorkNest Announcement";
+                mail.Subject = isAlert ? $"[URGENT ALERT] {title} â€” WorkNest" : $"{title} â€” WorkNest Announcement";
                 mail.IsBodyHtml = true;
 
                 string badgeColor = isAlert ? "#ef4444" : "#2563eb";
@@ -602,7 +611,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     </div>
                     <p style=""font-size: 13px; color: #64748b; margin-bottom: 4px;"">Need assistance? Reach out to our community operations desk or reply to this email.</p>
                     <hr style=""border: none; border-top: 1px solid #e2e8f0; margin: 24px 0 16px 0;"" />
-                    <p style=""font-size: 12px; color: #94a3b8; text-align: center; margin: 0;"">WorkNest Operations & Control Center • Sent automatically</p>
+                    <p style=""font-size: 12px; color: #94a3b8; text-align: center; margin: 0;"">WorkNest Operations & Control Center â€¢ Sent automatically</p>
                 </div>";
 
                 mail.Body = html;
