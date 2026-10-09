@@ -1133,5 +1133,48 @@ namespace WorkNest.Application.Services
             _rosterSignature = sig;
             return "no enrollment change";
         }
-    }
+    
+        // ---- "Test" buttons --------------------------------------------------------------------
+
+        public async Task<HikDeviceTestResult?> TestDeviceAsync(int deviceId)
+        {
+            var dev = await _repo.GetDeviceAsync(deviceId);
+            return dev == null ? null : await TestAsync(dev, TimeSpan.FromSeconds(6));
+        }
+
+        public async Task<List<HikDeviceTestResult>> TestAllDevicesAsync()
+        {
+            var devices = await _repo.GetAllDevicesAsync();
+            var results = await Task.WhenAll(devices.Select(d => TestAsync(d, TimeSpan.FromSeconds(4))));
+            return results.ToList();
+        }
+
+        /// <summary>Reads the machine's device info over ISAPI; saves the result (Online, Last_seen) and logs it.</summary>
+        private async Task<HikDeviceTestResult> TestAsync(HikSyncDevice dev, TimeSpan timeout)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            HikDeviceInfo info;
+            try { info = await _isapi.GetDeviceInfoAsync(dev, timeout); }
+            catch (Exception ex) { info = new HikDeviceInfo { Ok = false, Error = ex.Message }; }
+            sw.Stop();
+            try
+            {
+                await _repo.SetDeviceOnlineAsync(dev.Id, info.Ok);
+                if (info.Ok != dev.Online) await InvalidateRosterAsync(dev.Id);
+                await Log(null, dev.Id, "test", info.Ok, info.Ok ? $"online ({sw.ElapsedMilliseconds} ms)" : info.Error);
+            }
+            catch { /* the test result is still returned */ }
+            return new HikDeviceTestResult
+            {
+                DeviceId = dev.Id,
+                Name = dev.Name,
+                Online = info.Ok,
+                Error = info.Ok ? null : (string.IsNullOrWhiteSpace(info.Error) ? "The machine did not respond." : info.Error),
+                Model = info.Model,
+                SerialNumber = info.SerialNumber,
+                FirmwareVersion = info.FirmwareVersion,
+                ElapsedMs = sw.ElapsedMilliseconds
+            };
+        }
+}
 }
