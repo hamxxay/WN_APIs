@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Quotation;
@@ -15,11 +16,13 @@ namespace WorkNest.API.Controllers
     public class QuotationController : ControllerBase
     {
         private readonly IQuotationService _quotations;
+        private readonly IPdfService _pdf;
         private readonly IDbRepository _db;
 
-        public QuotationController(IQuotationService quotations, IDbRepository db)
+        public QuotationController(IQuotationService quotations, IPdfService pdf, IDbRepository db)
         {
             _quotations = quotations;
+            _pdf = pdf;
             _db = db;
         }
 
@@ -376,6 +379,47 @@ namespace WorkNest.API.Controllers
             {
                 return BadRequest(ApiResponse.Fail(ex.Message));
             }
+        }
+
+        [EnableRateLimiting("pdf")]
+        [HttpGet("api/quotation/{id:int}/pdf")]
+        [HttpGet("api/quotations/{id:int}/pdf")]
+        [HttpGet("api/quotation/{id:int}/download-pdf")]
+        [HttpGet("api/quotations/{id:int}/download-pdf")]
+        public async Task<IActionResult> GetQuotationPdf(int id)
+        {
+            var q = await _quotations.GetQuotationByIdAsync(id);
+            if (q == null || !await CanSeeCustomerAsync(q.CustomerId))
+                return NotFound(ApiResponse.Fail("Quotation not found."));
+
+            var pdfBytes = _pdf.GenerateQuotationPdf(q);
+            var filename = $"Quotation-{q.QuotationNumber ?? id.ToString()}-v{q.Version}.pdf";
+            return File(pdfBytes, "application/pdf", filename);
+        }
+
+        [EnableRateLimiting("pdf")]
+        [HttpGet("api/quotation/{id:int}/versions/{version:int}/pdf")]
+        [HttpGet("api/quotations/{id:int}/versions/{version:int}/pdf")]
+        [HttpGet("api/quotation/{id:int}/versions/{version:int}/download-pdf")]
+        [HttpGet("api/quotations/{id:int}/versions/{version:int}/download-pdf")]
+        public async Task<IActionResult> GetQuotationVersionPdf(int id, int version)
+        {
+            var root = await _quotations.GetQuotationByIdAsync(id);
+            if (root == null || !await CanSeeCustomerAsync(root.CustomerId))
+                return NotFound(ApiResponse.Fail("Quotation version not found."));
+
+            var versions = await _quotations.GetVersionsAsync(id);
+            var specificVersion = versions.FirstOrDefault(v => v.Version == version);
+            if (specificVersion == null)
+            {
+                specificVersion = await _quotations.GetQuotationByIdAsync(version);
+            }
+            if (specificVersion == null || specificVersion.CustomerId != root.CustomerId)
+                return NotFound(ApiResponse.Fail("Quotation version not found."));
+
+            var pdfBytes = _pdf.GenerateQuotationPdf(specificVersion);
+            var filename = $"Quotation-{specificVersion.QuotationNumber ?? id.ToString()}-v{specificVersion.Version}.pdf";
+            return File(pdfBytes, "application/pdf", filename);
         }
     }
 }

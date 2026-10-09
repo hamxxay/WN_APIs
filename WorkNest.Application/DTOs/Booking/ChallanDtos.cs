@@ -87,7 +87,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? LocationAddress { get; set; }
         public string? CityName { get; set; }
         public string? BranchName { get; set; }
-        public string? CompanyName { get => CustomerCompany; set => CustomerCompany = value; }
+        public string? CompanyName { get; set; }
 
         public string? BillingPeriodCode { get; set; }
         public string? BillingPeriodLabel { get; set; }

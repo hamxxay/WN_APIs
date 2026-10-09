@@ -3942,7 +3942,13 @@ BEGIN
         v.ContractEndDate,
         v.BookingStatusCode,
         v.BookingStatusLabel,
-        v.UserName        AS CustomerName,
+        COALESCE(
+            NULLIF(RTRIM(LTRIM(ISNULL(cust.FirstName, '') + ' ' + ISNULL(cust.LastName, ''))), ''),
+            NULLIF(u.Name, ''),
+            v.UserName
+        )                 AS CustomerName,
+        cust.Company      AS CustomerCompany,
+        cust.Address      AS CustomerAddress,
         v.UserEmail       AS CustomerEmail,
         v.SpaceCode,
         v.SpaceNumber,
@@ -3969,8 +3975,11 @@ BEGIN
         v.RoomPrice,
         v.SecurityDeposit,
         v.BookedOn
-    FROM dbo.WN_Challans          c  WITH (NOLOCK)
-    JOIN dbo.WN_vw_BookingSummary v  ON v.BookingId = c.BookingId
+    FROM dbo.WN_Challans          c    WITH (NOLOCK)
+    JOIN dbo.WN_vw_BookingSummary v    ON v.BookingId = c.BookingId
+    JOIN dbo.WN_Bookings          b    WITH (NOLOCK) ON b.Id = c.BookingId
+    LEFT JOIN dbo.WN_Customers    cust WITH (NOLOCK) ON (cust.Code = b.CustomerCode OR (b.CustomerCode IS NULL AND cust.UserId = b.UserId))
+    LEFT JOIN dbo.WN_Users        u    WITH (NOLOCK) ON u.Id = b.UserId
     WHERE c.BookingId = @BookingId
     ORDER BY c.CreatedOn DESC;
 
