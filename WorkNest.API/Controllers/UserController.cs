@@ -25,8 +25,9 @@ namespace WorkNest.API.Controllers
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null)
         {
-            int? filterLocationId = User.IsLocationBoundRole() ? User.GetLocationId() : null;
-            var (items, total) = await _users.GetUsersAsync(page, limit, search, filterLocationId);
+            // Location-bound roles (admin, sales executive) see users of ALL their locations, not just the main one.
+            var (items, total) = await MultiLocationList.FetchAsync(User.ScopedLocations(null), page, limit,
+                (p, l, loc) => _users.GetUsersAsync(p, l, search, loc));
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
