@@ -100,7 +100,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/user")]
         public async Task<IActionResult> Create([FromBody] UserCreateRequest request)
         {
-            if (GrantsSuperAdmin(request?.Role)) return Forbid();
+            if (GrantsAdminRole(request?.Role)) return OnlySuperAdmin();
             if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
                 return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
             var result = await _users.CreateUserAsync(request!, null);
@@ -111,7 +111,7 @@ namespace WorkNest.API.Controllers
         [HttpPut("api/user/{id:int}")]
         public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest request)
         {
-            if (GrantsSuperAdmin(request?.Role) || await IsProtectedSuperAdminAsync(id)) return Forbid();
+            if (GrantsAdminRole(request?.Role) || await IsProtectedAsync(id)) return OnlySuperAdmin();
             if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
                 return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
             return Ok(await _users.UpdateUserAsync(id, request!));
@@ -130,7 +130,7 @@ namespace WorkNest.API.Controllers
         [HttpDelete("api/user/{id:int}")]
         public async Task<IActionResult> Delete(int id)
         {
-            if (await IsProtectedSuperAdminAsync(id)) return Forbid();
+            if (await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.DeleteUserAsync(id));
         }
 
@@ -147,7 +147,7 @@ namespace WorkNest.API.Controllers
         [HttpPatch("api/user/{id:int}/activate")]
         public async Task<IActionResult> Activate(int id)
         {
-            if (await IsProtectedSuperAdminAsync(id)) return Forbid();
+            if (await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.ActivateUserAsync(id));
         }
 
@@ -164,7 +164,7 @@ namespace WorkNest.API.Controllers
         [HttpPatch("api/user/{id:int}/deactivate")]
         public async Task<IActionResult> Deactivate(int id)
         {
-            if (await IsProtectedSuperAdminAsync(id)) return Forbid();
+            if (await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.DeactivateUserAsync(id));
         }
 
@@ -181,7 +181,7 @@ namespace WorkNest.API.Controllers
         [HttpPatch("api/user/{id:int}/role")]
         public async Task<IActionResult> UpdateRole(int id, [FromBody] UserRoleUpdateRequest request)
         {
-            if (GrantsSuperAdmin(request?.Role) || await IsProtectedSuperAdminAsync(id)) return Forbid();
+            if (GrantsAdminRole(request?.Role) || await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.UpdateUserRoleAsync(id, request!));
         }
 
@@ -197,18 +197,29 @@ namespace WorkNest.API.Controllers
         private bool CallerIsSuperAdmin() =>
             User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsSuperAdmin();
 
-        /// <summary>True when a non-super-admin tries to assign the super admin role.</summary>
-        private bool GrantsSuperAdmin(string? role) =>
-            !string.IsNullOrWhiteSpace(role) && Roles.IsSuperAdmin(Roles.ParseRoleId(role)) && !CallerIsSuperAdmin();
+        /// <summary>
+        /// Only a Super Admin creates, promotes or changes Admins (and Super Admins). An Admin manages Sales Executives
+        /// and customers, giving them one, some or all of the Admin's own locations.
+        /// </summary>
+        private bool GrantsAdminRole(string? role)
+        {
+            if (string.IsNullOrWhiteSpace(role) || CallerIsSuperAdmin()) return false;
+            var roleId = Roles.ParseRoleId(role);
+            return Roles.IsSuperAdmin(roleId) || roleId == Roles.AdminId;
+        }
 
-        /// <summary>True when a non-super-admin targets an existing super admin account.</summary>
-        private async Task<bool> IsProtectedSuperAdminAsync(int id)
+        /// <summary>True when a non-super-admin targets an existing Admin or Super Admin account.</summary>
+        private async Task<bool> IsProtectedAsync(int id)
         {
             if (CallerIsSuperAdmin()) return false;
             var row = await _db.GetUserByIdAsync(id);
-            return row != null && row.TryGetValue("RoleId", out var roleId) && roleId != null
-                   && Roles.IsSuperAdmin(Convert.ToInt32(roleId));
+            if (row == null || !row.TryGetValue("RoleId", out var roleId) || roleId == null) return false;
+            var rid = Convert.ToInt32(roleId);
+            return Roles.IsSuperAdmin(rid) || rid == Roles.AdminId;
         }
+
+        private IActionResult OnlySuperAdmin() =>
+            StatusCode(403, ApiResponse.Fail("Only a Super Admin can create or change Admin accounts."));
 
         private async Task<int?> ResolveIdAsync(Guid publicId)
         {
