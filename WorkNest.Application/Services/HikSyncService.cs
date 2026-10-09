@@ -799,12 +799,14 @@ namespace WorkNest.Application.Services
         {
             var devices = (await _repo.GetAllDevicesAsync()).Where(d => d.Online).ToList();
             var saved = 0;
+            var failed = new System.Collections.Concurrent.ConcurrentBag<string>();
             await Task.WhenAll(devices.Select(async dev =>
             {
                 try
                 {
                     var head = await _isapi.SearchEventsAsync(dev, 0, 1, TimeSpan.FromSeconds(2));
-                    if (!head.Ok || head.Total == 0) return;
+                    if (!head.Ok) { failed.Add(dev.Name); _logger.LogWarning("HIK events: {Device} could not be read", dev.Name); return; }
+                    if (head.Total == 0) return;
                     // Firmware caps event pages at 30 — walk only the tail so background jobs don't stall.
                     var pos = Math.Max(0, head.Total - 60);
                     var recent = new List<JsonObject>();
@@ -836,9 +838,16 @@ namespace WorkNest.Application.Services
                             Interlocked.Increment(ref saved);
                     }
                 }
-                catch (Exception ex) { _logger.LogDebug("HIK event archive skipped {Device}: {Error}", dev.Name, ex.Message); }
+                catch (Exception ex)
+                {
+                    failed.Add(dev.Name);
+                    _logger.LogWarning("HIK event archive failed for {Device}: {Error}", dev.Name, ex.Message);
+                }
             }));
-            return $"stored {saved} new event(s)";
+            var result = $"stored {saved} new event(s) from {devices.Count - failed.Count}/{devices.Count} online machine(s)";
+            if (!failed.IsEmpty) result += $"; could not read: {string.Join(", ", failed.OrderBy(n => n).Take(10))}{(failed.Count > 10 ? "…" : "")}";
+            if (devices.Count == 0) result = "no machines are marked online (run the online check / Test all first)";
+            return result;
         }
 
         // ---- queued operations (replayPendingOps) ----------------------------------------------
