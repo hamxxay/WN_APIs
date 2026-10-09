@@ -568,6 +568,7 @@ namespace WorkNest.Application.Services
                 BookedOn = ParseDateSafely(header["BookedOn"]),
 
                 CustomerName = header["CustomerName"]?.ToString(),
+                CustomerCompany = header.TryGetValue("CustomerCompany", out var ccVal) && ccVal != null && ccVal is not DBNull ? ccVal.ToString() : null,
                 CustomerEmail = header["CustomerEmail"]?.ToString(),
 
                 SpaceCode = header["SpaceCode"]?.ToString(),

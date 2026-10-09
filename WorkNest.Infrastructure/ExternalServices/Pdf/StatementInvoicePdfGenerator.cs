@@ -277,19 +277,35 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                 table.Header(h =>
                 {
-                    h.Cell().Background("#000000").Padding(5).Text("Description").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#000000").Padding(5).AlignRight().Text("Unit Price").Bold().FontColor("#ffffff");
-                    h.Cell().Background("#000000").Padding(5).AlignRight().Text("Total").Bold().FontColor("#ffffff");
+                    foreach (var (title, isRight) in new[] {
+                        ("Description", false),
+                        ("Unit Price", true),
+                        ("Total", true)
+                    })
+                    {
+                        var cell = h.Cell().Border(1).BorderColor("#000000").Background(Colors.White).Padding(6);
+                        if (isRight)
+                        {
+                            cell.AlignRight().Text(title).FontColor("#000000").Bold().FontSize(9);
+                        }
+                        else
+                        {
+                            cell.Text(title).FontColor("#000000").Bold().FontSize(9);
+                        }
+                    }
                 });
 
+                bool alt = false;
                 foreach (var item in data.LineItems)
                 {
+                    var bg = alt ? "#f9f9f9" : "#ffffff";
                     decimal displayQty = item.Quantity > 0 ? item.Quantity : 1;
                     decimal displayUnitPrice = displayQty > 0 ? Math.Round(item.PriceExclVat / displayQty, 2) : item.PriceExclVat;
 
-                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).Text(item.Description).FontColor("#000000");
-                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).AlignRight().Text(FormatAmount(displayUnitPrice)).FontColor("#000000");
-                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).AlignRight().Text(FormatAmount(item.PriceExclVat)).FontColor("#000000");
+                    table.Cell().Background(bg).Padding(6).Text(item.Description).FontColor("#000000");
+                    table.Cell().Background(bg).Padding(6).AlignRight().Text(FormatAmount(displayUnitPrice)).FontColor("#000000");
+                    table.Cell().Background(bg).Padding(6).AlignRight().Text(FormatAmount(item.PriceExclVat)).FontColor("#000000");
+                    alt = !alt;
                 }
             });
 
@@ -339,22 +355,24 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                 col.Item().PaddingTop(10).AlignRight().Column(c =>
                 {
+                    c.Spacing(3);
                     if (depositTotal > 0)
                     {
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
                     }
                     else
                     { 
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
                     }
 
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Support Services Portion (incl. in rent):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Services):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });
-                    c.Item().PaddingTop(4).Row(r =>
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Support Services Portion (incl. in rent):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Services):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });
+                    c.Item().LineHorizontal(1).LineColor("#000000");
+                    c.Item().Row(r =>
                     {
-                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(10).FontColor("#000000");
-                        r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
+                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(11).FontColor("#000000");
+                        r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
                     });
 
                     if (!string.IsNullOrWhiteSpace(data.SupportChargesInvoiceUrl))
@@ -375,20 +393,22 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
                 col.Item().PaddingTop(10).AlignRight().Column(c =>
                 {
+                    c.Spacing(3);
                     if (depositTotal > 0)
                     {
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent:").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent:").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
                     }
                     else
                     {
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Sub Total:").FontColor("#000000"); r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Sub Total:").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
                     }
 
-                    c.Item().PaddingTop(4).Row(r =>
+                    c.Item().LineHorizontal(1).LineColor("#000000");
+                    c.Item().Row(r =>
                     {
-                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total:").Bold().FontSize(10).FontColor("#000000");
-                        r.ConstantItem(140).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
+                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total:").Bold().FontSize(11).FontColor("#000000");
+                        r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
                     });
                 });
             }
@@ -694,8 +714,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             {
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "images", "Logo_black.png"),
                 Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "images", "Logo_black.png"),
+                @"E:\WN_APIs\WorkNest.API\wwwroot\images\Logo_black.png",
                 @"F:\WN_APIs\WorkNest.API\wwwroot\images\Logo_black.png",
+                @"E:\WorkNest_FE\public\images\Logo_black.png",
                 @"F:\WorkNest_FE\public\images\Logo_black.png",
+                @"E:\WorkNest_FE\public\images\Logo.png",
                 @"F:\WorkNest_FE\public\images\Logo.png",
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "public", "images", "Logo.png"),
                 Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "images", "Logo.png"),
