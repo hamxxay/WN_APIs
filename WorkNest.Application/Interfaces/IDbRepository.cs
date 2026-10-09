@@ -213,7 +213,7 @@ namespace WorkNest.Application.Interfaces
 
         // --- Dashboard ---
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
-        Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(int? locationId, int endingSoonDays,
+        Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
         Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow);
