@@ -49,7 +49,6 @@ namespace WorkNest.Application.DTOs.HikDevice
         public bool Running { get; set; }
     }
 
-    /// <summary>ISAPI deviceInfo of a machine.</summary>
     /// <summary>Result of testing one machine (the "Test" button): reachable or not, with its details.</summary>
     public class HikDeviceTestResult
     {
@@ -63,6 +62,7 @@ namespace WorkNest.Application.DTOs.HikDevice
         public long ElapsedMs { get; set; }
     }
 
+    /// <summary>ISAPI deviceInfo of a machine.</summary>
     public class HikDeviceInfo
     {
         public bool Ok { get; set; }
