@@ -50,6 +50,19 @@ namespace WorkNest.Application.DTOs.HikDevice
     }
 
     /// <summary>ISAPI deviceInfo of a machine.</summary>
+    /// <summary>Result of testing one machine (the "Test" button): reachable or not, with its details.</summary>
+    public class HikDeviceTestResult
+    {
+        public int DeviceId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public bool Online { get; set; }
+        public string? Error { get; set; }
+        public string? Model { get; set; }
+        public string? SerialNumber { get; set; }
+        public string? FirmwareVersion { get; set; }
+        public long ElapsedMs { get; set; }
+    }
+
     public class HikDeviceInfo
     {
         public bool Ok { get; set; }

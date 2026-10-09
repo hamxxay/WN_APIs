@@ -18,5 +18,11 @@ namespace WorkNest.Application.Interfaces
 
         /// <summary>Last run of every job.</summary>
         IReadOnlyList<HikSyncJobStatus> GetStatus();
+
+        /// <summary>"Test" button: connects to one machine now and saves online / offline. Null when the machine doesn't exist.</summary>
+        Task<HikDeviceTestResult?> TestDeviceAsync(int deviceId);
+
+        /// <summary>"Test all": tests every machine in parallel and saves online / offline.</summary>
+        Task<List<HikDeviceTestResult>> TestAllDevicesAsync();
     }
 }
