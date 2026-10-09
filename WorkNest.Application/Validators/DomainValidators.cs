@@ -96,18 +96,6 @@ namespace WorkNest.Application.Validators
     }
 
     /// <summary>WHT invoice: when ticked, the rate is required and must be 0.01-99.99 (same rule as the DB CHECK).</summary>
-    public class QuotationRequestWhtValidator : AbstractValidator<WorkNest.Application.DTOs.Quotation.QuotationRequest>
-    {
-        public QuotationRequestWhtValidator()
-        {
-            When(x => x.SendWhtInvoice, () =>
-                // the Id of the chosen WN_WHTaxRate row (dropdown); the service checks it is an active rate
-                RuleFor(x => x.WithholdingTaxRate)
-                    .NotNull().WithMessage("Select a WHT rate when a WHT invoice is generated.")
-                    .GreaterThan(0m).WithMessage("Select a WHT rate from the list."));
-        }
-    }
-
     public class AdminBookingRequestWhtValidator : AbstractValidator<WorkNest.Application.DTOs.Booking.AdminBookingRequest>
     {
         public AdminBookingRequestWhtValidator()

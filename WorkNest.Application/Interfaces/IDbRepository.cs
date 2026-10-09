@@ -265,6 +265,11 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingAttendantsDbAsync(int bookingDetailId);
         Task<List<int>> GetUserLocationIdsAsync(int userId);
         Task<bool> GetQuotationSendWhtInvoiceAsync(int quotationId);
+        /// <summary>The booking's WHT choice: SendWhtInvoice and the WN_WHTaxRate Id (null when not a WHT booking).</summary>
+        Task<(bool SendWht, decimal? WhTaxId)> GetBookingWhtAsync(int bookingId);
+        /// <summary>Saves the WHT choice made on the Initial Invoice Preview on the booking: a WN_WHTaxRate Id sets
+        /// SendWhtInvoice = 1 + that Id; null (standard invoice) sets SendWhtInvoice = 0 and clears the Id.</summary>
+        Task SetBookingWhtAsync(int bookingId, decimal? whTaxId);
         Task<Dictionary<int, List<(int Id, string Name)>>> GetUserLocationsMapAsync(IEnumerable<int> userIds);
         Task<bool> SetUserLocationsAsync(int userId, IReadOnlyCollection<int> locationIds, int? actorId);
         Task<int?> GetSpaceLocationIdAsync(int spaceId);
