@@ -8,6 +8,19 @@ namespace WorkNest.Application.DTOs.Contact
         public string? Phone { get; set; }
     }
 
+    /// <summary>Staff feedback on a tour inquiry (Tour Inquiries page).</summary>
+    public class ContactFeedbackRequest
+    {
+        /// <summary>not_interested | future_prospect | converted</summary>
+        public string Outcome { get; set; } = string.Empty;
+        /// <summary>Not interested: the reason (required). Otherwise an optional note.</summary>
+        public string? Reason { get; set; }
+        /// <summary>Future prospect: the date to be alerted on (today or later).</summary>
+        public DateTime? FollowUpOn { get; set; }
+        /// <summary>Converted: the quotation created from the inquiry.</summary>
+        public int? QuotationId { get; set; }
+    }
+
     public class ContactStatusUpdateRequest
     {
         public byte StatusId { get; set; }

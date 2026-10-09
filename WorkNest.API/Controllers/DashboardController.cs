@@ -51,7 +51,7 @@ namespace WorkNest.API.Controllers
         {
             "/admin", "/admin/dashboard", "/admin/kyc", "/admin/quotations", "/admin/agreements", "/admin/lease-templates", "/admin/invoices",
             "/admin/bookings", "/admin/attendants", "/admin/staff-access", "/admin/biometric-users", "/admin/machine-users",
-            "/admin/contacts", "/admin/network", "/admin/network/clients", "/admin/network/devices",
+            "/admin/contacts", "/admin/complaints", "/admin/whatsapp", "/admin/network", "/admin/network/clients", "/admin/network/devices",
             "/admin/network/internet", "/admin/network/wifi"
         };
 

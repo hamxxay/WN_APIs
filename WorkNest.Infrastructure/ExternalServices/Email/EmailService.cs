@@ -45,7 +45,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         public async Task SendTourNotificationAsync(string fullName, string email, string phone, string message)
         {
             var (fromEmail, password, host, port) = GetEmailSettings();
-            var toEmail = _config["Email:ToEmail"] ?? fromEmail;
+            // Tour requests go to sales: Email:TourRequestsTo, else Email:ToEmail, else sales@worknestpk.com.
+            // (An empty setting used to leave no recipient, so no email was sent at all.)
+            var toEmail = new[] { _config["Email:TourRequestsTo"], _config["Email:ToEmail"] }
+                .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim() ?? "sales@worknestpk.com";
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -73,7 +76,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     Body       = body,
                     IsBodyHtml = false,
                 };
-                mailMessage.To.Add(toEmail);
+                foreach (var to in toEmail.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    mailMessage.To.Add(to);
+                // Sales can reply straight to the customer.
+                if (!string.IsNullOrWhiteSpace(email) && MailAddress.TryCreate(email.Trim(), out var replyTo))
+                    mailMessage.ReplyToList.Add(replyTo);
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 await smtp.SendMailAsync(mailMessage);

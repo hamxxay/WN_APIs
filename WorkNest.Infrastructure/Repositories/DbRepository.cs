@@ -2436,6 +2436,71 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // ---- Tour inquiry feedback (dbo.WN_ContactFeedback). SQL error 208 = table not created yet. ----
+
+        public async Task<bool> InsertContactFeedbackAsync(int contactId, string outcome, string? reason, DateTime? followUpOn, int? quotationId, int? createdById)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand(@"
+                    INSERT INTO dbo.WN_ContactFeedback (ContactId, Outcome, Reason, FollowUpOn, QuotationId, CreatedById)
+                    VALUES (@ContactId, @Outcome, @Reason, @FollowUpOn, @QuotationId, @CreatedById);", c);
+                cmd.Parameters.AddWithValue("@ContactId", contactId);
+                cmd.Parameters.AddWithValue("@Outcome", outcome);
+                cmd.Parameters.AddWithValue("@Reason", (object?)reason ?? DBNull.Value);
+                cmd.Parameters.Add("@FollowUpOn", SqlDbType.Date).Value = (object?)followUpOn?.Date ?? DBNull.Value;
+                cmd.Parameters.AddWithValue("@QuotationId", (object?)quotationId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return false; }
+        }
+
+        public async Task<Dictionary<int, IDictionary<string, object?>>> GetLatestContactFeedbackAsync(IEnumerable<int> contactIds)
+        {
+            var result = new Dictionary<int, IDictionary<string, object?>>();
+            var ids = contactIds.Where(i => i > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            try
+            {
+                await using var c = await Open();
+                // Ids are ints from the inquiry list, never user text.
+                await using var cmd = new SqlCommand($@"
+                    SELECT f.ContactId, f.Outcome, f.Reason, f.FollowUpOn, f.QuotationId, f.CreatedOn
+                    FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) AS rn
+                          FROM dbo.WN_ContactFeedback WITH (NOLOCK)
+                          WHERE ContactId IN ({string.Join(",", ids)})) f
+                    WHERE f.rn = 1;", c);
+                await using var r = await cmd.ExecuteReaderAsync();
+                foreach (var row in await ReadAll(r))
+                    result[Convert.ToInt32(row["ContactId"])] = row;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return result;
+        }
+
+        public async Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today)
+        {
+            var list = new List<(int, DateTime)>();
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand(@"
+                    SELECT f.ContactId, f.FollowUpOn
+                    FROM (SELECT ContactId, Outcome, FollowUpOn, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) AS rn
+                          FROM dbo.WN_ContactFeedback WITH (NOLOCK)) f
+                    JOIN dbo.WN_Contacts ct WITH (NOLOCK) ON ct.Id = f.ContactId
+                    WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today;", c);
+                cmd.Parameters.Add("@Today", SqlDbType.Date).Value = today.Date;
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.GetDateTime(1)));
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return list;
+        }
+
         // --- Dashboard ---
 
         /// <summary>

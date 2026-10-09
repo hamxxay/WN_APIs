@@ -210,6 +210,12 @@ namespace WorkNest.Application.Interfaces
         Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message);
         Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById);
         Task DeleteContactAsync(int id);
+        /// <summary>Adds a feedback row to dbo.WN_ContactFeedback (false if the table has not been created yet).</summary>
+        Task<bool> InsertContactFeedbackAsync(int contactId, string outcome, string? reason, DateTime? followUpOn, int? quotationId, int? createdById);
+        /// <summary>Newest feedback row per inquiry for the given inquiries (empty if the table does not exist).</summary>
+        Task<Dictionary<int, IDictionary<string, object?>>> GetLatestContactFeedbackAsync(IEnumerable<int> contactIds);
+        /// <summary>Inquiries whose newest feedback is "future prospect" with a follow-up date on or before today.</summary>
+        Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today);
 
         // --- Dashboard ---
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
