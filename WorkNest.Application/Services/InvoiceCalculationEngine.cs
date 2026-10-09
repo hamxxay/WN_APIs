@@ -69,6 +69,9 @@ namespace WorkNest.Application.Services
 
     public static class InvoiceCalculationEngine
     {
+        /// <summary>Prorated rent treats every month as 30 days.</summary>
+        public const int ProrationDaysPerMonth = 30;
+
         private static decimal Round2(decimal val) =>
             Math.Round(val, 2, MidpointRounding.AwayFromZero);
 
@@ -168,10 +171,11 @@ namespace WorkNest.Application.Services
             if (!request.DisableProration && !request.IsQuotation && request.StartOn.HasValue && request.StartOn.Value.Day > 1 && result.MonthlyRent > 0)
             {
                 int startDay = request.StartOn.Value.Day;
-                int daysInMonth = DateTime.DaysInMonth(request.StartOn.Value.Year, request.StartOn.Value.Month);
-                // Days are counted from the day AFTER the start (signing) day: 20th of a 30-day month = 10 days.
+                // 30-day calendar: every month counts as 30 days (the 31st counts as the 30th). Days are counted from
+                // the day AFTER the start (signing) day: signed on the 9th = days 10..30 = 21 days = 21/30 of a month.
                 // Before the 15th: those days (+ the rest of the billing cycle); from the 15th: days + full cycle.
-                int remainingDays = daysInMonth - startDay;
+                const int daysInMonth = ProrationDaysPerMonth;
+                int remainingDays = daysInMonth - Math.Min(startDay, daysInMonth);
                 decimal fraction = (decimal)remainingDays / daysInMonth;
                 periodStart = request.StartOn.Value.Date.AddDays(1);
                 decimal proratedCurrentMonth = Round2(fraction * result.MonthlyRent);
