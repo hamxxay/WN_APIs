@@ -10,13 +10,16 @@ namespace WorkNest.API.Filters
 {
     /// <summary>
     /// Last stop before a failed response leaves the API: if its message is technical text (a SQL Server or .NET
-    /// error such as "Invalid column name" or "Cannot find ... user-defined function"), the text is logged and
+    /// error, file path, IP address, or internal service error), the text is logged and
     /// replaced by a friendly message (<see cref="UserErrorText"/>). Business messages pass through unchanged.
     /// Applies to error statuses (4xx/5xx) and to 200 responses that report failure (isSuccessful/success = false).
     /// </summary>
     public sealed class FriendlyErrorResultFilter : IAsyncResultFilter
     {
-        private static readonly string[] MessageKeys = { "message", "error", "errorMessage", "detail", "title" };
+        private static readonly string[] MessageKeys = {
+            "message", "error", "errorMessage", "detail", "title",
+            "error_description", "description", "exception", "reason", "statusText", "err"
+        };
         private readonly ILogger<FriendlyErrorResultFilter> _logger;
         private readonly JsonSerializerOptions _json;
 
@@ -59,19 +62,55 @@ namespace WorkNest.API.Filters
                 return;
             }
 
-            if (JsonSerializer.SerializeToNode(result.Value, result.Value!.GetType(), _json) is not JsonObject obj) return;
+            if (JsonSerializer.SerializeToNode(result.Value, result.Value!.GetType(), _json) is not JsonNode node) return;
+            bool changed = SanitizeNode(context, node);
+            if (changed) result.Value = node;
+        }
+
+        private bool SanitizeNode(ResultExecutingContext context, JsonNode node)
+        {
             bool changed = false;
-            foreach (var key in obj.Select(kv => kv.Key).ToList())
+            if (node is JsonObject obj)
             {
-                if (!MessageKeys.Contains(key, StringComparer.OrdinalIgnoreCase)) continue;
-                if (obj[key] is JsonValue v && v.TryGetValue<string>(out var msg) && UserErrorText.IsTechnical(msg))
+                foreach (var key in obj.Select(kv => kv.Key).ToList())
                 {
-                    Log(context, msg);
-                    obj[key] = UserErrorText.ForUser(msg);
-                    changed = true;
+                    var child = obj[key];
+                    if (child is JsonValue v && v.TryGetValue<string>(out var msg) && MessageKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (UserErrorText.IsTechnical(msg))
+                        {
+                            Log(context, msg);
+                            obj[key] = UserErrorText.ForUser(msg);
+                            changed = true;
+                        }
+                    }
+                    else if (child != null)
+                    {
+                        changed |= SanitizeNode(context, child);
+                    }
                 }
             }
-            if (changed) result.Value = obj;
+            else if (node is JsonArray arr)
+            {
+                for (int i = 0; i < arr.Count; i++)
+                {
+                    var item = arr[i];
+                    if (item is JsonValue v && v.TryGetValue<string>(out var msg))
+                    {
+                        if (UserErrorText.IsTechnical(msg))
+                        {
+                            Log(context, msg);
+                            arr[i] = UserErrorText.ForUser(msg);
+                            changed = true;
+                        }
+                    }
+                    else if (item != null)
+                    {
+                        changed |= SanitizeNode(context, item);
+                    }
+                }
+            }
+            return changed;
         }
 
         private void Log(ResultExecutingContext context, string original) =>

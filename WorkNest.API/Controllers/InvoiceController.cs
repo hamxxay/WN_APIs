@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Threading.Tasks;
@@ -960,7 +960,7 @@ namespace WorkNest.API.Controllers
                     await getLock.ExecuteNonQueryAsync();
                     var code = ret.Value is int c ? c : -999;
                     if (code < 0)
-                        return Conflict(new { isSuccessful = false, message = "This booking's first invoice is already being created — try again in a moment." });
+                        return Conflict(new { isSuccessful = false, message = "This booking's first invoice is already being created â€” try again in a moment." });
                     lockTaken = true;
                 }
 
@@ -1107,7 +1107,7 @@ namespace WorkNest.API.Controllers
                 decimal secDepositQty = (secMonths > 0 && securityDeposit > 0) ? secMonths : 1m;
 
                 // Preview: return exactly what this invoice will contain (same calculation), without saving
-                // or emailing anything — the admin preview window shows these figures.
+                // or emailing anything â€” the admin preview window shows these figures.
                 if (preview)
                 {
                     // Invoice date is always today; due 7 days later.
@@ -1306,7 +1306,7 @@ namespace WorkNest.API.Controllers
                     await getLock.ExecuteNonQueryAsync();
                     var code = ret.Value is int c ? c : -999;
                     if (code < 0)
-                        return Conflict(new { isSuccessful = false, message = "The next invoice for this booking is already being created — try again in a moment." });
+                        return Conflict(new { isSuccessful = false, message = "The next invoice for this booking is already being created â€” try again in a moment." });
                     lockTaken = true;
                 }
 
@@ -1537,7 +1537,7 @@ namespace WorkNest.API.Controllers
                 }
 
                 // Earlier unpaid invoices stay open and are paid on their own, so the balance is shown
-                // for the customer's information only — adding it here would count it twice.
+                // for the customer's information only â€” adding it here would count it twice.
                 if (arrears > 0)
                 {
                     dto.Notes = $"{dto.Notes}. Previous unpaid balance: PKR {arrears:N0} (separate invoices, not included in this total).";
