@@ -111,8 +111,10 @@ namespace WorkNest.API.Controllers
             var (email, reject) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "login");
             if (reject != null) return reject;
             request.Email = email!;
-            request.Password = null;
-            return Ok(await _auth.LoginAsync(request));
+            // Retain request.Password for credential verification
+            var authResult = await _auth.LoginAsync(request);
+            if (!authResult.IsSuccessful) return Unauthorized(authResult);
+            return Ok(authResult);
         }
 
         [EnableRateLimiting("auth")]

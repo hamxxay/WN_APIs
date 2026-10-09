@@ -49,9 +49,14 @@ namespace WorkNest.Application.Services
             int? locationId = null;
 
             var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
+            bool isFirebaseVerified = !string.IsNullOrWhiteSpace(request.FirebaseIdToken);
 
             if (row is null)
             {
+                if (!isFirebaseVerified)
+                {
+                    return ApiResponse.Fail("Invalid email or password.");
+                }
                 var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, request.Password, Roles.GeneralId, request.CompanyId);
                 publicId = pid;
                 role = Roles.General;
@@ -59,6 +64,16 @@ namespace WorkNest.Application.Services
             }
             else
             {
+                if (!isFirebaseVerified)
+                {
+                    var dbPassword = row.TryGetValue("PasswordHash", out var pw) ? pw?.ToString() : null;
+                    if (string.IsNullOrWhiteSpace(request.Password) ||
+                        (!string.IsNullOrWhiteSpace(dbPassword) && !string.Equals(dbPassword, request.Password, StringComparison.Ordinal)))
+                    {
+                        return ApiResponse.Fail("Invalid email or password.");
+                    }
+                }
+
                 publicId = (row.TryGetValue("IdGUID", out var idg) && idg is not null && !string.IsNullOrWhiteSpace(idg.ToString())) 
                     ? idg.ToString() 
                     : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
@@ -77,7 +92,6 @@ namespace WorkNest.Application.Services
                 row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
             return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Login successful.");
         }
-
         public async Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request)
         {
             try
