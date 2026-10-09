@@ -220,39 +220,13 @@ namespace WorkNest.Application.Services
                 {
                     if (message.Length < 2 || message.Length > 200) { t.Texts.Add("Please enter a valid full name.\n\nType 0 for the main menu."); return; }
                     t.Data.Name = message;
-                    t.State = "booking_phone";
-                    t.Texts.Add($"Thank you, {message}!\n\nPlease enter your Contact Phone Number.\n\nExample: 03001234567\n\nType 0 for the main menu.");
+                    // The phone number is the customer's WhatsApp number: no need to ask for it.
+                    await FinishTourAsync(t, phone, profileName);
                     return;
                 }
-                case "booking_phone":
+                case "booking_phone": // conversations started before the phone question was removed
                 {
-                    var cleaned = Regex.Replace(message, @"[^\d+]", "");
-                    if (cleaned.Length < 7 || cleaned.Length > 20)
-                    {
-                        t.Texts.Add("Please enter a valid contact phone number.\n\nExample: 03001234567\n\nType 0 for the main menu.");
-                        return;
-                    }
-                    var reference = "WN-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-                    var d = t.Data;
-                    var saved = await _contacts.CreateChatbotTourInquiryAsync(new ChatbotTourInquiryRequest
-                    {
-                        Name = d.Name ?? profileName ?? "WhatsApp customer",
-                        Phone = cleaned,
-                        Branch = d.Branch,
-                        WorkspaceType = d.WorkspaceType,
-                        Seats = int.TryParse(d.Seats, out var s) ? s : null,
-                        Reference = reference
-                    });
-                    if (!saved.IsSuccessful)
-                    {
-                        t.Texts.Add("We could not save your tour request right now. Please try again in a moment, or call our sales team.\n\n" + SalesContacts());
-                        return; // keep the answers so the customer can just resend the phone number
-                    }
-                    t.Texts.Add("Tour request received!\n\n" +
-                                $"Reference: {reference}\n\n" +
-                                $"Branch: {d.Branch}\nWorkspace: {d.WorkspaceType}\nSeats / Persons: {d.Seats}\nName: {d.Name}\nPhone: {cleaned}\n\n" +
-                                "Our sales team will contact you shortly.\n\nThank you for choosing WorkNest!\n\nType 0 to return to the main menu.");
-                    t.Reset();
+                    await FinishTourAsync(t, phone, profileName);
                     return;
                 }
                 case "complaint_category":
@@ -331,6 +305,42 @@ namespace WorkNest.Application.Services
             {
                 t.Texts.Add("Please select a valid option.\n\n" + MainMenu());
             }
+        }
+
+        /// <summary>Saves the Book a Tour answers as a Tour Inquiry, with the customer's WhatsApp number as the phone.</summary>
+        private async Task FinishTourAsync(Turn t, string whatsAppPhone, string? profileName)
+        {
+            var phone = LocalPhone(whatsAppPhone);
+            var reference = "WN-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+            var d = t.Data;
+            var saved = await _contacts.CreateChatbotTourInquiryAsync(new ChatbotTourInquiryRequest
+            {
+                Name = d.Name ?? profileName ?? "WhatsApp customer",
+                Phone = phone,
+                Branch = d.Branch,
+                WorkspaceType = d.WorkspaceType,
+                Seats = int.TryParse(d.Seats, out var s) ? s : null,
+                Reference = reference
+            });
+            if (!saved.IsSuccessful)
+            {
+                t.State = "booking_phone"; // any reply retries the save with the same answers
+                t.Texts.Add("We could not save your tour request right now. Please reply with any message to try again, or call our sales team.\n\n" + SalesContacts());
+                return;
+            }
+            t.Texts.Add("Tour request received!\n\n" +
+                        $"Reference: {reference}\n\n" +
+                        $"Branch: {d.Branch}\nWorkspace: {d.WorkspaceType}\nSeats / Persons: {d.Seats}\nName: {d.Name}\nPhone: {phone}\n\n" +
+                        "Our sales team will contact you on this WhatsApp number shortly.\n\nThank you for choosing WorkNest!\n\nType 0 to return to the main menu.");
+            t.Reset();
+        }
+
+        /// <summary>WhatsApp number (923001234567) shown the local way (03001234567); other countries keep +.</summary>
+        private static string LocalPhone(string whatsAppPhone)
+        {
+            var digits = new string((whatsAppPhone ?? "").Where(char.IsDigit).ToArray());
+            if (digits.StartsWith("92") && digits.Length == 12) return "0" + digits[2..];
+            return digits.Length > 0 ? "+" + digits : whatsAppPhone ?? "";
         }
 
         // ---- texts ------------------------------------------------------------------------------
