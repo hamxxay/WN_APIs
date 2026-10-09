@@ -292,7 +292,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Hikvision
 
                 var dup = list.FirstOrDefault(s => s?["cardReaderRecvStatus"]?.ToString() == "5");
                 if (dup != null)
-                    return HikIsapiResult.Fail($"This fingerprint is already enrolled for employee #{dup["errorMsg"]}.");
+                {
+                    var failDup = HikIsapiResult.Fail($"This fingerprint is already enrolled for employee #{dup["errorMsg"]}.");
+                    failDup.DuplicateWith = dup["errorMsg"]?.ToString();
+                    return failDup;
+                }
 
                 var first = statuses.FirstOrDefault(s => s != "1");
                 return HikIsapiResult.Fail(first switch
@@ -363,6 +367,231 @@ namespace WorkNest.Infrastructure.ExternalServices.Hikvision
             return Interpret(await SendAsync(device, HttpMethod.Post, "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json", Build, TimeSpan.FromSeconds(30)));
         }
 
+        // ---- Sync jobs (ports of HIK isapi.js read calls) --------------------------
+
+        public async Task<bool> PingAsync(HikDeviceConnection device, TimeSpan timeout)
+        {
+            var res = await SendAsync(device, HttpMethod.Get, "/ISAPI/System/deviceInfo?format=json", null, timeout);
+            return res.Error == null && !res.TimedOut && res.IsSuccessStatus;
+        }
+
+        public async Task<DateTime?> GetDeviceTimeAsync(HikDeviceConnection device)
+        {
+            var res = await SendAsync(device, HttpMethod.Get, "/ISAPI/System/time", null, TimeSpan.FromSeconds(2.5));
+            if (res.Error != null || res.TimedOut || !res.IsSuccessStatus) return null;
+            var local = XmlTag(res.Text, "localTime");
+            return DateTimeOffset.TryParse(local, out var t) ? t.UtcDateTime : null;
+        }
+
+        /// <summary>
+        /// Same as HIK setDeviceTime: the zone is pinned to Pakistan (UTC+5, no DST) and the body is built when
+        /// the request is sent, so every machine gets the time of its own send moment, not of its queue entry.
+        /// Hikvision's timeZone string is inverted: CST-5:00:00 means UTC+5.
+        /// </summary>
+        public async Task<HikIsapiResult> SetDeviceTimeAsync(HikDeviceConnection device, int tzOffsetMinutes = 300)
+        {
+            var abs = Math.Abs(tzOffsetMinutes);
+            var oh = (abs / 60).ToString("00");
+            var om = (abs % 60).ToString("00");
+            var sign = tzOffsetMinutes >= 0 ? "+" : "-";
+            var tz = $"CST{(tzOffsetMinutes >= 0 ? "-" : "+")}{abs / 60}:{om}:00";
+            HttpContent Build()
+            {
+                var t = DateTime.UtcNow.AddMinutes(tzOffsetMinutes);
+                var local = $"{t:yyyy-MM-ddTHH:mm:ss}{sign}{oh}:{om}";
+                return new StringContent($"<Time><timeMode>manual</timeMode><localTime>{local}</localTime><timeZone>{tz}</timeZone></Time>",
+                    Encoding.UTF8, "application/xml");
+            }
+            return Interpret(await SendAsync(device, HttpMethod.Put, "/ISAPI/System/time", Build, DefaultTimeout));
+        }
+
+        public Task<HikSearchPage> SearchPersonsAsync(HikDeviceConnection device, int position, int maxResults, TimeSpan timeout) =>
+            SearchAsync(device, "/ISAPI/AccessControl/UserInfo/Search?format=json",
+                new JsonObject { ["UserInfoSearchCond"] = new JsonObject { ["searchID"] = "hik-dash", ["searchResultPosition"] = position, ["maxResults"] = maxResults } },
+                "UserInfoSearch", "UserInfo", timeout);
+
+        public Task<HikSearchPage> SearchEventsAsync(HikDeviceConnection device, int position, int maxResults, TimeSpan timeout) =>
+            SearchAsync(device, "/ISAPI/AccessControl/AcsEvent?format=json",
+                new JsonObject { ["AcsEventCond"] = new JsonObject { ["searchID"] = "hik-dash-ev", ["searchResultPosition"] = position, ["maxResults"] = maxResults, ["major"] = 5, ["minor"] = 0 } },
+                "AcsEvent", "InfoList", timeout);
+
+        public Task<HikSearchPage> ReadAllCardsAsync(HikDeviceConnection device, int position, int maxResults, TimeSpan timeout) =>
+            SearchAsync(device, "/ISAPI/AccessControl/CardInfo/Search?format=json",
+                new JsonObject { ["CardInfoSearchCond"] = new JsonObject { ["searchID"] = "hik-dash-cards", ["searchResultPosition"] = position, ["maxResults"] = maxResults } },
+                "CardInfoSearch", "CardInfo", timeout);
+
+        private async Task<HikSearchPage> SearchAsync(HikDeviceConnection device, string path, JsonNode body, string root, string listKey, TimeSpan timeout)
+        {
+            var res = await SendJsonAsync(device, HttpMethod.Post, path, body, timeout);
+            if (res.Error != null || res.TimedOut) return new HikSearchPage { Ok = false, Error = res.Error ?? "timed out" };
+            if (!res.IsSuccessStatus) return new HikSearchPage { Ok = false, Error = $"search failed ({res.Status})" };
+            var s = res.Json?[root];
+            var page = new HikSearchPage { Ok = true, Total = int.TryParse(s?["totalMatches"]?.ToString(), out var n) ? n : 0 };
+            if (s?[listKey] is JsonArray arr)
+                foreach (var item in arr) if (item is JsonObject o) page.List.Add((JsonObject)o.DeepClone());
+            return page;
+        }
+
+        public async Task<List<string>?> ReadCardsAsync(HikDeviceConnection device, string employeeNo)
+        {
+            var body = new JsonObject
+            {
+                ["CardInfoSearchCond"] = new JsonObject
+                {
+                    ["searchID"] = "hik-dash", ["searchResultPosition"] = 0, ["maxResults"] = 30,
+                    ["EmployeeNoList"] = new JsonArray(new JsonObject { ["employeeNo"] = employeeNo })
+                }
+            };
+            var res = await SendJsonAsync(device, HttpMethod.Post, "/ISAPI/AccessControl/CardInfo/Search?format=json", body, TimeSpan.FromSeconds(2.5));
+            if (res.Error != null || res.TimedOut) return null;
+            var list = new List<string>();
+            if (res.Json?["CardInfoSearch"]?["CardInfo"] is JsonArray arr)
+                foreach (var c in arr) { var no = c?["cardNo"]?.ToString(); if (!string.IsNullOrEmpty(no)) list.Add(no); }
+            return list;
+        }
+
+        public async Task<List<HikFingerprintTemplate>?> ReadFingerprintsAsync(HikDeviceConnection device, string employeeNo)
+        {
+            // Do NOT send cardReaderNo: this firmware answers "NoFP" when it is present.
+            var body = new JsonObject { ["FingerPrintCond"] = new JsonObject { ["searchID"] = "hik-dash", ["employeeNo"] = employeeNo } };
+            var res = await SendJsonAsync(device, HttpMethod.Post, "/ISAPI/AccessControl/FingerPrintUpload?format=json", body);
+            if (res.Error != null || res.TimedOut) return null;
+            var list = new List<HikFingerprintTemplate>();
+            if (res.Json?["FingerPrintInfo"]?["FingerPrintList"] is JsonArray arr)
+                foreach (var f in arr)
+                {
+                    var data = f?["fingerData"]?.ToString();
+                    if (string.IsNullOrEmpty(data)) continue;
+                    list.Add(new HikFingerprintTemplate { FingerPrintId = int.TryParse(f?["fingerPrintID"]?.ToString(), out var id) && id > 0 ? id : 1, FingerData = data });
+                }
+            return list;
+        }
+
+        public async Task<List<string>?> ReadFacesAsync(HikDeviceConnection device, string employeeNo)
+        {
+            var faces = new List<string>();
+            var pos = 0;
+            for (var i = 0; i < 20; i++)
+            {
+                var body = new JsonObject { ["searchResultPosition"] = pos, ["maxResults"] = 30, ["FDID"] = "1", ["faceLibType"] = "blackFD" };
+                var res = await SendJsonAsync(device, HttpMethod.Post, "/ISAPI/Intelligent/FDLib/FDSearch?format=json", body);
+                if (res.Error != null || res.TimedOut) return i == 0 ? null : faces;
+                if (!res.IsSuccessStatus) break;
+                var list = res.Json?["MatchList"] as JsonArray;
+                var count = list?.Count ?? 0;
+                if (list != null)
+                    foreach (var m in list)
+                        if (m?["FPID"]?.ToString() == employeeNo && !string.IsNullOrEmpty(m?["modelData"]?.ToString()))
+                            faces.Add(m!["modelData"]!.ToString());
+                pos += count;
+                var total = int.TryParse(res.Json?["totalMatches"]?.ToString(), out var t) ? t : 0;
+                if (count == 0 || pos >= total) break;
+            }
+            return faces;
+        }
+
+        public async Task<HikIsapiResult> AddFaceByModelAsync(HikDeviceConnection device, string employeeNo, string modelData)
+        {
+            var body = new JsonObject { ["faceLibType"] = "blackFD", ["FDID"] = "1", ["FPID"] = employeeNo, ["modelData"] = modelData };
+            return Interpret(await SendJsonAsync(device, HttpMethod.Post, "/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json", body));
+        }
+
+        public async Task<HikIsapiResult> DeleteCardAsync(HikDeviceConnection device, string cardNo)
+        {
+            var body = new JsonObject { ["CardInfoDelCond"] = new JsonObject { ["CardNoList"] = new JsonArray(new JsonObject { ["cardNo"] = cardNo }) } };
+            return Interpret(await SendJsonAsync(device, HttpMethod.Put, "/ISAPI/AccessControl/CardInfo/Delete?format=json", body));
+        }
+
+        public async Task<HikIsapiResult> RemoteControlDoorAsync(HikDeviceConnection device, string cmd = "open", int doorNo = 1)
+        {
+            // The terminal serves one request at a time; a busy device can time out the first attempt — retry once.
+            var xml = $"<RemoteControlDoor><cmd>{cmd}</cmd></RemoteControlDoor>";
+            var path = $"/ISAPI/AccessControl/RemoteControl/door/{doorNo}";
+            var r = Interpret(await SendAsync(device, HttpMethod.Put, path, () => new StringContent(xml, Encoding.UTF8, "application/xml"), DefaultTimeout));
+            if (r.Ok || !r.Unreachable) return r;
+            return Interpret(await SendAsync(device, HttpMethod.Put, path, () => new StringContent(xml, Encoding.UTF8, "application/xml"), DefaultTimeout));
+        }
+
+        public async Task<(JsonObject? Person, HikIsapiResult Result)> GetPersonRecordAsync(HikDeviceConnection device, string employeeNo)
+        {
+            var (person, result) = await GetPersonAsync(device, employeeNo);
+            return (person as JsonObject, result);
+        }
+
+        public async Task<HikIsapiResult> WritePersonAsync(HikDeviceConnection device, HikPersonRecord person, bool modify)
+        {
+            var record = new JsonObject
+            {
+                ["UserInfo"] = new JsonObject
+                {
+                    ["employeeNo"] = person.EmployeeNo,
+                    ["name"] = person.Name,
+                    ["userType"] = "normal",
+                    ["Valid"] = new JsonObject
+                    {
+                        ["enable"] = person.Enabled,
+                        ["beginTime"] = person.ValidBegin,
+                        ["endTime"] = person.ValidEnd,
+                        ["timeType"] = "local"
+                    },
+                    ["localUIRight"] = person.Admin,
+                    ["doorRight"] = "1",
+                    ["RightPlan"] = new JsonArray(new JsonObject { ["doorNo"] = 1, ["planTemplateNo"] = "1" })
+                }
+            };
+            return modify
+                ? Interpret(await SendJsonAsync(device, HttpMethod.Put, "/ISAPI/AccessControl/UserInfo/Modify?format=json", record))
+                : Interpret(await SendJsonAsync(device, HttpMethod.Post, "/ISAPI/AccessControl/UserInfo/Record?format=json", record));
+        }
+
+        // ---- Machines / users endpoints ---------------------------------------------
+
+        public async Task<HikDeviceInfo> GetDeviceInfoAsync(HikDeviceConnection device, TimeSpan timeout)
+        {
+            var res = await SendAsync(device, HttpMethod.Get, "/ISAPI/System/deviceInfo?format=json", null, timeout);
+            if (res.Error != null) return new HikDeviceInfo { Ok = false, Error = res.Error };
+            if (res.TimedOut) return new HikDeviceInfo { Ok = false, Error = "The machine did not respond in time." };
+            if (!res.IsSuccessStatus) return new HikDeviceInfo { Ok = false, Error = $"deviceInfo failed ({res.Status})" };
+            // Many MinMoe units ignore ?format=json and answer in XML: read either shape.
+            var info = res.Json?["DeviceInfo"];
+            string? Field(string tag) => info?[tag]?.ToString() ?? XmlTag(res.Text, tag);
+            return new HikDeviceInfo
+            {
+                Ok = true,
+                DeviceName = Field("deviceName"),
+                Model = Field("model"),
+                SerialNumber = Field("serialNumber"),
+                FirmwareVersion = Field("firmwareVersion"),
+                MacAddress = Field("macAddress")
+            };
+        }
+
+        public async Task<JsonNode?> GetCapabilitiesAsync(HikDeviceConnection device)
+        {
+            var res = await SendAsync(device, HttpMethod.Get, "/ISAPI/AccessControl/capabilities?format=json", null, DefaultTimeout);
+            return res.Error == null && !res.TimedOut && res.IsSuccessStatus ? res.Json : null;
+        }
+
+        public async Task<HikIsapiResult> DeleteFingerprintsAsync(HikDeviceConnection device, string employeeNo)
+        {
+            var body = new JsonObject
+            {
+                ["FingerPrintDelete"] = new JsonObject
+                {
+                    ["mode"] = "byEmployeeNo",
+                    ["EmployeeNoDetail"] = new JsonArray(new JsonObject { ["employeeNo"] = employeeNo })
+                }
+            };
+            return Interpret(await SendJsonAsync(device, HttpMethod.Put, "/ISAPI/AccessControl/FingerPrintDelete?format=json", body));
+        }
+
+        public async Task<HikIsapiResult> DeleteFaceAsync(HikDeviceConnection device, string employeeNo)
+        {
+            var body = new JsonObject { ["FPID"] = new JsonArray(new JsonObject { ["value"] = employeeNo }) };
+            return Interpret(await SendJsonAsync(device, HttpMethod.Put,
+                "/ISAPI/Intelligent/FDLib/FDSearch/Delete?format=json&FDID=1&faceLibType=blackFD", body));
+        }
+
         // ---- Transport ------------------------------------------------------------
 
         private sealed class IsapiResponse
@@ -378,9 +607,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Hikvision
         }
 
         private Task<IsapiResponse> SendJsonAsync(HikDeviceConnection device, HttpMethod method, string path, JsonNode body)
+            => SendJsonAsync(device, method, path, body, DefaultTimeout);
+
+        private Task<IsapiResponse> SendJsonAsync(HikDeviceConnection device, HttpMethod method, string path, JsonNode body, TimeSpan timeout)
         {
             var json = body.ToJsonString();
-            return SendAsync(device, method, path, () => new StringContent(json, Encoding.UTF8, "application/json"), DefaultTimeout);
+            return SendAsync(device, method, path, () => new StringContent(json, Encoding.UTF8, "application/json"), timeout);
         }
 
         /// <summary>

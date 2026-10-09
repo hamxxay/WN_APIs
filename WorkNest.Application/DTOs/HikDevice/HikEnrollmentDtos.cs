@@ -29,6 +29,8 @@ namespace WorkNest.Application.DTOs.HikDevice
         public string? SubStatusCode { get; set; }
         /// <summary>The machine could not be reached (offline / network) — the operation can be queued.</summary>
         public bool Unreachable { get; set; }
+        /// <summary>addFingerprint: the machine already has this print under another employee # (cardReaderRecvStatus 5).</summary>
+        public string? DuplicateWith { get; set; }
 
         public static HikIsapiResult Success() => new() { Ok = true };
         public static HikIsapiResult Fail(string error, string? subStatusCode = null) => new() { Ok = false, Error = error, SubStatusCode = subStatusCode };

@@ -163,6 +163,12 @@ try
     builder.Services.AddScoped<IPayFastService, PayFastService>();
     builder.Services.AddScoped<IKycFileStorage, LocalKycFileStorage>();
     builder.Services.AddSingleton<IHikIsapiClient, HikIsapiClient>();
+    // Hikvision machine <-> DB sync (replaces the HIK Node scheduler). Off unless HikSync:Enabled = true.
+    var hikSyncOptions = new HikSyncOptions();
+    builder.Configuration.GetSection("HikSync").Bind(hikSyncOptions);
+    builder.Services.AddSingleton(hikSyncOptions);
+    builder.Services.AddSingleton<IHikSyncRepository, HikSyncRepository>();
+    builder.Services.AddSingleton<IHikSyncService, HikSyncService>();
     builder.Services.AddSingleton<IUnifiClient, UnifiClient>();
 
     // ── Application Services ──────────────────────────────────────────────────
@@ -218,6 +224,7 @@ try
     builder.Services.AddHostedService<AccessCardRestrictionService>();
     builder.Services.AddHostedService<AnnouncementDeliveryService>();
     builder.Services.AddHostedService<ChallanAccessSuspensionService>();
+    builder.Services.AddHostedService<HikSyncBackgroundService>();
     builder.Services.AddHostedService<BookingAutoConfirmService>();
     builder.Services.AddHostedService<AgreementReminderService>();
     builder.Services.AddMemoryCache();

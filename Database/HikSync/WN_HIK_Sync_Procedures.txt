@@ -1,0 +1,329 @@
+-- ============================================================================================
+-- WN_HIK_Sync_* procedures for the Hikvision sync built into WN_APIs (HikSyncService, HikSync:Enabled).
+-- They run the same queries the HIK_Access-Control Node scheduler runs (same WN_HIK_* tables and columns).
+-- 31 procedures, CREATE OR ALTER: no table is created or changed. Safe to run again.
+-- Run on the database the API uses (test, then live) as ONE statement in DBeaver.
+-- Needs SQL Server 2016+ with compatibility level 130+ (WN_HIK_Sync_Users_Rebuild reads JSON).
+-- ============================================================================================
+SET NOCOUNT ON;
+
+IF (SELECT compatibility_level FROM sys.databases WHERE name = DB_NAME()) < 130
+BEGIN
+    SELECT 'Database compatibility level is below 130 (needed for OPENJSON). Nothing was changed - tell Claude.' AS Result;
+    RETURN;
+END
+
+IF OBJECT_ID(N'dbo.WN_HIK_Employees', N'V') IS NULL
+BEGIN
+    SELECT 'View dbo.WN_HIK_Employees is missing - run WN_HIK_Employees_View.txt first. Nothing was changed.' AS Result;
+    RETURN;
+END
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Devices_Get
+    @DeviceId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Machines (with group name) for the sync jobs: entrances first, then meeting rooms, then rooms by number.
+    SELECT d.Id, d.Device_Name, d.Host, d.Host2, d.Port, d.Use_https, d.Username, d.Password, d.Online, d.Code, g.Name AS GroupName
+    FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
+    LEFT JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id
+    WHERE @DeviceId IS NULL OR d.Id = @DeviceId
+    ORDER BY CASE WHEN LOWER(g.Name) LIKE ''entrance%'' THEN 0 WHEN d.Device_Name LIKE ''Meeting%'' THEN 1 ELSE 2 END,
+             TRY_CAST(d.Code AS INT), d.Device_Name, d.Id;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Employee_Get
+    @EmployeeId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT * FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE id = @EmployeeId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Grants_GetByEmployee
+    @EmployeeId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT id, employee_id, device_id, sync_state, last_error, synced_at
+    FROM dbo.WN_HIK_AccessGrants WITH (NOLOCK) WHERE employee_id = @EmployeeId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Grants_DeleteByEmployee
+    @EmployeeId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_HIK_AccessGrants WHERE employee_id = @EmployeeId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Grant_Delete
+    @GrantId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_HIK_AccessGrants WHERE id = @GrantId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Grants_CountPending
+    AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT COUNT(*) AS n FROM dbo.WN_HIK_AccessGrants WITH (NOLOCK) WHERE sync_state IN (N''pending'', N''error'', N''removing'');
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Grant_InsertSynced
+    @EmployeeId INT, @DeviceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_HIK_AccessGrants WHERE employee_id = @EmployeeId AND device_id = @DeviceId)
+        INSERT INTO dbo.WN_HIK_AccessGrants (employee_id, device_id, sync_state, synced_at)
+        VALUES (@EmployeeId, @DeviceId, N''synced'', SYSDATETIME());
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Grants_ResetToPending
+    @EmployeeId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_HIK_AccessGrants SET sync_state = N''pending''
+    WHERE employee_id = @EmployeeId AND sync_state IN (N''synced'', N''error'');
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_DevCache_Get
+    @DeviceId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Device_id, Users_snapshot, Users_UpdatedOn, Cards_snapshot, Cards_UpdatedOn
+    FROM dbo.WN_HIK_DevCache WITH (NOLOCK)
+    WHERE @DeviceId IS NULL OR Device_id = @DeviceId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_DevCache_Save
+    @DeviceId INT, @IsCards BIT, @Json NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF @IsCards = 1
+        MERGE dbo.WN_HIK_DevCache WITH (HOLDLOCK) AS t USING (SELECT @DeviceId AS id) s ON t.Device_id = s.id
+        WHEN MATCHED THEN UPDATE SET Cards_snapshot = @Json, Cards_UpdatedOn = SYSDATETIME()
+        WHEN NOT MATCHED THEN INSERT (Device_id, Cards_snapshot, Cards_UpdatedOn) VALUES (s.id, @Json, SYSDATETIME());
+    ELSE
+        MERGE dbo.WN_HIK_DevCache WITH (HOLDLOCK) AS t USING (SELECT @DeviceId AS id) s ON t.Device_id = s.id
+        WHEN MATCHED THEN UPDATE SET Users_snapshot = @Json, Users_UpdatedOn = SYSDATETIME()
+        WHEN NOT MATCHED THEN INSERT (Device_id, Users_snapshot, Users_UpdatedOn) VALUES (s.id, @Json, SYSDATETIME());
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_DevCache_Invalidate
+    @DeviceId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_HIK_DevCache SET Users_UpdatedOn = NULL, Cards_UpdatedOn = NULL
+    WHERE @DeviceId IS NULL OR Device_id = @DeviceId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Events_GetLast
+    @DeviceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT MAX(machine_event_no) AS LastSerial, CONVERT(VARCHAR(19), MAX(event_time), 126) AS LastTime
+    FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE device_id = @DeviceId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Event_Insert
+    @DeviceId INT, @DeviceName NVARCHAR(100), @EmployeeNo NVARCHAR(32) = NULL, @Name NVARCHAR(128) = NULL,
+    @CardNo NVARCHAR(32) = NULL, @AccessEvent INT = NULL, @AccessEventDetails NVARCHAR(64) = NULL,
+    @MachineEventNo BIGINT = NULL, @EventTime DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Inserted = 0 when this machine event (device + serial + time) is already archived.
+    IF @MachineEventNo IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.WN_HIK_Events WITH (NOLOCK)
+        WHERE device_id = @DeviceId AND machine_event_no = @MachineEventNo AND event_time = @EventTime)
+    BEGIN
+        SELECT 0 AS Inserted;
+        RETURN;
+    END
+    BEGIN TRY
+        INSERT INTO dbo.WN_HIK_Events (device_id, device_name, employee_no, name, card_no, access_event, access_event_details, machine_event_no, event_time)
+        VALUES (@DeviceId, @DeviceName, @EmployeeNo, @Name, @CardNo, @AccessEvent, @AccessEventDetails, @MachineEventNo, @EventTime);
+        SELECT 1 AS Inserted;
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() IN (2601, 2627) SELECT 0 AS Inserted; ELSE THROW;
+    END CATCH
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_PendingOps_Get
+    @Top INT = 200
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP (@Top) id, device_id, op, employee_no, payload, attempts, last_error, created_at
+    FROM dbo.WN_HIK_PendingOps WITH (NOLOCK) ORDER BY id;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_PendingOp_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_HIK_PendingOps WHERE id = @Id;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_PendingOp_Fail
+    @Id INT, @Error NVARCHAR(400)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_HIK_PendingOps SET attempts = attempts + 1, last_error = @Error WHERE id = @Id;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_FpVault_Get
+    @EmployeeNo NVARCHAR(32), @Name NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT finger_no, template FROM dbo.WN_HIK_FpVault WITH (NOLOCK) WHERE employee_no = @EmployeeNo AND name = @Name;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_FpVault_Save
+    @EmployeeNo NVARCHAR(32), @Name NVARCHAR(128), @FingerNo INT, @Template NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    MERGE dbo.WN_HIK_FpVault WITH (HOLDLOCK) AS t
+    USING (SELECT @EmployeeNo AS emp, @Name AS nm, @FingerNo AS fno) s
+       ON t.employee_no = s.emp AND t.name = s.nm AND t.finger_no = s.fno
+    WHEN MATCHED THEN UPDATE SET template = @Template, updated_at = SYSDATETIME()
+    WHEN NOT MATCHED THEN INSERT (employee_no, name, finger_no, template) VALUES (s.emp, s.nm, s.fno, @Template);
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_FaceVault_Get
+    @EmployeeNo NVARCHAR(32), @Name NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 model_data FROM dbo.WN_HIK_FaceVault WITH (NOLOCK) WHERE employee_no = @EmployeeNo AND name = @Name;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_FaceVault_Save
+    @EmployeeNo NVARCHAR(32), @Name NVARCHAR(128), @ModelData NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    MERGE dbo.WN_HIK_FaceVault WITH (HOLDLOCK) AS t
+    USING (SELECT @EmployeeNo AS emp, @Name AS nm) s ON t.employee_no = s.emp AND t.name = s.nm
+    WHEN MATCHED THEN UPDATE SET model_data = @ModelData, updated_at = SYSDATETIME()
+    WHEN NOT MATCHED THEN INSERT (employee_no, name, model_data) VALUES (s.emp, s.nm, @ModelData);
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_FaceVault_Keys
+    AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT employee_no, name FROM dbo.WN_HIK_FaceVault WITH (NOLOCK);
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_UserMeta_Get
+    AS
+BEGIN
+    SET NOCOUNT ON;
+    -- CNIC / tag typed by staff, kept when WN_HIK_Users is rebuilt from the machines.
+    SELECT employee_no, name, cnic, tag_id FROM dbo.WN_HIK_Users WITH (NOLOCK) WHERE cnic IS NOT NULL OR tag_id IS NOT NULL;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Users_Rebuild
+    @UsersJson NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    -- Replaces WN_HIK_Users in one transaction from a JSON array built from the machine rosters.
+    BEGIN TRAN;
+        DELETE FROM dbo.WN_HIK_Users;
+        INSERT INTO dbo.WN_HIK_Users (employee_no, name, room, role, machines, machine_count, cnic, tag_id)
+        SELECT j.employee_no, j.name, j.room, j.role, j.machines, j.machine_count, j.cnic, j.tag_id
+        FROM OPENJSON(@UsersJson) WITH (
+            employee_no NVARCHAR(32) ''$.employee_no'', name NVARCHAR(128) ''$.name'', room NVARCHAR(256) ''$.room'',
+            role NVARCHAR(16) ''$.role'', machines NVARCHAR(MAX) ''$.machines'', machine_count INT ''$.machine_count'',
+            cnic NVARCHAR(20) ''$.cnic'', tag_id INT ''$.tag_id'') j;
+    COMMIT;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_CardEmployees_Get
+    AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT id, card_no FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE kind = N''card'' AND status = N''active'' AND card_no IS NOT NULL;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Card_SetHolder
+    @Id INT, @EmployeeName NVARCHAR(128) = NULL, @EmployeeNo NVARCHAR(32) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_HIK_Cards SET Employee_name = @EmployeeName, Employee_no = @EmployeeNo WHERE Id = @Id;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_BookingRefs_Get
+    AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT DISTINCT booking_ref FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE booking_ref LIKE N''WNB-%'';
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Booking_Get
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT b.Id, b.CustomerCode, b.SpaceId, b.EndOn, b.BillingPeriodEnd AS billEnd
+    FROM dbo.WN_Bookings b WITH (NOLOCK) WHERE b.Id = @BookingId;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Attendees_GetByRef
+    @BookingRef NVARCHAR(64)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT id, CONVERT(VARCHAR(19), valid_end, 126) AS ve FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE booking_ref = @BookingRef;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Booking_GetNext
+    @OldId INT, @CustomerCode NVARCHAR(50) = NULL, @SpaceId INT, @OldEnd DATETIME2(0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Renewal: the earliest newer running booking of the same customer for the same space.
+    SELECT TOP 1 b.Id, b.StartOn, b.EndOn, b.BillingPeriodEnd AS billEnd
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.Id <> @OldId AND b.CustomerCode = @CustomerCode AND b.SpaceId = @SpaceId
+      AND b.EndOn > @OldEnd AND b.EndOn > SYSDATETIME()
+    ORDER BY b.StartOn ASC;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Ref_HasAttendees
+    @BookingRef NVARCHAR(64)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 id FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE booking_ref = @BookingRef;
+END');
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Visitors_Retarget
+    @FromRef NVARCHAR(64), @ToRef NVARCHAR(64), @NewEnd NVARCHAR(19)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_HIK_Visitors
+    SET Booking_ref = @ToRef, Valid_end = CONVERT(DATETIME, @NewEnd, 126), Status = N''active''
+    WHERE Booking_ref = @FromRef;
+END');
+
+
+SELECT COUNT(*) AS SyncProceduresInstalled FROM sys.procedures WHERE name LIKE N'WN[_]HIK[_]Sync[_]%';
