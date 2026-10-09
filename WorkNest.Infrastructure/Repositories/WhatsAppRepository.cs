@@ -92,14 +92,15 @@ namespace WorkNest.Infrastructure.Repositories
             catch (SqlException ex) when (ex.Number is 2601 or 2627) { return false; } // already saved (Meta re-delivery)
         }
 
-        public async Task<(string State, string? Data)?> GetBotStateAsync(string phone)
+        public async Task<(string State, string? Data, int MinutesSinceUpdate)?> GetBotStateAsync(string phone)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand("SELECT State, Data FROM dbo.WN_WhatsApp_BotState WITH (NOLOCK) WHERE PhoneNumber = @Phone;", c);
+            await using var cmd = new SqlCommand(
+                "SELECT State, Data, DATEDIFF(MINUTE, UpdatedOn, SYSDATETIME()) FROM dbo.WN_WhatsApp_BotState WITH (NOLOCK) WHERE PhoneNumber = @Phone;", c);
             cmd.Parameters.AddWithValue("@Phone", phone);
             await using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return null;
-            return (r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1));
+            return (r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? int.MaxValue : r.GetInt32(2));
         }
 
         public async Task SaveBotStateAsync(string phone, string state, string? data)
