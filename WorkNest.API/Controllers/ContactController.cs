@@ -48,6 +48,18 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> BookTour([FromBody] ContactRequest request) =>
             StatusCode(201, await _contacts.CreateContactAsync(request, "book_tour", User.GetEmail()));
 
+        /// <summary>Feedback on a tour inquiry: not interested (reason, closes it), future prospect (follow-up date,
+        /// alerted on that date) or converted into a quotation (quotationId).</summary>
+        [HttpPost("api/contact/{id:int}/feedback")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> Feedback(int id, [FromBody] ContactFeedbackRequest request)
+        {
+            var email = User.GetEmail();
+            int? actorId = string.IsNullOrWhiteSpace(email) ? null : (await _db.GetUserIdByEmailAsync(email)).Item1;
+            var result = await _contacts.SaveFeedbackAsync(id, request, actorId);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
+
         [HttpPatch("api/contact/{id:int}/status")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] ContactStatusUpdateRequest request) =>

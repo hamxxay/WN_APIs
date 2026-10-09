@@ -2436,6 +2436,71 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // ---- Tour inquiry feedback (dbo.WN_ContactFeedback). SQL error 208 = table not created yet. ----
+
+        public async Task<bool> InsertContactFeedbackAsync(int contactId, string outcome, string? reason, DateTime? followUpOn, int? quotationId, int? createdById)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand(@"
+                    INSERT INTO dbo.WN_ContactFeedback (ContactId, Outcome, Reason, FollowUpOn, QuotationId, CreatedById)
+                    VALUES (@ContactId, @Outcome, @Reason, @FollowUpOn, @QuotationId, @CreatedById);", c);
+                cmd.Parameters.AddWithValue("@ContactId", contactId);
+                cmd.Parameters.AddWithValue("@Outcome", outcome);
+                cmd.Parameters.AddWithValue("@Reason", (object?)reason ?? DBNull.Value);
+                cmd.Parameters.Add("@FollowUpOn", SqlDbType.Date).Value = (object?)followUpOn?.Date ?? DBNull.Value;
+                cmd.Parameters.AddWithValue("@QuotationId", (object?)quotationId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return false; }
+        }
+
+        public async Task<Dictionary<int, IDictionary<string, object?>>> GetLatestContactFeedbackAsync(IEnumerable<int> contactIds)
+        {
+            var result = new Dictionary<int, IDictionary<string, object?>>();
+            var ids = contactIds.Where(i => i > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            try
+            {
+                await using var c = await Open();
+                // Ids are ints from the inquiry list, never user text.
+                await using var cmd = new SqlCommand($@"
+                    SELECT f.ContactId, f.Outcome, f.Reason, f.FollowUpOn, f.QuotationId, f.CreatedOn
+                    FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) AS rn
+                          FROM dbo.WN_ContactFeedback WITH (NOLOCK)
+                          WHERE ContactId IN ({string.Join(",", ids)})) f
+                    WHERE f.rn = 1;", c);
+                await using var r = await cmd.ExecuteReaderAsync();
+                foreach (var row in await ReadAll(r))
+                    result[Convert.ToInt32(row["ContactId"])] = row;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return result;
+        }
+
+        public async Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today)
+        {
+            var list = new List<(int, DateTime)>();
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand(@"
+                    SELECT f.ContactId, f.FollowUpOn
+                    FROM (SELECT ContactId, Outcome, FollowUpOn, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) AS rn
+                          FROM dbo.WN_ContactFeedback WITH (NOLOCK)) f
+                    JOIN dbo.WN_Contacts ct WITH (NOLOCK) ON ct.Id = f.ContactId
+                    WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today;", c);
+                cmd.Parameters.Add("@Today", SqlDbType.Date).Value = today.Date;
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.GetDateTime(1)));
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return list;
+        }
+
         // --- Dashboard ---
 
         /// <summary>
@@ -2444,7 +2509,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
         /// [5] receivables aging, [6] occupancy by space type, [7] top customers, [8] lease expiries next 6 months.
         /// Live bookings = BookingStatusId 1, 2, 5, 33 (old + WN_BookingStatuses pending / confirmed).
         /// </summary>
-        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(int? locationId, int endingSoonDays,
+        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null)
         {
             // Period: this month / quarter / year (calendar, to date). Comparisons are against the previous period;
@@ -2455,6 +2520,9 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
             // Status IDs are ints from code (OrderStatus lookups), never user input.
             static string List(IEnumerable<int> ids) { var l = ids.Distinct().ToList(); return l.Count == 0 ? "-1" : string.Join(",", l); }
             var open = List(openInvoiceStatusIds); var paid = List(paidStatusIds); var voids = List(voidStatusIds);
+            // Location filter: null = all locations; otherwise only spaces in those locations (ints, never user text).
+            var spaceLocFilter = locationIds is null ? "1 = 1" : $"s.LocationId IN ({List(locationIds)})";
+            var invLocFilter = locationIds is null ? "1 = 1" : "b.SpaceId IN (SELECT Id FROM @Spaces)";
             await using var c = await Open();
             var sql = $@"
                 DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) wall-clock time from the app clock
@@ -2472,7 +2540,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                 INSERT INTO @Spaces (Id, Name)
                 SELECT s.Id, COALESCE(NULLIF(s.Name, ''), s.Code)
                   FROM dbo.WN_Spaces s WITH (NOLOCK)
-                 WHERE s.Status = 1 AND (@Loc IS NULL OR s.LocationId = @Loc);
+                 WHERE s.Status = 1 AND {spaceLocFilter};
 
                 DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, StartOn DATETIME2(0), EndOn DATETIME2(0), StatusId INT, UserId INT NULL, CustomerCode NVARCHAR(50) NULL, TotalAmount DECIMAL(18,2) NULL);
                 INSERT INTO @Live
@@ -2487,7 +2555,7 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                  WHERE i.StatusId NOT IN ({voids})
-                   AND (@Loc IS NULL OR b.SpaceId IN (SELECT Id FROM @Spaces));
+                   AND {invLocFilter};
 
                 -- [0] headline numbers
                 SELECT
@@ -2611,7 +2679,6 @@ VALUES ({quotationId}, {ver}, 'Sent', '{msg.Replace("'", "''")}', {uIdSql}, GETU
                   FROM f
                  ORDER BY f.MStart;";
             await using var cmd = new SqlCommand(sql, c) { CommandTimeout = 60 };
-            cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
             cmd.Parameters.Add("@Days", SqlDbType.Int).Value = endingSoonDays;
             cmd.Parameters.Add("@PMonths", SqlDbType.Int).Value = months;
             cmd.Parameters.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow ?? _clock.Now;

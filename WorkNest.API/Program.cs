@@ -38,7 +38,8 @@ try
         lc.ReadFrom.Configuration(ctx.Configuration));
 
     // ── Controllers + JSON camelCase ──────────────────────────────────────────
-    builder.Services.AddControllers()
+    // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
+    builder.Services.AddControllers(o => o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>())
         .AddJsonOptions(o =>
         {
             o.JsonSerializerOptions.PropertyNamingPolicy  = System.Text.Json.JsonNamingPolicy.CamelCase;
@@ -174,6 +175,14 @@ try
     builder.Services.AddScoped<ISpaceTypeService, SpaceTypeService>();
     builder.Services.AddScoped<IPricingPlanService, PricingPlanService>();
     builder.Services.AddScoped<IContactService, ContactService>();
+    // Complaints (WhatsApp bot + staff) and the WhatsApp bot / Inbox (WhatsApp:* settings, webhook api/whatsapp/webhook).
+    builder.Services.AddScoped<IComplaintRepository, WorkNest.Infrastructure.Repositories.ComplaintRepository>();
+    builder.Services.AddScoped<IComplaintService, ComplaintService>();
+    builder.Services.AddScoped<IChatbotNotifier, WhatsAppComplaintNotifier>();
+    builder.Services.AddScoped<IWhatsAppRepository, WorkNest.Infrastructure.Repositories.WhatsAppRepository>();
+    builder.Services.AddScoped<IWhatsAppClient, WorkNest.Infrastructure.ExternalServices.WhatsApp.WhatsAppCloudClient>();
+    builder.Services.AddScoped<IWhatsAppInboxService, WhatsAppInboxService>();
+    builder.Services.AddScoped<IWhatsAppBotService, WhatsAppBotService>();
     builder.Services.AddScoped<IGalleryService, GalleryService>();
     builder.Services.AddScoped<ISpaceConfigService, SpaceConfigService>();
     builder.Services.AddScoped<IDashboardService, DashboardService>();
