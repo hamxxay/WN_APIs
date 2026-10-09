@@ -11,8 +11,12 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IOrderStatusService _orderStatus;
         private readonly IBusinessClock _clock;
-        public DashboardService(IDbRepository db, IOrderStatusService orderStatus, IBusinessClock clock)
+        private readonly IComplaintRepository _complaints;
+        private readonly IWhatsAppRepository _whatsApp;
+        public DashboardService(IDbRepository db, IOrderStatusService orderStatus, IBusinessClock clock, IComplaintRepository complaints, IWhatsAppRepository whatsApp)
         {
+            _complaints = complaints;
+            _whatsApp = whatsApp;
             _clock = clock;
             _db = db;
             _orderStatus = orderStatus;
@@ -47,6 +51,15 @@ namespace WorkNest.Application.Services
                 // KYC is left out entirely when its table is missing (no rows can't be told apart, so keep 0).
                 result[route] = rows.Where(r => r.Key == key).Select(r => r.ItemKey).Distinct().ToList();
             }
+            // Tour inquiries marked "future prospect" whose follow-up date has come: alert on Tour Inquiries
+            // (one item per inquiry + date, so a new follow-up date alerts again even after "mark as read").
+            if (result.TryGetValue("/admin/contacts", out var contactItems))
+                foreach (var (contactId, followUpOn) in await _db.GetDueContactFollowUpsAsync(_clock.Today))
+                    contactItems.Add($"followup:{contactId}:{followUpOn:yyyyMMdd}");
+            // New (open) complaints waiting on staff.
+            result["/admin/complaints"] = (await _complaints.GetOpenIdsAsync()).Select(id => $"complaint:{id}").ToList();
+            // WhatsApp conversations with unread customer messages (a new message alerts again).
+            result["/admin/whatsapp"] = (await _whatsApp.GetUnreadConversationsAsync()).Select(x => $"wa:{x.ConversationId}:{x.LastMessageAt:yyyyMMddHHmmss}").ToList();
             return result;
         }
 
