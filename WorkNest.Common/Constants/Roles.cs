@@ -84,15 +84,16 @@ namespace WorkNest.Common.Constants
             role == Admin || role == SuperAdmin;
 
         /// <summary>
-        /// Only Sales Executives are limited to their assigned location(s); Admins and Super Admins cover
-        /// every location.
+        /// Admins and Sales Executives are limited to their assigned location(s) (WN_Users.LocationId plus
+        /// WN_UserLocations); only Super Admins cover every location.
         /// </summary>
         public static bool IsLocationBoundRole(int? roleId) =>
-            roleId == SalesExecutiveId;
+            roleId == SalesExecutiveId || roleId == AdminId;
 
-        /// <summary>Only sales_executive is limited to its assigned location(s).</summary>
+        /// <summary>admin and sales_executive are limited to their assigned location(s); super_admin is not.</summary>
         public static bool IsLocationBoundRole(string? role) =>
-            string.Equals(role, SalesExecutive, System.StringComparison.OrdinalIgnoreCase);
+            string.Equals(role, SalesExecutive, System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, Admin, System.StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Returns true if the role is SuperAdmin.</summary>
         public static bool IsSuperAdmin(int? roleId) =>
