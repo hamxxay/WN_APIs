@@ -710,8 +710,9 @@ namespace WorkNest.Application.Services
             if (start.Day > 1 && monthlyRate > 0)
             {
                 int startDay = start.Day;
-                int daysInMonth = DateTime.DaysInMonth(start.Year, start.Month);
-                int remainingDays = daysInMonth - startDay; // from the day after the start day (20th of 30 = 10 days)
+                // 30-day calendar, same as the invoice: from the day after the start day (signed on the 9th = 21/30).
+                int daysInMonth = InvoiceCalculationEngine.ProrationDaysPerMonth;
+                int remainingDays = daysInMonth - Math.Min(startDay, daysInMonth);
                 decimal proratedMonth1 = Math.Round(((decimal)remainingDays / daysInMonth) * monthlyRate, 2);
 
                 months.Add(new AdvanceInvoiceMonthDto

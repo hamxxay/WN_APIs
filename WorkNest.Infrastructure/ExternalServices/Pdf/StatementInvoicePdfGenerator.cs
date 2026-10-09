@@ -356,17 +356,21 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 col.Item().PaddingTop(10).AlignRight().Column(c =>
                 {
                     c.Spacing(3);
+                    // Each summary row is a separate part of the total, so the rows add up to the invoice total:
+                    // rent without support + deposit + support + PST = total.
                     if (depositTotal > 0)
                     {
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentTotal)).FontColor("#000000"); });
+                        decimal rentOnly = Math.Max(0, rentTotal - supportCharges);
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. tax and support charges):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentOnly)).FontColor("#000000"); });
                         c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Security Deposit (Refundable):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, depositTotal)).FontColor("#000000"); });
                     }
                     else
-                    { 
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total (exc. Tax):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
+                    {
+                        decimal rentOnly = Math.Max(0, totalExclVat - supportCharges);
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. tax and support charges):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentOnly)).FontColor("#000000"); });
                     }
 
-                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Support Services Portion (incl. in rent):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
+                    c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Support Services:").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
                     c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Services):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });
                     c.Item().LineHorizontal(1).LineColor("#000000");
                     c.Item().Row(r =>
@@ -461,11 +465,18 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 decimal grossedUpRent = withholdingTaxRate < 1m
                     ? Math.Round(roomRentNet / (1 - withholdingTaxRate), 2, MidpointRounding.AwayFromZero)
                     : roomRentNet;
-                decimal grossedUpTotal = grossedUpRent + pstInTotal + secDeposit;
+                // Support charges on this invoice (not grossed up), so point 6 quotes the rent alone.
+                decimal supportInTotal = data.SupportChargeAmount is > 0
+                    ? data.SupportChargeAmount.Value
+                    : (pstInTotal > 0 && taxPercentage > 0 ? Math.Round(pstInTotal / (taxPercentage / 100m), 2) : 0m);
+                decimal grossedUpRentOnly = Math.Max(0, grossedUpRent - supportInTotal);
+                // Invoice amount if tax is withheld: grossed-up rent + support charges + tax + security deposit
+                // (only the rent is grossed up).
+                decimal whtInvoiceAmount = grossedUpRentOnly + supportInTotal + pstInTotal + secDeposit;
 
                 // A WHT invoice is already grossed up: these two terms would quote a second gross-up.
                 if (!data.IsWhtInvoice)
-                    tc.Item().Text($"{itemNum++}. If tax is withheld, the invoice will be PKR {grossedUpTotal:N0}").FontSize(7.5f).Bold().FontColor("#000000");
+                    tc.Item().Text($"{itemNum++}. If tax is withheld, the invoice will be PKR {whtInvoiceAmount:N0} (only the rent is grossed up; support charges, tax and the security deposit are not).").FontSize(7.5f).Bold().FontColor("#000000");
                 if (secDeposit > 0 && !data.IsWhtInvoice)
                 {
                     tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(7.5f).Bold().FontColor("#000000");
