@@ -10,6 +10,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public string Description { get; set; } = string.Empty;
         public decimal DiscountCap { get; set; }
         public bool Status { get; set; } = true;
+        public int? LocationId { get; set; }
     }
 
     public class QuotationRequest

@@ -777,9 +777,9 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
             await _db.SendQuotationStatusAsync(quotationId, "Sent", userId);
         }
 
-        public async Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync(bool? activeOnly = null)
+        public async Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync(bool? activeOnly = null, int? locationId = null)
         {
-            var rows = await _db.GetOfferingTypesAsync(activeOnly);
+            var rows = await _db.GetOfferingTypesAsync(activeOnly, locationId);
             return rows.Select(r => new OfferingTypeDto
             {
                 Id = Convert.ToInt32(r["Id"]),
@@ -787,7 +787,10 @@ INSERT INTO dbo.WN_QuotationDetails (QuotationId, FeeType, Description, Quantity
                 DiscountCap = Convert.ToDecimal(r["DiscountCap"]),
                 Status = r.ContainsKey("Status") && r["Status"] != null && r["Status"] != DBNull.Value
                     ? Convert.ToBoolean(r["Status"])
-                    : true
+                    : true,
+                LocationId = r.ContainsKey("LocationId") && r["LocationId"] != null && r["LocationId"] != DBNull.Value
+                    ? Convert.ToInt32(r["LocationId"])
+                    : null
             }).ToList();
         }
     }

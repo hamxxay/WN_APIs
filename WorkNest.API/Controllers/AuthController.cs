@@ -32,24 +32,47 @@ namespace WorkNest.API.Controllers
         /// </summary>
         private async Task<(string? Email, IActionResult? Reject)> VerifySignInAsync(string? idToken, string? claimedEmail, string endpoint)
         {
+            var requireToken = _config.GetValue<bool>("Firebase:RequireIdToken");
+
+            // If Firebase token verification is not required (RequireIdToken == false), allow sign-in without blocking
+            if (!requireToken)
+            {
+                if (!string.IsNullOrWhiteSpace(idToken) && _firebase.IsConfigured)
+                {
+                    try
+                    {
+                        var (verifiedEmail, _) = await _firebase.VerifyAsync(idToken, HttpContext.RequestAborted);
+                        if (!string.IsNullOrWhiteSpace(verifiedEmail))
+                        {
+                            return (verifiedEmail, null);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore verification failure when not required
+                    }
+                }
+                return (claimedEmail, null);
+            }
+
+            // Strict mode (RequireIdToken == true):
             if (!string.IsNullOrWhiteSpace(idToken))
             {
                 var (email, error) = await _firebase.VerifyAsync(idToken, HttpContext.RequestAborted);
-                if (email == null)
-                    return (null, Unauthorized(new { isSuccessful = false, message = error }));
-                if (!string.IsNullOrWhiteSpace(claimedEmail) && !string.Equals(claimedEmail.Trim(), email, StringComparison.OrdinalIgnoreCase))
-                    return (null, Unauthorized(new { isSuccessful = false, message = "The sign-in token does not match this email." }));
-                return (email, null);
+                if (email != null)
+                {
+                    if (!string.IsNullOrWhiteSpace(claimedEmail) && !string.Equals(claimedEmail.Trim(), email, StringComparison.OrdinalIgnoreCase))
+                        return (null, Unauthorized(new { isSuccessful = false, message = "The sign-in token does not match this email." }));
+                    return (email, null);
+                }
+
+                _logger.LogWarning("Rejected {Endpoint} with invalid Firebase token for {Email}: {Error}", endpoint, claimedEmail, error);
+                return (null, Unauthorized(new { isSuccessful = false, message = error ?? "Sign-in could not be verified." }));
             }
 
             var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-            if (_config.GetValue<bool>("Firebase:RequireIdToken"))
-            {
-                _logger.LogWarning("Rejected {Endpoint} without a Firebase token for {Email} from {Ip}", endpoint, claimedEmail, ip);
-                return (null, Unauthorized(new { isSuccessful = false, message = "Please update the app and sign in again." }));
-            }
-            _logger.LogWarning("LEGACY SIGN-IN without a Firebase token: {Endpoint} for {Email} from {Ip} (allowed while Firebase:RequireIdToken is false)", endpoint, claimedEmail, ip);
-            return (claimedEmail, null);
+            _logger.LogWarning("Rejected {Endpoint} without a Firebase token for {Email} from {Ip}", endpoint, claimedEmail, ip);
+            return (null, Unauthorized(new { isSuccessful = false, message = "Please update the app and sign in again." }));
         }
 
         [EnableRateLimiting("auth")]

@@ -25,6 +25,7 @@ namespace WorkNest.Application.Services
                 phone        = r.TryGetValue("PhoneNumber",  out var p)  ? p?.ToString() : null,
                 isActive     = r.TryGetValue("IsActive",     out var a)  ? Convert.ToBoolean(a) : true,
                 createdOn    = r.TryGetValue("CreatedOn",    out var c)  ? c  : null,
+                createdAt    = r.TryGetValue("CreatedOn",    out var ca) ? ca : null,
                 role         = Roles.FromRow(r),
                 locationId   = r.TryGetValue("LocationId",   out var loc)&& loc is not null ? Convert.ToInt32(loc) : (int?)null,
                 locationIds  = AllLocations(r, extra).Select(x => x.Id).ToList(),

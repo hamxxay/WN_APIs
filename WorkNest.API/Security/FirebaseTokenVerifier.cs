@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 
@@ -18,11 +18,14 @@ namespace WorkNest.API.Security
         private readonly IMemoryCache _cache;
         private readonly string _projectId;
 
+        public const string DefaultProjectId = "work-nest-3936a";
+
         public FirebaseTokenVerifier(IHttpClientFactory http, IMemoryCache cache, IConfiguration config)
         {
             _http = http;
             _cache = cache;
-            _projectId = config["Firebase:ProjectId"] ?? string.Empty;
+            var configured = config["Firebase:ProjectId"];
+            _projectId = !string.IsNullOrWhiteSpace(configured) ? configured.Trim() : DefaultProjectId;
         }
 
         public bool IsConfigured => !string.IsNullOrWhiteSpace(_projectId);

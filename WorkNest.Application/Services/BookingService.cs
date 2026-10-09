@@ -105,7 +105,18 @@ namespace WorkNest.Application.Services
             var pricingId = await ResolvePricingIdAsync(request.SpaceId ?? 0);
             // pricingId may be 0; WN_Bookings_Insert handles category fallback
 
-            var shiftType = !string.IsNullOrWhiteSpace(request.ShiftType) ? request.ShiftType : (!string.IsNullOrWhiteSpace(request.OfferingType) ? request.OfferingType : "24_7");
+            var shiftType = !string.IsNullOrWhiteSpace(request.ShiftType) ? request.ShiftType : null;
+            if (string.IsNullOrWhiteSpace(shiftType) && request.OfferingTypeId.HasValue)
+            {
+                int otId = request.OfferingTypeId.Value;
+                if (otId == 2 || otId == 5) shiftType = "morning";
+                else if (otId == 3 || otId == 6) shiftType = "evening";
+                else if (otId == 1 || otId == 4) shiftType = "24_7";
+            }
+            if (string.IsNullOrWhiteSpace(shiftType))
+            {
+                shiftType = !string.IsNullOrWhiteSpace(request.OfferingType) ? request.OfferingType : "24_7";
+            }
 
             var result = await _db.InsertBookingAsync(
                 userId.Value, request.SpaceId ?? 0, pricingId,
@@ -235,8 +246,12 @@ namespace WorkNest.Application.Services
             if (!isMeetingRoom && discountValue > 0)
             {
                 var offeringTypes = (await _db.GetOfferingTypesAsync()).ToList();
-                var offering = offeringTypes.FirstOrDefault(o => string.Equals(o["Description"]?.ToString(), request.OfferingType, StringComparison.OrdinalIgnoreCase))
-                    ?? offeringTypes.FirstOrDefault();
+                var offering = (request.OfferingTypeId.HasValue && request.OfferingTypeId.Value > 0)
+                    ? offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == request.OfferingTypeId.Value)
+                    : (int.TryParse(request.OfferingType, out int otId)
+                        ? offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == otId)
+                        : (offeringTypes.FirstOrDefault(o => string.Equals(o["Description"]?.ToString(), request.OfferingType, StringComparison.OrdinalIgnoreCase))
+                           ?? offeringTypes.FirstOrDefault()));
                 decimal baseCap = offering?["DiscountCap"] is { } dc ? Convert.ToDecimal(dc) : 10.00m;
                 decimal perSeat = perSeatBasePrice ?? standardPerSeat;
                 decimal monthlyRent = isPrivate ? perSeat * seats : perSeat;

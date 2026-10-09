@@ -52,6 +52,7 @@ namespace WorkNest.Application.DTOs.User
         public string? Phone { get; set; }
         public bool IsActive { get; set; }
         public string? CreatedOn { get; set; }
+        public string? CreatedAt { get; set; }
         public string? Role { get; set; }
         public int? LocationId { get; set; }
         /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
