@@ -60,6 +60,18 @@ namespace WorkNest.API.Controllers
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
+        /// <summary>Same as above, by the inquiry's public id (lists that return only PublicId).</summary>
+        [HttpPost("api/contact/{publicId:guid}/feedback")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> FeedbackByGuid(Guid publicId, [FromBody] ContactFeedbackRequest request)
+        {
+            var (rows, _) = await _db.GetContactsAsync(1, 10000, null);
+            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            if (match is null) return NotFound(ApiResponse.Fail("Inquiry not found."));
+            var id = match.TryGetValue("Id", out var rid) && rid != null ? Convert.ToInt32(rid) : 0;
+            return id > 0 ? await Feedback(id, request) : NotFound(ApiResponse.Fail("Inquiry not found."));
+        }
+
         [HttpPatch("api/contact/{id:int}/status")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] ContactStatusUpdateRequest request) =>
