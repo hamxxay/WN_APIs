@@ -630,5 +630,41 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 throw;
             }
         }
+
+        public async Task SendHtmlReportAsync(string toEmail, string subject, string html)
+        {
+            var (fromEmail, password, host, port) = GetEmailSettings();
+
+            // Throws when it cannot send (like the agreement reminder), so the weekly report job records a failure
+            // and the "send now" button can tell the user it did not go out.
+            if (string.IsNullOrWhiteSpace(fromEmail) ||
+                string.IsNullOrWhiteSpace(toEmail) ||
+                string.IsNullOrWhiteSpace(password))
+            {
+                _logger.LogWarning("[EMAIL] Missing email credentials or recipient email. Report email '{Subject}' not sent.", subject);
+                throw new InvalidOperationException("Email credentials or recipient email missing; report not sent.");
+            }
+
+            try
+            {
+                using var mail = new MailMessage();
+                mail.From = new MailAddress(fromEmail, "WorkNest Reports");
+                mail.To.Add(new MailAddress(toEmail));
+                mail.Subject = subject;
+                mail.IsBodyHtml = true;
+                mail.BodyEncoding = Encoding.UTF8;
+                mail.SubjectEncoding = Encoding.UTF8;
+                mail.Body = html;
+
+                using var smtp = CreateSmtpClient(fromEmail, password, host, port);
+                await smtp.SendMailAsync(mail);
+                _logger.LogInformation("[EMAIL] Report '{Subject}' sent to {ToEmail} via {Host}:{Port}.", subject, toEmail, host, port);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[EMAIL] Failed to send report '{Subject}' to {ToEmail}.", subject, toEmail);
+                throw;
+            }
+        }
     }
 }
