@@ -100,6 +100,15 @@ namespace WorkNest.API.Services
                     DateTime rawPeriodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(b.ContractStart, nextPeriodStart, b.BillingPeriodMonths);
                     DateTime nextPeriodEnd = rawPeriodEnd > b.ContractEnd ? b.ContractEnd : rawPeriodEnd;
 
+                    // One instance at a time per booking (IIS overlapped recycle, a second server): the check below and
+                    // the insert run under a session lock, and an instance that can't get it skips this booking.
+                    if (!await TryLockBookingAsync(conn, b.BookingId, stoppingToken))
+                    {
+                        _logger.LogInformation("Booking {BookingId} is being billed by another instance. Skipping.", b.BookingId);
+                        continue;
+                    }
+                    try
+                    {
                     // Step 2: Idempotent Duplicate Invoice Check
                     bool invoiceExists = false;
                     using (var checkCmd = new SqlCommand("dbo.WN_Invoice_CheckExistingBillingPeriod", conn))
@@ -137,12 +146,38 @@ namespace WorkNest.API.Services
                             _logger.LogInformation("Successfully generated recurring invoice {InvoiceNo} (ID: {InvoiceId}) for Booking {BookingId}. Total: PKR {Total}.", invoiceNo, invoiceId, b.BookingId, total);
                         }
                     }
+                    }
+                    finally
+                    {
+                        await UnlockBookingAsync(conn, b.BookingId);
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to process recurring invoice generation for Booking {BookingId}.", b.BookingId);
                 }
             }
+        }
+
+        private static async Task<bool> TryLockBookingAsync(SqlConnection conn, int bookingId, CancellationToken ct)
+        {
+            using var cmd = new SqlCommand(@"
+                DECLARE @r INT;
+                EXEC @r = sp_getapplock @Resource = @Res, @LockMode = 'Exclusive', @LockOwner = 'Session', @LockTimeout = 0;
+                SELECT @r;", conn);
+            cmd.Parameters.AddWithValue("@Res", $"wn-billing-{bookingId}");
+            return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) >= 0; // 0 / 1 = granted, negative = held elsewhere
+        }
+
+        private static async Task UnlockBookingAsync(SqlConnection conn, int bookingId)
+        {
+            try
+            {
+                using var cmd = new SqlCommand("EXEC sp_releaseapplock @Resource = @Res, @LockOwner = 'Session';", conn);
+                cmd.Parameters.AddWithValue("@Res", $"wn-billing-{bookingId}");
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch { /* the lock also ends when the connection closes */ }
         }
 
         private class DueBookingDto

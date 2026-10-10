@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using WorkNest.Application.DTOs.Agreement;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Filters;
 using WorkNest.Common.Configurations;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -19,6 +20,7 @@ namespace WorkNest.API.Controllers
     [Route("api/[controller]")]
     [Route("api/agreements")]
     [Authorize]
+    [RecordScope(RecordKind.Agreement, "id")] // location-bound staff: only records of their locations
     public class AgreementController : ControllerBase
     {
         private readonly IAgreementService _agreement;

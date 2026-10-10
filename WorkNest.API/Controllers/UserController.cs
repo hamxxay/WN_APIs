@@ -13,6 +13,7 @@ namespace WorkNest.API.Controllers
     [ApiController]
     [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // user records: staff only; writes are admin-only below
     [ValidateLocationScope]
+    [RecordScope(RecordKind.User, "id", "publicId", "email")] // location-bound staff: only records of their locations
     public class UserController : ControllerBase
     {
         private readonly IUserService _users;

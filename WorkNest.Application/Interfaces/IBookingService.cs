@@ -9,7 +9,8 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetBookingByIdAsync(Guid publicId, string? userEmail);
         Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail);
         Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10);
-        Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month);
+        /// <summary>Booked dates of a space in a month; <paramref name="includeBookings"/> adds the bookings (staff only).</summary>
+        Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month, bool includeBookings = false);
         Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail);
         Task<ApiResponse> CreateAdminBookingAsync(AdminBookingRequest request, string? actorEmail, IReadOnlyCollection<int>? allowedLocationIds = null);
         Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail);

@@ -193,6 +193,7 @@ try
     builder.Services.AddScoped<ISpaceConfigService, SpaceConfigService>();
     builder.Services.AddScoped<IDashboardService, DashboardService>();
     builder.Services.AddScoped<IRoleDashboardRepository, WorkNest.Infrastructure.Repositories.RoleDashboardRepository>();
+    builder.Services.AddScoped<IRecordScopeRepository, WorkNest.Infrastructure.Repositories.RecordScopeRepository>(); // location of one record (RecordScopeAttribute)
     builder.Services.AddScoped<IRoleDashboardService, RoleDashboardService>();
     builder.Services.AddScoped<IPlanFeatureService, PlanFeatureService>();
     builder.Services.AddScoped<IBranchService, BranchService>();

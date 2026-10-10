@@ -336,7 +336,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/quotations/activities")]
         public async Task<IActionResult> GetActivities([FromQuery] int? quotationId = null, [FromQuery] int limit = 20)
         {
-            var res = await _quotations.GetActivitiesAsync(quotationId, limit);
+            var res = await _quotations.GetActivitiesAsync(quotationId, Math.Clamp(limit, 1, 200)); // goes into SELECT TOP
             return Ok(ApiResponse.Ok(res));
         }
 

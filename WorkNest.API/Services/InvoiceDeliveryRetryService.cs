@@ -65,11 +65,18 @@ namespace WorkNest.API.Services
 
             var pendingItems = new List<QueueItemDto>();
 
+            // Claim the due rows in the same statement that reads them: their NextRetryAt moves 10 minutes ahead, so a
+            // second instance (IIS overlapped recycle, another server) skips them instead of sending the same invoice
+            // again. The success / failure update below sets the real NextRetryAt; a crash just retries after 10 minutes.
             string query = @"
-                SELECT Id, InvoiceId, BookingId, TargetEmail, Attempts 
-                FROM dbo.WN_InvoiceDeliveryQueue 
-                WHERE Status = 'Pending' 
-                  AND (NextRetryAt IS NULL OR NextRetryAt <= SYSUTCDATETIME());";
+                DECLARE @Claimed TABLE (Id INT, InvoiceId INT, BookingId INT NULL, TargetEmail NVARCHAR(320) NULL, Attempts INT);
+                UPDATE TOP (20) q
+                   SET NextRetryAt = DATEADD(minute, 10, SYSUTCDATETIME())
+                OUTPUT inserted.Id, inserted.InvoiceId, inserted.BookingId, inserted.TargetEmail, inserted.Attempts INTO @Claimed
+                  FROM dbo.WN_InvoiceDeliveryQueue q WITH (ROWLOCK, READPAST, UPDLOCK)
+                 WHERE q.Status = 'Pending'
+                   AND (q.NextRetryAt IS NULL OR q.NextRetryAt <= SYSUTCDATETIME());
+                SELECT Id, InvoiceId, BookingId, TargetEmail, Attempts FROM @Claimed;";
 
             using (var cmd = new SqlCommand(query, conn))
             using (var reader = await cmd.ExecuteReaderAsync(stoppingToken))
