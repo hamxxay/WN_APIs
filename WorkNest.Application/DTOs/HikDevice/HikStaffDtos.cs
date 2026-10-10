@@ -45,6 +45,9 @@ namespace WorkNest.Application.DTOs.HikDevice
 
     public class HikStaffCreateRequest
     {
+        /// <summary>Set by the API from the caller's login (never from the request): their locations, or null for super admins.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public IReadOnlyCollection<int>? CallerLocationIds { get; set; }
         public string Name { get; set; } = string.Empty;
         /// <summary>13-digit CNIC (dashes allowed).</summary>
         public string Cnic { get; set; } = string.Empty;
@@ -57,6 +60,9 @@ namespace WorkNest.Application.DTOs.HikDevice
 
     public class HikStaffMachinesRequest
     {
+        /// <summary>Set by the API from the caller's login (never from the request): their locations, or null for super admins.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public IReadOnlyCollection<int>? CallerLocationIds { get; set; }
         public List<int> RoomDeviceIds { get; set; } = new();
         public string? ValidUntil { get; set; }
     }

@@ -17,6 +17,13 @@ namespace WorkNest.Application.DTOs.HikDevice
         [JsonPropertyName("code")]
         public string? Code { get; set; }
 
+        /// <summary>WorkNest location the machine belongs to (WN_Locations.Id); null = not assigned.</summary>
+        [JsonPropertyName("locationId")]
+        public int? LocationId { get; set; }
+
+        [JsonPropertyName("locationName")]
+        public string? LocationName { get; set; }
+
         [JsonPropertyName("location")]
         public string? Location { get; set; }
 

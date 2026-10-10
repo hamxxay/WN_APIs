@@ -19,10 +19,11 @@ namespace WorkNest.Application.Services
 
         // ---- Read ----------------------------------------------------------------------
 
-        public async Task<IEnumerable<HikStaffDto>> GetStaffAsync(bool includeMachineAdmins = true)
+        public async Task<IEnumerable<HikStaffDto>> GetStaffAsync(bool includeMachineAdmins = true, IReadOnlyCollection<int>? locationIds = null)
         {
             var rowsTask = _db.GetHikStaffDbAsync();
-            var devicesTask = _db.GetHikDevicesAsync();
+            // Location-bound callers: only their locations' machines (+ unassigned); staff on none of them are hidden.
+            var devicesTask = _db.GetHikDevicesAsync(null, locationIds);
             var snapsTask = _db.GetHikDevCacheSnapshotsDbAsync();
             await Task.WhenAll(rowsTask, devicesTask, snapsTask);
 
@@ -61,6 +62,7 @@ namespace WorkNest.Application.Services
                     return staff;
                 })
                 .Where(s => includeMachineAdmins || !s.IsMachineAdmin)
+                .Where(s => locationIds == null || s.Machines.Count > 0 || s.PendingOps > 0)
                 .ToList();
         }
 
@@ -88,7 +90,7 @@ namespace WorkNest.Application.Services
             if (cnic.Length != 13) return new HikStaffResultDto { Error = "CNIC must be 13 digits." };
             if (!TryValidUntil(request!.ValidUntil, out var validEnd)) return new HikStaffResultDto { Error = "Access-until date is not valid." };
 
-            var targets = await StaffTargetDevicesAsync(request.RoomDeviceIds);
+            var targets = await StaffTargetDevicesAsync(request.RoomDeviceIds, request.CallerLocationIds);
             if (targets.Count == 0) return new HikStaffResultDto { Error = "No Entrance machines are registered." };
 
             var emp = await _db.CreateHikStaffDbAsync(name, cnic, request.TagId, await MachineIdFloorAsync());
@@ -113,7 +115,7 @@ namespace WorkNest.Application.Services
             if (staff == null) return new HikStaffResultDto { MachineId = employeeNo, Error = "Staff member not found." };
             if (!TryValidUntil(request?.ValidUntil, out var validEnd)) return new HikStaffResultDto { MachineId = employeeNo, Error = "Access-until date is not valid." };
 
-            var desired = await StaffTargetDevicesAsync(request!.RoomDeviceIds);
+            var desired = await StaffTargetDevicesAsync(request!.RoomDeviceIds, request.CallerLocationIds);
             var desiredIds = desired.Select(d => d.Id).ToHashSet();
             var m = await StaffCurrentMachinesAsync(employeeNo, staff);
             var enabled = await StaffLiveEnabledAsync(employeeNo, m, staff);
@@ -212,12 +214,19 @@ namespace WorkNest.Application.Services
 
         // ---- Helpers ------------------------------------------------------------------------
 
-        /// <summary>Every Entrance machine + the selected non-Entrance (room) machines.</summary>
-        private async Task<List<HikDeviceConnection>> StaffTargetDevicesAsync(IEnumerable<int>? roomDeviceIds)
+        /// <summary>
+        /// The selected room machines + the Entrance machines of the same location(s). The location comes from
+        /// the selected machines, else from the caller (admins / sales executives); with neither, every Entrance.
+        /// Machines without a location yet count everywhere.
+        /// </summary>
+        private async Task<List<HikDeviceConnection>> StaffTargetDevicesAsync(IEnumerable<int>? roomDeviceIds, IReadOnlyCollection<int>? callerLocationIds = null)
         {
             var all = (await _db.GetHikDevicesAsync()).ToList();
             var requested = (roomDeviceIds ?? Enumerable.Empty<int>()).ToHashSet();
-            var ids = all.Where(d => IsEntrance(d.Grp) || requested.Contains(d.Id)).Select(d => d.Id);
+            var locations = all.Where(d => requested.Contains(d.Id) && d.LocationId != null).Select(d => d.LocationId!.Value).ToHashSet();
+            if (locations.Count == 0 && callerLocationIds is { Count: > 0 }) locations = callerLocationIds.ToHashSet();
+            bool EntranceHere(HikDeviceDto d) => IsEntrance(d.Grp) && (locations.Count == 0 || d.LocationId == null || locations.Contains(d.LocationId.Value));
+            var ids = all.Where(d => EntranceHere(d) || requested.Contains(d.Id)).Select(d => d.Id);
             return (await _db.GetHikDeviceConnectionsDbAsync(ids)).ToList();
         }
 

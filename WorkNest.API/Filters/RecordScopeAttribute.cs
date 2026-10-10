@@ -13,7 +13,7 @@ namespace WorkNest.API.Filters
     /// customer without a booking) stay open to everyone. Super admins, receptionists and customers are not affected
     /// (customers are checked for ownership by each action).
     /// </summary>
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
     public sealed class RecordScopeAttribute : Attribute, IAsyncActionFilter
     {
         private readonly RecordKind _kind;

@@ -1,0 +1,24 @@
+USE [SAC400];
+
+-- Which WorkNest location (WN_Locations.Id) each door machine belongs to.
+-- NULL = not assigned yet: the machine stays visible to everyone until a super admin picks its location.
+-- (The existing text column "Location" is the machine's area, e.g. "Entrance", and is not changed.)
+IF COL_LENGTH('dbo.WN_HIK_Devices', 'LocationId') IS NULL
+BEGIN
+    ALTER TABLE dbo.WN_HIK_Devices ADD LocationId INT NULL;
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_WN_HIK_Devices_WN_Locations')
+BEGIN
+    EXEC(N'ALTER TABLE dbo.WN_HIK_Devices WITH CHECK ADD CONSTRAINT FK_WN_HIK_Devices_WN_Locations
+           FOREIGN KEY (LocationId) REFERENCES dbo.WN_Locations (Id);');
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_WN_HIK_Devices_LocationId' AND object_id = OBJECT_ID(N'dbo.WN_HIK_Devices'))
+BEGIN
+    EXEC(N'CREATE INDEX IX_WN_HIK_Devices_LocationId ON dbo.WN_HIK_Devices (LocationId);');
+END;
+
+-- Optional, one time: put every machine that has no location yet on I-8 (WN_Locations.Id = 1).
+-- Skip this line if some machines belong to F-7 (Id = 2); you can then set each machine on the Access Dashboard.
+EXEC(N'UPDATE dbo.WN_HIK_Devices SET LocationId = 1 WHERE LocationId IS NULL;');

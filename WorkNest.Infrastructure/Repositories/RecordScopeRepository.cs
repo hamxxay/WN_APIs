@@ -67,13 +67,21 @@ namespace WorkNest.Infrastructure.Repositories
             IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
                 SELECT ul.LocationId FROM dbo.WN_UserLocations ul WITH (NOLOCK) JOIN @U x ON x.Id = ul.UserId;";
 
+        // A booking detail (one space of a booking) belongs to the location of its space.
+        private const string BookingDetailSql = @"
+            SELECT s.LocationId
+              FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+              LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = d.BookingGuid
+              LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+             WHERE d.Id = @Id;";
+
         public async Task<List<int>?> GetLocationIdsAsync(RecordKind kind, string key)
         {
             int? id = int.TryParse(key, out var n) ? n : null;
             Guid? guid = Guid.TryParse(key, out var g) ? g : null;
             string? email = kind == RecordKind.User && id == null && guid == null && key.Contains('@') ? key : null;
             if (id == null && guid == null && email == null) return null;
-            if (kind == RecordKind.Agreement && id == null) return null;
+            if (kind is RecordKind.Agreement or RecordKind.BookingDetail && id == null) return null;
 
             var sql = kind switch
             {
@@ -81,6 +89,7 @@ namespace WorkNest.Infrastructure.Repositories
                 RecordKind.Payment => PaymentSql,
                 RecordKind.Agreement => AgreementSql,
                 RecordKind.Customer => CustomerSql,
+                RecordKind.BookingDetail => BookingDetailSql,
                 _ => UserSql
             };
             await using var c = new SqlConnection(_connectionString);

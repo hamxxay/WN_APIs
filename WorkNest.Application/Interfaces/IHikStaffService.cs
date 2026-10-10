@@ -7,7 +7,8 @@ namespace WorkNest.Application.Interfaces
     /// </summary>
     public interface IHikStaffService
     {
-        Task<IEnumerable<HikStaffDto>> GetStaffAsync(bool includeMachineAdmins = true);
+        /// <summary><paramref name="locationIds"/>: only staff on machines of those locations (null = all).</summary>
+        Task<IEnumerable<HikStaffDto>> GetStaffAsync(bool includeMachineAdmins = true, IReadOnlyCollection<int>? locationIds = null);
         Task<IEnumerable<HikTagDto>> GetTagsAsync();
         Task<HikTagDto> AddTagAsync(string name);
         Task<HikStaffResultDto> CreateStaffAsync(HikStaffCreateRequest request);

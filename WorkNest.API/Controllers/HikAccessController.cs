@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
@@ -29,7 +30,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/access/dashboard")]
         public async Task<IActionResult> GetDashboard([FromQuery] int expiringDays = 7)
         {
-            var result = await _access.GetDashboardAsync(expiringDays);
+            var result = await _access.GetDashboardAsync(expiringDays, Scope());
             return Ok(result);
         }
 
@@ -45,7 +46,7 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? name = null,
             [FromQuery] int limit = 500)
         {
-            var result = await _access.GetEventsAsync(from, to, deviceId, employeeNo, name, limit);
+            var result = await _access.GetEventsAsync(from, to, deviceId, employeeNo, name, limit, Scope());
             return Ok(result);
         }
 
@@ -55,7 +56,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/access/activity")]
         public async Task<IActionResult> GetActivity([FromQuery] int limit = 200)
         {
-            var result = await _access.GetSyncActivityAsync(limit);
+            var result = await _access.GetSyncActivityAsync(limit, Scope());
             return Ok(result);
         }
 
@@ -65,7 +66,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/access/analytics")]
         public async Task<IActionResult> GetAnalytics([FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
         {
-            var result = await _access.GetAnalyticsAsync(from ?? _clock.Today, to ?? from ?? _clock.Today);
+            var result = await _access.GetAnalyticsAsync(from ?? _clock.Today, to ?? from ?? _clock.Today, Scope());
             return Ok(result);
         }
 
@@ -82,8 +83,11 @@ namespace WorkNest.API.Controllers
             if (string.IsNullOrWhiteSpace(employeeNo) && string.IsNullOrWhiteSpace(name))
                 return BadRequest(new { message = "employeeNo or name is required." });
 
-            var result = await _access.GetUserAnalyticsAsync(employeeNo, name, from ?? _clock.Today, to ?? from ?? _clock.Today);
+            var result = await _access.GetUserAnalyticsAsync(employeeNo, name, from ?? _clock.Today, to ?? from ?? _clock.Today, Scope());
             return Ok(result);
         }
+
+        /// <summary>Admins / sales executives / receptionists see their locations' machines, scans and members; super admins all.</summary>
+        private IReadOnlyCollection<int>? Scope() => User.IsLocationBoundRole() ? User.GetLocationIds() : null;
     }
 }

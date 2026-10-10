@@ -26,8 +26,20 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/devices")]
         public async Task<IActionResult> GetDevices([FromQuery] string? location = null)
         {
-            var result = await _deviceService.GetDevicesAsync(location);
+            // Admins / sales executives see the machines of their locations (and unassigned ones); super admins see all.
+            var result = await _deviceService.GetDevicesAsync(location, User.IsLocationBoundRole() ? User.GetLocationIds() : null);
             return Ok(result);
+        }
+
+        /// <summary>Super admin: which WorkNest location a machine belongs to. Body { locationId } (null = unassigned).</summary>
+        [HttpPut("api/hik/devices/{id:int}/location")]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
+        public async Task<IActionResult> SetLocation(int id, [FromBody] HikDeviceLocationRequest? request)
+        {
+            var ok = await _deviceService.SetDeviceLocationAsync(id, request?.LocationId is > 0 ? request.LocationId : null);
+            return ok
+                ? Ok(new { isSuccessful = true, message = "Machine location saved." })
+                : BadRequest(new { isSuccessful = false, message = "The location could not be saved. Run WN_HIK_Devices_LocationId.txt first, or refresh the machine list." });
         }
 
         /// <summary>
@@ -38,7 +50,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetRosters([FromQuery] string? location = null)
         {
             // Machine-admin users are only visible to admin / super admin.
-            var result = await _deviceService.GetRostersAsync(location, User.IsAdminOrSuperAdmin());
+            var result = await _deviceService.GetRostersAsync(location, User.IsAdminOrSuperAdmin(), User.IsLocationBoundRole() ? User.GetLocationIds() : null);
             return Ok(result);
         }
 
@@ -64,5 +76,11 @@ namespace WorkNest.API.Controllers
             var result = await _deviceService.GetNextEmployeeNoAsync();
             return Ok(result);
         }
+    }
+
+    /// <summary>Body of PUT api/hik/devices/{id}/location.</summary>
+    public class HikDeviceLocationRequest
+    {
+        public int? LocationId { get; set; }
     }
 }

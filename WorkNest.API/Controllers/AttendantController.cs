@@ -18,6 +18,9 @@ namespace WorkNest.API.Controllers
     [ApiController]
     [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
     [ValidateLocationScope]
+    // Location-bound staff: access actions only on bookings / customers of their own locations.
+    [RecordScope(RecordKind.BookingDetail, "bookingDetailId")]
+    [RecordScope(RecordKind.Customer, "customerId")]
     public class AttendantController : ControllerBase
     {
         private readonly IAttendantService _attendants;
@@ -219,14 +222,15 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// Admin dashboard "Door access" card: machines online / offline, operations queued for offline machines,
-        /// and running bookings that are suspended or on temporary access.
+        /// Dashboard "Door access" card: machines online / offline, operations queued for offline machines,
+        /// and running bookings that are suspended or on temporary access (location-scoped for admins / sales executives).
         /// </summary>
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
         [HttpGet("api/access-suspensions/overview")]
         public async Task<IActionResult> GetAccessOverview()
         {
-            var result = await _accessSuspension.GetAccessOverviewAsync();
+            // Admins / sales executives see suspended bookings of their own locations; super admins see all.
+            var result = await _accessSuspension.GetAccessOverviewAsync(User.IsLocationBoundRole() ? User.GetLocationIds() : null);
             return Ok(result);
         }
 

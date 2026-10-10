@@ -1177,9 +1177,10 @@ namespace WorkNest.Application.Services
             return dev == null ? null : await TestAsync(dev, TimeSpan.FromSeconds(6));
         }
 
-        public async Task<List<HikDeviceTestResult>> TestAllDevicesAsync()
+        public async Task<List<HikDeviceTestResult>> TestAllDevicesAsync(IReadOnlyCollection<int>? onlyDeviceIds = null)
         {
             var devices = await _repo.GetAllDevicesAsync();
+            if (onlyDeviceIds != null) devices = devices.Where(d => onlyDeviceIds.Contains(d.Id)).ToList();
             var results = await Task.WhenAll(devices.Select(d => TestAsync(d, TimeSpan.FromSeconds(4))));
             return results.ToList();
         }

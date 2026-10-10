@@ -1,7 +1,7 @@
 namespace WorkNest.Application.Interfaces
 {
     /// <summary>Kinds of record whose location decides who may open them (see RecordScopeAttribute).</summary>
-    public enum RecordKind { Booking, Payment, Agreement, Customer, User }
+    public enum RecordKind { Booking, Payment, Agreement, Customer, User, BookingDetail }
 
     /// <summary>Which WN_Locations a single record belongs to, for location-bound admins / sales executives.</summary>
     public interface IRecordScopeRepository
