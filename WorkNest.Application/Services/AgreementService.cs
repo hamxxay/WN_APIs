@@ -77,6 +77,10 @@ namespace WorkNest.Application.Services
             if (cnicError != null)
                 throw new InvalidOperationException(cnicError);
 
+            var phoneError = Phone.Validate(request.PhoneNumber);
+            if (phoneError != null)
+                throw new InvalidOperationException(phoneError);
+
             if (string.IsNullOrWhiteSpace(request.Address))
                 throw new InvalidOperationException("Customer Address is required.");
 

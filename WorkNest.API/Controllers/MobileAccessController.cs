@@ -102,6 +102,9 @@ namespace WorkNest.API.Controllers
             // Only checked on Verify (where it is typed in): door/open re-checks keep accepting what was verified before.
             var cnicError = WorkNest.Application.Helpers.Cnic.Validate(request?.Cnic);
             if (cnicError != null) return Ok(ApiResponse.Fail(cnicError));
+            // Phone is optional here too, but when entered it must be a real phone number.
+            var phoneError = WorkNest.Application.Helpers.Phone.Validate(request?.Phone);
+            if (phoneError != null) return Ok(ApiResponse.Fail(phoneError));
             var result = await _attendants.VerifyMobileAccessAsync(request ?? new MobileAccessVerifyRequest());
             return Ok(ApiResponse.Ok(result, result.Message));
         }

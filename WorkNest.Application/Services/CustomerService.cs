@@ -78,6 +78,9 @@ namespace WorkNest.Application.Services
             var cnicErr = Cnic.Validate(request.CnicOrPassport);
             if (cnicErr is not null)
                 return ApiResponse.Fail(cnicErr);
+            var phoneErr = Phone.Validate(request.PhoneNumber);
+            if (phoneErr is not null)
+                return ApiResponse.Fail(phoneErr);
 
             var existing = await _db.GetCustomerByEmailAsync(request.Email);
             if (existing is not null && existing.TryGetValue("Id", out var eid) && eid is not null)
@@ -117,6 +120,9 @@ namespace WorkNest.Application.Services
             var cnicErr = Cnic.Validate(request.CnicOrPassport);
             if (cnicErr is not null)
                 return ApiResponse.Fail(cnicErr);
+            var phoneErr = Phone.Validate(request.PhoneNumber);
+            if (phoneErr is not null)
+                return ApiResponse.Fail(phoneErr);
 
             string? companyValue = ResolveCompany(request.CustomerType, request.Company);
 

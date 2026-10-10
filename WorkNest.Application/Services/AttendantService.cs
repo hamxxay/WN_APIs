@@ -113,6 +113,7 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(request.Name)) throw new ArgumentException("Name is required.");
             if (string.IsNullOrWhiteSpace(request.Email)) throw new ArgumentException("Email is required.");
             if (string.IsNullOrWhiteSpace(request.Phone)) throw new ArgumentException("Phone is required.");
+            if (!Phone.IsValid(request.Phone)) throw new ArgumentException(Phone.ErrorMessage);
             if (string.IsNullOrWhiteSpace(request.IdNumber)) throw new ArgumentException("CNIC/Passport IdNumber is required.");
 
             request.IdType = request.IdType?.ToUpperInvariant() == "PASSPORT" ? "Passport" : "CNIC";
@@ -139,6 +140,7 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(request.Name)) throw new ArgumentException("Name is required.");
             if (string.IsNullOrWhiteSpace(request.Email)) throw new ArgumentException("Email is required.");
             if (string.IsNullOrWhiteSpace(request.Phone)) throw new ArgumentException("Phone is required.");
+            if (!Phone.IsValid(request.Phone)) throw new ArgumentException(Phone.ErrorMessage);
 
             var cleanName = request.Name.Trim();
             var cleanEmail = request.Email.Trim().ToLowerInvariant();

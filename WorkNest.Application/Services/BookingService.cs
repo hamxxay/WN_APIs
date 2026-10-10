@@ -87,6 +87,8 @@ namespace WorkNest.Application.Services
         {
             var cnicError = Cnic.Validate(request.CnicOrPassport);
             if (cnicError != null) return ApiResponse.Fail(cnicError);
+            var phoneError = Phone.Validate(request.PhoneNumber);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
 
             var userRow = await _db.GetUserByEmailAsync(userEmail);
             if (userRow is null) return ApiResponse.Fail("User not found");
@@ -143,6 +145,9 @@ namespace WorkNest.Application.Services
         {
             if (request is null)
                 return ApiResponse.Fail("Request body is required.");
+
+            var phoneError = Phone.Validate(request.Phone);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
 
             int userId = request.UserId ?? 0;
 
@@ -328,6 +333,8 @@ namespace WorkNest.Application.Services
         {
             var cnicError = Cnic.Validate(request.CnicOrPassport);
             if (cnicError != null) return ApiResponse.Fail(cnicError);
+            var phoneError = Phone.Validate(request.PhoneNumber);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
 
             var userRow = await _db.GetUserByEmailAsync(userEmail);
             if (userRow is null) return ApiResponse.Fail("User not found");
