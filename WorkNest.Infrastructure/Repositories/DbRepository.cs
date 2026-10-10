@@ -4704,6 +4704,19 @@ END";
             return devices;
         }
 
+        public async Task InsertHikDoorLogDbAsync(int deviceId, string action, bool ok, string detail)
+        {
+            await using var conn = await Open();
+            await using var cmd = new SqlCommand(@"
+                IF OBJECT_ID('dbo.WN_HIK_SyncLog', 'U') IS NOT NULL
+                    INSERT INTO dbo.WN_HIK_SyncLog (Employee_id, Device_id, Action, Ok, Detail) VALUES (NULL, @Device, @Action, @Ok, @Detail);", conn);
+            cmd.Parameters.Add("@Device", SqlDbType.Int).Value = deviceId;
+            cmd.Parameters.Add("@Action", SqlDbType.NVarChar, 50).Value = action;
+            cmd.Parameters.Add("@Ok", SqlDbType.Bit).Value = ok;
+            cmd.Parameters.Add("@Detail", SqlDbType.NVarChar, 1000).Value = detail.Length > 1000 ? detail[..1000] : detail;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
         public async Task<bool> SetHikDeviceLocationDbAsync(int deviceId, int? locationId)
         {
             await using var conn = await Open();

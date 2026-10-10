@@ -359,6 +359,8 @@ namespace WorkNest.Application.Interfaces
         Task<string> ReallocateHikEmployeeNoDbAsync(int personId, int floor);
         Task<HashSet<int>> GetHikPendingOpDeviceIdsForEmployeeDbAsync(string employeeNo);
         Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceConnection>> GetHikDeviceConnectionsDbAsync(IEnumerable<int> deviceIds);
+        /// <summary>One line in WN_HIK_SyncLog for a door event (e.g. an app unlock); skipped when the table is missing.</summary>
+        Task InsertHikDoorLogDbAsync(int deviceId, string action, bool ok, string detail);
         Task<IEnumerable<int>> GetHikEntranceDeviceIdsDbAsync();
 
         // --- dbo.OrderStatus (status lookup by description) ---

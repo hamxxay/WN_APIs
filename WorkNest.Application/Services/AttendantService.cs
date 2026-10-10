@@ -101,7 +101,9 @@ namespace WorkNest.Application.Services
                 Message = canOpen ? "Access verified." : "Your access is currently disabled. Contact your company admin or reception.",
                 PersonGuid = rows[0]["PersonGuid"] is Guid g ? g : (Guid.TryParse(rows[0]["PersonGuid"]?.ToString(), out var pg) ? pg : null),
                 Name = rows[0]["Name"]?.ToString(),
-                Spaces = spaces
+                Spaces = spaces,
+                PersonId = Convert.ToInt32(rows[0]["PersonId"]),
+                PersonEmail = (rows[0]["Email"]?.ToString() ?? "").Trim()
             };
         }
 
