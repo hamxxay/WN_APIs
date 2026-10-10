@@ -1,3 +1,4 @@
+using WorkNest.Application.Helpers;
 using WorkNest.Application.DTOs.User;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Constants;
@@ -100,6 +101,9 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateUserAsync(UserCreateRequest request, int? actorId)
         {
+            var cnicError = Cnic.Validate(request.CnicOrPassport);
+            if (cnicError != null) return ApiResponse.Fail(cnicError);
+
             var roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
             int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
 
@@ -144,6 +148,9 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> UpdateUserAsync(int id, UserUpdateRequest request)
         {
+            var cnicError = Cnic.Validate(request.CnicOrPassport);
+            if (cnicError != null) return ApiResponse.Fail(cnicError);
+
             int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
             int? effectiveRoleId = null;
 

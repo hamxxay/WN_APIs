@@ -1,0 +1,19 @@
+USE [SAC400];
+
+-- App "Access Request": an access user (WN_Persons) verified themselves in the mobile app with their login account.
+-- One row per person + account; shown on the web (Users & Access Status) as "App verified … until …".
+-- The verification lasts 30 days (ExpiresAt); unlocks from the app update LastUnlockAt / UnlockCount.
+IF OBJECT_ID(N'dbo.WN_MobileAccessVerifications', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WN_MobileAccessVerifications (
+        Id              INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_WN_MobileAccessVerifications PRIMARY KEY,
+        PersonId        INT            NOT NULL,
+        BookingDetailId INT            NULL,       -- the room chosen in the app
+        AccountEmail    NVARCHAR(256)  NOT NULL,   -- the app login that verified
+        VerifiedAt      DATETIME2(0)   NOT NULL,   -- UTC
+        ExpiresAt       DATETIME2(0)   NOT NULL,   -- UTC, VerifiedAt + 30 days
+        LastUnlockAt    DATETIME2(0)   NULL,       -- UTC
+        UnlockCount     INT            NOT NULL CONSTRAINT DF_WN_MobileAccessVerifications_UnlockCount DEFAULT 0,
+        CONSTRAINT UQ_WN_MobileAccessVerifications_Person_Account UNIQUE (PersonId, AccountEmail)
+    );
+END

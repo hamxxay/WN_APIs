@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Agreement;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Application.Services
@@ -71,6 +72,10 @@ namespace WorkNest.Application.Services
 
             if (string.IsNullOrWhiteSpace(request.Cnic) && string.IsNullOrWhiteSpace(request.SecpRegistrationNo) && string.IsNullOrWhiteSpace(request.Ntn))
                 throw new InvalidOperationException("Customer CNIC, NTN, or SECP Registration Number is required.");
+
+            var cnicError = Cnic.Validate(request.Cnic);
+            if (cnicError != null)
+                throw new InvalidOperationException(cnicError);
 
             if (string.IsNullOrWhiteSpace(request.Address))
                 throw new InvalidOperationException("Customer Address is required.");

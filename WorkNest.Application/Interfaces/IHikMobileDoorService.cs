@@ -3,8 +3,8 @@ using WorkNest.Application.DTOs.Attendant;
 namespace WorkNest.Application.Interfaces
 {
     /// <summary>
-    /// "Unlock door" in the app for a verified access user: the doors of their booking (the booked room's machine +
-    /// the entrances of that location) and a remote open on one of them. Callers verify the person first.
+    /// "Unlock door" in the app for a verified access user: the booked room's door only (entrances are opened with
+    /// card, fingerprint or face) and a remote open on it. Callers verify the person first.
     /// </summary>
     public interface IHikMobileDoorService
     {

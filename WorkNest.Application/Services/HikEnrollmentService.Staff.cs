@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.HikDevice;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Application.Services
@@ -87,7 +88,7 @@ namespace WorkNest.Application.Services
             var name = (request?.Name ?? "").Trim();
             var cnic = new string((request?.Cnic ?? "").Where(char.IsDigit).ToArray());
             if (name.Length == 0 || name.Length > 64) return new HikStaffResultDto { Error = "Name is required (max 64 characters)." };
-            if (cnic.Length != 13) return new HikStaffResultDto { Error = "CNIC must be 13 digits." };
+            if (!Cnic.IsValid(request?.Cnic)) return new HikStaffResultDto { Error = Cnic.ErrorMessage };
             if (!TryValidUntil(request!.ValidUntil, out var validEnd)) return new HikStaffResultDto { Error = "Access-until date is not valid." };
 
             var targets = await StaffTargetDevicesAsync(request.RoomDeviceIds, request.CallerLocationIds);

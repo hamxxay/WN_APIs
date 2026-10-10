@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Attendant;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Application.Services
@@ -115,6 +116,7 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(request.IdNumber)) throw new ArgumentException("CNIC/Passport IdNumber is required.");
 
             request.IdType = request.IdType?.ToUpperInvariant() == "PASSPORT" ? "Passport" : "CNIC";
+            if (request.IdType == "CNIC" && !Cnic.IsValid(request.IdNumber)) throw new ArgumentException(Cnic.ErrorMessage);
 
             var cleanName = request.Name.Trim();
             var cleanEmail = request.Email.Trim().ToLowerInvariant();
@@ -179,6 +181,11 @@ namespace WorkNest.Application.Services
                     HikPendingOps = r.ContainsKey("HikPendingOps") && r["HikPendingOps"] != null ? Convert.ToInt32(r["HikPendingOps"]) : 0
                 });
             }
+
+            // App verification (Access Request in the mobile app) for each user, shown on the web.
+            var app = await _db.GetMobileAccessVerificationsDbAsync(list.Select(x => x.PersonId));
+            foreach (var a in list)
+                if (app.TryGetValue(a.PersonId, out var v)) a.AppAccess = v;
 
             return list;
         }

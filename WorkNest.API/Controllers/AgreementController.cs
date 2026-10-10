@@ -65,6 +65,10 @@ namespace WorkNest.API.Controllers
                 if (request == null || request.QuotationId <= 0)
                     return BadRequest(new { isSuccessful = false, message = "Valid QuotationId is required." });
 
+                var cnicError = WorkNest.Application.Helpers.Cnic.Validate(request.Cnic);
+                if (cnicError != null)
+                    return BadRequest(new { isSuccessful = false, message = cnicError });
+
                 int? actorId = ResolveActorId();
                 var result = await _agreement.SendAgreementAsync(request, actorId);
 

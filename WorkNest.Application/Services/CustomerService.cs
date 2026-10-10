@@ -1,3 +1,4 @@
+using WorkNest.Application.Helpers;
 using WorkNest.Application.DTOs.Customer;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -74,6 +75,9 @@ namespace WorkNest.Application.Services
             var ntnErr = ValidateCompanyNtn(request);
             if (ntnErr is not null)
                 return ApiResponse.Fail(ntnErr);
+            var cnicErr = Cnic.Validate(request.CnicOrPassport);
+            if (cnicErr is not null)
+                return ApiResponse.Fail(cnicErr);
 
             var existing = await _db.GetCustomerByEmailAsync(request.Email);
             if (existing is not null && existing.TryGetValue("Id", out var eid) && eid is not null)
@@ -110,6 +114,9 @@ namespace WorkNest.Application.Services
             var ntnErr = ValidateCompanyNtn(request);
             if (ntnErr is not null)
                 return ApiResponse.Fail(ntnErr);
+            var cnicErr = Cnic.Validate(request.CnicOrPassport);
+            if (cnicErr is not null)
+                return ApiResponse.Fail(cnicErr);
 
             string? companyValue = ResolveCompany(request.CustomerType, request.Company);
 

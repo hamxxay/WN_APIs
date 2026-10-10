@@ -76,6 +76,8 @@ namespace WorkNest.Application.DTOs.Attendant
         public decimal? SurchargeApplied { get; set; }
         /// <summary>Machine ID (WN_HIK_PersonMap.MachineID); null until first enrollment.</summary>
         public string? MachineId { get; set; }
+        /// <summary>Verified in the mobile app (Access Request), or null; shown on the web next to the user.</summary>
+        public MobileAccessVerificationDto? AppAccess { get; set; }
         public int HikPendingOps { get; set; }
     }
 
@@ -166,5 +168,16 @@ namespace WorkNest.Application.DTOs.Attendant
         public bool Ok { get; set; }
         public string Message { get; set; } = string.Empty;
         public string? Door { get; set; }
+    }
+
+    /// <summary>An access user's verification in the mobile app (WN_MobileAccessVerifications).</summary>
+    public class MobileAccessVerificationDto
+    {
+        public string AccountEmail { get; set; } = string.Empty;
+        public DateTime VerifiedAt { get; set; }
+        public DateTime ExpiresAt { get; set; }
+        public DateTime? LastUnlockAt { get; set; }
+        public int UnlockCount { get; set; }
+        public bool IsActive => ExpiresAt > DateTime.UtcNow;
     }
 }

@@ -1,4 +1,5 @@
 ﻿using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -84,6 +85,9 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateBookingAsync(BookingRequest request, string userEmail)
         {
+            var cnicError = Cnic.Validate(request.CnicOrPassport);
+            if (cnicError != null) return ApiResponse.Fail(cnicError);
+
             var userRow = await _db.GetUserByEmailAsync(userEmail);
             if (userRow is null) return ApiResponse.Fail("User not found");
             var userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : (int?)null;
@@ -322,6 +326,9 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail)
         {
+            var cnicError = Cnic.Validate(request.CnicOrPassport);
+            if (cnicError != null) return ApiResponse.Fail(cnicError);
+
             var userRow = await _db.GetUserByEmailAsync(userEmail);
             if (userRow is null) return ApiResponse.Fail("User not found");
             var userId = userRow.TryGetValue("Id", out var uid) ? Convert.ToInt32(uid) : (int?)null;

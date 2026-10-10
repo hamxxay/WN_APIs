@@ -16,11 +16,16 @@ namespace WorkNest.API.Controllers
     {
         private readonly IAttendantService _attendants;
         private readonly IHikMobileDoorService _doors;
+        private readonly IDbRepository _db;
 
-        public MobileAccessController(IAttendantService attendants, IHikMobileDoorService doors)
+        /// <summary>How long an app verification lasts before the user does Access Request again.</summary>
+        private const int AppVerificationDays = 30;
+
+        public MobileAccessController(IAttendantService attendants, IHikMobileDoorService doors, IDbRepository db)
         {
             _attendants = attendants;
             _doors = doors;
+            _db = db;
         }
 
         /// <summary>
@@ -42,7 +47,22 @@ namespace WorkNest.API.Controllers
             return (personId, null);
         }
 
-        /// <summary>Doors the verified access user can unlock for one of their rooms (room door first, then entrances).</summary>
+        /// <summary>
+        /// Access Request completed in the app: records the verification (person, login account, room, 30 days) so the
+        /// web shows "App verified" next to the user. Same checks as unlocking.
+        /// </summary>
+        [HttpPost("api/mobile/access/confirm")]
+        public async Task<IActionResult> Confirm([FromBody] MobileDoorRequest request)
+        {
+            var (personId, error) = await ResolveDoorUserAsync(request ?? new MobileDoorRequest());
+            if (error != null) return error;
+            var now = DateTime.UtcNow;
+            var expires = now.AddDays(AppVerificationDays);
+            var saved = await _db.UpsertMobileAccessVerificationDbAsync(personId!.Value, request!.BookingDetailId, User.GetEmail()!.Trim(), now, expires);
+            return Ok(ApiResponse.Ok(new { verifiedAt = now, expiresAt = expires, recorded = saved }, "Access verified."));
+        }
+
+        /// <summary>The room door the verified access user can unlock from the app (the booked room's machine only).</summary>
         [HttpPost("api/mobile/access/doors")]
         // Logged-in users only: the per-user default limit applies (a per-IP limit would throttle the whole office Wi-Fi).
         public async Task<IActionResult> Doors([FromBody] MobileDoorRequest request)
@@ -53,7 +73,7 @@ namespace WorkNest.API.Controllers
             return Ok(result.Ok ? ApiResponse.Ok(result, result.Message) : ApiResponse.Fail(result.Message));
         }
 
-        /// <summary>Unlocks one of those doors now (remote open on the machine); every attempt is logged.</summary>
+        /// <summary>Unlocks their room door now (remote open on the machine); entrances are refused; every attempt is logged.</summary>
         [HttpPost("api/mobile/access/open")]
         // Logged-in users only: the per-user default limit applies (a per-IP limit would throttle the whole office Wi-Fi).
         public async Task<IActionResult> Open([FromBody] MobileDoorRequest request)
@@ -62,6 +82,11 @@ namespace WorkNest.API.Controllers
             var (personId, error) = await ResolveDoorUserAsync(request);
             if (error != null) return error;
             var result = await _doors.OpenDoorAsync(request.BookingDetailId, personId!.Value, deviceId, User.GetEmail());
+            if (result.Ok)
+            {
+                try { await _db.TouchMobileAccessUnlockDbAsync(personId.Value, User.GetEmail()!.Trim(), DateTime.UtcNow); }
+                catch { /* the unlock itself already happened and is logged */ }
+            }
             return Ok(result.Ok ? ApiResponse.Ok(result, result.Message) : ApiResponse.Fail(result.Message));
         }
 
@@ -73,6 +98,10 @@ namespace WorkNest.API.Controllers
         [EnableRateLimiting("auth")]
         public async Task<IActionResult> Verify([FromBody] MobileAccessVerifyRequest request)
         {
+            // CNIC stays optional here (email can be used instead), but when entered it must be a real CNIC.
+            // Only checked on Verify (where it is typed in): door/open re-checks keep accepting what was verified before.
+            var cnicError = WorkNest.Application.Helpers.Cnic.Validate(request?.Cnic);
+            if (cnicError != null) return Ok(ApiResponse.Fail(cnicError));
             var result = await _attendants.VerifyMobileAccessAsync(request ?? new MobileAccessVerifyRequest());
             return Ok(ApiResponse.Ok(result, result.Message));
         }
