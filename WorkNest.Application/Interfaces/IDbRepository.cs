@@ -313,6 +313,15 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Reminder count and last reminder date (WN_QuotationActivities 'AgreementReminder' since SentDate) per agreement id.</summary>
         Task<IDictionary<int, (int Count, DateTime? LastReminderAt)>> GetAgreementReminderStatsDbAsync(IEnumerable<int> agreementIds);
         /// <summary>
+        /// WN_AgreementESignatures (created by Database/Agreements/WN_AgreementESignatures.txt): evidence of a portal e-signature.
+        /// Returns false when the table isn't created yet (SQL error 208); the certificate page in the signed PDF is the primary evidence.
+        /// </summary>
+        Task<bool> InsertAgreementESignatureDbAsync(WorkNest.Application.DTOs.Agreement.AgreementESignatureEvidence evidence);
+        /// <summary>Latest e-signature of an agreement; null when there is none or the table isn't created yet.</summary>
+        Task<IDictionary<string, object?>?> GetAgreementESignatureDbAsync(int agreementId);
+        /// <summary>Latest e-signature (signer name, signed at) per agreement id; empty when the table isn't created yet.</summary>
+        Task<IDictionary<int, (string? SignerName, DateTime SignedAt)>> GetAgreementESignatureStatsDbAsync(IEnumerable<int> agreementIds);
+        /// <summary>
         /// Tries to take a SQL Server session app lock (sp_getapplock, no wait). Returns a handle that releases the lock
         /// when disposed, or null when another session already holds it.
         /// </summary>

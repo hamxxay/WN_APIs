@@ -18,4 +18,13 @@ namespace WorkNest.Application.Interfaces
         /// A non-null body is sent as JSON (POST unless another method is given).</summary>
         Task<JsonElement> NetworkAsync(string consoleId, string path, object? body = null, HttpMethod? method = null, CancellationToken ct = default);
     }
+
+    /// <summary>
+    /// A change was sent to the UniFi console but no answer came back in time (cloud connector 408 / 504, or our own
+    /// timeout). The change may or may not have been saved: callers re-read the console to find out.
+    /// </summary>
+    public class UnifiTimeoutException : InvalidOperationException
+    {
+        public UnifiTimeoutException(string message, Exception? inner = null) : base(message, inner) { }
+    }
 }

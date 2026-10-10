@@ -1,0 +1,26 @@
+USE [SAC400];
+
+-- Log of scheduled reports sent by WorkNest (e.g. the weekly super admin report, WeeklyReportService).
+-- One row per report and period: the UNIQUE (ReportKey, PeriodKey) key is what stops a report going out twice
+-- when the API restarts or runs on more than one IIS instance. The service inserts the row first ("claims" it)
+-- and only then sends; an instance that gets a key violation skips.
+--   ReportKey  : which report, e.g. 'weekly'
+--   PeriodKey  : which period, e.g. '2026-W42' (ISO week)
+--   SentAt     : Pakistan time of the last attempt / of sending
+--   Recipients : comma-separated e-mail addresses it was sent to
+--   Status     : Sending | Sent | Partial (some addresses failed) | Failed (nothing sent; retried after an hour)
+--   Error      : last error when an address failed
+-- New table only; no existing table is changed. Safe to run again.
+IF OBJECT_ID(N'dbo.WN_ScheduledReportRuns', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WN_ScheduledReportRuns (
+        Id          INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_WN_ScheduledReportRuns PRIMARY KEY,
+        ReportKey   NVARCHAR(50)    NOT NULL,
+        PeriodKey   NVARCHAR(20)    NOT NULL,
+        SentAt      DATETIME2(0)    NOT NULL,
+        Recipients  NVARCHAR(MAX)   NULL,
+        Status      NVARCHAR(20)    NOT NULL,
+        Error       NVARCHAR(1000)  NULL,
+        CONSTRAINT UQ_WN_ScheduledReportRuns_Report_Period UNIQUE (ReportKey, PeriodKey)
+    );
+END
