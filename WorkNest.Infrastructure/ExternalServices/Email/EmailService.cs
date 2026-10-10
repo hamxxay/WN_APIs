@@ -154,8 +154,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
-                _logger.LogWarning("[EMAIL] Missing email credentials or recipient. Challan email skipped.");
-                return;
+                _logger.LogWarning("[EMAIL] Missing email credentials or recipient. Challan email not sent.");
+                // Throw, so callers (and the retry queue) never record this as "Sent".
+                throw new InvalidOperationException("The email could not be sent: email is not set up on the server, or the customer has no email address.");
             }
 
             try
@@ -340,8 +341,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
-                _logger.LogWarning("[EMAIL] Missing email credentials or recipient. Surcharge invoice email skipped.");
-                return;
+                _logger.LogWarning("[EMAIL] Missing email credentials or recipient. Surcharge invoice email not sent.");
+                throw new InvalidOperationException("The surcharge invoice email could not be sent: email is not set up on the server, or the customer has no email address.");
             }
 
             decimal supportCharge = (taxAmount > 0) 
@@ -441,6 +442,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send custom surcharge invoice email #{InvoiceNumber} to {ToEmail}.", invoiceNumber, toEmail);
+                throw;
             }
         }
 
@@ -452,8 +454,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 string.IsNullOrWhiteSpace(toEmail) ||
                 string.IsNullOrWhiteSpace(password))
             {
-                _logger.LogWarning("[EMAIL] Missing email credentials or recipient email. Agreement email skipped.");
-                return;
+                _logger.LogWarning("[EMAIL] Missing email credentials or recipient email. Agreement email not sent.");
+                // Throw, so the agreement is marked EmailFailed instead of looking sent.
+                throw new InvalidOperationException("The agreement email could not be sent: email is not set up on the server, or the customer has no email address.");
             }
 
             try
@@ -492,6 +495,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send agreement email for quotation #{QuotationNumber} to {ToEmail}.", quotationNumber, toEmail);
+                throw;
             }
         }
 

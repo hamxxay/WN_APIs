@@ -13,6 +13,9 @@ namespace WorkNest.API.Extensions
     /// </summary>
     public static class MultiLocationList
     {
+        public const int MaxLimit = 2000;
+        private const int MaxRows = 10000;
+
         private static readonly string[] DateKeys =
             { "CreatedOn", "CreatedDate", "BookedOn", "BookingDate", "IssuedOn", "QuotationDate", "Date" };
 
@@ -20,8 +23,9 @@ namespace WorkNest.API.Extensions
             IReadOnlyList<int?> locations, int page, int limit,
             Func<int, int, int?, Task<(IEnumerable<T> Items, int Total)>> fetch)
         {
-            if (page <= 0) page = 1;
-            if (limit <= 0) limit = 10;
+            // Bounded: the screens ask for at most 2,000 rows (dropdowns); anything bigger is a mistake or abuse.
+            limit = limit <= 0 ? 10 : Math.Min(limit, MaxLimit);
+            page = Math.Clamp(page, 1, MaxRows / limit);
             if (locations.Count <= 1)
             {
                 var single = await fetch(page, limit, locations.Count == 0 ? null : locations[0]);

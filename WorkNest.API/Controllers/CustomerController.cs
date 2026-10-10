@@ -2,12 +2,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Customer;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Filters;
 using WorkNest.API.Extensions;
 
 namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // customer records: staff only
+    [RecordScope(RecordKind.Customer, "id")] // location-bound staff: only records of their locations
     public class CustomerController : ControllerBase
     {
         private readonly ICustomerService _customers;

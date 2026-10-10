@@ -111,6 +111,7 @@ namespace WorkNest.API.Controllers
             var (email, reject) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "login");
             if (reject != null) return reject;
             request.Email = email!;
+            request.CompanyId = null;     // a sign-in can never move the user to another company
             // Retain request.Password for credential verification
             var authResult = await _auth.LoginAsync(request);
             if (!authResult.IsSuccessful) return Unauthorized(authResult);
@@ -125,6 +126,7 @@ namespace WorkNest.API.Controllers
             var (email, reject) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "google-login");
             if (reject != null) return reject;
             request.Email = email!;
+            request.CompanyId = null;     // a sign-in can never move the user to another company
             return Ok(await _auth.GoogleLoginAsync(request));
         }
 

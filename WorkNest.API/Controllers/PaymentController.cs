@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Filters;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
 using Microsoft.AspNetCore.RateLimiting;
@@ -10,11 +11,18 @@ namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Authorize]
+    [RecordScope(RecordKind.Payment, "id", "publicId")] // location-bound staff: only records of their locations
     public class PaymentController : ControllerBase
     {
         private readonly IPaymentService _payments;
         private readonly IDbRepository _db;
-        public PaymentController(IPaymentService payments, IDbRepository db) { _payments = payments; _db = db; }
+        private readonly IRecordScopeRepository _scope;
+        public PaymentController(IPaymentService payments, IDbRepository db, IRecordScopeRepository scope)
+        {
+            _payments = payments;
+            _db = db;
+            _scope = scope;
+        }
 
         // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
@@ -50,8 +58,18 @@ namespace WorkNest.API.Controllers
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null)
         {
-            var (items, total) = await _payments.GetPaymentsAsync(page, limit, search);
-            return Ok(new PaginatedResponse<object> { Data = items, Total = total });
+            page = Math.Max(1, page);
+            limit = Math.Clamp(limit, 1, 100);
+            if (!User.IsLocationBoundRole())
+            {
+                var (items, total) = await _payments.GetPaymentsAsync(page, limit, search);
+                return Ok(new PaginatedResponse<object> { Data = items, Total = total });
+            }
+            // Admins / sales executives: only payments of their locations (the list procedure has no location filter).
+            var allowed = await _scope.GetPaymentIdsInLocationsAsync(User.GetLocationIds());
+            var (all, _) = await _payments.GetPaymentsAsync(1, 5000, search);
+            var mine = all.Where(r => r is IDictionary<string, object?> d && d.TryGetValue("Id", out var id) && id != null && allowed.Contains(Convert.ToInt32(id))).ToList();
+            return Ok(new PaginatedResponse<object> { Data = mine.Skip((page - 1) * limit).Take(limit), Total = mine.Count });
         }
 
         [HttpGet("api/payment/{id:int}/summary")]
@@ -67,10 +85,8 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> SummaryByGuid(Guid publicId)
         {
-            var (rows, _) = await _db.GetPaymentsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
-            if (match is null) return NotFound(ApiResponse.Fail("Payment not found"));
-            var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            var id = await _scope.GetPaymentIdByPublicIdAsync(publicId) ?? 0;
+            if (id == 0) return NotFound(ApiResponse.Fail("Payment not found"));
             var result = await _payments.GetPaymentSummaryAsync(id);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
@@ -95,10 +111,8 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatusByGuid(Guid publicId, [FromBody] PaymentStatusUpdateRequest request)
         {
-            var (rows, _) = await _db.GetPaymentsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
-            if (match is null) return NotFound(ApiResponse.Fail("Payment not found"));
-            var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            var id = await _scope.GetPaymentIdByPublicIdAsync(publicId) ?? 0;
+            if (id == 0) return NotFound(ApiResponse.Fail("Payment not found"));
             return Ok(await _payments.UpdatePaymentStatusAsync(id, request.StatusId, null));
         }
 
@@ -115,10 +129,8 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> ApproveByGuid(Guid publicId)
         {
-            var (rows, _) = await _db.GetPaymentsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
-            if (match is null) return NotFound(ApiResponse.Fail("Payment not found"));
-            var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            var id = await _scope.GetPaymentIdByPublicIdAsync(publicId) ?? 0;
+            if (id == 0) return NotFound(ApiResponse.Fail("Payment not found"));
             return Ok(await _payments.UpdatePaymentStatusAsync(id, 2, null));
         }
 
@@ -131,10 +143,8 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
-            var (rows, _) = await _db.GetPaymentsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
-            if (match is null) return NotFound(ApiResponse.Fail("Payment not found"));
-            var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            var id = await _scope.GetPaymentIdByPublicIdAsync(publicId) ?? 0;
+            if (id == 0) return NotFound(ApiResponse.Fail("Payment not found"));
             return Ok(await _payments.DeletePaymentAsync(id));
         }
 

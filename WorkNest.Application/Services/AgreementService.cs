@@ -461,12 +461,37 @@ namespace WorkNest.Application.Services
             await _db.SetAgreementStatusDbAsync(agreementId, "SignedUploaded", signedDate);
         }
 
+        // One conversion at a time per quotation: a double click, or a customer upload racing an admin "mark signed",
+        // used to create two bookings (each with its own deposit and invoices).
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, System.Threading.SemaphoreSlim> ConvertLocks = new();
+
         public async Task<AgreementResponseDto> MarkAgreementSignedAsync(int agreementId, int? userId, string? note, DateTime? signedDate = null)
         {
             var row = await _db.GetAgreementByIdDbAsync(agreementId);
             if (row == null) throw new InvalidOperationException("Agreement record not found.");
-
             int quotationId = Convert.ToInt32(row["QuotationId"]);
+
+            var gate = ConvertLocks.GetOrAdd(quotationId, _ => new System.Threading.SemaphoreSlim(1, 1));
+            await gate.WaitAsync();
+            try
+            {
+                return await MarkAgreementSignedLockedAsync(agreementId, quotationId, userId, signedDate);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        private async Task<AgreementResponseDto> MarkAgreementSignedLockedAsync(int agreementId, int quotationId, int? userId, DateTime? signedDate)
+        {
+            // Re-read under the lock: a request that waited must not convert a second time.
+            var current = await GetAgreementByIdAsync(agreementId)
+                          ?? throw new InvalidOperationException("Agreement record not found.");
+            if (current.BookingId is > 0) return current; // already converted (e.g. the first of two clicks)
+            var quotation = await _db.GetQuotationByIdAsync(quotationId);
+            if (quotation != null && quotation.TryGetValue("Status", out var qs) && string.Equals(qs?.ToString(), "Converted", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("This quotation has already been converted to a booking. Open the booking from Bookings instead of signing it again.");
 
             // 1. Update Agreement to Signed
             await _db.MarkAgreementSignedDbAsync(agreementId, userId);

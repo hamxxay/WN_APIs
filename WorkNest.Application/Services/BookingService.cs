@@ -48,7 +48,7 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(data);
         }
 
-        public async Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month)
+        public async Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month, bool includeBookings = false)
         {
             var result = await _db.GetBookingCalendarAsync(spaceId, year, month);
             var bookedDates = new HashSet<string>();
@@ -60,7 +60,8 @@ namespace WorkNest.Application.Services
                 for (var d = s.Value.Date; d <= e.Value.Date; d = d.AddDays(1))
                     bookedDates.Add(d.ToString("yyyy-MM-dd"));
             }
-            return ApiResponse.Ok(new { bookedDates, bookings = result });
+            // Booker names / emails are for staff only; the public calendar gets the booked dates.
+            return includeBookings ? ApiResponse.Ok(new { bookedDates, bookings = result }) : ApiResponse.Ok(new { bookedDates });
         }
 
         public async Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7")
@@ -677,23 +678,30 @@ namespace WorkNest.Application.Services
                 ? pdfBytes
                 : _pdf.GenerateBookingConfirmationPdf(dto);
 
-            await _email.SendChallanEmailAsync(
-                dto.CustomerEmail,
-                dto.CustomerName ?? "Customer",
-                dto.ChallanNumber,
-                dto.SpaceName ?? dto.SpaceCode ?? "",
-                dto.BillingPeriodLabel ?? dto.BillingPeriodCode ?? "",
-                dto.TotalPayable,
-                dto.StartOn,
-                dto.EndOn,
-                dto.TotalContractAmount,
-                dto.NextBillDueDate,
-                dto.BalanceLeft,
-                dto.CurrentCycleAmount,
-                dto.SecurityDeposit,
-                dto.TaxAmount,
-                dto.DiscountAmount,
-                pdf);
+            try
+            {
+                await _email.SendChallanEmailAsync(
+                    dto.CustomerEmail,
+                    dto.CustomerName ?? "Customer",
+                    dto.ChallanNumber,
+                    dto.SpaceName ?? dto.SpaceCode ?? "",
+                    dto.BillingPeriodLabel ?? dto.BillingPeriodCode ?? "",
+                    dto.TotalPayable,
+                    dto.StartOn,
+                    dto.EndOn,
+                    dto.TotalContractAmount,
+                    dto.NextBillDueDate,
+                    dto.BalanceLeft,
+                    dto.CurrentCycleAmount,
+                    dto.SecurityDeposit,
+                    dto.TaxAmount,
+                    dto.DiscountAmount,
+                    pdf);
+            }
+            catch (Exception ex)
+            {
+                return ApiResponse.Fail($"The challan could not be emailed: {ex.Message}");
+            }
 
             return ApiResponse.Ok("Challan email sent successfully.");
         }

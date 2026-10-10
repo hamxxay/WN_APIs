@@ -17,6 +17,7 @@ namespace WorkNest.API.Controllers
     [ApiController]
     [Authorize]
     [ValidateLocationScope]
+    [RecordScope(RecordKind.Booking, "id", "bookingId", "publicId")] // location-bound staff: only records of their locations
     public class BookingController : ControllerBase
     {
         private readonly IBookingService _bookings;
@@ -87,7 +88,7 @@ namespace WorkNest.API.Controllers
             [FromQuery] int month)
         {
             if (int.TryParse(spaceId, out var intId))
-                return Ok(await _bookings.GetBookingCalendarAsync(intId, year, month));
+                return Ok(await _bookings.GetBookingCalendarAsync(intId, year, month, User.IsStaff()));
 
             if (Guid.TryParse(spaceId, out var guid))
             {
@@ -95,7 +96,7 @@ namespace WorkNest.API.Controllers
                 var match = rows.FirstOrDefault(r => (r.TryGetValue("IdGUID", out var idg) && idg?.ToString() == guid.ToString()) || (r.TryGetValue("PublicId", out var g) && g?.ToString() == guid.ToString()));
                 if (match is null) return NotFound(new { isSuccessful = false, message = "Space not found" });
                 intId = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
-                return Ok(await _bookings.GetBookingCalendarAsync(intId, year, month));
+                return Ok(await _bookings.GetBookingCalendarAsync(intId, year, month, User.IsStaff()));
             }
 
             return BadRequest(new { isSuccessful = false, message = "Invalid spaceId" });

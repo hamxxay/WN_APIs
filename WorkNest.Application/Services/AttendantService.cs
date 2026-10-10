@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,8 +13,11 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IEmailService _email;
 
-        public AttendantService(IDbRepository db, IEmailService email)
+        private readonly ILogger<AttendantService> _logger;
+
+        public AttendantService(IDbRepository db, IEmailService email, ILogger<AttendantService> logger)
         {
+            _logger = logger;
             _db = db;
             _email = email;
         }
@@ -288,6 +292,8 @@ namespace WorkNest.Application.Services
                             {
                                 _ = Task.Run(async () =>
                                 {
+                                    try
+                                    {
                                     await _email.SendAttendantSurchargeInvoiceEmailAsync(
                                         targetEmail,
                                         customerName,
@@ -303,13 +309,23 @@ namespace WorkNest.Application.Services
                                         billingStart,
                                         billingEnd
                                     );
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        // The invoice exists; only the email failed. It can be re-sent from Invoices.
+                                        _logger.LogError(ex, "Surcharge invoice {InvoiceNumber} was created but its email to {Email} failed", invoiceNum, targetEmail);
+                                    }
                                 });
                             }
                         }
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Invoice/Email dispatch exception captured safely without breaking attendant assignment
+                        // The attendant stays assigned, but the surcharge invoice is missing: log it and tell the screen.
+                        _logger.LogError(ex, "Surcharge invoice failed for booking detail {BookingDetailId}, person {PersonId}, amount {Surcharge}",
+                            request.BookingDetailId, request.PersonId, surcharge);
+                        if (result != null)
+                            result["SurchargeInvoiceError"] = "The attendant was added, but the surcharge invoice could not be created. Please create it from Invoices.";
                     }
                 }
             }
