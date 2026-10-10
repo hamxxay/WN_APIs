@@ -128,5 +128,43 @@ namespace WorkNest.Application.DTOs.Attendant
         public Guid? PersonGuid { get; set; }
         public string? Name { get; set; }
         public List<MobileAccessSpaceDto> Spaces { get; set; } = new();
+        /// <summary>Matched person (server side only, never sent to the app).</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public int? PersonId { get; set; }
+        /// <summary>Email registered for the matched person (server side only).</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? PersonEmail { get; set; }
+    }
+
+    /// <summary>App "Unlock door": the verified details again + the room (booking) + optionally the door.</summary>
+    public class MobileDoorRequest : MobileAccessVerifyRequest
+    {
+        public int BookingDetailId { get; set; }
+        /// <summary>The door to open (WN_HIK_Devices.Id); not used when listing doors.</summary>
+        public int? DeviceId { get; set; }
+    }
+
+    public class MobileDoorDto
+    {
+        public int DeviceId { get; set; }
+        public string Name { get; set; } = string.Empty;
+        /// <summary>"room" (the booked office's door) or "entrance" (building / floor entrance).</summary>
+        public string Kind { get; set; } = "room";
+        public bool Online { get; set; }
+    }
+
+    public class MobileDoorsResult
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string? SpaceName { get; set; }
+        public List<MobileDoorDto> Doors { get; set; } = new();
+    }
+
+    public class MobileOpenDoorResult
+    {
+        public bool Ok { get; set; }
+        public string Message { get; set; } = string.Empty;
+        public string? Door { get; set; }
     }
 }
