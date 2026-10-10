@@ -361,6 +361,12 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceConnection>> GetHikDeviceConnectionsDbAsync(IEnumerable<int> deviceIds);
         /// <summary>One line in WN_HIK_SyncLog for a door event (e.g. an app unlock); skipped when the table is missing.</summary>
         Task InsertHikDoorLogDbAsync(int deviceId, string action, bool ok, string detail);
+        /// <summary>WN_MobileAccessVerifications: the app's Access Request was completed (insert or refresh). False when the table is missing.</summary>
+        Task<bool> UpsertMobileAccessVerificationDbAsync(int personId, int? bookingDetailId, string accountEmail, DateTime verifiedAtUtc, DateTime expiresAtUtc);
+        /// <summary>Records an app unlock for the person's verification (no-op when the table is missing).</summary>
+        Task TouchMobileAccessUnlockDbAsync(int personId, string accountEmail, DateTime atUtc);
+        /// <summary>Latest app verification per person (empty when the table is missing).</summary>
+        Task<Dictionary<int, WorkNest.Application.DTOs.Attendant.MobileAccessVerificationDto>> GetMobileAccessVerificationsDbAsync(IEnumerable<int> personIds);
         Task<IEnumerable<int>> GetHikEntranceDeviceIdsDbAsync();
 
         // --- dbo.OrderStatus (status lookup by description) ---

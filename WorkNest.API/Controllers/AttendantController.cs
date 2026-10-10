@@ -46,6 +46,11 @@ namespace WorkNest.API.Controllers
         {
             if (request == null || request.CustomerId <= 0)
                 return BadRequest(new { message = "Valid CustomerId is required." });
+            // Passports keep their own format; anything sent as (or defaulting to) CNIC must be 13 digits.
+            if (!string.Equals(request.IdType, "Passport", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(request.IdNumber)
+                && !WorkNest.Application.Helpers.Cnic.IsValid(request.IdNumber))
+                return BadRequest(new { message = WorkNest.Application.Helpers.Cnic.ErrorMessage });
 
             var result = await _attendants.AddAttendantAsync(request);
             return StatusCode(201, new

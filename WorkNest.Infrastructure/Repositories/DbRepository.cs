@@ -4704,6 +4704,75 @@ END";
             return devices;
         }
 
+        public async Task<bool> UpsertMobileAccessVerificationDbAsync(int personId, int? bookingDetailId, string accountEmail, DateTime verifiedAtUtc, DateTime expiresAtUtc)
+        {
+            try
+            {
+                await using var conn = await Open();
+                await using var cmd = new SqlCommand(@"
+                    UPDATE dbo.WN_MobileAccessVerifications
+                       SET BookingDetailId = @Bd, VerifiedAt = @At, ExpiresAt = @Exp
+                     WHERE PersonId = @P AND AccountEmail = @E;
+                    IF @@ROWCOUNT = 0
+                        INSERT INTO dbo.WN_MobileAccessVerifications (PersonId, BookingDetailId, AccountEmail, VerifiedAt, ExpiresAt)
+                        VALUES (@P, @Bd, @E, @At, @Exp);", conn);
+                cmd.Parameters.Add("@P", SqlDbType.Int).Value = personId;
+                cmd.Parameters.Add("@Bd", SqlDbType.Int).Value = (object?)bookingDetailId ?? DBNull.Value;
+                cmd.Parameters.Add("@E", SqlDbType.NVarChar, 256).Value = accountEmail;
+                cmd.Parameters.Add("@At", SqlDbType.DateTime2).Value = verifiedAtUtc;
+                cmd.Parameters.Add("@Exp", SqlDbType.DateTime2).Value = expiresAtUtc;
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return false; }
+        }
+
+        public async Task TouchMobileAccessUnlockDbAsync(int personId, string accountEmail, DateTime atUtc)
+        {
+            try
+            {
+                await using var conn = await Open();
+                await using var cmd = new SqlCommand(@"
+                    UPDATE dbo.WN_MobileAccessVerifications SET LastUnlockAt = @At, UnlockCount = UnlockCount + 1
+                     WHERE PersonId = @P AND AccountEmail = @E;", conn);
+                cmd.Parameters.Add("@P", SqlDbType.Int).Value = personId;
+                cmd.Parameters.Add("@E", SqlDbType.NVarChar, 256).Value = accountEmail;
+                cmd.Parameters.Add("@At", SqlDbType.DateTime2).Value = atUtc;
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+        }
+
+        public async Task<Dictionary<int, WorkNest.Application.DTOs.Attendant.MobileAccessVerificationDto>> GetMobileAccessVerificationsDbAsync(IEnumerable<int> personIds)
+        {
+            var map = new Dictionary<int, WorkNest.Application.DTOs.Attendant.MobileAccessVerificationDto>();
+            var ids = personIds.Where(i => i > 0).Distinct().ToList();
+            if (ids.Count == 0) return map;
+            try
+            {
+                await using var conn = await Open();
+                // Person ids are ints from our own query results, never user text. Newest verification per person.
+                await using var cmd = new SqlCommand($@"
+                    SELECT PersonId, AccountEmail, VerifiedAt, ExpiresAt, LastUnlockAt, UnlockCount
+                      FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY PersonId ORDER BY VerifiedAt DESC) rn
+                              FROM dbo.WN_MobileAccessVerifications WITH (NOLOCK)
+                             WHERE PersonId IN ({string.Join(",", ids)})) x
+                     WHERE rn = 1;", conn);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    map[r.GetInt32(0)] = new WorkNest.Application.DTOs.Attendant.MobileAccessVerificationDto
+                    {
+                        AccountEmail = r.GetString(1),
+                        VerifiedAt = DateTime.SpecifyKind(r.GetDateTime(2), DateTimeKind.Utc),
+                        ExpiresAt = DateTime.SpecifyKind(r.GetDateTime(3), DateTimeKind.Utc),
+                        LastUnlockAt = r.IsDBNull(4) ? null : DateTime.SpecifyKind(r.GetDateTime(4), DateTimeKind.Utc),
+                        UnlockCount = r.GetInt32(5)
+                    };
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return map;
+        }
+
         public async Task InsertHikDoorLogDbAsync(int deviceId, string action, bool ok, string detail)
         {
             await using var conn = await Open();

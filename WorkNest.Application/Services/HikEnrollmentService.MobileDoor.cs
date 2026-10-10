@@ -23,13 +23,13 @@ namespace WorkNest.Application.Services
         {
             var ctx = await _db.GetHikAttendantContextDbAsync(bookingDetailId, personId);
             if (ctx == null) return (null, new(), new());
-            var (all, room) = await ResolveBookingMachinesAsync(ctx);
-            var roomIds = room.Select(d => d.Id).ToHashSet();
-            var doors = all
-                .Select(d => new MobileDoorDto { DeviceId = d.Id, Name = d.Name, Kind = roomIds.Contains(d.Id) ? "room" : "entrance", Online = d.Online })
-                .OrderBy(d => d.Kind == "room" ? 0 : 1).ThenBy(d => d.Name)
+            // The app opens only the booked room's door; entrances are opened with card, fingerprint or face.
+            var (_, room) = await ResolveBookingMachinesAsync(ctx);
+            var doors = room
+                .Select(d => new MobileDoorDto { DeviceId = d.Id, Name = d.Name, Kind = "room", Online = d.Online })
+                .OrderBy(d => d.Name)
                 .ToList();
-            return (ctx, doors, all);
+            return (ctx, doors, room);
         }
 
         public async Task<MobileDoorsResult> GetDoorsAsync(int bookingDetailId, int personId)
@@ -39,7 +39,7 @@ namespace WorkNest.Application.Services
             if (blocked != null) return new MobileDoorsResult { Message = blocked, SpaceName = ctx?.SpaceName };
             if (doors.Count == 0)
                 return new MobileDoorsResult { Message = "No door machine is set up for your room yet. Please contact reception.", SpaceName = ctx!.SpaceName };
-            return new MobileDoorsResult { Ok = true, Message = "Choose the door to unlock.", SpaceName = ctx!.SpaceName, Doors = doors };
+            return new MobileDoorsResult { Ok = true, Message = "Tap Unlock to open your room door.", SpaceName = ctx!.SpaceName, Doors = doors };
         }
 
         public async Task<MobileOpenDoorResult> OpenDoorAsync(int bookingDetailId, int personId, int deviceId, string? byEmail)
@@ -48,7 +48,7 @@ namespace WorkNest.Application.Services
             var blocked = MobileDoorBlocked(ctx);
             if (blocked != null) return new MobileOpenDoorResult { Message = blocked };
             var device = devices.FirstOrDefault(d => d.Id == deviceId);
-            if (device == null) return new MobileOpenDoorResult { Message = "You can't open this door. Choose one of your doors." };
+            if (device == null) return new MobileOpenDoorResult { Message = "You can only unlock your own room's door from the app." };
 
             var result = await _isapi.RemoteControlDoorAsync(device, "open");
             var who = $"{ctx!.Name} ({byEmail ?? "app"})";
