@@ -11,10 +11,12 @@ namespace WorkNest.API.Controllers
     {
         private readonly IDashboardService _dashboard;
         private readonly IRoleDashboardService _roleDashboard;
-        public DashboardController(IDashboardService dashboard, IRoleDashboardService roleDashboard)
+        private readonly IForecastService _forecast;
+        public DashboardController(IDashboardService dashboard, IRoleDashboardService roleDashboard, IForecastService forecast)
         {
             _dashboard = dashboard;
             _roleDashboard = roleDashboard;
+            _forecast = forecast;
         }
 
         [HttpGet("api/dashboard/summary")]
@@ -47,6 +49,16 @@ namespace WorkNest.API.Controllers
                 : "sales_executive";
             return Ok(await _roleDashboard.GetAsync(role, Scope(locationId, locationIds), period));
         }
+
+        /// <summary>
+        /// Revenue &amp; occupancy forecast for the next N months (default 3, at most 12) from current leases: expected
+        /// rent, occupancy at month end, leases ending / starting, per month (see ForecastService for the rules).
+        /// Same location rules as the overview; per-location rows when more than one location is in scope.
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpGet("api/dashboard/forecast")]
+        public async Task<IActionResult> Forecast([FromQuery] int? locationId, [FromQuery] string? locationIds, [FromQuery] int? months) =>
+            Ok(await _forecast.GetAsync(Scope(locationId, locationIds), months ?? 3));
 
         /// <summary>
         /// Locations to total: the asked-for ones, none = all. Location-bound roles (admin, sales executive) only ever

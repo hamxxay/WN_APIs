@@ -195,6 +195,10 @@ try
     builder.Services.AddScoped<IRoleDashboardRepository, WorkNest.Infrastructure.Repositories.RoleDashboardRepository>();
     builder.Services.AddScoped<IRecordScopeRepository, WorkNest.Infrastructure.Repositories.RecordScopeRepository>(); // location of one record (RecordScopeAttribute)
     builder.Services.AddScoped<IRoleDashboardService, RoleDashboardService>();
+    // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
+    builder.Services.AddScoped<IReportRepository, WorkNest.Infrastructure.Repositories.ReportRepository>();
+    builder.Services.AddScoped<IForecastService, ForecastService>();
+    builder.Services.AddScoped<IWeeklyReportGenerator, WeeklyReportGenerator>();
     builder.Services.AddScoped<IPlanFeatureService, PlanFeatureService>();
     builder.Services.AddScoped<IBranchService, BranchService>();
     builder.Services.AddScoped<IFloorService, FloorService>();
@@ -230,6 +234,7 @@ try
     builder.Services.AddHostedService<HikSyncBackgroundService>();
     builder.Services.AddHostedService<BookingAutoConfirmService>();
     builder.Services.AddHostedService<AgreementReminderService>();
+    builder.Services.AddHostedService<WeeklyReportService>();   // Reports:Weekly (Monday 09:00 Pakistan time by default)
     builder.Services.AddMemoryCache();
     builder.Services.AddHttpClient();
     builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();

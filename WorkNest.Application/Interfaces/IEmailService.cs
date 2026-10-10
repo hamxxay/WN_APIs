@@ -12,5 +12,7 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Reminder that a sent agreement still needs the customer's signature. Throws when the email could not be sent.</summary>
         Task SendAgreementReminderEmailAsync(string toEmail, string customerName, string quotationNumber, string? spaceName, DateTime sentDate, int reminderNumber, string portalUrl, byte[]? pdfBytes = null);
         Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type);
+        /// <summary>Sends a ready-made HTML report (e.g. the weekly super admin report). Throws when the email could not be sent.</summary>
+        Task SendHtmlReportAsync(string toEmail, string subject, string html);
     }
 }
