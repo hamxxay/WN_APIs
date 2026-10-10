@@ -240,7 +240,7 @@ namespace WorkNest.Infrastructure.Repositories
                  ORDER BY l.Name;
 
                 -- [1] sales executives and admins: quotations they created in the period and how many converted
-                SELECT TOP 25 u.Id, COALESCE(NULLIF(u.UserName, ''), u.Email) AS Name, u.Email, u.RoleId,
+                SELECT TOP 25 u.Id, COALESCE(NULLIF(u.Name, ''), NULLIF(u.UserName, ''), u.Email) AS Name, u.Email, u.RoleId,
                        STUFF((SELECT ', ' + l.Name FROM @UL ul JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = ul.LocationId
                                WHERE ul.UserId = u.Id ORDER BY l.Name FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Location,
                        COUNT(q.Id) AS Quotations,
@@ -249,8 +249,8 @@ namespace WorkNest.Infrastructure.Repositories
                   FROM dbo.WN_Users u WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.CreatedById = u.Id AND q.CreatedDate >= @PStart AND ISNULL(q.IsActive, 1) = 1
                  WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
-                 GROUP BY u.Id, u.UserName, u.Email, u.RoleId
-                 ORDER BY COUNT(q.Id) DESC, COALESCE(NULLIF(u.UserName, ''), u.Email);",
+                 GROUP BY u.Id, u.Name, u.UserName, u.Email, u.RoleId
+                 ORDER BY COUNT(q.Id) DESC, COALESCE(NULLIF(u.Name, ''), NULLIF(u.UserName, ''), u.Email);",
                 p => p.Add("@PStart", SqlDbType.DateTime2).Value = periodStart);
 
         public Task<List<List<IDictionary<string, object?>>>> GetSystemAsync() =>
