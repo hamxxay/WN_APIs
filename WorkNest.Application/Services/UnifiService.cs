@@ -1365,13 +1365,17 @@ namespace WorkNest.Application.Services
             var devices = await NetDevices();
             var aps = devices.Where(d => Str(P(d, "type")) == "uap").ToList();
             var end = NowMs();
-            var hist = await Cached("ap-hourly", TimeSpan.FromMinutes(10), () =>
-                NetData("/api/s/default/stat/report/hourly.ap",
+            var hist = await Cached("ap-hourly", TimeSpan.FromMinutes(10), async () =>
+            {
+                var rows = await NetData("/api/s/default/stat/report/hourly.ap",
                     new
                     {
                         attrs = new[] { "time", "num_sta", "satisfaction", "tx_retries", "tx_packets", "bytes" },
                         start = (long)(end - 24 * HourMs), end = (long)end, macs = aps.Select(a => Str(P(a, "mac"))).ToArray(),
-                    }, swallow: true));
+                    }, swallow: true);
+                _logger.LogInformation("UniFi hourly AP report: {Rows} rows, {WithScore} with an experience score", rows.Count, rows.Count(r => P(r, "satisfaction") != null));
+                return rows;
+            });
 
             return new JsonObject
             {
@@ -1586,6 +1590,337 @@ namespace WorkNest.Application.Services
             await WithDbAsync(db => alias != "" ? db.UpsertUnifiClientAliasDbAsync(dbMac, alias, email) : db.DeleteUnifiClientAliasDbAsync(dbMac));
 
             return new JsonObject { ["mac"] = m, ["name"] = alias };
+        }
+
+        // =====================================================================
+        // Wi-Fi SSIDs and per-SSID MAC filters
+        // =====================================================================
+
+        private static readonly Regex WlanIdRe = new("^[0-9a-f]{24}$", RegexOptions.IgnoreCase);
+
+        /// <summary>"aabbccddeeff" / "AA-BB-..." → "aa:bb:cc:dd:ee:ff"; null when it isn't a MAC.</summary>
+        private static string? ColonMac(string? mac)
+        {
+            var m = NormMac(mac);
+            return m.Length == 12 ? string.Join(":", Regex.Matches(m, "..").Select(x => x.Value)) : null;
+        }
+
+        private static List<string> MacList(JsonElement? wlan) =>
+            Arr(P(wlan, "mac_filter_list")).Select(x => ColonMac(Str(x))).Where(x => x != null).Select(x => x!).Distinct().ToList();
+
+        private JsonObject NormaliseWlan(JsonElement w, List<JsonObject> clients, Dictionary<(string, string), (string? Name, string? RoomNo)> details, List<JsonElement> groups)
+        {
+            var name = Str(P(w, "name"));
+            var here = clients.Where(c => ToStr(c["ssid"]) == name).ToList();
+            var bands = Arr(P(w, "wlan_bands")).Select(b => Str(b)).Where(b => b != "").ToList();
+            if (bands.Count == 0 && Str(P(w, "wlan_band")) is { Length: > 0 } wb) bands = wb == "both" ? new() { "2g", "5g" } : new() { wb };
+            var filterOn = Truthy(P(w, "mac_filter_enabled"));
+            var policy = Str(P(w, "mac_filter_policy")) == "allow" ? "allow" : "deny";
+            return new JsonObject
+            {
+                ["id"] = Str(P(w, "_id")),
+                ["name"] = name,
+                ["enabled"] = Truthy(P(w, "enabled")),
+                ["hidden"] = Truthy(P(w, "hide_ssid")),
+                ["guest"] = Truthy(P(w, "is_guest")),
+                ["security"] = Str(P(w, "security")),
+                ["bands"] = new JsonArray(bands.Select(b => (JsonNode?)JsonValue.Create(b == "2g" ? "2.4 GHz" : b == "5g" ? "5 GHz" : b == "6e" ? "6 GHz" : b)).ToArray()),
+                ["filterEnabled"] = filterOn,
+                ["filterPolicy"] = filterOn ? policy : "off",
+                ["macList"] = new JsonArray(MacList(w).Select(m => (JsonNode?)JsonValue.Create(m)).ToArray()),
+                // Name / room entered in WorkNest for each MAC on the list (WN_UNIFI_SsidDevices).
+                ["devices"] = new JsonArray(MacList(w).Select(m =>
+                {
+                    details.TryGetValue((Str(P(w, "_id")), m), out var d);
+                    return (JsonNode?)new JsonObject { ["mac"] = m, ["name"] = d.Name, ["roomNo"] = d.RoomNo };
+                }).ToArray()),
+                ["speedLimit"] = SpeedLimitOf(Find(groups, g => Str(P(g, "_id")) == Str(P(w, "usergroup_id")))),
+                ["speedProfile"] = Find(groups, g => Str(P(g, "_id")) == Str(P(w, "usergroup_id"))) is { } grp && DefaultGroup(groups) is var dg
+                                   && (dg == null || Str(P(dg, "_id")) != Str(P(grp, "_id")))
+                    ? new JsonObject { ["id"] = Str(P(grp, "_id")), ["name"] = Str(P(grp, "name")) } : null,
+                ["clientCount"] = here.Count,
+                ["clients"] = new JsonArray(here.Select(c => (JsonNode?)c.DeepClone()).ToArray()),
+            };
+        }
+
+        public async Task<JsonObject> GetSsidsAsync()
+        {
+            await InitializeAsync();
+            var wlansTask = Cached("wlans", TimeSpan.FromSeconds(20), () => NetData("/api/s/default/rest/wlanconf"));
+            var groupsTask = Cached("usergroups", TimeSpan.FromSeconds(60), () => NetData("/api/s/default/rest/usergroup", swallow: true));
+            var devicesTask = NetDevices();
+            var clientsTask = NetClients();
+            await Task.WhenAll(wlansTask, groupsTask, devicesTask, clientsTask);
+            var devByMac = DevByMac(devicesTask.Result.Select(NormaliseNetDevice).ToList());
+            var clients = clientsTask.Result.Where(c => !Truthy(P(c, "is_wired"))).Select(c => NormaliseClient(c, devByMac)).ToList();
+            var details = new Dictionary<(string, string), (string? Name, string? RoomNo)>();
+            await WithDbAsync(async db =>
+            {
+                foreach (var d in await db.GetUnifiSsidDevicesDbAsync()) details[(d.WlanId, d.Mac)] = (d.Name, d.RoomNo);
+            });
+            var wlans = wlansTask.Result.Select(w => NormaliseWlan(w, clients, details, groupsTask.Result)).ToList();
+            return new JsonObject
+            {
+                ["ssids"] = new JsonArray(wlans.OrderByDescending(w => w["enabled"]!.GetValue<bool>()).ThenBy(w => ToStr(w["name"]), LocaleCompare).Select(w => (JsonNode?)w).ToArray()),
+                ["activeCount"] = wlans.Count(w => w["enabled"]!.GetValue<bool>()),
+                ["wifiClients"] = clients.Count,
+            };
+        }
+
+        public async Task<JsonObject> UpdateMacFilterAsync(string wlanId, string action, string? mac, string? policy, string? reason, string? byEmail, int? byUserId, IReadOnlyList<string>? macs = null, string? deviceName = null, string? roomNo = null)
+        {
+            static JsonObject Error(string message) => new() { ["error"] = message };
+            await InitializeAsync();
+            if (!WlanIdRe.IsMatch(wlanId ?? "")) return Error("Unknown SSID.");
+            action = (action ?? "").Trim().ToLowerInvariant();
+            if (action is not ("add" or "remove" or "block" or "unblock" or "mode")) return Error("Unknown action.");
+            var colon = ColonMac(mac);
+            if (action != "mode" && colon == null) return Error("Enter a valid MAC address, e.g. aa:bb:cc:dd:ee:ff.");
+            reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim() is var r && r.Length > 500 ? r[..500] : reason.Trim();
+
+            var wlans = await NetData("/api/s/default/rest/wlanconf");
+            var wlan = Find(wlans, w => Str(P(w, "_id")) == wlanId);
+            if (wlan == null) return Error("This SSID no longer exists on the console.");
+            var ssid = Str(P(wlan, "name"));
+            var list = MacList(wlan);
+            var previous = JsonSerializer.Serialize(list);
+            var enabled = Truthy(P(wlan, "mac_filter_enabled"));
+            var pol = Str(P(wlan, "mac_filter_policy")) == "allow" ? "allow" : "deny";
+
+            switch (action)
+            {
+                case "add":
+                    if (!list.Contains(colon!)) list.Add(colon!);
+                    break;
+                case "remove":
+                    list.Remove(colon!);
+                    break;
+                case "block":
+                    // Off → turn on as a block-list holding just this device; block-list → add; allow-list → take it out.
+                    if (!enabled) { enabled = true; pol = "deny"; list = new() { colon! }; }
+                    else if (pol == "deny") { if (!list.Contains(colon!)) list.Add(colon!); }
+                    else list.Remove(colon!);
+                    break;
+                case "unblock":
+                    if (!enabled) return Error("This SSID has no MAC filter, so the device is not blocked.");
+                    if (pol == "deny") list.Remove(colon!);
+                    else if (!list.Contains(colon!)) list.Add(colon!);
+                    break;
+                case "mode":
+                    var p = (policy ?? "").Trim().ToLowerInvariant();
+                    if (p is not ("allow" or "deny" or "off")) return Error("Mode must be allow, deny or off.");
+                    // MACs added in the same step (e.g. the devices allowed when switching to an allow-list).
+                    foreach (var raw in macs ?? Array.Empty<string>())
+                    {
+                        var m = ColonMac(raw);
+                        if (m == null) return Error($"“{raw}” is not a valid MAC address (e.g. aa:bb:cc:dd:ee:ff).");
+                        if (!list.Contains(m)) list.Add(m);
+                    }
+                    if (p == "off") enabled = false;
+                    else { enabled = true; pol = p; }
+                    break;
+            }
+            // An empty allow-list is allowed (e.g. a new SSID nobody may join yet); the screen warns before it is set.
+
+            await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
+                $"/api/s/default/rest/wlanconf/{wlanId}",
+                new { mac_filter_enabled = enabled, mac_filter_policy = pol, mac_filter_list = list }, HttpMethod.Put);
+
+            // A device that just lost access is disconnected now (otherwise it stays on until it reconnects).
+            var cutOff = colon != null && enabled && (pol == "deny" ? list.Contains(colon) : !list.Contains(colon));
+            if (cutOff && action != "mode")
+            {
+                var live = Find(await NetClients(), c => ColonMac(Str(P(c, "mac"))) == colon && Str(P(c, "essid")) == ssid);
+                if (live != null)
+                {
+                    try { await Net("/api/s/default/cmd/stamgr", new { cmd = "kick-sta", mac = colon }); }
+                    catch (Exception ex) { _logger.LogWarning("UniFi kick-sta {Mac} failed: {Error}", colon, ex.Message); }
+                }
+            }
+
+            // Name / room of the device: saved when it is added (or blocked), dropped when it leaves the list.
+            static string? Clip(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : v.Trim().Length > max ? v.Trim()[..max] : v.Trim();
+            var name = Clip(deviceName, 100);
+            var room = Clip(roomNo, 50);
+            if (colon != null && list.Contains(colon) && (action is "add" or "block" or "unblock") && (name != null || room != null))
+                await WithDbAsync(db => db.UpsertUnifiSsidDeviceDbAsync(wlanId, colon, name, room, byEmail));
+            else if (colon != null && !list.Contains(colon))
+                await WithDbAsync(db => db.DeleteUnifiSsidDeviceDbAsync(wlanId, colon));
+
+            var logPolicy = enabled ? pol : "off";
+            await WithDbAsync(db => db.InsertUnifiMacFilterLogDbAsync(wlanId, ssid, colon, action, logPolicy, reason,
+                byEmail is { Length: > 200 } ? byEmail[..200] : byEmail, byUserId, previous));
+            DropCache("wlans", "clients");
+            return (await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
+                   ?? new JsonObject { ["id"] = wlanId };
+        }
+
+        public async Task<JsonObject> SetSsidHiddenAsync(string wlanId, bool hidden, string? reason, string? byEmail, int? byUserId)
+        {
+            await InitializeAsync();
+            if (!WlanIdRe.IsMatch(wlanId ?? "")) return new JsonObject { ["error"] = "Unknown SSID." };
+            reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim() is var r && r.Length > 500 ? r[..500] : reason.Trim();
+            var wlan = Find(await Cached("wlans", TimeSpan.FromSeconds(20), () => NetData("/api/s/default/rest/wlanconf")), w => Str(P(w, "_id")) == wlanId);
+            if (wlan == null) return new JsonObject { ["error"] = "This SSID no longer exists on the console." };
+            var ssid = Str(P(wlan, "name"));
+
+            await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
+                $"/api/s/default/rest/wlanconf/{wlanId}", new { hide_ssid = hidden }, HttpMethod.Put);
+
+            var filterOn = Truthy(P(wlan, "mac_filter_enabled"));
+            var policy = filterOn ? (Str(P(wlan, "mac_filter_policy")) == "allow" ? "allow" : "deny") : "off";
+            await WithDbAsync(db => db.InsertUnifiMacFilterLogDbAsync(wlanId, ssid, null, hidden ? "hide" : "unhide", policy, reason,
+                byEmail is { Length: > 200 } ? byEmail[..200] : byEmail, byUserId, null));
+            DropCache("wlans");
+            return (await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
+                   ?? new JsonObject { ["id"] = wlanId };
+        }
+
+        /// <summary>{ downMbps, upMbps } of a UniFi user group (kbps, -1 = unlimited); null when it has no limit.</summary>
+        private static JsonObject? SpeedLimitOf(JsonElement? group)
+        {
+            static int? Mbps(JsonElement? v) => D(v) is double k && k > 0 ? (int)Math.Round(k / 1000) : null;
+            var down = Mbps(P(group, "qos_rate_max_down"));
+            var up = Mbps(P(group, "qos_rate_max_up"));
+            return down == null && up == null ? null : new JsonObject { ["downMbps"] = down, ["upMbps"] = up };
+        }
+
+        /// <summary>The "Default" user group (no limit) every SSID uses unless a speed profile is chosen.</summary>
+        private static JsonElement? DefaultGroup(List<JsonElement> groups) =>
+            Find(groups, g => Truthy(P(g, "attr_no_delete")) || string.Equals(Str(P(g, "name")), "Default", StringComparison.OrdinalIgnoreCase));
+
+        public async Task<JsonObject> GetSpeedProfilesAsync()
+        {
+            await InitializeAsync();
+            var groupsTask = NetData("/api/s/default/rest/usergroup");
+            var wlansTask = Cached("wlans", TimeSpan.FromSeconds(20), () => NetData("/api/s/default/rest/wlanconf"));
+            await Task.WhenAll(groupsTask, wlansTask);
+            var def = DefaultGroup(groupsTask.Result);
+            var defId = def != null ? Str(P(def, "_id")) : "";
+            return new JsonObject
+            {
+                ["profiles"] = new JsonArray(groupsTask.Result
+                    .Where(g => Str(P(g, "_id")) != defId)
+                    .OrderBy(g => Str(P(g, "name")), LocaleCompare)
+                    .Select(g =>
+                    {
+                        var id = Str(P(g, "_id"));
+                        var limit = SpeedLimitOf(g);
+                        return (JsonNode?)new JsonObject
+                        {
+                            ["id"] = id,
+                            ["name"] = Str(P(g, "name")),
+                            ["downMbps"] = limit?["downMbps"]?.DeepClone(),
+                            ["upMbps"] = limit?["upMbps"]?.DeepClone(),
+                            ["ssids"] = new JsonArray(wlansTask.Result.Where(w => Str(P(w, "usergroup_id")) == id)
+                                .Select(w => (JsonNode?)JsonValue.Create(Str(P(w, "name")))).ToArray()),
+                        };
+                    }).ToArray()),
+            };
+        }
+
+        public async Task<JsonObject> CreateSpeedProfileAsync(string? name, int? downMbps, int? upMbps)
+        {
+            static JsonObject Error(string message) => new() { ["error"] = message };
+            await InitializeAsync();
+            name = (name ?? "").Trim();
+            if (name.Length is < 1 or > 64) return Error("Give the profile a name (up to 64 characters).");
+            if (downMbps == null && upMbps == null) return Error("Enter a download and/or upload speed.");
+            if (downMbps is < 1 or > 10000 || upMbps is < 1 or > 10000) return Error("Speed must be between 1 and 10,000 Mbps.");
+            var groups = await NetData("/api/s/default/rest/usergroup");
+            if (Find(groups, g => string.Equals(Str(P(g, "name")), name, StringComparison.OrdinalIgnoreCase)) != null)
+                return Error("A profile with this name already exists.");
+            var created = await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
+                "/api/s/default/rest/usergroup",
+                new { name, qos_rate_max_down = downMbps.HasValue ? downMbps.Value * 1000 : -1, qos_rate_max_up = upMbps.HasValue ? upMbps.Value * 1000 : -1 },
+                HttpMethod.Post);
+            var g0 = Arr(P(created, "data")).FirstOrDefault();
+            if (Str(P(g0, "_id")) == "") return Error("UniFi did not create the profile.");
+            DropCache("usergroups");
+            return new JsonObject { ["id"] = Str(P(g0, "_id")), ["name"] = name, ["downMbps"] = downMbps, ["upMbps"] = upMbps, ["ssids"] = new JsonArray() };
+        }
+
+        public async Task<JsonObject> SetSsidSpeedProfileAsync(string wlanId, string? profileId, string? reason, string? byEmail, int? byUserId)
+        {
+            static JsonObject Error(string message) => new() { ["error"] = message };
+            await InitializeAsync();
+            if (!WlanIdRe.IsMatch(wlanId ?? "")) return Error("Unknown SSID.");
+            reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim() is var r && r.Length > 400 ? r[..400] : reason.Trim();
+
+            // The SSID list shown on the page (cached 20 s) is enough here: only its name and current profile are needed.
+            var wlan = Find(await Cached("wlans", TimeSpan.FromSeconds(20), () => NetData("/api/s/default/rest/wlanconf")), w => Str(P(w, "_id")) == wlanId);
+            if (wlan == null) return Error("This SSID no longer exists on the console.");
+            var ssid = Str(P(wlan, "name"));
+
+            var groups = await NetData("/api/s/default/rest/usergroup");
+            // No profile = the Default group (no limit).
+            var group = string.IsNullOrWhiteSpace(profileId) ? DefaultGroup(groups) : Find(groups, g => Str(P(g, "_id")) == profileId);
+            if (group == null) return Error(string.IsNullOrWhiteSpace(profileId) ? "UniFi has no Default profile to remove the limit with." : "This speed profile no longer exists on the console.");
+            var groupId = Str(P(group, "_id"));
+
+            if (Str(P(wlan, "usergroup_id")) != groupId)
+                await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
+                    $"/api/s/default/rest/wlanconf/{wlanId}", new { usergroup_id = groupId }, HttpMethod.Put);
+
+            var limit = string.IsNullOrWhiteSpace(profileId) ? null : SpeedLimitOf(group);
+            var limitText = limit == null ? "speed: no limit"
+                : $"speed profile {Str(P(group, "name"))}: download {limit["downMbps"]?.ToString() ?? "no limit"} / upload {limit["upMbps"]?.ToString() ?? "no limit"} Mbps per device";
+            var filterOn = Truthy(P(wlan, "mac_filter_enabled"));
+            var policy = filterOn ? (Str(P(wlan, "mac_filter_policy")) == "allow" ? "allow" : "deny") : "off";
+            await WithDbAsync(db => db.InsertUnifiMacFilterLogDbAsync(wlanId, ssid, null, "speed", policy,
+                reason == null ? limitText : $"{limitText} · {reason}",
+                byEmail is { Length: > 200 } ? byEmail[..200] : byEmail, byUserId, null));
+            DropCache("wlans", "usergroups");
+            return (await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
+                   ?? new JsonObject { ["id"] = wlanId };
+        }
+
+        // ---- which WorkNest location the UniFi network belongs to ----
+        private const string LocationIdsKey = "LocationIds";
+        private volatile int[]? _locationIds;
+        private DateTime _locationIdsAt;
+
+        public async Task<IReadOnlyList<int>> GetLocationIdsAsync()
+        {
+            var cached = _locationIds;
+            if (cached != null && DateTime.UtcNow - _locationIdsAt < TimeSpan.FromSeconds(60)) return cached;
+            string? raw = null;
+            await WithDbAsync(async db => raw = await db.GetUnifiSettingDbAsync(LocationIdsKey));
+            var ids = (raw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => int.TryParse(x, out var id) ? id : 0).Where(id => id > 0).Distinct().ToArray();
+            _locationIds = ids;
+            _locationIdsAt = DateTime.UtcNow;
+            return ids;
+        }
+
+        public async Task<bool> SetLocationIdsAsync(IReadOnlyList<int> locationIds, string? byEmail)
+        {
+            var ids = locationIds.Where(id => id > 0).Distinct().ToArray();
+            var ok = await WithDbAsync(db => db.SetUnifiSettingDbAsync(LocationIdsKey, string.Join(",", ids), byEmail));
+            if (ok) { _locationIds = ids; _locationIdsAt = DateTime.UtcNow; }
+            return ok;
+        }
+
+        public async Task<JsonObject> GetMacFilterLogAsync(string? wlanId, string? mac)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<IDbRepository>();
+            var rows = await db.GetUnifiMacFilterLogDbAsync(wlanId != null && WlanIdRe.IsMatch(wlanId) ? wlanId : null, ColonMac(mac), 200);
+            return new JsonObject
+            {
+                ["entries"] = new JsonArray(rows.Select(r => (JsonNode?)new JsonObject
+                {
+                    ["id"] = Convert.ToInt32(r["Id"]),
+                    ["at"] = r["LoggedAt"] is DateTime d ? Iso(DateTime.SpecifyKind(d, DateTimeKind.Utc)) : null,
+                    ["wlanId"] = Convert.ToString(r["WlanId"]),
+                    ["ssid"] = Convert.ToString(r["Ssid"]),
+                    ["mac"] = Convert.ToString(r["Mac"]),
+                    ["action"] = Convert.ToString(r["Action"]),
+                    ["policy"] = Convert.ToString(r["Policy"]),
+                    ["reason"] = Convert.ToString(r["Reason"]),
+                    ["by"] = Convert.ToString(r["ByName"]),
+                }).ToArray()),
+            };
         }
 
         // =====================================================================

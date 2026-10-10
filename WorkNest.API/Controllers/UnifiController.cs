@@ -4,6 +4,8 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Filters;
+using WorkNest.API.Extensions;
 
 namespace WorkNest.API.Controllers
 {
@@ -14,6 +16,7 @@ namespace WorkNest.API.Controllers
     [ApiController]
     [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    [TypeFilter(typeof(UnifiLocationScopeFilter))] // admins / sales executives of other locations get 403
     public class UnifiController : ControllerBase
     {
         private static readonly Regex DeviceMacRe = new("^[0-9a-fA-F:.-]+$");
@@ -154,6 +157,106 @@ namespace WorkNest.API.Controllers
             return result == null ? NotFound(new { error = "Device not found" }) : Ok(result);
         });
 
+        /// <summary>
+        /// Every SSID with its MAC filter (off / allow-list / block-list), the MACs in it and the clients connected
+        /// to it right now.
+        /// </summary>
+        [HttpGet("api/unifi/ssids")]
+        public Task<IActionResult> GetSsids() => Run(() => _unifi.GetSsidsAsync());
+
+        /// <summary>
+        /// Changes one SSID's MAC filter: body { action: add | remove | block | unblock | mode, mac, name, roomNo, policy, macs, reason }.
+        /// block / unblock act on this SSID only; mode sets allow | deny | off. Logged in WN_UNIFI_MacFilterLog.
+        /// All staff roles may use it.
+        /// </summary>
+        [HttpPost("api/unifi/ssids/{wlanId}/mac-filter")]
+        public Task<IActionResult> UpdateMacFilter(string wlanId, [FromBody] JsonElement body) => Run(async () =>
+        {
+            var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+            var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("id")?.Value;
+            int? userId = int.TryParse(idClaim, out var uid) ? uid : null;
+            var macs = body.ValueKind == JsonValueKind.Object && body.TryGetProperty("macs", out var m) && m.ValueKind == JsonValueKind.Array
+                ? m.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Take(500).ToList()
+                : null;
+            var result = await _unifi.UpdateMacFilterAsync(wlanId, Field(body, "action") ?? "", Field(body, "mac"),
+                Field(body, "policy"), Field(body, "reason"), email, userId, macs, Field(body, "name"), Field(body, "roomNo"));
+            return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
+        });
+
+        /// <summary>Shows or hides the SSID name: body { hidden: true | false, reason }. All staff roles; logged.</summary>
+        [HttpPost("api/unifi/ssids/{wlanId}/visibility")]
+        public Task<IActionResult> SetSsidVisibility(string wlanId, [FromBody] JsonElement body) => Run(async () =>
+        {
+            if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("hidden", out var h) || h.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                return BadRequest(new { error = "Say whether the SSID should be hidden (true or false)." });
+            var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+            var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("id")?.Value;
+            int? userId = int.TryParse(idClaim, out var uid) ? uid : null;
+            var result = await _unifi.SetSsidHiddenAsync(wlanId, h.GetBoolean(), Field(body, "reason"), email, userId);
+            return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
+        });
+
+        /// <summary>UniFi speed profiles with their per-device speeds and the SSIDs using them.</summary>
+        [HttpGet("api/unifi/speed-profiles")]
+        public Task<IActionResult> GetSpeedProfiles() => Run(() => _unifi.GetSpeedProfilesAsync());
+
+        /// <summary>Creates a speed profile: body { name, downMbps, upMbps }. Admin / super admin only.</summary>
+        [HttpPost("api/unifi/speed-profiles")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        public Task<IActionResult> CreateSpeedProfile([FromBody] JsonElement body) => Run(async () =>
+        {
+            var result = await _unifi.CreateSpeedProfileAsync(Field(body, "name"), IntField(body, "downMbps"), IntField(body, "upMbps"));
+            return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
+        });
+
+        /// <summary>
+        /// Puts the SSID on a speed profile: body { profileId, reason }; no profileId = no limit (Default).
+        /// Admin / super admin only; logged.
+        /// </summary>
+        [HttpPost("api/unifi/ssids/{wlanId}/speed-profile")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        public Task<IActionResult> SetSsidSpeedProfile(string wlanId, [FromBody] JsonElement body) => Run(async () =>
+        {
+            var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+            var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("id")?.Value;
+            int? userId = int.TryParse(idClaim, out var uid) ? uid : null;
+            var result = await _unifi.SetSsidSpeedProfileAsync(wlanId, Field(body, "profileId"), Field(body, "reason"), email, userId);
+            return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
+        });
+
+        /// <summary>
+        /// Which locations the UniFi network belongs to, and whether this user may see it ({ locationIds, allowed, canEdit }).
+        /// Any staff member may ask (the sidebar uses it to hide the Network section).
+        /// </summary>
+        [HttpGet("api/unifi/scope")]
+        [AnyUnifiLocation]
+        public async Task<IActionResult> GetScope() => Ok(new
+        {
+            locationIds = await _unifi.GetLocationIdsAsync(),
+            allowed = await UnifiScope.AllowsAsync(_unifi, User),
+            canEdit = User.IsSuperAdmin()
+        });
+
+        /// <summary>Saves the locations the UniFi network belongs to: body { locationIds: [1] }; empty = every location. Super admin only.</summary>
+        [HttpPut("api/unifi/scope")]
+        [AnyUnifiLocation]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
+        public async Task<IActionResult> SetScope([FromBody] JsonElement body)
+        {
+            if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("locationIds", out var arr) || arr.ValueKind != JsonValueKind.Array)
+                return BadRequest(new { error = "Choose the locations the network belongs to." });
+            var ids = arr.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Number && x.TryGetInt32(out _)).Select(x => x.GetInt32()).ToList();
+            var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+            if (!await _unifi.SetLocationIdsAsync(ids, email))
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "The setting could not be saved. Run WN_UNIFI_Settings.txt to create its table." });
+            return Ok(new { locationIds = await _unifi.GetLocationIdsAsync(), allowed = true, canEdit = true });
+        }
+
+        /// <summary>Latest MAC filter changes (who, what, when, why), optionally for one SSID (wlanId) or one MAC.</summary>
+        [HttpGet("api/unifi/ssids/log")]
+        public Task<IActionResult> GetMacFilterLog([FromQuery] string? wlanId = null, [FromQuery] string? mac = null) =>
+            Run(() => _unifi.GetMacFilterLogAsync(wlanId, mac));
+
         // ---- Helpers --------------------------------------------------------------
 
         private Task<IActionResult> Run<T>(Func<Task<T>> action) => Run(async () => (IActionResult)Ok(await action()));
@@ -178,6 +281,9 @@ namespace WorkNest.API.Controllers
             var n = double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) && v != 0 && !double.IsNaN(v) ? v : fallback;
             return (int)Math.Min(max, Math.Max(min, n));
         }
+
+        private static int? IntField(JsonElement body, string name) =>
+            body.ValueKind == JsonValueKind.Object && body.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var n) ? n : null;
 
         private static string? Field(JsonElement body, string name)
         {

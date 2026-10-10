@@ -5690,6 +5690,112 @@ END";
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task InsertUnifiMacFilterLogDbAsync(string wlanId, string ssid, string? mac, string action, string? policy, string? reason, string? byEmail, int? byUserId, string? previousList)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(@"
+                INSERT INTO dbo.WN_UNIFI_MacFilterLog (WlanId, Ssid, Mac, Action, Policy, Reason, ByEmail, ByUserId, PreviousList)
+                VALUES (@WlanId, @Ssid, @Mac, @Action, @Policy, @Reason, @ByEmail, @ByUserId, @PreviousList);", c);
+            cmd.Parameters.Add("@WlanId", SqlDbType.NVarChar, 50).Value = wlanId;
+            cmd.Parameters.Add("@Ssid", SqlDbType.NVarChar, 100).Value = ssid;
+            cmd.Parameters.Add("@Mac", SqlDbType.NVarChar, 17).Value = (object?)mac ?? DBNull.Value;
+            cmd.Parameters.Add("@Action", SqlDbType.NVarChar, 20).Value = action;
+            cmd.Parameters.Add("@Policy", SqlDbType.NVarChar, 10).Value = (object?)policy ?? DBNull.Value;
+            cmd.Parameters.Add("@Reason", SqlDbType.NVarChar, 500).Value = (object?)reason ?? DBNull.Value;
+            cmd.Parameters.Add("@ByEmail", SqlDbType.NVarChar, 200).Value = (object?)byEmail ?? DBNull.Value;
+            cmd.Parameters.Add("@ByUserId", SqlDbType.Int).Value = (object?)byUserId ?? DBNull.Value;
+            cmd.Parameters.Add("@PreviousList", SqlDbType.NVarChar, -1).Value = (object?)previousList ?? DBNull.Value;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<List<(string WlanId, string Mac, string? Name, string? RoomNo)>> GetUnifiSsidDevicesDbAsync()
+        {
+            var list = new List<(string, string, string?, string?)>();
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand("SELECT WlanId, Mac, Name, RoomNo FROM dbo.WN_UNIFI_SsidDevices WITH (NOLOCK);", c);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    list.Add((r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3)));
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return list;
+        }
+
+        public async Task UpsertUnifiSsidDeviceDbAsync(string wlanId, string mac, string? name, string? roomNo, string? updatedBy)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(@"
+                UPDATE dbo.WN_UNIFI_SsidDevices SET Name = @Name, RoomNo = @RoomNo, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @By
+                 WHERE WlanId = @WlanId AND Mac = @Mac;
+                IF @@ROWCOUNT = 0
+                    INSERT INTO dbo.WN_UNIFI_SsidDevices (WlanId, Mac, Name, RoomNo, UpdatedBy) VALUES (@WlanId, @Mac, @Name, @RoomNo, @By);", c);
+            cmd.Parameters.Add("@WlanId", SqlDbType.NVarChar, 50).Value = wlanId;
+            cmd.Parameters.Add("@Mac", SqlDbType.NVarChar, 17).Value = mac;
+            cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 100).Value = (object?)name ?? DBNull.Value;
+            cmd.Parameters.Add("@RoomNo", SqlDbType.NVarChar, 50).Value = (object?)roomNo ?? DBNull.Value;
+            cmd.Parameters.Add("@By", SqlDbType.NVarChar, 200).Value = (object?)updatedBy ?? DBNull.Value;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<string?> GetUnifiSettingDbAsync(string key)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand("SELECT SettingValue FROM dbo.WN_UNIFI_Settings WITH (NOLOCK) WHERE SettingKey = @Key;", c);
+                cmd.Parameters.Add("@Key", SqlDbType.NVarChar, 50).Value = key;
+                return await cmd.ExecuteScalarAsync() as string;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return null; }
+        }
+
+        public async Task SetUnifiSettingDbAsync(string key, string? value, string? updatedBy)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(@"
+                UPDATE dbo.WN_UNIFI_Settings SET SettingValue = @Value, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @By WHERE SettingKey = @Key;
+                IF @@ROWCOUNT = 0
+                    INSERT INTO dbo.WN_UNIFI_Settings (SettingKey, SettingValue, UpdatedBy) VALUES (@Key, @Value, @By);", c);
+            cmd.Parameters.Add("@Key", SqlDbType.NVarChar, 50).Value = key;
+            cmd.Parameters.Add("@Value", SqlDbType.NVarChar, 1000).Value = (object?)value ?? DBNull.Value;
+            cmd.Parameters.Add("@By", SqlDbType.NVarChar, 200).Value = (object?)updatedBy ?? DBNull.Value;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task DeleteUnifiSsidDeviceDbAsync(string wlanId, string mac)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("DELETE FROM dbo.WN_UNIFI_SsidDevices WHERE WlanId = @WlanId AND Mac = @Mac;", c);
+            cmd.Parameters.Add("@WlanId", SqlDbType.NVarChar, 50).Value = wlanId;
+            cmd.Parameters.Add("@Mac", SqlDbType.NVarChar, 17).Value = mac;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<List<IDictionary<string, object?>>> GetUnifiMacFilterLogDbAsync(string? wlanId, string? mac, int top)
+        {
+            var list = new List<IDictionary<string, object?>>();
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand(@"
+                    SELECT TOP (@Top) l.Id, l.LoggedAt, l.WlanId, l.Ssid, l.Mac, l.Action, l.Policy, l.Reason, l.ByEmail,
+                           COALESCE(NULLIF(u.Name, ''), l.ByEmail) AS ByName
+                      FROM dbo.WN_UNIFI_MacFilterLog l WITH (NOLOCK)
+                      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = l.ByUserId
+                     WHERE (@WlanId IS NULL OR l.WlanId = @WlanId) AND (@Mac IS NULL OR l.Mac = @Mac)
+                     ORDER BY l.Id DESC;", c);
+                cmd.Parameters.Add("@Top", SqlDbType.Int).Value = top;
+                cmd.Parameters.Add("@WlanId", SqlDbType.NVarChar, 50).Value = (object?)wlanId ?? DBNull.Value;
+                cmd.Parameters.Add("@Mac", SqlDbType.NVarChar, 17).Value = (object?)mac ?? DBNull.Value;
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) list.Add(ToDict(r));
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return list;
+        }
+
         // --- KYC Portal ---
 
         public async Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null)
