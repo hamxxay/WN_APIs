@@ -1,0 +1,24 @@
+USE [SAC400];
+
+-- Evidence of lease agreements signed electronically in the customer portal (POST api/agreement/my/{id}/esign):
+-- who signed, when (Pakistan time), from which email / IP / browser, the SHA-256 of the agreement as presented
+-- for signing, and the signature image. The signed PDF (agreement + "Electronic signature certificate" page)
+-- is stored as the agreement's signed copy (WN_Agreements.SignedPdfPath) and remains the primary evidence;
+-- the API keeps working without this table (it logs a warning and still completes the signing).
+-- New table only; no existing table is changed.
+IF OBJECT_ID(N'dbo.WN_AgreementESignatures', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WN_AgreementESignatures (
+        Id             INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_WN_AgreementESignatures PRIMARY KEY,
+        AgreementId    INT             NOT NULL,   -- WN_Agreements.Id
+        SignerName     NVARCHAR(100)   NULL,
+        SignerEmail    NVARCHAR(256)   NULL,       -- from the customer's login (JWT)
+        SignedAt       DATETIME2(0)    NULL,       -- Pakistan time
+        IpAddress      NVARCHAR(64)    NULL,
+        UserAgent      NVARCHAR(400)   NULL,
+        DocumentSha256 CHAR(64)        NULL,       -- hex SHA-256 of the agreement PDF before the certificate page
+        SignatureImage VARBINARY(MAX)  NULL,       -- PNG
+        CreatedOn      DATETIME2(0)    NOT NULL CONSTRAINT DF_WN_AgreementESignatures_CreatedOn DEFAULT SYSUTCDATETIME()
+    );
+    CREATE INDEX IX_WN_AgreementESignatures_Agreement ON dbo.WN_AgreementESignatures (AgreementId, Id DESC);
+END
