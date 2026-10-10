@@ -200,9 +200,9 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/unifi/speed-profiles")]
         public Task<IActionResult> GetSpeedProfiles() => Run(() => _unifi.GetSpeedProfilesAsync());
 
-        /// <summary>Creates a speed profile: body { name, downMbps, upMbps }. Admin / super admin only.</summary>
+        /// <summary>Creates a speed profile: body { name, downMbps, upMbps }. Super admin only.</summary>
         [HttpPost("api/unifi/speed-profiles")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
         public Task<IActionResult> CreateSpeedProfile([FromBody] JsonElement body) => Run(async () =>
         {
             var result = await _unifi.CreateSpeedProfileAsync(Field(body, "name"), IntField(body, "downMbps"), IntField(body, "upMbps"));
@@ -211,10 +211,10 @@ namespace WorkNest.API.Controllers
 
         /// <summary>
         /// Puts the SSID on a speed profile: body { profileId, reason }; no profileId = no limit (Default).
-        /// Admin / super admin only; logged.
+        /// Super admin only; logged.
         /// </summary>
         [HttpPost("api/unifi/ssids/{wlanId}/speed-profile")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
         public Task<IActionResult> SetSsidSpeedProfile(string wlanId, [FromBody] JsonElement body) => Run(async () =>
         {
             var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
