@@ -21,5 +21,14 @@ namespace WorkNest.Application.Interfaces
         Task UpdateSignedPdfInfoAsync(int agreementId, string path, DateTime uploadedAtUtc);
         Task<bool> DeleteAgreementAsync(int agreementId);
         Task<bool> DeleteSignedPdfAsync(int agreementId);
+        /// <summary>Customer e-signature: the agreement as downloaded + the signature certificate page; sets evidence.DocumentSha256.</summary>
+        Task<byte[]> BuildESignedPdfAsync(AgreementESignatureEvidence evidence);
+        /// <summary>
+        /// Customer e-signature, after the signed PDF is stored: records the evidence and activity, then creates the booking
+        /// like admin "mark signed". If that fails the agreement stays "SignedUploaded" for staff (Completed = false).
+        /// </summary>
+        Task<ESignAgreementResult> CompleteESignatureAsync(AgreementESignatureEvidence evidence, int? userId);
+        /// <summary>Staff: the latest e-signature evidence of an agreement (null when it was not e-signed).</summary>
+        Task<AgreementESignatureDto?> GetAgreementESignatureAsync(int agreementId);
     }
 }

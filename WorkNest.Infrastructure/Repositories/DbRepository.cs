@@ -4166,6 +4166,73 @@ END";
             return result;
         }
 
+        public async Task<bool> InsertAgreementESignatureDbAsync(WorkNest.Application.DTOs.Agreement.AgreementESignatureEvidence e)
+        {
+            try
+            {
+                await using var c = await Open();
+                const string sql = @"
+                    INSERT INTO dbo.WN_AgreementESignatures
+                        (AgreementId, SignerName, SignerEmail, SignedAt, IpAddress, UserAgent, DocumentSha256, SignatureImage)
+                    VALUES (@AgreementId, @SignerName, @SignerEmail, @SignedAt, @IpAddress, @UserAgent, @DocumentSha256, @SignatureImage);";
+                await using var cmd = new SqlCommand(sql, c);
+                cmd.Parameters.Add("@AgreementId", SqlDbType.Int).Value = e.AgreementId;
+                cmd.Parameters.Add("@SignerName", SqlDbType.NVarChar, 100).Value = e.SignerName;
+                cmd.Parameters.Add("@SignerEmail", SqlDbType.NVarChar, 256).Value = (object?)e.SignerEmail ?? DBNull.Value;
+                cmd.Parameters.Add("@SignedAt", SqlDbType.DateTime2).Value = e.SignedAt;
+                cmd.Parameters.Add("@IpAddress", SqlDbType.NVarChar, 64).Value = (object?)e.IpAddress ?? DBNull.Value;
+                cmd.Parameters.Add("@UserAgent", SqlDbType.NVarChar, 400).Value = (object?)e.UserAgent ?? DBNull.Value;
+                cmd.Parameters.Add("@DocumentSha256", SqlDbType.Char, 64).Value = e.DocumentSha256;
+                cmd.Parameters.Add("@SignatureImage", SqlDbType.VarBinary, -1).Value = e.SignatureImage;
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return false; } // table not created yet
+        }
+
+        public async Task<IDictionary<string, object?>?> GetAgreementESignatureDbAsync(int agreementId)
+        {
+            try
+            {
+                await using var c = await Open();
+                const string sql = @"
+                    SELECT TOP 1 Id, AgreementId, SignerName, SignerEmail, SignedAt, IpAddress, UserAgent, DocumentSha256, SignatureImage, CreatedOn
+                      FROM dbo.WN_AgreementESignatures WITH (NOLOCK)
+                     WHERE AgreementId = @AgreementId
+                     ORDER BY Id DESC;";
+                await using var cmd = new SqlCommand(sql, c);
+                cmd.Parameters.Add("@AgreementId", SqlDbType.Int).Value = agreementId;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? ToDict(r) : null;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return null; }
+        }
+
+        public async Task<IDictionary<int, (string? SignerName, DateTime SignedAt)>> GetAgreementESignatureStatsDbAsync(IEnumerable<int> agreementIds)
+        {
+            var result = new Dictionary<int, (string? SignerName, DateTime SignedAt)>();
+            // Ids are ints from our own list query, never user input.
+            var ids = agreementIds.Where(i => i > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            try
+            {
+                await using var c = await Open();
+                string sql = $@"
+                    SELECT e.AgreementId, e.SignerName, e.SignedAt
+                      FROM (SELECT AgreementId, SignerName, SignedAt,
+                                   ROW_NUMBER() OVER (PARTITION BY AgreementId ORDER BY Id DESC) AS rn
+                              FROM dbo.WN_AgreementESignatures WITH (NOLOCK)
+                             WHERE AgreementId IN ({string.Join(",", ids)})) e
+                     WHERE e.rn = 1;";
+                await using var cmd = new SqlCommand(sql, c);
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    result[r.GetInt32(0)] = (r.IsDBNull(1) ? null : r.GetString(1), r.GetDateTime(2));
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+            return result;
+        }
+
         public async Task<IAsyncDisposable?> TryAcquireAppLockDbAsync(string resource)
         {
             var c = await Open();

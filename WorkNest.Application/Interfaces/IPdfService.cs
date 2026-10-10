@@ -11,5 +11,7 @@ namespace WorkNest.Application.Interfaces
         byte[] GenerateAdvanceInvoicePdf(WorkNest.Application.DTOs.Payment.AdvanceInvoicePdfDto inv);
         byte[] GenerateSalesTaxInvoicePdf(CustomerSTInvoiceDto dto);
         byte[] GenerateAgreementPdf(WorkNest.Application.DTOs.Agreement.SendAgreementRequest request, string quotationNumber);
+        /// <summary>One-page "Electronic signature certificate" appended to an e-signed agreement.</summary>
+        byte[] GenerateESignatureCertificatePdf(WorkNest.Application.DTOs.Agreement.AgreementESignatureEvidence evidence);
     }
 }

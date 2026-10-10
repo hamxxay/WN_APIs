@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Agreement;
 using WorkNest.Application.Interfaces;
 
@@ -17,6 +19,7 @@ namespace WorkNest.Application.Services
         private readonly IHtmlToPdfService _htmlToPdfService;
         private readonly IPdfMergeService _pdfMergeService;
         private readonly IBusinessClock _clock;
+        private readonly ILogger<AgreementService> _logger;
 
         public AgreementService(
             IDbRepository db,
@@ -26,9 +29,11 @@ namespace WorkNest.Application.Services
             ILeaseTemplateService templateService,
             IHtmlToPdfService htmlToPdfService,
             IPdfMergeService pdfMergeService,
-            IBusinessClock clock)
+            IBusinessClock clock,
+            ILogger<AgreementService> logger)
         {
             _clock = clock;
+            _logger = logger;
             _db = db;
             _quotations = quotations;
             _email = email;
@@ -406,6 +411,21 @@ namespace WorkNest.Application.Services
                     }
                 }
                 catch { /* reminder info is optional */ }
+
+                // How it was signed: e-signed in the portal (WN_AgreementESignatures) vs an uploaded scan. Optional too.
+                try
+                {
+                    var esigned = await _db.GetAgreementESignatureStatsDbAsync(list.Select(a => a.Id));
+                    foreach (var a in list)
+                    {
+                        if (esigned.TryGetValue(a.Id, out var es))
+                        {
+                            a.ESignedBy = es.SignerName;
+                            a.ESignedAt = es.SignedAt;
+                        }
+                    }
+                }
+                catch { /* e-signature info is optional */ }
             }
 
             return (list, total);
@@ -516,6 +536,112 @@ namespace WorkNest.Application.Services
             // Re-read this agreement (the old code read only the newest one and failed for older agreements)
             return await GetAgreementByIdAsync(agreementId)
                    ?? throw new InvalidOperationException("Failed to retrieve updated agreement.");
+        }
+
+        // ---------------- Electronic signature (customer portal) ----------------
+
+        /// <summary>
+        /// The e-signed agreement: the agreement exactly as the customer downloads it (my/{id}/pdf) followed by the
+        /// "Electronic signature certificate" page. Sets <see cref="AgreementESignatureEvidence.DocumentSha256"/> to the
+        /// SHA-256 of the agreement as presented for signing (before the certificate is added).
+        /// </summary>
+        public async Task<byte[]> BuildESignedPdfAsync(AgreementESignatureEvidence evidence)
+        {
+            byte[] original = await GetAgreementPdfAsync(evidence.AgreementId);
+            evidence.DocumentSha256 = Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant();
+            byte[] certificate = _pdf.GenerateESignatureCertificatePdf(evidence);
+            return _pdfMergeService.MergePdfs(new[] { original, certificate });
+        }
+
+        /// <summary>
+        /// The e-signed PDF is stored: hold the agreement as "SignedUploaded" (signed today), record the evidence and the
+        /// activity, then create the booking exactly like an admin "mark signed". When the booking can't be created
+        /// (e.g. the quotation's space or dates need attention) the agreement stays "SignedUploaded" with the signed copy
+        /// on file, so staff finish it with the existing "mark signed".
+        /// </summary>
+        public async Task<ESignAgreementResult> CompleteESignatureAsync(AgreementESignatureEvidence evidence, int? userId)
+        {
+            int agreementId = evidence.AgreementId;
+            DateTime signedDate = evidence.SignedAt.Date;
+
+            // 1. Same state as a portal upload until the booking exists
+            await _db.SetAgreementStatusDbAsync(agreementId, "SignedUploaded", signedDate);
+
+            // 2. Evidence row; the certificate page in the signed PDF is the primary evidence, so this never blocks signing
+            try
+            {
+                if (!await _db.InsertAgreementESignatureDbAsync(evidence))
+                    _logger.LogWarning("WN_AgreementESignatures is missing (run Database/Agreements/WN_AgreementESignatures.txt); e-signature of agreement {AgreementId} is recorded only in its signed PDF.", agreementId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not record the e-signature evidence of agreement {AgreementId}.", agreementId);
+            }
+
+            // 3. Quotation activity (like AgreementSent / AgreementEmailFailed)
+            var agreement = await GetAgreementByIdAsync(agreementId)
+                            ?? throw new InvalidOperationException("Agreement record not found.");
+            int quotationVersion = 0;
+            try
+            {
+                var q = await _quotations.GetQuotationByIdAsync(agreement.QuotationId);
+                quotationVersion = q?.Version ?? 0;
+                await _db.AddQuotationActivityAsync(agreement.QuotationId, quotationVersion, "AgreementESigned",
+                    $"Lease Agreement #{agreementId} signed electronically by {evidence.SignerName} ({evidence.SignerEmail}) on {evidence.SignedAt:dd MMM yyyy HH:mm} PKT from {evidence.IpAddress ?? "unknown IP"}.", userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not log the AgreementESigned activity of agreement {AgreementId}.", agreementId);
+            }
+
+            // 4. Create the booking like admin "mark signed" (serialised per quotation and idempotent)
+            try
+            {
+                var signed = await MarkAgreementSignedAsync(agreementId, userId, "Signed electronically", signedDate);
+                return new ESignAgreementResult { AgreementId = agreementId, Completed = signed.BookingId is > 0, BookingId = signed.BookingId, Status = signed.Status };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "E-signed agreement {AgreementId}: the booking was not created; left for staff to confirm.", agreementId);
+
+                var after = await GetAgreementByIdAsync(agreementId);
+                if (after?.BookingId is > 0) // converted after all (failure after the booking was created)
+                    return new ESignAgreementResult { AgreementId = agreementId, Completed = true, BookingId = after.BookingId, Status = after.Status };
+
+                // MarkAgreementSigned may have set the agreement to Signed before the conversion failed: put it back
+                // (no-op once a booking exists) so it shows as "Signed copy received — verify" for staff.
+                try
+                {
+                    await _db.SetAgreementStatusDbAsync(agreementId, "SignedUploaded", signedDate);
+                    await _db.AddQuotationActivityAsync(agreement.QuotationId, quotationVersion, "AgreementESignPending",
+                        $"Lease Agreement #{agreementId} was signed electronically but the booking could not be created automatically: {ex.Message} Confirm it with \"Mark signed\".", userId);
+                }
+                catch (Exception logEx)
+                {
+                    _logger.LogWarning(logEx, "Could not flag e-signed agreement {AgreementId} for staff.", agreementId);
+                }
+                return new ESignAgreementResult { AgreementId = agreementId, Completed = false, Status = "SignedUploaded" };
+            }
+        }
+
+        /// <summary>Staff: the latest e-signature of an agreement (null when it was not e-signed).</summary>
+        public async Task<AgreementESignatureDto?> GetAgreementESignatureAsync(int agreementId)
+        {
+            var r = await _db.GetAgreementESignatureDbAsync(agreementId);
+            if (r == null) return null;
+            return new AgreementESignatureDto
+            {
+                AgreementId = GetInt(r, "AgreementId"),
+                SignerName = GetString(r, "SignerName"),
+                SignerEmail = GetString(r, "SignerEmail"),
+                SignedAt = GetDateTime(r, "SignedAt"),
+                IpAddress = GetString(r, "IpAddress"),
+                UserAgent = GetString(r, "UserAgent"),
+                DocumentSha256 = GetString(r, "DocumentSha256")?.Trim(),
+                SignatureImage = r.TryGetValue("SignatureImage", out var img) && img is byte[] bytes && bytes.Length > 0
+                    ? "data:image/png;base64," + Convert.ToBase64String(bytes)
+                    : null
+            };
         }
 
         public async Task<bool> DeleteAgreementAsync(int agreementId)

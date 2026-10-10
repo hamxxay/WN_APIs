@@ -1068,5 +1068,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         {
             return AgreementPdfGenerator.Generate(request, quotationNumber);
         }
+
+        public byte[] GenerateESignatureCertificatePdf(WorkNest.Application.DTOs.Agreement.AgreementESignatureEvidence evidence)
+        {
+            return ESignatureCertificatePdfGenerator.Generate(evidence);
+        }
     }
 }

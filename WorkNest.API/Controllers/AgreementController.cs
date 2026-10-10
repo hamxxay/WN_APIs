@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WorkNest.Application.DTOs.Agreement;
 using WorkNest.Application.Interfaces;
@@ -27,14 +29,17 @@ namespace WorkNest.API.Controllers
         private readonly IWebHostEnvironment _env;
         private readonly FileStorageSettings _storageSettings;
         private readonly IBusinessClock _clock;
+        private readonly ILogger<AgreementController> _logger;
 
         public AgreementController(
             IAgreementService agreement,
             IWebHostEnvironment env,
             IOptions<FileStorageSettings> storageSettings,
-            IBusinessClock clock)
+            IBusinessClock clock,
+            ILogger<AgreementController> logger)
         {
             _clock = clock;
+            _logger = logger;
             _agreement = agreement;
             _env = env;
             _storageSettings = storageSettings.Value;
@@ -232,6 +237,182 @@ namespace WorkNest.API.Controllers
             {
                 return StatusCode(500, new { isSuccessful = false, message = ex.Message });
             }
+        }
+
+        // One e-signature at a time per agreement (double click / two tabs): the second request is turned away.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<int, System.Threading.SemaphoreSlim> ESignLocks = new();
+        private const int MaxSignatureImageBytes = 300 * 1024;
+        private static readonly byte[] PngSignature = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+
+        /// <summary>
+        /// My Agreements: sign electronically. Stores the agreement + an "Electronic signature certificate" page
+        /// (signer, Pakistan time, email, IP, browser, signature image, SHA-256 of the agreement) as the signed copy,
+        /// then creates the booking like admin "mark signed". If the booking can't be created automatically the
+        /// signed copy is kept as "SignedUploaded" and staff confirm it.
+        /// </summary>
+        [EnableRateLimiting("pdf")]
+        [HttpPost("my/{id:int}/esign")]
+        [RequestSizeLimit(1024 * 1024)]
+        public async Task<IActionResult> ESignMyAgreement(int id, [FromBody] ESignAgreementRequest? req)
+        {
+            var email = CurrentUserEmail();
+            if (string.IsNullOrWhiteSpace(email) || !await _agreement.IsOwnAgreementAsync(email, id))
+                return NotFound(new { isSuccessful = false, message = "Agreement not found." });
+
+            // 1. Request
+            if (req == null) return BadRequest(new { isSuccessful = false, message = "Please sign the agreement first." });
+            if (!req.Consent)
+                return BadRequest(new { isSuccessful = false, message = "Please confirm that you have read the agreement and agree to sign it electronically." });
+            var signerName = (req.SignerName ?? "").Trim();
+            if (signerName.Length < 2 || signerName.Length > 100)
+                return BadRequest(new { isSuccessful = false, message = "Enter your full name (2 to 100 characters)." });
+            var signature = DecodePngDataUrl(req.SignatureImage, out var signatureError);
+            if (signature == null) return BadRequest(new { isSuccessful = false, message = signatureError });
+
+            var gate = ESignLocks.GetOrAdd(id, _ => new System.Threading.SemaphoreSlim(1, 1));
+            if (!await gate.WaitAsync(0))
+                return Conflict(new { isSuccessful = false, message = "Your signature is already being processed. Please wait a moment." });
+            try
+            {
+                // 2. Agreement can be signed (read under the lock)
+                var agreement = await _agreement.GetAgreementByIdAsync(id);
+                if (agreement == null) return NotFound(new { isSuccessful = false, message = "Agreement not found." });
+                if (agreement.BookingId != null)
+                    return BadRequest(new { isSuccessful = false, message = "This agreement is already signed and your booking has been created." });
+                var status = (agreement.Status ?? "").Trim();
+                if (status.Equals("SignedUploaded", StringComparison.OrdinalIgnoreCase))
+                    return BadRequest(new { isSuccessful = false, message = "Your signed agreement is already with our team. We will confirm your booking shortly." });
+                if (!(status.Equals("AgreementSent", StringComparison.OrdinalIgnoreCase) || status.Equals("Sent", StringComparison.OrdinalIgnoreCase) || status.Equals("EmailFailed", StringComparison.OrdinalIgnoreCase)))
+                    return BadRequest(new { isSuccessful = false, message = "This agreement can no longer be signed online. Please contact us." });
+                if (await IsSupersededAsync(email, agreement))
+                    return BadRequest(new { isSuccessful = false, message = "A newer version of this agreement was sent to you. Please sign the latest one." });
+
+                // 3. Signed PDF = agreement as downloaded + certificate page
+                var evidence = new AgreementESignatureEvidence
+                {
+                    AgreementId = id,
+                    QuotationNumber = agreement.QuotationNumber,
+                    CustomerName = !string.IsNullOrWhiteSpace(agreement.CompanyName) ? $"{agreement.CompanyName} ({agreement.CustomerName})" : agreement.CustomerName,
+                    SignerName = signerName,
+                    SignerEmail = Truncate(email, 256),
+                    SignedAt = _clock.Now,
+                    IpAddress = Truncate(HttpContext.Connection.RemoteIpAddress?.ToString(), 64),
+                    UserAgent = Truncate(Request.Headers.UserAgent.ToString(), 400),
+                    SignatureImage = signature
+                };
+                byte[] signedPdf;
+                try
+                {
+                    signedPdf = await _agreement.BuildESignedPdfAsync(evidence);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "E-sign: could not build the signed PDF of agreement {AgreementId}.", id);
+                    return StatusCode(500, new { isSuccessful = false, message = "We could not prepare your signed agreement. Please try again in a few minutes." });
+                }
+
+                // 4. Store it as the signed copy (same folder + DB update as upload-signed)
+                await StoreSignedPdfBytesAsync(id, signedPdf);
+
+                // 5. Evidence, activity and booking
+                var result = await _agreement.CompleteESignatureAsync(evidence, ResolveActorId());
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    data = result,
+                    message = result.Completed
+                        ? "Thank you — your agreement is signed and your booking has been created."
+                        : "Signed. Our team will confirm your booking shortly."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "E-sign of agreement {AgreementId} failed.", id);
+                return StatusCode(500, new { isSuccessful = false, message = "We could not complete your signature. Please try again." });
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+
+        /// <summary>Staff: how an agreement was e-signed (signer, time, email, IP, browser, document hash, signature).</summary>
+        [HttpGet("{id:int}/esignature")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        public async Task<IActionResult> GetESignature(int id)
+        {
+            try
+            {
+                var row = await _agreement.GetAgreementESignatureAsync(id);
+                return Ok(new { isSuccessful = true, data = row });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>True when a newer agreement was sent to this customer for the same quotation.</summary>
+        private async Task<bool> IsSupersededAsync(string email, AgreementResponseDto agreement)
+        {
+            var mine = await _agreement.GetMyAgreementsAsync(email);
+            return mine.Any(r => r.TryGetValue("QuotationId", out var q) && q != null && Convert.ToInt32(q) == agreement.QuotationId
+                              && r.TryGetValue("Id", out var aid) && aid != null && Convert.ToInt32(aid) > agreement.Id);
+        }
+
+        /// <summary>"data:image/png;base64,..." → PNG bytes (max 300 KB), or null with a message for the customer.</summary>
+        private static byte[]? DecodePngDataUrl(string? dataUrl, out string error)
+        {
+            error = "Please draw or type your signature.";
+            const string prefix = "data:image/png;base64,";
+            if (string.IsNullOrWhiteSpace(dataUrl) || !dataUrl.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+            var b64 = dataUrl.Substring(prefix.Length).Trim();
+            if (b64.Length == 0) return null;
+            if (b64.Length > (MaxSignatureImageBytes / 3 + 1) * 4)
+            {
+                error = "The signature image is too large. Please clear it and sign again.";
+                return null;
+            }
+            var buffer = new byte[b64.Length * 3 / 4 + 3];
+            if (!Convert.TryFromBase64String(b64, buffer, out int written))
+            {
+                error = "The signature could not be read. Please clear it and sign again.";
+                return null;
+            }
+            // PNG signature + IHDR with a sensible size (a signature, not a page-sized image)
+            if (written < 33 || written > MaxSignatureImageBytes || !buffer.AsSpan(0, 8).SequenceEqual(PngSignature))
+            {
+                error = "The signature could not be read. Please clear it and sign again.";
+                return null;
+            }
+            int width = (buffer[16] << 24) | (buffer[17] << 16) | (buffer[18] << 8) | buffer[19];
+            int height = (buffer[20] << 24) | (buffer[21] << 16) | (buffer[22] << 8) | buffer[23];
+            if (width < 10 || height < 10 || width > 4000 || height > 2000)
+            {
+                error = "The signature could not be read. Please clear it and sign again.";
+                return null;
+            }
+            return buffer.AsSpan(0, written).ToArray();
+        }
+
+        private static string? Truncate(string? value, int max) =>
+            string.IsNullOrEmpty(value) ? null : (value.Length <= max ? value : value.Substring(0, max));
+
+        /// <summary>Signed agreements folder (FileStorage:SignedAgreementsPath, default App_Data/SignedAgreements).</summary>
+        private string SignedAgreementsDirectory()
+        {
+            var configPath = string.IsNullOrWhiteSpace(_storageSettings.SignedAgreementsPath) ? "App_Data/SignedAgreements" : _storageSettings.SignedAgreementsPath;
+            var targetDir = Path.IsPathRooted(configPath) ? configPath : Path.Combine(_env.ContentRootPath, configPath);
+            if (!Directory.Exists(targetDir)) Directory.CreateDirectory(targetDir);
+            return targetDir;
+        }
+
+        /// <summary>Stores a generated signed agreement PDF the same way as an uploaded one; records its path on the agreement.</summary>
+        private async Task StoreSignedPdfBytesAsync(int id, byte[] pdf)
+        {
+            var fullFilePath = Path.Combine(SignedAgreementsDirectory(), $"{id}_{Guid.NewGuid():N}.pdf");
+            await System.IO.File.WriteAllBytesAsync(fullFilePath, pdf);
+            await _agreement.UpdateSignedPdfInfoAsync(id, fullFilePath, DateTime.UtcNow);
         }
 
         /// <summary>
