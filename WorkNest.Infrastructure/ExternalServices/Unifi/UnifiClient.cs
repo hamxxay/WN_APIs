@@ -89,7 +89,16 @@ namespace WorkNest.Infrastructure.ExternalServices.Unifi
             var isRead = method == HttpMethod.Get;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var req = Build();
-            var resp = await SendAsync(req, isRead ? ConsoleTimeout : ConsoleWriteTimeout, ct);
+            HttpResponseMessage resp;
+            try
+            {
+                resp = await SendAsync(req, isRead ? ConsoleTimeout : ConsoleWriteTimeout, ct);
+            }
+            catch (TimeoutException ex) when (!isRead)
+            {
+                // Our own wait ran out while UniFi was still working on the change.
+                throw new UnifiTimeoutException("UniFi is taking longer than usual to apply this change. Refresh in a minute to see whether it was saved.", ex);
+            }
             // 408 / 504: the cloud connector gave up waiting for the console (a slow moment at the office gateway).
             // Reads are retried once after a short pause; writes are not, so a change is never sent twice.
             if (method == HttpMethod.Get && resp.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout)
@@ -106,7 +115,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Unifi
                 _logger.Log(resp.IsSuccessStatusCode ? Microsoft.Extensions.Logging.LogLevel.Information : Microsoft.Extensions.Logging.LogLevel.Warning,
                     "UniFi console {Method} {Path} → HTTP {Status} in {Ms} ms", method.Method, path, (int)resp.StatusCode, sw.ElapsedMilliseconds);
             if (!isRead && resp.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout)
-                throw new InvalidOperationException("UniFi is taking longer than usual to apply this change. Refresh in a minute to see whether it was saved.");
+                throw new UnifiTimeoutException("UniFi is taking longer than usual to apply this change. Refresh in a minute to see whether it was saved.");
             if (!resp.IsSuccessStatusCode)
             {
                 var hint = resp.StatusCode == HttpStatusCode.Forbidden ? " (the API key must belong to the console owner)" : "";

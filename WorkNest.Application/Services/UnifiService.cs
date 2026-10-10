@@ -1722,9 +1722,12 @@ namespace WorkNest.Application.Services
             }
             // An empty allow-list is allowed (e.g. a new SSID nobody may join yet); the screen warns before it is set.
 
-            await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
-                $"/api/s/default/rest/wlanconf/{wlanId}",
-                new { mac_filter_enabled = enabled, mac_filter_policy = pol, mac_filter_list = list }, HttpMethod.Put);
+            var wantList = list.ToHashSet();
+            var answeredInTime = await PutWlanAndConfirmAsync(wlanId,
+                new { mac_filter_enabled = enabled, mac_filter_policy = pol, mac_filter_list = list },
+                w => Truthy(P(w, "mac_filter_enabled")) == enabled
+                     && (!enabled || (Str(P(w, "mac_filter_policy")) == "allow" ? "allow" : "deny") == pol)
+                     && MacList(w).ToHashSet().SetEquals(wantList));
 
             // A device that just lost access is disconnected now (otherwise it stays on until it reconnects).
             var cutOff = colon != null && enabled && (pol == "deny" ? list.Contains(colon) : !list.Contains(colon));
@@ -1751,8 +1754,50 @@ namespace WorkNest.Application.Services
             await WithDbAsync(db => db.InsertUnifiMacFilterLogDbAsync(wlanId, ssid, colon, action, logPolicy, reason,
                 byEmail is { Length: > 200 } ? byEmail[..200] : byEmail, byUserId, previous));
             DropCache("wlans", "clients");
-            return (await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
-                   ?? new JsonObject { ["id"] = wlanId };
+            return WithConfirmation((await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
+                   ?? new JsonObject { ["id"] = wlanId }, answeredInTime);
+        }
+
+        /// <summary>
+        /// Sends a change to one SSID. If UniFi times out, the change may still have been saved (it often is), so the
+        /// SSID is read back up to three times (after 3, 6 and 10 s) and <paramref name="isApplied"/> decides.
+        /// Returns true when UniFi answered normally, false when it timed out but the change is there; throws a
+        /// friendly "not applied" error when it never shows up.
+        /// </summary>
+        private async Task<bool> PutWlanAndConfirmAsync(string wlanId, object body, Func<JsonElement, bool> isApplied)
+        {
+            var consoleId = ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key");
+            try
+            {
+                await _client.NetworkAsync(consoleId, $"/api/s/default/rest/wlanconf/{wlanId}", body, HttpMethod.Put);
+                return true;
+            }
+            catch (UnifiTimeoutException)
+            {
+                _logger.LogWarning("UniFi timed out changing WLAN {WlanId}; checking whether the change was saved", wlanId);
+                foreach (var wait in new[] { 3, 6, 10 })
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(wait));
+                    try
+                    {
+                        var wlan = Find(await NetData("/api/s/default/rest/wlanconf"), w => Str(P(w, "_id")) == wlanId);
+                        if (wlan != null && isApplied(wlan.Value))
+                        {
+                            _logger.LogInformation("UniFi change to WLAN {WlanId} was saved despite the timeout", wlanId);
+                            return false;
+                        }
+                    }
+                    catch (Exception ex) { _logger.LogWarning("Re-reading WLAN {WlanId} failed: {Error}", wlanId, ex.Message); }
+                }
+                throw new InvalidOperationException("Not applied: UniFi did not save this change. Please try again in a minute.");
+            }
+        }
+
+        /// <summary>Marks a returned SSID as confirmed only by reading it back after a UniFi timeout.</summary>
+        private static JsonObject WithConfirmation(JsonObject ssid, bool answeredInTime)
+        {
+            if (!answeredInTime) ssid["confirmedAfterTimeout"] = true;
+            return ssid;
         }
 
         public async Task<JsonObject> SetSsidHiddenAsync(string wlanId, bool hidden, string? reason, string? byEmail, int? byUserId)
@@ -1764,16 +1809,15 @@ namespace WorkNest.Application.Services
             if (wlan == null) return new JsonObject { ["error"] = "This SSID no longer exists on the console." };
             var ssid = Str(P(wlan, "name"));
 
-            await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
-                $"/api/s/default/rest/wlanconf/{wlanId}", new { hide_ssid = hidden }, HttpMethod.Put);
+            var answeredInTime = await PutWlanAndConfirmAsync(wlanId, new { hide_ssid = hidden }, w => Truthy(P(w, "hide_ssid")) == hidden);
 
             var filterOn = Truthy(P(wlan, "mac_filter_enabled"));
             var policy = filterOn ? (Str(P(wlan, "mac_filter_policy")) == "allow" ? "allow" : "deny") : "off";
             await WithDbAsync(db => db.InsertUnifiMacFilterLogDbAsync(wlanId, ssid, null, hidden ? "hide" : "unhide", policy, reason,
                 byEmail is { Length: > 200 } ? byEmail[..200] : byEmail, byUserId, null));
             DropCache("wlans");
-            return (await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
-                   ?? new JsonObject { ["id"] = wlanId };
+            return WithConfirmation((await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
+                   ?? new JsonObject { ["id"] = wlanId }, answeredInTime);
         }
 
         /// <summary>{ downMbps, upMbps } of a UniFi user group (kbps, -1 = unlimited); null when it has no limit.</summary>
@@ -1830,14 +1874,34 @@ namespace WorkNest.Application.Services
             var groups = await NetData("/api/s/default/rest/usergroup");
             if (Find(groups, g => string.Equals(Str(P(g, "name")), name, StringComparison.OrdinalIgnoreCase)) != null)
                 return Error("A profile with this name already exists.");
-            var created = await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
-                "/api/s/default/rest/usergroup",
-                new { name, qos_rate_max_down = downMbps.HasValue ? downMbps.Value * 1000 : -1, qos_rate_max_up = upMbps.HasValue ? upMbps.Value * 1000 : -1 },
-                HttpMethod.Post);
-            var g0 = Arr(P(created, "data")).FirstOrDefault();
+            JsonElement? g0;
+            var answeredInTime = true;
+            try
+            {
+                var created = await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
+                    "/api/s/default/rest/usergroup",
+                    new { name, qos_rate_max_down = downMbps.HasValue ? downMbps.Value * 1000 : -1, qos_rate_max_up = upMbps.HasValue ? upMbps.Value * 1000 : -1 },
+                    HttpMethod.Post);
+                g0 = Arr(P(created, "data")).FirstOrDefault();
+            }
+            catch (UnifiTimeoutException)
+            {
+                // Timed out: the profile may exist anyway, so look for it by name before reporting a failure.
+                answeredInTime = false;
+                g0 = null;
+                foreach (var wait in new[] { 3, 6, 10 })
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(wait));
+                    try { g0 = Find(await NetData("/api/s/default/rest/usergroup"), g => string.Equals(Str(P(g, "name")), name, StringComparison.OrdinalIgnoreCase)); }
+                    catch (Exception ex) { _logger.LogWarning("Re-reading speed profiles failed: {Error}", ex.Message); }
+                    if (g0 != null) break;
+                }
+                if (g0 == null) return Error("Not applied: UniFi did not create the profile. Please try again in a minute.");
+            }
             if (Str(P(g0, "_id")) == "") return Error("UniFi did not create the profile.");
             DropCache("usergroups");
-            return new JsonObject { ["id"] = Str(P(g0, "_id")), ["name"] = name, ["downMbps"] = downMbps, ["upMbps"] = upMbps, ["ssids"] = new JsonArray() };
+            var profile = new JsonObject { ["id"] = Str(P(g0, "_id")), ["name"] = name, ["downMbps"] = downMbps, ["upMbps"] = upMbps, ["ssids"] = new JsonArray() };
+            return WithConfirmation(profile, answeredInTime);
         }
 
         public async Task<JsonObject> SetSsidSpeedProfileAsync(string wlanId, string? profileId, string? reason, string? byEmail, int? byUserId)
@@ -1858,9 +1922,8 @@ namespace WorkNest.Application.Services
             if (group == null) return Error(string.IsNullOrWhiteSpace(profileId) ? "UniFi has no Default profile to remove the limit with." : "This speed profile no longer exists on the console.");
             var groupId = Str(P(group, "_id"));
 
-            if (Str(P(wlan, "usergroup_id")) != groupId)
-                await _client.NetworkAsync(ConsoleId() ?? throw new InvalidOperationException("No UniFi console found for this API key"),
-                    $"/api/s/default/rest/wlanconf/{wlanId}", new { usergroup_id = groupId }, HttpMethod.Put);
+            var answeredInTime = Str(P(wlan, "usergroup_id")) == groupId
+                || await PutWlanAndConfirmAsync(wlanId, new { usergroup_id = groupId }, w => Str(P(w, "usergroup_id")) == groupId);
 
             var limit = string.IsNullOrWhiteSpace(profileId) ? null : SpeedLimitOf(group);
             var limitText = limit == null ? "speed: no limit"
@@ -1871,8 +1934,8 @@ namespace WorkNest.Application.Services
                 reason == null ? limitText : $"{limitText} · {reason}",
                 byEmail is { Length: > 200 } ? byEmail[..200] : byEmail, byUserId, null));
             DropCache("wlans", "usergroups");
-            return (await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
-                   ?? new JsonObject { ["id"] = wlanId };
+            return WithConfirmation((await GetSsidsAsync())["ssids"]!.AsArray().FirstOrDefault(w => ToStr(w!["id"]) == wlanId)?.DeepClone().AsObject()
+                   ?? new JsonObject { ["id"] = wlanId }, answeredInTime);
         }
 
         // ---- which WorkNest location the UniFi network belongs to ----
