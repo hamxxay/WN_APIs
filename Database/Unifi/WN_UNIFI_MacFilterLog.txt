@@ -1,0 +1,50 @@
+USE [SAC400];
+
+-- Log of Wi-Fi MAC filter changes made from WorkNest (Network > Wi-Fi > SSIDs), and SSIDs hidden or shown:
+-- who blocked / allowed which device on which SSID, when, and why.
+-- PreviousList keeps the SSID's MAC list before the change (JSON array), so a change can be undone by hand.
+IF OBJECT_ID(N'dbo.WN_UNIFI_MacFilterLog', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WN_UNIFI_MacFilterLog (
+        Id           INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_WN_UNIFI_MacFilterLog PRIMARY KEY,
+        LoggedAt     DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_UNIFI_MacFilterLog_LoggedAt DEFAULT SYSUTCDATETIME(),
+        WlanId       NVARCHAR(50)   NOT NULL,   -- UniFi WLAN _id
+        Ssid         NVARCHAR(100)  NOT NULL,
+        Mac          NVARCHAR(17)   NULL,       -- aa:bb:cc:dd:ee:ff; NULL for a mode change
+        Action       NVARCHAR(20)   NOT NULL,   -- add | remove | block | unblock | mode | hide | unhide
+        Policy       NVARCHAR(10)   NULL,       -- filter after the change: allow | deny | off
+        Reason       NVARCHAR(500)  NULL,
+        ByEmail      NVARCHAR(200)  NULL,
+        ByUserId     INT            NULL,
+        PreviousList NVARCHAR(MAX)  NULL
+    );
+    CREATE INDEX IX_WN_UNIFI_MacFilterLog_Wlan ON dbo.WN_UNIFI_MacFilterLog (WlanId, Id DESC);
+    CREATE INDEX IX_WN_UNIFI_MacFilterLog_Mac ON dbo.WN_UNIFI_MacFilterLog (Mac, Id DESC);
+END
+
+-- Details of the devices on each SSID's MAC list (UniFi stores only the MAC): name and room number,
+-- entered on Network > Wi-Fi > Device list. One row per SSID + MAC.
+IF OBJECT_ID(N'dbo.WN_UNIFI_SsidDevices', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WN_UNIFI_SsidDevices (
+        WlanId      NVARCHAR(50)  NOT NULL,   -- UniFi WLAN _id
+        Mac         NVARCHAR(17)  NOT NULL,   -- aa:bb:cc:dd:ee:ff
+        Name        NVARCHAR(100) NULL,
+        RoomNo      NVARCHAR(50)  NULL,
+        UpdatedAt   DATETIME2(0)  NOT NULL CONSTRAINT DF_WN_UNIFI_SsidDevices_UpdatedAt DEFAULT SYSUTCDATETIME(),
+        UpdatedBy   NVARCHAR(200) NULL,
+        CONSTRAINT PK_WN_UNIFI_SsidDevices PRIMARY KEY CLUSTERED (WlanId, Mac)
+    );
+END
+
+-- WorkNest settings for the UniFi network, e.g. LocationIds = "1" (the WN_Locations the network belongs to;
+-- admins and sales executives of other locations don't see the Network pages). Set on Network Overview.
+IF OBJECT_ID(N'dbo.WN_UNIFI_Settings', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WN_UNIFI_Settings (
+        SettingKey   NVARCHAR(50)   NOT NULL CONSTRAINT PK_WN_UNIFI_Settings PRIMARY KEY,
+        SettingValue NVARCHAR(1000) NULL,
+        UpdatedAt    DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_UNIFI_Settings_UpdatedAt DEFAULT SYSUTCDATETIME(),
+        UpdatedBy    NVARCHAR(200)  NULL
+    );
+END

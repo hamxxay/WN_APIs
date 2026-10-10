@@ -24,6 +24,13 @@ namespace WorkNest.Application.Services
         /// blackholes the source (it happened on 2026-09-10). Set true only once the router allows full sweeps.
         /// </summary>
         public bool FullOnlineSweep { get; set; }
+        /// <summary>
+        /// Gentle mode: offline machines re-tested per pass (one after another, a short pause apart, so the router
+        /// doesn't see a burst). With the 2-minute pass, 3 means every offline machine is retried every few minutes.
+        /// </summary>
+        public int OfflineProbesPerPass { get; set; } = 3;
+        /// <summary>How long the online check waits for a machine (same reach as the Test button needs on slow links).</summary>
+        public int PingTimeoutSeconds { get; set; } = 6;
         /// <summary>Machine time zone, minutes east of UTC (Pakistan = 300).</summary>
         public int DeviceTzOffsetMinutes { get; set; } = 300;
     }
@@ -385,24 +392,43 @@ namespace WorkNest.Application.Services
         private async Task<string> RunOnlineCheckAsync()
         {
             var devices = await _repo.GetAllDevicesAsync();
-            var targets = devices;
-            if (!_options.FullOnlineSweep)
+            var timeout = TimeSpan.FromSeconds(Math.Clamp(_options.PingTimeoutSeconds, 2, 15));
+            List<HikSyncDevice> targets;
+            (HikSyncDevice Dev, bool Up)[] results;
+            if (_options.FullOnlineSweep)
             {
-                // Gentle mode: machines that were online (live ports) + ONE rotating offline machine.
+                targets = devices;
+                results = await Task.WhenAll(targets.Select(async d => (Dev: d, Up: await _isapi.PingAsync(d, timeout))));
+            }
+            else
+            {
+                // Gentle mode: machines that were online (live ports) in parallel, plus a few rotating offline machines
+                // one after another, a short pause apart. Rapid connects to many dead forwarded ports look like a port
+                // scan to the office router (it blackholed the source on 2026-09-10).
                 var online = devices.Where(d => d.Online).ToList();
                 var offline = devices.Where(d => !d.Online).ToList();
-                targets = online;
+                var probe = new List<HikSyncDevice>();
                 if (offline.Count > 0)
                 {
                     var idx = 0;
                     try { int.TryParse(await _repo.GetSettingAsync("offline_probe_idx"), out idx); } catch { /* start at 0 */ }
-                    targets = online.Append(offline[Math.Abs(idx) % offline.Count]).ToList();
-                    await SetSetting("offline_probe_idx", ((idx + 1) % offline.Count).ToString());
+                    var n = Math.Min(offline.Count, Math.Max(1, _options.OfflineProbesPerPass));
+                    for (var i = 0; i < n; i++) probe.Add(offline[(Math.Abs(idx) + i) % offline.Count]);
+                    await SetSetting("offline_probe_idx", ((Math.Abs(idx) + n) % offline.Count).ToString());
                 }
+                targets = online.Concat(probe).ToList();
                 if (targets.Count == 0) return "checked 0";
+
+                var onlineTask = Task.WhenAll(online.Select(async d => (Dev: d, Up: await _isapi.PingAsync(d, timeout))));
+                var probed = new List<(HikSyncDevice Dev, bool Up)>();
+                foreach (var d in probe)
+                {
+                    if (probed.Count > 0) await Task.Delay(TimeSpan.FromMilliseconds(1500));
+                    probed.Add((d, await _isapi.PingAsync(d, timeout)));
+                }
+                results = (await onlineTask).Concat(probed).ToArray();
             }
 
-            var results = await Task.WhenAll(targets.Select(async d => (Dev: d, Up: await _isapi.PingAsync(d, TimeSpan.FromSeconds(2)))));
             var allDown = results.Length > 0 && results.All(r => !r.Up);
             if (allDown) _logger.LogWarning("HIK online check: all probed machines unreachable — marking them offline");
             await SetSetting("path_blocked_at", allDown ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() : "0");

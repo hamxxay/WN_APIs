@@ -393,6 +393,16 @@ namespace WorkNest.Application.Interfaces
         Task<Dictionary<string, string>> GetUnifiClientAliasesDbAsync();
         Task UpsertUnifiClientAliasDbAsync(string mac, string alias, string? updatedByEmail);
         Task DeleteUnifiClientAliasDbAsync(string mac);
+        /// <summary>WN_UNIFI_MacFilterLog (created by WN_UNIFI_MacFilterLog.txt). SQL error 208 = table not created yet.</summary>
+        Task InsertUnifiMacFilterLogDbAsync(string wlanId, string ssid, string? mac, string action, string? policy, string? reason, string? byEmail, int? byUserId, string? previousList);
+        Task<List<IDictionary<string, object?>>> GetUnifiMacFilterLogDbAsync(string? wlanId, string? mac, int top);
+        /// <summary>WN_UNIFI_SsidDevices: name / room of the MACs on each SSID's list. Empty when the table isn't created yet.</summary>
+        Task<List<(string WlanId, string Mac, string? Name, string? RoomNo)>> GetUnifiSsidDevicesDbAsync();
+        Task UpsertUnifiSsidDeviceDbAsync(string wlanId, string mac, string? name, string? roomNo, string? updatedBy);
+        Task DeleteUnifiSsidDeviceDbAsync(string wlanId, string mac);
+        /// <summary>WN_UNIFI_Settings (key / value). Null when missing or the table isn't created yet.</summary>
+        Task<string?> GetUnifiSettingDbAsync(string key);
+        Task SetUnifiSettingDbAsync(string key, string? value, string? updatedBy);
 
         // --- KYC Portal ---
         Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null);

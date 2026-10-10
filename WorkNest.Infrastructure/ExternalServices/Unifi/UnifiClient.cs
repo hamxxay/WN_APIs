@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -15,13 +16,17 @@ namespace WorkNest.Infrastructure.ExternalServices.Unifi
     {
         private static readonly TimeSpan CloudTimeout = TimeSpan.FromSeconds(20);
         private static readonly TimeSpan ConsoleTimeout = TimeSpan.FromSeconds(30);
+        // Changes make the console re-provision its access points, which can take longer than a read.
+        private static readonly TimeSpan ConsoleWriteTimeout = TimeSpan.FromSeconds(60);
+        private readonly Microsoft.Extensions.Logging.ILogger<UnifiClient> _logger;
 
         private readonly HttpClient _http = new() { Timeout = Timeout.InfiniteTimeSpan };
         private readonly string _apiKey;
         private readonly Uri _apiBase;
 
-        public UnifiClient(IConfiguration configuration)
+        public UnifiClient(IConfiguration configuration, Microsoft.Extensions.Logging.ILogger<UnifiClient> logger)
         {
+            _logger = logger;
             _apiKey = configuration["Unifi:ApiKey"]?.Trim() ?? string.Empty;
             var apiBase = configuration["Unifi:ApiBase"];
             _apiBase = new Uri(string.IsNullOrWhiteSpace(apiBase) ? "https://api.ui.com" : apiBase.Trim());
@@ -74,9 +79,34 @@ namespace WorkNest.Infrastructure.ExternalServices.Unifi
             method ??= body != null ? HttpMethod.Post : HttpMethod.Get;
             var url = new Uri(_apiBase, $"/v1/connector/consoles/{Uri.EscapeDataString(consoleId)}/proxy/network{path}");
 
-            using var req = new HttpRequestMessage(method, url);
-            if (body != null) req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-            using var resp = await SendAsync(req, ConsoleTimeout, ct);
+            HttpRequestMessage Build()
+            {
+                var r = new HttpRequestMessage(method, url);
+                if (body != null) r.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+                return r;
+            }
+
+            var isRead = method == HttpMethod.Get;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var req = Build();
+            var resp = await SendAsync(req, isRead ? ConsoleTimeout : ConsoleWriteTimeout, ct);
+            // 408 / 504: the cloud connector gave up waiting for the console (a slow moment at the office gateway).
+            // Reads are retried once after a short pause; writes are not, so a change is never sent twice.
+            if (method == HttpMethod.Get && resp.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout)
+            {
+                resp.Dispose();
+                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                using var retry = Build();
+                resp = await SendAsync(retry, ConsoleTimeout, ct);
+            }
+            using var _ = resp;
+            sw.Stop();
+            // Every change, and any slow or failed read, is logged with its time (for "it's stuck" reports).
+            if (!isRead || !resp.IsSuccessStatusCode || sw.ElapsedMilliseconds > 5000)
+                _logger.Log(resp.IsSuccessStatusCode ? Microsoft.Extensions.Logging.LogLevel.Information : Microsoft.Extensions.Logging.LogLevel.Warning,
+                    "UniFi console {Method} {Path} → HTTP {Status} in {Ms} ms", method.Method, path, (int)resp.StatusCode, sw.ElapsedMilliseconds);
+            if (!isRead && resp.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout)
+                throw new InvalidOperationException("UniFi is taking longer than usual to apply this change. Refresh in a minute to see whether it was saved.");
             if (!resp.IsSuccessStatusCode)
             {
                 var hint = resp.StatusCode == HttpStatusCode.Forbidden ? " (the API key must belong to the console owner)" : "";
