@@ -71,8 +71,8 @@ namespace WorkNest.Infrastructure.Repositories
                        ISNULL(b.MonthlyRent, 0) * (100 - d.Pct) / 100
                   FROM dbo.WN_Bookings b WITH (NOLOCK)
                   JOIN @Spaces sp ON sp.Id = b.SpaceId
+                 -- Only DiscountPercentage (used by WN_Invoice_CreateRecurring); fixed-amount discounts are per cycle.
                  CROSS APPLY (SELECT CASE WHEN ISNULL(b.DiscountPercentage, 0) BETWEEN 0.01 AND 100 THEN b.DiscountPercentage
-                                          WHEN b.DiscountType IN ('Percentage', 'Percent') AND ISNULL(b.DiscountValue, 0) BETWEEN 0.01 AND 100 THEN b.DiscountValue
                                           ELSE 0 END AS Pct) d
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33)
                    AND b.StartOn < @Last AND b.EndOn >= @First;
