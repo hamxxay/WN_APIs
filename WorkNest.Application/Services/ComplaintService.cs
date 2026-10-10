@@ -1,3 +1,4 @@
+using WorkNest.Application.Helpers;
 using System.Security.Cryptography;
 using WorkNest.Application.DTOs.Complaint;
 using WorkNest.Application.Interfaces;
@@ -35,6 +36,8 @@ namespace WorkNest.Application.Services
             if (error != null) return ApiResponse.Fail(error);
             if (request.CustomerName is { Length: > 200 }) return ApiResponse.Fail("The customer name can be at most 200 characters.");
             if (request.Email is { Length: > 256 }) return ApiResponse.Fail("The email can be at most 256 characters.");
+            var phoneError = Phone.Validate(request.PhoneNumber);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
 
             var complaint = new ComplaintDto
             {

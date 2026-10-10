@@ -103,6 +103,8 @@ namespace WorkNest.Application.Services
         {
             var cnicError = Cnic.Validate(request.CnicOrPassport);
             if (cnicError != null) return ApiResponse.Fail(cnicError);
+            var phoneError = Phone.Validate(request.Phone);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
 
             var roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
             int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
@@ -150,6 +152,8 @@ namespace WorkNest.Application.Services
         {
             var cnicError = Cnic.Validate(request.CnicOrPassport);
             if (cnicError != null) return ApiResponse.Fail(cnicError);
+            var phoneError = Phone.Validate(request.Phone);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
 
             int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
             int? effectiveRoleId = null;

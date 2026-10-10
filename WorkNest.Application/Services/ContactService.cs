@@ -1,3 +1,4 @@
+using WorkNest.Application.Helpers;
 using WorkNest.Application.DTOs.Contact;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -105,6 +106,9 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail)
         {
+            var phoneError = Phone.Validate(request.Phone);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
+
             int? userId = null;
             if (!string.IsNullOrWhiteSpace(userEmail))
             {

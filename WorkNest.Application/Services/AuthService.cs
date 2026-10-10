@@ -1,3 +1,4 @@
+using WorkNest.Application.Helpers;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Auth;
 using WorkNest.Application.Interfaces;
@@ -32,6 +33,9 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> RegisterAsync(UserRegisterRequest request)
         {
+            var phoneError = Phone.Validate(request.Phone);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
+
             var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
             var roleId = request.RoleId ?? Roles.GeneralId;
             var companyId = request.CompanyId;
@@ -186,6 +190,8 @@ namespace WorkNest.Application.Services
             var phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
             if (name.Length == 0) return ApiResponse.Fail("Name is required.");
             if (name.Length > 200) return ApiResponse.Fail("Name must be 200 characters or fewer.");
+            var phoneError = Phone.Validate(phone);
+            if (phoneError != null) return ApiResponse.Fail(phoneError);
             if (phone != null && (phone.Length > 20 || !System.Text.RegularExpressions.Regex.IsMatch(phone, @"^\+?[0-9 ()-]{7,20}$")))
                 return ApiResponse.Fail("Enter a valid phone number.");
 

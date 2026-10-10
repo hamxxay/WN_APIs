@@ -51,6 +51,9 @@ namespace WorkNest.API.Controllers
                 && !string.IsNullOrWhiteSpace(request.IdNumber)
                 && !WorkNest.Application.Helpers.Cnic.IsValid(request.IdNumber))
                 return BadRequest(new { message = WorkNest.Application.Helpers.Cnic.ErrorMessage });
+            var phoneError = WorkNest.Application.Helpers.Phone.Validate(request.Phone);
+            if (phoneError != null)
+                return BadRequest(new { message = phoneError });
 
             var result = await _attendants.AddAttendantAsync(request);
             return StatusCode(201, new
@@ -68,7 +71,11 @@ namespace WorkNest.API.Controllers
         [HttpPut("api/attendants/{personId}")]
         public async Task<IActionResult> UpdateAttendant(int personId, [FromBody] UpdateAttendantRequest request)
         {
-            await _attendants.UpdateAttendantAsync(personId, request);
+            var phoneError = WorkNest.Application.Helpers.Phone.Validate(request?.Phone);
+            if (phoneError != null)
+                return BadRequest(new { message = phoneError });
+
+            await _attendants.UpdateAttendantAsync(personId, request!);
             return Ok(new { message = "Attendant contact details updated." });
         }
 

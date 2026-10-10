@@ -69,6 +69,10 @@ namespace WorkNest.API.Controllers
                 if (cnicError != null)
                     return BadRequest(new { isSuccessful = false, message = cnicError });
 
+                var phoneError = WorkNest.Application.Helpers.Phone.Validate(request.PhoneNumber);
+                if (phoneError != null)
+                    return BadRequest(new { isSuccessful = false, message = phoneError });
+
                 int? actorId = ResolveActorId();
                 var result = await _agreement.SendAgreementAsync(request, actorId);
 

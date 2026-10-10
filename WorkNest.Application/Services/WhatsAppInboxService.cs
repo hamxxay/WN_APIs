@@ -1,3 +1,4 @@
+using WorkNest.Application.Helpers;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.DTOs.WhatsApp;
 using WorkNest.Application.Interfaces;
@@ -53,6 +54,7 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> StartConversationAsync(WhatsAppStartConversationRequest request, int? userId)
         {
+            if (!Phone.IsValid(request.Phone)) return ApiResponse.Fail(Phone.ErrorMessage);
             var phone = ComplaintService.NormalizePhone(request.Phone);
             if (phone == null || phone.Length < 10) return ApiResponse.Fail("Enter a valid WhatsApp number (e.g. 03001234567).");
             var text = (request.Message ?? "").Trim();
