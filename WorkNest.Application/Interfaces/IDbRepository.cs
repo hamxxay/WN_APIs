@@ -341,7 +341,10 @@ namespace WorkNest.Application.Interfaces
         Task RegisterDeviceTokenAsync(int userId, string token, string platform);
 
         // --- Hikvision Devices & Cache Snapshots ---
-        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceDto>> GetHikDevicesAsync(string? location = null);
+        /// <summary>Machines; <paramref name="locationIds"/> limits them to those locations (plus unassigned ones), null = all.</summary>
+        Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikDeviceDto>> GetHikDevicesAsync(string? location = null, IReadOnlyCollection<int>? locationIds = null);
+        /// <summary>Sets the WorkNest location of a machine (null = unassigned). False when the machine or the column doesn't exist.</summary>
+        Task<bool> SetHikDeviceLocationDbAsync(int deviceId, int? locationId);
         Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null);
         Task<Dictionary<string, string>> GetHikCnicMapAsync();
         Task<IEnumerable<IDictionary<string, object?>>> GetHikBookedRoomsDbAsync();
@@ -369,7 +372,8 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<WorkNest.Application.DTOs.HikDevice.HikAccessSuspensionChange>> RunHikAccessSuspensionDbAsync(DateTime? today = null);
         Task SetHikAccessSuspensionAppliedDbAsync(int suspensionId, bool machinesBlocked);
         Task<IDictionary<string, object?>?> GetHikAccessSuspensionByBookingDetailDbAsync(int bookingDetailId);
-        Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync();
+        /// <summary>Door access card; <paramref name="locationIds"/> limits the suspended bookings to those locations (null = all).</summary>
+        Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync(IReadOnlyCollection<int>? locationIds = null);
         Task<(int? SuspensionId, int? BookingId)> ExtendHikAccessSuspensionDbAsync(int bookingDetailId, DateTime overrideUntil, string reason, int? createdById, string? createdByEmail);
         Task<IEnumerable<int>> GetBookingDetailIdsForBookingDbAsync(int bookingId);
         Task<List<List<IDictionary<string, object?>>>> GetBookingChallansByBookingDetailDbAsync(int bookingDetailId);
@@ -386,12 +390,12 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<int>> GetHikPendingOpDeviceIdsDbAsync(string employeeNo);
 
         // --- Hikvision Access Dashboard / Activity Log / Analytics (read-only) ---
-        Task<IDictionary<string, object?>> GetHikAccessStatsDbAsync();
-        Task<IEnumerable<IDictionary<string, object?>>> GetHikAccessEventsDbAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit);
+        Task<IDictionary<string, object?>> GetHikAccessStatsDbAsync(IReadOnlyCollection<int>? locationIds = null);
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikAccessEventsDbAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit, IReadOnlyCollection<int>? locationIds = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetHikSyncActivityDbAsync(int limit);
-        Task<IEnumerable<IDictionary<string, object?>>> GetHikExpiringDbAsync(int days);
-        Task<List<List<IDictionary<string, object?>>>> GetHikAccessAnalyticsDbAsync(DateTime from, DateTime to);
-        Task<List<List<IDictionary<string, object?>>>> GetHikUserAnalyticsDbAsync(string? employeeNo, string? name, DateTime from, DateTime to);
+        Task<IEnumerable<IDictionary<string, object?>>> GetHikExpiringDbAsync(int days, IReadOnlyCollection<int>? locationIds = null);
+        Task<List<List<IDictionary<string, object?>>>> GetHikAccessAnalyticsDbAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? locationIds = null);
+        Task<List<List<IDictionary<string, object?>>>> GetHikUserAnalyticsDbAsync(string? employeeNo, string? name, DateTime from, DateTime to, IReadOnlyCollection<int>? locationIds = null);
         Task SaveHikUserCnicDbAsync(string employeeNo, string name, string? cnic);
         Task SaveHikFingerprintTemplateDbAsync(string employeeNo, string name, int fingerNo, string template);
 

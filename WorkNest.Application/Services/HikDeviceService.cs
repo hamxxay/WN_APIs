@@ -13,14 +13,23 @@ namespace WorkNest.Application.Services
             _db = db;
         }
 
-        public async Task<IEnumerable<HikDeviceDto>> GetDevicesAsync(string? location = null)
+        public Task<bool> SetDeviceLocationAsync(int deviceId, int? locationId) =>
+            _db.SetHikDeviceLocationDbAsync(deviceId, locationId);
+
+        public async Task<IEnumerable<HikDeviceDto>> GetDevicesAsync(string? location = null, IReadOnlyCollection<int>? locationIds = null)
         {
-            return await _db.GetHikDevicesAsync(location);
+            return await _db.GetHikDevicesAsync(location, locationIds);
         }
 
-        public async Task<HikRosterResponseDto> GetRostersAsync(string? location = null, bool includeMachineAdmins = true)
+        public async Task<HikRosterResponseDto> GetRostersAsync(string? location = null, bool includeMachineAdmins = true, IReadOnlyCollection<int>? locationIds = null)
         {
             var snapshots = await _db.GetHikDeviceSnapshotsAsync(location);
+            if (locationIds != null)
+            {
+                // Location-bound callers: only the machines of their locations (+ unassigned ones).
+                var allowed = (await _db.GetHikDevicesAsync(null, locationIds)).Select(d => d.Id).ToHashSet();
+                snapshots = snapshots.Where(x => allowed.Contains(x.DeviceId)).ToList();
+            }
             var rosters = new List<HikDeviceRosterItemDto>();
 
             foreach (var (deviceId, rosterJson) in snapshots)

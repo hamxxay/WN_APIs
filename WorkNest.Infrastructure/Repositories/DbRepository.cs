@@ -2733,6 +2733,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             var open = openInvoiceStatusIds.Distinct().ToList();
             var openList = open.Count == 0 ? "-1" : string.Join(",", open);
             await using var c = await Open();
+            // Offline machines of the caller's location (and unassigned ones) once machines have a location.
+            var machinesLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationId is int l ? new[] { l } : null);
             var sql = $@"
                 DECLARE @Items TABLE (K VARCHAR(20) NOT NULL, ItemKey NVARCHAR(100) NOT NULL);
 
@@ -2809,7 +2811,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 UNION ALL
                 -- offline door machines; Last_seen makes a machine that drops off again count as new
                 SELECT 'MachinesOffline', CONCAT(hd.Id, ':', CONVERT(VARCHAR(19), hd.Last_seen, 126))
-                  FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 0;
+                  FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 0{machinesLoc};
 
                 SELECT K, ItemKey FROM @Items;";
             await using var cmd = new SqlCommand(sql, c);
@@ -4649,26 +4651,30 @@ END";
 
         // --- Hikvision Devices & Cache Snapshots Implementation ---
 
-        public async Task<IEnumerable<HikDeviceDto>> GetHikDevicesAsync(string? location = null)
+        public async Task<IEnumerable<HikDeviceDto>> GetHikDevicesAsync(string? location = null, IReadOnlyCollection<int>? locationIds = null)
         {
             await using var conn = await Open();
-            var sql = @"SELECT 
+            var hasLoc = await DeviceLocationSql.HasColumnAsync(conn);
+            var sql = $@"SELECT 
                             d.Id AS id, 
                             d.Device_Name AS name, 
                             g.Name AS grp, 
                             d.Code AS code, 
                             d.Location AS location, 
                             d.Online AS online, 
-                            d.Last_seen AS last_seen
+                            d.Last_seen AS last_seen,
+                            {(hasLoc ? "d.LocationId AS location_id, wl.Name AS location_name" : "CAST(NULL AS INT) AS location_id, CAST(NULL AS NVARCHAR(200)) AS location_name")}
                         FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
-                        LEFT JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id";
+                        LEFT JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id
+                        {(hasLoc ? "LEFT JOIN dbo.WN_Locations wl WITH (NOLOCK) ON wl.Id = d.LocationId" : "")}
+                        WHERE 1 = 1{DeviceLocationSql.Filter(hasLoc, "d", locationIds)}";
             var shouldFilterLocation = !string.IsNullOrWhiteSpace(location)
                 && !int.TryParse(location, out _)
                 && !string.Equals(location, "all", StringComparison.OrdinalIgnoreCase);
 
             if (shouldFilterLocation)
             {
-                sql += " WHERE d.Location = @Location";
+                sql += " AND d.Location = @Location";
             }
             sql += " ORDER BY d.Device_Name";
 
@@ -4690,10 +4696,22 @@ END";
                     Code = r.IsDBNull(r.GetOrdinal("code")) ? null : r.GetString(r.GetOrdinal("code")),
                     Location = r.IsDBNull(r.GetOrdinal("location")) ? null : r.GetString(r.GetOrdinal("location")),
                     Online = !r.IsDBNull(r.GetOrdinal("online")) && r.GetBoolean(r.GetOrdinal("online")) ? 1 : 0,
-                    LastSeen = r.IsDBNull(r.GetOrdinal("last_seen")) ? null : r.GetDateTime(r.GetOrdinal("last_seen")).ToString("yyyy-MM-ddTHH:mm:ss")
+                    LastSeen = r.IsDBNull(r.GetOrdinal("last_seen")) ? null : r.GetDateTime(r.GetOrdinal("last_seen")).ToString("yyyy-MM-ddTHH:mm:ss"),
+                    LocationId = r.IsDBNull(r.GetOrdinal("location_id")) ? null : r.GetInt32(r.GetOrdinal("location_id")),
+                    LocationName = r.IsDBNull(r.GetOrdinal("location_name")) ? null : r.GetString(r.GetOrdinal("location_name"))
                 });
             }
             return devices;
+        }
+
+        public async Task<bool> SetHikDeviceLocationDbAsync(int deviceId, int? locationId)
+        {
+            await using var conn = await Open();
+            if (!await DeviceLocationSql.HasColumnAsync(conn)) return false;
+            await using var cmd = new SqlCommand("UPDATE dbo.WN_HIK_Devices SET LocationId = @Loc WHERE Id = @Id;", conn);
+            cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = deviceId;
+            return await cmd.ExecuteNonQueryAsync() > 0;
         }
 
         public async Task<IEnumerable<(int DeviceId, string? RosterJson)>> GetHikDeviceSnapshotsAsync(string? location = null)
@@ -5159,16 +5177,22 @@ END";
         /// Dashboard overview (read-only): [0] machine / queued-operation counts,
         /// [1] open suspensions of bookings that are still running.
         /// </summary>
-        public async Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync()
+        public async Task<List<List<IDictionary<string, object?>>>> GetHikAccessOverviewDbAsync(IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
+            var devLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationIds);
+            // Machines are shared by the building, so they stay unfiltered; suspended bookings follow the location.
+            // Location ids are ints from the caller's claims, never user text.
+            var ids = locationIds?.Distinct().ToList();
+            var locFilter = ids is null ? "" :
+                $"AND EXISTS (SELECT 1 FROM dbo.WN_Spaces sp WITH (NOLOCK) WHERE sp.Id = b.SpaceId AND sp.LocationId IN ({(ids.Count == 0 ? "-1" : string.Join(",", ids))}))";
             const string sql = @"
                 DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
                 SELECT
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS Devices,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 1) AS DevicesOnline,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_PendingOps WITH (NOLOCK)) AS PendingOps,
-                    (SELECT COUNT(DISTINCT device_id) FROM dbo.WN_HIK_PendingOps WITH (NOLOCK)) AS PendingOpsDevices;
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE 1 = 1{devLoc}) AS Devices,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 1{devLoc}) AS DevicesOnline,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_PendingOps po WITH (NOLOCK) JOIN dbo.WN_HIK_Devices hd WITH (NOLOCK) ON hd.Id = po.device_id WHERE 1 = 1{devLoc}) AS PendingOps,
+                    (SELECT COUNT(DISTINCT po.device_id) FROM dbo.WN_HIK_PendingOps po WITH (NOLOCK) JOIN dbo.WN_HIK_Devices hd WITH (NOLOCK) ON hd.Id = po.device_id WHERE 1 = 1{devLoc}) AS PendingOpsDevices;
 
                 SELECT
                     s.Id AS SuspensionId, s.BookingId, s.Reason, s.SuspendedAt, s.OverrideUntil,
@@ -5198,6 +5222,7 @@ END";
                   AND b.BookingStatusId NOT IN (3, 4, 6, 86) -- rejected / old cancelled / no show / cancelled
                   AND bd.BookingDetailId IS NOT NULL
                   AND bd.BookingEnd >= @Today   -- booking still running
+                  {locFilter}
                 ORDER BY CASE WHEN s.OverrideUntil >= @Today THEN 1 ELSE 0 END, ppl.EnrolledPeople DESC, s.SuspendedAt DESC;";
             await using var cmd = new SqlCommand(sql, c);
             await using var r = await cmd.ExecuteReaderAsync();
@@ -5426,36 +5451,45 @@ END";
             return sets;
         }
 
-        public async Task<IDictionary<string, object?>> GetHikAccessStatsDbAsync()
+        public async Task<IDictionary<string, object?>> GetHikAccessStatsDbAsync(IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
+            // Location-bound callers: machines of their locations (+ unassigned), scans on those machines,
+            // members / grants with access on those machines.
+            var hasLoc = await DeviceLocationSql.HasColumnAsync(c);
+            var devLoc = DeviceLocationSql.Filter(hasLoc, "hd", locationIds);
+            var evDev = DeviceLocationSql.DeviceIdIn(hasLoc, "device_id", locationIds);
+            var evDevE = DeviceLocationSql.DeviceIdIn(hasLoc, "e.device_id", locationIds);
+            var grDev = DeviceLocationSql.DeviceIdIn(hasLoc, "device_id", locationIds);
+            var mem = DeviceLocationSql.MemberIn(hasLoc, "em.id", locationIds);
             var sql = $@"
                 DECLARE @Today DATETIME2(0) = CAST(CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) AS DATETIME2(0));
                 DECLARE @Tomorrow DATETIME2(0) = DATEADD(day, 1, @Today);
                 DECLARE @Yesterday DATETIME2(0) = DATEADD(day, -1, @Today);
                 SELECT
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS devices,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 1) AS devicesOnline,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE status = 'active') AS activeMembers,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE status = 'expired') AS expiredMembers,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE kind = 'card') AS cards,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_AccessGrants WITH (NOLOCK) WHERE sync_state IN ('pending', 'error', 'removing')) AS pendingSync,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE event_time >= @Today AND event_time < @Tomorrow) AS todayScans,
-                    (SELECT COUNT(*) FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE event_time >= @Yesterday AND event_time < @Today) AS yesterdayScans,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE 1 = 1{devLoc}) AS devices,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 1{devLoc}) AS devicesOnline,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees em WITH (NOLOCK) WHERE em.status = 'active'{mem}) AS activeMembers,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees em WITH (NOLOCK) WHERE em.status = 'expired'{mem}) AS expiredMembers,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Employees em WITH (NOLOCK) WHERE em.kind = 'card'{mem}) AS cards,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_AccessGrants WITH (NOLOCK) WHERE sync_state IN ('pending', 'error', 'removing'){grDev}) AS pendingSync,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE event_time >= @Today AND event_time < @Tomorrow{evDev}) AS todayScans,
+                    (SELECT COUNT(*) FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE event_time >= @Yesterday AND event_time < @Today{evDev}) AS yesterdayScans,
                     (SELECT COUNT(DISTINCT employee_no) FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                        WHERE event_time >= @Today AND event_time < @Tomorrow AND employee_no IS NOT NULL AND employee_no <> '') AS uniqueToday,
+                        WHERE event_time >= @Today AND event_time < @Tomorrow AND employee_no IS NOT NULL AND employee_no <> ''{evDev}) AS uniqueToday,
                     (SELECT COUNT(*) FROM dbo.WN_HIK_Events e WITH (NOLOCK)
                         LEFT JOIN dbo.WN_HIK_EventCategories ec WITH (NOLOCK) ON ec.Code = e.access_event
-                        WHERE e.event_time >= @Today AND e.event_time < @Tomorrow
+                        WHERE e.event_time >= @Today AND e.event_time < @Tomorrow{evDevE}
                           AND COALESCE(CAST(ec.Is_denied AS INT), {HikDeniedFallbackSql}) = 1) AS deniedToday;";
             await using var cmd = new SqlCommand(sql, c);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? ToDict(r) : new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikAccessEventsDbAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikAccessEventsDbAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit, IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
+            var evDevE = DeviceLocationSql.DeviceIdIn(await DeviceLocationSql.HasColumnAsync(c), "e.device_id", locationIds);
             var sql = $@"
                 SELECT TOP (@Limit)
                     e.id,
@@ -5472,7 +5506,7 @@ END";
                 LEFT JOIN dbo.WN_HIK_EventCategories ec WITH (NOLOCK) ON ec.Code = e.access_event
                 WHERE (@From IS NULL OR e.event_time >= @From)
                   AND (@To IS NULL OR e.event_time < @To)
-                  AND (@DeviceId IS NULL OR e.device_id = @DeviceId)
+                  AND (@DeviceId IS NULL OR e.device_id = @DeviceId){evDevE}
                   AND ((@Emp IS NULL AND @Name IS NULL)
                        OR (@Emp IS NOT NULL AND e.employee_no = @Emp)
                        OR (@Emp IS NULL AND e.name = @Name))
@@ -5497,15 +5531,16 @@ END";
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikExpiringDbAsync(int days)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetHikExpiringDbAsync(int days, IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
-            const string sql = @"
+            var devLocD = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "d", locationIds);
+            var sql = $@"
                 SELECT e.employee_no, e.name, e.valid_end, d.Device_Name AS device
                 FROM dbo.WN_HIK_Employees e WITH (NOLOCK)
                 JOIN dbo.WN_HIK_AccessGrants g WITH (NOLOCK) ON g.employee_id = e.id
                 JOIN dbo.WN_HIK_Devices d WITH (NOLOCK) ON d.Id = g.device_id
-                WHERE e.valid_end IS NOT NULL AND e.valid_end <= DATEADD(day, @Days, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)))
+                WHERE e.valid_end IS NOT NULL AND e.valid_end <= DATEADD(day, @Days, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))){devLocD}
                 ORDER BY e.valid_end ASC;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@Days", days);
@@ -5517,24 +5552,27 @@ END";
         /// Result sets: [0] hourly, [1] doors, [2] top users, [3] totals + method split, [4] daily.
         /// Range is [from, to) on the terminal's local event_time.
         /// </summary>
-        public async Task<List<List<IDictionary<string, object?>>>> GetHikAccessAnalyticsDbAsync(DateTime from, DateTime to)
+        public async Task<List<List<IDictionary<string, object?>>>> GetHikAccessAnalyticsDbAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
+            var hasLocA = await DeviceLocationSql.HasColumnAsync(c);
+            var evDevA = DeviceLocationSql.DeviceIdIn(hasLocA, "device_id", locationIds);
+            var evDevAE = DeviceLocationSql.DeviceIdIn(hasLocA, "e.device_id", locationIds);
             var sql = $@"
                 SELECT DATEPART(hour, event_time) AS hr, COUNT(*) AS cnt
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE event_time >= @From AND event_time < @To
+                WHERE event_time >= @From AND event_time < @To{evDevA}
                 GROUP BY DATEPART(hour, event_time);
 
                 SELECT device_name AS name, COUNT(*) AS cnt
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE event_time >= @From AND event_time < @To AND device_name IS NOT NULL
+                WHERE event_time >= @From AND event_time < @To{evDevA} AND device_name IS NOT NULL
                 GROUP BY device_name
                 ORDER BY cnt DESC;
 
                 SELECT TOP 10 employee_no, name, COUNT(*) AS cnt
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE event_time >= @From AND event_time < @To
+                WHERE event_time >= @From AND event_time < @To{evDevA}
                   AND ((employee_no IS NOT NULL AND employee_no <> '') OR (name IS NOT NULL AND name <> ''))
                 GROUP BY employee_no, name
                 ORDER BY cnt DESC;
@@ -5549,11 +5587,11 @@ END";
                     SUM(CASE WHEN NULLIF(e.card_no, '') IS NULL AND (e.access_event BETWEEN 21 AND 26 OR e.access_event = 31) THEN 1 ELSE 0 END) AS door
                 FROM dbo.WN_HIK_Events e WITH (NOLOCK)
                 LEFT JOIN dbo.WN_HIK_EventCategories ec WITH (NOLOCK) ON ec.Code = e.access_event
-                WHERE e.event_time >= @From AND e.event_time < @To;
+                WHERE e.event_time >= @From AND e.event_time < @To{evDevAE};
 
                 SELECT CAST(event_time AS DATE) AS d, COUNT(*) AS cnt
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE event_time >= @From AND event_time < @To
+                WHERE event_time >= @From AND event_time < @To{evDevA}
                 GROUP BY CAST(event_time AS DATE)
                 ORDER BY d;";
             await using var cmd = new SqlCommand(sql, c);
@@ -5567,9 +5605,10 @@ END";
         /// Result sets: [0] profile (WN_HIK_Employees + WN_HIK_Users), [1] doors, [2] hourly, [3] range totals, [4] all-time total.
         /// The person is matched by employee # when given, otherwise by name.
         /// </summary>
-        public async Task<List<List<IDictionary<string, object?>>>> GetHikUserAnalyticsDbAsync(string? employeeNo, string? name, DateTime from, DateTime to)
+        public async Task<List<List<IDictionary<string, object?>>>> GetHikUserAnalyticsDbAsync(string? employeeNo, string? name, DateTime from, DateTime to, IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
+            var evDevU = DeviceLocationSql.DeviceIdIn(await DeviceLocationSql.HasColumnAsync(c), "device_id", locationIds);
             const string who = "((@Emp IS NOT NULL AND employee_no = @Emp) OR (@Emp IS NULL AND name = @Name))";
             var sql = $@"
                 SELECT
@@ -5584,23 +5623,23 @@ END";
 
                 SELECT device_name AS name, COUNT(*) AS cnt
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE {who} AND event_time >= @From AND event_time < @To AND device_name IS NOT NULL
+                WHERE {who}{evDevU} AND event_time >= @From AND event_time < @To AND device_name IS NOT NULL
                 GROUP BY device_name
                 ORDER BY cnt DESC;
 
                 SELECT DATEPART(hour, event_time) AS hr, COUNT(*) AS cnt
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE {who} AND event_time >= @From AND event_time < @To
+                WHERE {who}{evDevU} AND event_time >= @From AND event_time < @To
                 GROUP BY DATEPART(hour, event_time);
 
                 SELECT COUNT(*) AS total, MIN(event_time) AS firstScan, MAX(event_time) AS lastScan,
                        MAX(NULLIF(card_no, '')) AS cardNo
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE {who} AND event_time >= @From AND event_time < @To;
+                WHERE {who}{evDevU} AND event_time >= @From AND event_time < @To;
 
                 SELECT COUNT(*) AS total
                 FROM dbo.WN_HIK_Events WITH (NOLOCK)
-                WHERE {who};";
+                WHERE {who}{evDevU};";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.Add("@Emp", SqlDbType.NVarChar, 32).Value = string.IsNullOrWhiteSpace(employeeNo) ? DBNull.Value : employeeNo.Trim();
             cmd.Parameters.Add("@Name", SqlDbType.NVarChar, 128).Value = string.IsNullOrWhiteSpace(name) ? DBNull.Value : name.Trim();

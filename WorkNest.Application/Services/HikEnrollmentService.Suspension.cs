@@ -160,9 +160,9 @@ namespace WorkNest.Application.Services
 
         private const int TemporaryAccessEndingSoonDays = 3;
 
-        public async Task<HikAccessOverviewDto> GetAccessOverviewAsync()
+        public async Task<HikAccessOverviewDto> GetAccessOverviewAsync(IReadOnlyCollection<int>? locationIds = null)
         {
-            var sets = await _db.GetHikAccessOverviewDbAsync();
+            var sets = await _db.GetHikAccessOverviewDbAsync(locationIds);
             var counts = sets.Count > 0 ? sets[0].FirstOrDefault() : null;
             int Int(IDictionary<string, object?>? row, string key) =>
                 row != null && row.TryGetValue(key, out var v) && v != null ? Convert.ToInt32(v) : 0;

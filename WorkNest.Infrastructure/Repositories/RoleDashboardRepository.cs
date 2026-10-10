@@ -167,8 +167,12 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@RenewalDays", SqlDbType.Int).Value = renewalDays;
                 });
 
-        public Task<List<List<IDictionary<string, object?>>>> GetTeamAsync(IReadOnlyCollection<int>? locationIds, DateTime now) =>
-            QueryAsync($@"
+        public async Task<List<List<IDictionary<string, object?>>>> GetTeamAsync(IReadOnlyCollection<int>? locationIds, DateTime now)
+        {
+            bool hasLoc;
+            await using (var c = new SqlConnection(_connectionString)) { await c.OpenAsync(); hasLoc = await DeviceLocationSql.HasColumnAsync(c); }
+            var devLoc = DeviceLocationSql.Filter(hasLoc, "hd", locationIds);
+            return await QueryAsync($@"
                 {SpacesSql(locationIds)}
                 DECLARE @OpenComplaints INT = 0, @UnreadWhatsApp INT = 0, @KycPending INT = 0, @AccessSuspended INT = 0;
                 IF OBJECT_ID(N'dbo.WN_Complaints', N'U') IS NOT NULL
@@ -186,10 +190,11 @@ namespace WorkNest.Infrastructure.Repositories
                 SELECT @OpenComplaints AS OpenComplaints, @UnreadWhatsApp AS UnreadWhatsApp,
                        (SELECT COUNT(*) FROM dbo.WN_Contacts WITH (NOLOCK) WHERE StatusId = 1) AS NewInquiries,
                        @KycPending AS KycPending, @AccessSuspended AS AccessSuspended,
-                       (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 0) AS MachinesOffline,
-                       (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS Machines;
-                SELECT TOP 8 Device_Name AS Name, Last_seen AS LastSeen FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 0 ORDER BY Device_Name;",
+                       (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 0{devLoc}) AS MachinesOffline,
+                       (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE 1 = 1{devLoc}) AS Machines;
+                SELECT TOP 8 hd.Device_Name AS Name, hd.Last_seen AS LastSeen FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 0{devLoc} ORDER BY hd.Device_Name;",
                 p => p.Add("@Today", SqlDbType.Date).Value = now.Date);
+        }
 
         public Task<List<List<IDictionary<string, object?>>>> GetLocationComparisonAsync(DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> voidStatusIds) =>
             QueryAsync($@"

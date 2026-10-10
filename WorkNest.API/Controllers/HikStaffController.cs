@@ -30,7 +30,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetStaff()
         {
             // Machine-admin users are only visible to admin / super admin.
-            var result = await _staff.GetStaffAsync(User.IsAdminOrSuperAdmin());
+            var result = await _staff.GetStaffAsync(User.IsAdminOrSuperAdmin(), Scope());
             return Ok(result);
         }
 
@@ -64,6 +64,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/hik/staff")]
         public async Task<IActionResult> CreateStaff([FromBody] HikStaffCreateRequest request)
         {
+            request.CallerLocationIds = Scope();
             var result = await _staff.CreateStaffAsync(request);
             return result.Ok ? Ok(result) : BadRequest(result);
         }
@@ -76,6 +77,7 @@ namespace WorkNest.API.Controllers
         {
             if (await IsHiddenMachineAdminAsync(employeeNo)) return Forbid();
 
+            if (request != null) request.CallerLocationIds = Scope();
             var result = await _staff.UpdateStaffMachinesAsync(employeeNo, request);
             return result.Ok ? Ok(result) : BadRequest(result);
         }
@@ -123,5 +125,8 @@ namespace WorkNest.API.Controllers
             var staff = await _staff.GetStaffAsync();
             return staff.Any(s => s.EmployeeNo == employeeNo && s.IsMachineAdmin);
         }
+
+        /// <summary>Admins / sales executives / receptionists work with their locations' machines; super admins with all.</summary>
+        private IReadOnlyCollection<int>? Scope() => User.IsLocationBoundRole() ? User.GetLocationIds() : null;
     }
 }

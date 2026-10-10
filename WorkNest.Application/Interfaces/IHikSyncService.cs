@@ -23,6 +23,7 @@ namespace WorkNest.Application.Interfaces
         Task<HikDeviceTestResult?> TestDeviceAsync(int deviceId);
 
         /// <summary>"Test all": tests every machine in parallel and saves online / offline.</summary>
-        Task<List<HikDeviceTestResult>> TestAllDevicesAsync();
+        /// <summary><paramref name="onlyDeviceIds"/>: test only these machines (null = every machine).</summary>
+        Task<List<HikDeviceTestResult>> TestAllDevicesAsync(IReadOnlyCollection<int>? onlyDeviceIds = null);
     }
 }

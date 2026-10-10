@@ -31,16 +31,16 @@ namespace WorkNest.Application.Services
             _clock = clock;
         }
 
-        public async Task<HikAccessDashboardDto> GetDashboardAsync(int expiringDays = 7)
+        public async Task<HikAccessDashboardDto> GetDashboardAsync(int expiringDays = 7, IReadOnlyCollection<int>? locationIds = null)
         {
             expiringDays = Math.Clamp(expiringDays, 1, 60);
             var today = _clock.Today;
 
-            var statsTask = _db.GetHikAccessStatsDbAsync();
-            var devicesTask = _db.GetHikDevicesAsync();
-            var analyticsTask = _db.GetHikAccessAnalyticsDbAsync(today, today.AddDays(1));
-            var recentTask = _db.GetHikAccessEventsDbAsync(today, today.AddDays(1), null, null, null, 10);
-            var expiringTask = _db.GetHikExpiringDbAsync(expiringDays);
+            var statsTask = _db.GetHikAccessStatsDbAsync(locationIds);
+            var devicesTask = _db.GetHikDevicesAsync(null, locationIds);
+            var analyticsTask = _db.GetHikAccessAnalyticsDbAsync(today, today.AddDays(1), locationIds);
+            var recentTask = _db.GetHikAccessEventsDbAsync(today, today.AddDays(1), null, null, null, 10, locationIds);
+            var expiringTask = _db.GetHikExpiringDbAsync(expiringDays, locationIds);
             await Task.WhenAll(statsTask, devicesTask, analyticsTask, recentTask, expiringTask);
 
             var s = statsTask.Result;
@@ -79,15 +79,21 @@ namespace WorkNest.Application.Services
             };
         }
 
-        public async Task<IEnumerable<HikAccessEventDto>> GetEventsAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit = 500)
+        public async Task<IEnumerable<HikAccessEventDto>> GetEventsAsync(DateTime? from, DateTime? to, int? deviceId, string? employeeNo, string? name, int limit = 500, IReadOnlyCollection<int>? locationIds = null)
         {
-            var rows = await _db.GetHikAccessEventsDbAsync(from, to, deviceId, employeeNo, name, Math.Clamp(limit, 1, 2000));
+            var rows = await _db.GetHikAccessEventsDbAsync(from, to, deviceId, employeeNo, name, Math.Clamp(limit, 1, 2000), locationIds);
             return rows.Select(MapEvent).ToList();
         }
 
-        public async Task<IEnumerable<HikSyncActivityDto>> GetSyncActivityAsync(int limit = 200)
+        public async Task<IEnumerable<HikSyncActivityDto>> GetSyncActivityAsync(int limit = 200, IReadOnlyCollection<int>? locationIds = null)
         {
-            var rows = await _db.GetHikSyncActivityDbAsync(Math.Clamp(limit, 1, 1000));
+            var rows = (await _db.GetHikSyncActivityDbAsync(Math.Clamp(limit, 1, 1000))).ToList();
+            if (locationIds != null)
+            {
+                // Location-bound callers: entries of their locations' machines (+ unassigned); entries with no machine stay.
+                var allowed = (await _db.GetHikDevicesAsync(null, locationIds)).Select(d => d.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                rows = rows.Where(r => string.IsNullOrWhiteSpace(Str(r, "device_name")) || allowed.Contains(Str(r, "device_name")!)).ToList();
+            }
             return rows.Select(r => new HikSyncActivityDto
             {
                 Id = Long(r, "id"),
@@ -100,11 +106,11 @@ namespace WorkNest.Application.Services
             }).ToList();
         }
 
-        public async Task<HikAccessAnalyticsDto> GetAnalyticsAsync(DateTime from, DateTime to)
+        public async Task<HikAccessAnalyticsDto> GetAnalyticsAsync(DateTime from, DateTime to, IReadOnlyCollection<int>? locationIds = null)
         {
             var (start, end) = Range(from, to);
-            var setsTask = _db.GetHikAccessAnalyticsDbAsync(start, end);
-            var statsTask = _db.GetHikAccessStatsDbAsync();
+            var setsTask = _db.GetHikAccessAnalyticsDbAsync(start, end, locationIds);
+            var statsTask = _db.GetHikAccessStatsDbAsync(locationIds);
             await Task.WhenAll(setsTask, statsTask);
             var sets = setsTask.Result;
 
@@ -147,11 +153,11 @@ namespace WorkNest.Application.Services
             };
         }
 
-        public async Task<HikUserAnalyticsDto> GetUserAnalyticsAsync(string? employeeNo, string? name, DateTime from, DateTime to)
+        public async Task<HikUserAnalyticsDto> GetUserAnalyticsAsync(string? employeeNo, string? name, DateTime from, DateTime to, IReadOnlyCollection<int>? locationIds = null)
         {
             var (start, end) = Range(from, to);
-            var setsTask = _db.GetHikUserAnalyticsDbAsync(employeeNo, name, start, end);
-            var recentTask = _db.GetHikAccessEventsDbAsync(start, end, null, employeeNo, name, 20);
+            var setsTask = _db.GetHikUserAnalyticsDbAsync(employeeNo, name, start, end, locationIds);
+            var recentTask = _db.GetHikAccessEventsDbAsync(start, end, null, employeeNo, name, 20, locationIds);
             await Task.WhenAll(setsTask, recentTask);
             var sets = setsTask.Result;
 

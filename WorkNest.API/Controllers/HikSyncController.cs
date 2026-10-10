@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Extensions;
 using WorkNest.Application.Services;
 using WorkNest.Common.Responses;
 
@@ -44,9 +45,13 @@ namespace WorkNest.API.Controllers
 
         /// <summary>"Test all machines": tests every machine in parallel and saves online / offline.</summary>
         [HttpPost("api/hik/devices/test-all")]
-        public async Task<IActionResult> TestAllDevices()
+        public async Task<IActionResult> TestAllDevices([FromServices] IHikDeviceService devices)
         {
-            var results = await _sync.TestAllDevicesAsync();
+            // Admins test the machines of their locations (+ unassigned); super admins every machine.
+            IReadOnlyCollection<int>? only = null;
+            if (User.IsLocationBoundRole())
+                only = (await devices.GetDevicesAsync(null, User.GetLocationIds())).Select(d => d.Id).ToList();
+            var results = await _sync.TestAllDevicesAsync(only);
             var online = results.Count(r => r.Online);
             return Ok(ApiResponse.Ok(results, $"{online} of {results.Count} machines online."));
         }

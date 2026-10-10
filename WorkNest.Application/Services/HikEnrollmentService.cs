@@ -18,10 +18,12 @@ namespace WorkNest.Application.Services
         private readonly ILogger<HikEnrollmentService> _logger;
         private readonly IOrderStatusService _orderStatus;
         private readonly IBusinessClock _clock;
+        private readonly IRecordScopeRepository _scope;
 
-        public HikEnrollmentService(IDbRepository db, IHikIsapiClient isapi, ILogger<HikEnrollmentService> logger, IOrderStatusService orderStatus, IBusinessClock clock)
+        public HikEnrollmentService(IDbRepository db, IHikIsapiClient isapi, ILogger<HikEnrollmentService> logger, IOrderStatusService orderStatus, IBusinessClock clock, IRecordScopeRepository scope)
         {
             _clock = clock;
+            _scope = scope;
             _db = db;
             _isapi = isapi;
             _logger = logger;
@@ -67,6 +69,8 @@ namespace WorkNest.Application.Services
             await ReplicateAsync(prep,
                 d => _isapi.AddFingerprintAsync(d, prep.EmployeeNo, capture.FingerData!, fingerNo),
                 grant => AddPrint(grant, capture.FingerData!, fingerNo));
+            await VerifyAsync(prep, "fingerprint", async d =>
+                await _isapi.ReadFingerprintsAsync(d, prep.EmployeeNo) is { } prints ? prints.Any(p => p.FingerPrintId == fingerNo) : null);
             prep.Result.Ok = true;
             prep.Result.Quality = capture.Quality;
             return prep.Result;
@@ -88,6 +92,8 @@ namespace WorkNest.Application.Services
             await ReplicateAsync(prep,
                 d => _isapi.AddCardAsync(d, prep.EmployeeNo, cardNo),
                 grant => AddCard(grant, cardNo));
+            await VerifyAsync(prep, "card", async d =>
+                await _isapi.ReadCardsAsync(d, prep.EmployeeNo) is { } cards ? cards.Any(c => string.Equals(c, cardNo, StringComparison.OrdinalIgnoreCase)) : null);
             prep.Result.Ok = true;
             prep.Result.CardNo = cardNo;
             return prep.Result;
@@ -105,8 +111,58 @@ namespace WorkNest.Application.Services
             // HIK credential sync copies the face from an online machine once they exist on the offline one.
             await ReplicateAsync(prep, d => _isapi.AddFaceByImageAsync(d, prep.EmployeeNo, capture.Jpeg!), _ => { },
                 queuedNote: "Machine offline — user queued; the face is copied by the HIK credential sync after it reconnects.");
+            await VerifyAsync(prep, "face", async d => await _isapi.ReadFacesAsync(d, prep.EmployeeNo) is { } faces ? faces.Count > 0 : null);
             prep.Result.Ok = true;
             return prep.Result;
+        }
+
+        /// <summary>
+        /// Self-check: reads the credential back from every machine it was saved on (in parallel) instead of assuming
+        /// the save worked. A machine where it is missing is reported as failed; one that can't be read stays "saved,
+        /// not checked". Fills VerifiedCount / TargetCount / QueuedCount and a one-line Summary.
+        /// </summary>
+        private async Task VerifyAsync(Prepared prep, string credential, Func<HikDeviceConnection, Task<bool?>> isThere)
+        {
+            var byId = new[] { prep.Capture! }.Concat(prep.Others).GroupBy(d => d.Id).ToDictionary(g => g.Key, g => g.First());
+            var saved = prep.Result.Devices.Where(x => x.Ok && !x.Queued && byId.ContainsKey(x.DeviceId)).ToList();
+            var checks = await Task.WhenAll(saved.Select(async x =>
+            {
+                try
+                {
+                    var found = await isThere(byId[x.DeviceId]);
+                    if (found == false)
+                    {
+                        // Machines can need a moment to store a new face / print: check once more before calling it missing.
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                        found = await isThere(byId[x.DeviceId]);
+                    }
+                    return (Line: x, Found: found);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Could not read back the {Credential} of #{Emp} from {Device}", credential, prep.EmployeeNo, x.Device);
+                    return (Line: x, Found: (bool?)null);
+                }
+            }));
+            foreach (var (line, found) in checks)
+            {
+                line.Verified = found;
+                if (found == false)
+                {
+                    line.Ok = false;
+                    line.Error = $"The {credential} was not found on this machine after saving. Please try again.";
+                }
+            }
+
+            var r = prep.Result;
+            r.QueuedCount = r.Devices.Count(x => x.Queued);
+            r.TargetCount = r.Devices.Count(x => !x.Queued);
+            r.VerifiedCount = r.Devices.Count(x => x.Verified == true);
+            var notChecked = r.Devices.Count(x => x.Ok && !x.Queued && x.Verified == null);
+            var parts = new List<string> { $"Saved on {r.VerifiedCount} of {r.TargetCount} machine{(r.TargetCount == 1 ? "" : "s")}" };
+            if (notChecked > 0) parts.Add($"{notChecked} could not be checked");
+            if (r.QueuedCount > 0) parts.Add($"{r.QueuedCount} offline (queued)");
+            r.Summary = string.Join(" · ", parts);
         }
 
         /// <summary>Typed card number (manual) — validated before anything is pushed to a machine.</summary>
@@ -240,12 +296,19 @@ namespace WorkNest.Application.Services
         private async Task<(List<HikDeviceConnection> All, List<HikDeviceConnection> Room)> ResolveBookingMachinesAsync(HikAttendantContext ctx)
         {
             var allDevices = (await _db.GetHikDevicesAsync()).ToList();
+            // Only machines of the booking's location (machines without a location yet count everywhere), so a
+            // tenant of one branch is never put on another branch's room or entrance machines.
+            var bookingLocations = await _scope.GetLocationIdsAsync(RecordKind.BookingDetail, ctx.BookingDetailId.ToString());
+            bool AtBookingLocation(HikDeviceDto d) =>
+                d.LocationId == null || bookingLocations == null || bookingLocations.Count == 0 || bookingLocations.Contains(d.LocationId.Value);
             var roomIds = allDevices
+                .Where(AtBookingLocation)
                 .Where(d => !(d.Grp ?? "").StartsWith("Entrance", StringComparison.OrdinalIgnoreCase))
                 .Where(d => RoomMatches(d.Code, ctx.SpaceCode, ctx.SpaceName))
                 .Select(d => d.Id)
                 .ToList();
-            var entranceIds = await _db.GetHikEntranceDeviceIdsDbAsync();
+            var atLocation = allDevices.Where(AtBookingLocation).Select(d => d.Id).ToHashSet();
+            var entranceIds = (await _db.GetHikEntranceDeviceIdsDbAsync()).Where(atLocation.Contains).ToList();
             var devices = (await _db.GetHikDeviceConnectionsDbAsync(roomIds.Concat(entranceIds))).ToList();
             return (devices, devices.Where(d => roomIds.Contains(d.Id)).ToList());
         }

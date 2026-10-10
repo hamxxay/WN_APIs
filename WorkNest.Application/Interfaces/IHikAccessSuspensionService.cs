@@ -14,6 +14,7 @@ namespace WorkNest.Application.Interfaces
         Task<HikBookingChallansDto> GetBookingChallansAsync(int bookingDetailId);
         Task<HikAccessSyncResultDto> ExtendAccessAsync(int bookingDetailId, HikAccessExtendRequest request, string? createdByEmail);
         /// <summary>Admin dashboard: machines online/offline, queued operations, suspended bookings.</summary>
-        Task<HikAccessOverviewDto> GetAccessOverviewAsync();
+        /// <summary>Machines (all) and suspended bookings, limited to <paramref name="locationIds"/> when given.</summary>
+        Task<HikAccessOverviewDto> GetAccessOverviewAsync(IReadOnlyCollection<int>? locationIds = null);
     }
 }

@@ -76,6 +76,8 @@ namespace WorkNest.Application.DTOs.HikDevice
         /// <summary>Machine was offline: the change is in WN_HIK_PendingOps and applies when it reconnects.</summary>
         public bool Queued { get; set; }
         public string? Error { get; set; }
+        /// <summary>Read back from the machine after saving: true = found there, false = missing, null = could not check.</summary>
+        public bool? Verified { get; set; }
     }
 
     public class HikEnrollResultDto
@@ -88,6 +90,13 @@ namespace WorkNest.Application.DTOs.HikDevice
         public string? CardNo { get; set; }
         public string? Quality { get; set; }
         public List<HikEnrollDeviceResultDto> Devices { get; set; } = new();
+        /// <summary>Machines the credential was confirmed on by reading it back.</summary>
+        public int VerifiedCount { get; set; }
+        /// <summary>Machines that should have it now (online; queued machines are counted separately).</summary>
+        public int TargetCount { get; set; }
+        public int QueuedCount { get; set; }
+        /// <summary>E.g. "Saved on 3 of 3 machines · 1 machine offline (queued)".</summary>
+        public string? Summary { get; set; }
     }
 
     /// <summary>
