@@ -79,8 +79,13 @@ namespace WorkNest.API.Extensions
         }
 
         /// <summary>
-        /// Admin / super admin — the only roles that may see machine-admin users on the access machines.
-        /// Same role names as the [Authorize] attributes.
+        /// Super admin only: the one role that may see machine-admin users (device admins) on the access machines.
+        /// </summary>
+        public static bool CanSeeMachineAdmins(this ClaimsPrincipal user) =>
+            user.IsSuperAdmin() || user.IsInRole("super_admin") || user.IsInRole("SuperAdmin");
+
+        /// <summary>
+        /// Admin or super admin.
         /// </summary>
         public static bool IsAdminOrSuperAdmin(this ClaimsPrincipal user)
         {

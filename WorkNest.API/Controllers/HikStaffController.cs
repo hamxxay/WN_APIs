@@ -30,7 +30,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetStaff()
         {
             // Machine-admin users are only visible to admin / super admin.
-            var result = await _staff.GetStaffAsync(User.IsAdminOrSuperAdmin(), Scope());
+            var result = await _staff.GetStaffAsync(User.CanSeeMachineAdmins(), Scope());
             return Ok(result);
         }
 
