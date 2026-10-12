@@ -212,7 +212,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mailMessage = new MailMessage
                 {
                     From       = new MailAddress(fromEmail, "WorkNest Billing"),
-                    Subject    = $"Your WorkNest {docType} â€” {challanNumber}",
+                    Subject    = $"Your WorkNest {docType} - {challanNumber}",
                     Body       = body,
                     IsBodyHtml = false,
                 };
@@ -402,7 +402,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 var mail = new MailMessage();
                 mail.From = new MailAddress(fromEmail, "WorkNest Billing");
                 mail.To.Add(toEmail);
-                mail.Subject = $"WorkNest Custom Invoice â€” Capacity Overage Surcharge";
+                mail.Subject = $"WorkNest Custom Invoice - Capacity Overage Surcharge";
                 mail.IsBodyHtml = true;
 
                 string body = $@"
@@ -425,7 +425,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     <p style=""font-size: 0.9em; color: #64748b;"">Formula applied: <code>0.5 Ã— Seat Price Ã— Excess Seat Count</code> + 16% PST on 10% Support Services. Statement PDF generated via QuestPDF is attached.</p>
                     <p>Thank you for choosing WorkNest.</p>
                     <hr style=""border: none; border-top: 1px solid #e2e8f0; margin-top: 30px;"" />
-                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces â€¢ Automated Billing System</p>
+                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces | Automated Billing System</p>
                 </div>";
 
                 mail.Body = body;
@@ -463,11 +463,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             {
                 string encCustomerName = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(customerName) ? "Valued Customer" : customerName);
                 string encQuotationNumber = WebUtility.HtmlEncode(quotationNumber ?? "");
+                // Customers sign on the public website (worknestpk.com/my-agreements), same link as the reminders.
+                string portalLink = WebUtility.HtmlEncode(WorkNest.Application.DTOs.Agreement.AgreementReminderOptions.DefaultPortalUrl);
 
                 using var mail = new MailMessage();
                 mail.From = new MailAddress(fromEmail, "WorkNest Office Spaces");
                 mail.To.Add(new MailAddress(toEmail));
-                mail.Subject = $"WorkNest â€” Coworking Space Use Agreement ({customerName})";
+                mail.Subject = $"WorkNest - Coworking Space Use Agreement ({customerName})";
                 mail.IsBodyHtml = true;
 
                 string body = $@"
@@ -475,10 +477,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     <h2 style=""color: #2563eb; margin-top: 0;"">Coworking Space Use Agreement</h2>
                     <p>Dear <strong>{encCustomerName}</strong>,</p>
                     <p>Please find attached your Coworking Space Use Agreement for quotation <strong>{encQuotationNumber}</strong>.</p>
-                    <p>Kindly review, sign, and return a copy to complete your workspace booking confirmation.</p>
+                    <p>You can review and sign it online: sign in at worknestpk.com with this email address and open <strong>My Agreements</strong>. You can also print it, sign it and upload the signed copy there.</p>
+                    <p style=""text-align: center; margin: 24px 0;"">
+                        <a href=""{portalLink}"" style=""background: #0f766e; color: #ffffff; padding: 12px 22px; border-radius: 8px; text-decoration: none; font-weight: bold;"">View and sign your agreement</a>
+                    </p>
                     <p>Thank you for partnering with WorkNest.</p>
                     <hr style=""border: none; border-top: 1px solid #e2e8f0; margin-top: 30px;"" />
-                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces â€¢ Automated System</p>
+                    <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces | Automated System</p>
                 </div>";
 
                 mail.Body = body;
@@ -594,7 +599,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 mail.To.Add(new MailAddress(toEmail));
 
                 bool isAlert = string.Equals(type, "Alert", StringComparison.OrdinalIgnoreCase);
-                mail.Subject = isAlert ? $"[URGENT ALERT] {title} â€” WorkNest" : $"{title} â€” WorkNest Announcement";
+                mail.Subject = isAlert ? $"[URGENT ALERT] {title} - WorkNest" : $"{title} - WorkNest Announcement";
                 mail.IsBodyHtml = true;
 
                 string badgeColor = isAlert ? "#ef4444" : "#2563eb";
@@ -615,7 +620,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     </div>
                     <p style=""font-size: 13px; color: #64748b; margin-bottom: 4px;"">Need assistance? Reach out to our community operations desk or reply to this email.</p>
                     <hr style=""border: none; border-top: 1px solid #e2e8f0; margin: 24px 0 16px 0;"" />
-                    <p style=""font-size: 12px; color: #94a3b8; text-align: center; margin: 0;"">WorkNest Operations & Control Center â€¢ Sent automatically</p>
+                    <p style=""font-size: 12px; color: #94a3b8; text-align: center; margin: 0;"">WorkNest Operations & Control Center | Sent automatically</p>
                 </div>";
 
                 mail.Body = html;

@@ -6,7 +6,7 @@ namespace WorkNest.Application.DTOs.Agreement
     /// </summary>
     public class AgreementReminderOptions
     {
-        public const string DefaultPortalUrl = "https://worknest.vercel.app/my-agreements";
+        public const string DefaultPortalUrl = "https://worknestpk.com/my-agreements";
 
         public bool Enabled { get; set; } = true;
         public int FirstAfterDays { get; set; } = 3;

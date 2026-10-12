@@ -398,7 +398,7 @@ namespace WorkNest.Application.Interfaces
         Task<string?> GetHikPendingOpPayloadDbAsync(int deviceId, string op, string employeeNo);
         Task QueueHikPendingOpDbAsync(int deviceId, string op, string employeeNo, string payloadJson);
 
-        // --- Hikvision Staff (janitors, office boys, â€¦ â€” tagged machine users without a booking) ---
+        // --- Hikvision Staff (janitors, office boys, ... - tagged machine users without a booking) ---
         Task<IEnumerable<IDictionary<string, object?>>> GetHikStaffDbAsync(string? employeeNo = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetHikTagsDbAsync();
         Task<int> AddHikTagDbAsync(string name);

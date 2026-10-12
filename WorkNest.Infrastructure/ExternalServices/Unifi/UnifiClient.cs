@@ -86,27 +86,36 @@ namespace WorkNest.Infrastructure.ExternalServices.Unifi
                 return r;
             }
 
-            var isRead = method == HttpMethod.Get;
+            // Report / log queries are POSTs (stat/report, stat/session, system-log) but only read data:
+            // treat them as reads (retried once, "took too long to send" message), with the longer wait big reports need.
+            var isQuery = method == HttpMethod.Post && (path.Contains("/stat/", StringComparison.OrdinalIgnoreCase)
+                                                        || path.Contains("/system-log/", StringComparison.OrdinalIgnoreCase));
+            var isRead = method == HttpMethod.Get || isQuery;
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var req = Build();
             HttpResponseMessage resp;
             try
             {
-                resp = await SendAsync(req, isRead ? ConsoleTimeout : ConsoleWriteTimeout, ct);
+                resp = await SendAsync(req, method == HttpMethod.Get ? ConsoleTimeout : ConsoleWriteTimeout, ct);
             }
             catch (TimeoutException ex) when (!isRead)
             {
                 // Our own wait ran out while UniFi was still working on the change.
                 throw new UnifiTimeoutException("UniFi is taking longer than usual to apply this change. Refresh in a minute to see whether it was saved.", ex);
             }
+            catch (TimeoutException ex)
+            {
+                throw new UnifiTimeoutException("UniFi took too long to send this data. Please try again in a minute.", ex);
+            }
             // 408 / 504: the cloud connector gave up waiting for the console (a slow moment at the office gateway).
             // Reads are retried once after a short pause; writes are not, so a change is never sent twice.
-            if (method == HttpMethod.Get && resp.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout)
+            if (isRead && resp.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.GatewayTimeout)
             {
                 resp.Dispose();
                 await Task.Delay(TimeSpan.FromSeconds(2), ct);
                 using var retry = Build();
-                resp = await SendAsync(retry, ConsoleTimeout, ct);
+                try { resp = await SendAsync(retry, method == HttpMethod.Get ? ConsoleTimeout : ConsoleWriteTimeout, ct); }
+                catch (TimeoutException ex) { throw new UnifiTimeoutException("UniFi took too long to send this data. Please try again in a minute.", ex); }
             }
             using var _ = resp;
             sw.Stop();
