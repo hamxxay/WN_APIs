@@ -362,6 +362,16 @@ namespace WorkNest.Application.Interfaces
         /// <summary>One line in WN_HIK_SyncLog for a door event (e.g. an app unlock); skipped when the table is missing.</summary>
         Task InsertHikDoorLogDbAsync(int deviceId, string action, bool ok, string detail);
         /// <summary>WN_MobileAccessVerifications: the app's Access Request was completed (insert or refresh). False when the table is missing.</summary>
+        // Over-capacity requests (WN_AttendantCapacityRequests). Before the table exists: create returns -1, lists are empty.
+        /// <summary>New pending request id; 0 if this person already has a pending request for the room; -1 if the table is missing.</summary>
+        Task<int> CreateCapacityRequestDbAsync(int bookingDetailId, int personId, int customerId, string requestedByEmail, DateTime atUtc);
+        Task<List<IDictionary<string, object?>>> GetCapacityRequestsDbAsync(string? status, int? bookingDetailId, IReadOnlyCollection<int>? locationIds);
+        Task<IDictionary<string, object?>?> GetCapacityRequestDbAsync(int id);
+        /// <summary>Moves a Pending request to Approved / Rejected / Cancelled; false if it was no longer pending.</summary>
+        /// <summary>Puts an Approved request back to Pending (used when the assignment after approval failed).</summary>
+        Task ReopenCapacityRequestDbAsync(int id);
+        Task<bool> DecideCapacityRequestDbAsync(int id, string status, string decidedByEmail, string? note, DateTime atUtc);
+
         Task<bool> UpsertMobileAccessVerificationDbAsync(int personId, int? bookingDetailId, string accountEmail, DateTime verifiedAtUtc, DateTime expiresAtUtc);
         /// <summary>Records an app unlock for the person's verification (no-op when the table is missing).</summary>
         Task TouchMobileAccessUnlockDbAsync(int personId, string accountEmail, DateTime atUtc);

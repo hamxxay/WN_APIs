@@ -4719,6 +4719,124 @@ END";
             return devices;
         }
 
+        // ---------------------------------------------------------------------
+        // Over-capacity requests (WN_AttendantCapacityRequests)
+        // ---------------------------------------------------------------------
+
+        private const string CapacityRequestSelect = @"
+                SELECT r.Id, r.BookingDetailId, r.PersonId, r.CustomerId, r.RequestedByEmail, r.RequestedAt, r.Status,
+                       r.DecidedByEmail, r.DecidedAt, r.DecisionNote,
+                       p.Name AS PersonName, p.Email AS PersonEmail, p.Phone AS PersonPhone,
+                       bd.SpaceName, bd.SpaceCategory,
+                       LTRIM(RTRIM(COALESCE(NULLIF(cu.Company, ''), CONCAT(cu.FirstName, ' ', cu.LastName), cu.Email))) AS CustomerName,
+                       ISNULL(s.Capacity, 1) AS RoomCapacity,
+                       (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+                         WHERE ba.BookingDetailId = r.BookingDetailId
+                           AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))) AS CurrentAttendants,
+                       ls.LocationId
+                  FROM dbo.WN_AttendantCapacityRequests r WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = r.PersonId
+                  LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = r.BookingDetailId
+                  LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
+                  LEFT JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = r.CustomerId
+                  OUTER APPLY (SELECT TOP 1 sx.LocationId
+                                 FROM dbo.WN_Bookings b WITH (NOLOCK)
+                                 JOIN dbo.WN_Spaces sx WITH (NOLOCK) ON sx.Id = b.SpaceId
+                                WHERE b.IdGUID = bd.BookingGuid) ls";
+
+        public async Task<int> CreateCapacityRequestDbAsync(int bookingDetailId, int personId, int customerId, string requestedByEmail, DateTime atUtc)
+        {
+            try
+            {
+                await using var conn = await Open();
+                await using var cmd = new SqlCommand(@"
+                    IF EXISTS (SELECT 1 FROM dbo.WN_AttendantCapacityRequests WITH (NOLOCK)
+                                WHERE BookingDetailId = @Bd AND PersonId = @P AND Status = N'Pending')
+                        SELECT 0;
+                    ELSE
+                    BEGIN
+                        INSERT INTO dbo.WN_AttendantCapacityRequests (BookingDetailId, PersonId, CustomerId, RequestedByEmail, RequestedAt, Status)
+                        VALUES (@Bd, @P, @C, @E, @At, N'Pending');
+                        SELECT CAST(SCOPE_IDENTITY() AS INT);
+                    END", conn);
+                cmd.Parameters.Add("@Bd", SqlDbType.Int).Value = bookingDetailId;
+                cmd.Parameters.Add("@P", SqlDbType.Int).Value = personId;
+                cmd.Parameters.Add("@C", SqlDbType.Int).Value = customerId;
+                cmd.Parameters.Add("@E", SqlDbType.NVarChar, 256).Value = requestedByEmail;
+                cmd.Parameters.Add("@At", SqlDbType.DateTime2).Value = atUtc;
+                return Convert.ToInt32(await cmd.ExecuteScalarAsync());
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return -1; }
+            catch (SqlException ex) when (ex.Number is 2601 or 2627) { return 0; } // a pending request was created at the same moment
+        }
+
+        public async Task<List<IDictionary<string, object?>>> GetCapacityRequestsDbAsync(string? status, int? bookingDetailId, IReadOnlyCollection<int>? locationIds)
+        {
+            try
+            {
+                await using var conn = await Open();
+                var where = new List<string> { "1 = 1" };
+                if (!string.IsNullOrWhiteSpace(status)) where.Add("r.Status = @Status");
+                if (bookingDetailId is int) where.Add("r.BookingDetailId = @Bd");
+                // Location-bound staff: requests for rooms at their locations (ids are ints from claims, never text).
+                if (locationIds is not null)
+                    where.Add($"ls.LocationId IN ({(locationIds.Count == 0 ? "-1" : string.Join(",", locationIds.Distinct()))})");
+                await using var cmd = new SqlCommand($"{CapacityRequestSelect} WHERE {string.Join(" AND ", where)} ORDER BY r.RequestedAt DESC;", conn);
+                if (!string.IsNullOrWhiteSpace(status)) cmd.Parameters.Add("@Status", SqlDbType.NVarChar, 20).Value = status;
+                if (bookingDetailId is int bd) cmd.Parameters.Add("@Bd", SqlDbType.Int).Value = bd;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await ReadAllRowsAsync(r);
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return new List<IDictionary<string, object?>>(); }
+        }
+
+        public async Task<IDictionary<string, object?>?> GetCapacityRequestDbAsync(int id)
+        {
+            try
+            {
+                await using var conn = await Open();
+                await using var cmd = new SqlCommand($"{CapacityRequestSelect} WHERE r.Id = @Id;", conn);
+                cmd.Parameters.Add("@Id", SqlDbType.Int).Value = id;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? RowToDictionary(r) : null;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return null; }
+        }
+
+        public async Task ReopenCapacityRequestDbAsync(int id)
+        {
+            try
+            {
+                await using var conn = await Open();
+                await using var cmd = new SqlCommand(@"
+                    UPDATE dbo.WN_AttendantCapacityRequests
+                       SET Status = N'Pending', DecidedByEmail = NULL, DecidedAt = NULL, DecisionNote = NULL
+                     WHERE Id = @Id AND Status = N'Approved';", conn);
+                cmd.Parameters.Add("@Id", SqlDbType.Int).Value = id;
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+        }
+
+        public async Task<bool> DecideCapacityRequestDbAsync(int id, string status, string decidedByEmail, string? note, DateTime atUtc)
+        {
+            try
+            {
+                await using var conn = await Open();
+                await using var cmd = new SqlCommand(@"
+                    UPDATE dbo.WN_AttendantCapacityRequests
+                       SET Status = @S, DecidedByEmail = @E, DecidedAt = @At, DecisionNote = @N
+                     WHERE Id = @Id AND Status = N'Pending';", conn);
+                cmd.Parameters.Add("@Id", SqlDbType.Int).Value = id;
+                cmd.Parameters.Add("@S", SqlDbType.NVarChar, 20).Value = status;
+                cmd.Parameters.Add("@E", SqlDbType.NVarChar, 256).Value = decidedByEmail;
+                cmd.Parameters.Add("@At", SqlDbType.DateTime2).Value = atUtc;
+                cmd.Parameters.Add("@N", SqlDbType.NVarChar, 500).Value = string.IsNullOrWhiteSpace(note) ? DBNull.Value : note.Trim();
+                return await cmd.ExecuteNonQueryAsync() > 0;
+            }
+            catch (SqlException ex) when (ex.Number == 208) { return false; }
+        }
+
         public async Task<bool> UpsertMobileAccessVerificationDbAsync(int personId, int? bookingDetailId, string accountEmail, DateTime verifiedAtUtc, DateTime expiresAtUtc)
         {
             try

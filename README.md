@@ -1,556 +1,177 @@
 # WorkNest API
 
-WorkNest is a **Coworking Space Management REST API** built with **ASP.NET Core 8**. It handles space bookings, user management, payments, memberships, and more for coworking facilities.
+ASP.NET Core Web API (.NET 10) for [WorkNest](https://worknestpk.com), coworking spaces and private offices in Islamabad. A single API with one SQL Server database serves:
 
----
+| Client | Repo | Uses the API for |
+|---|---|---|
+| Staff and customer web portal | `WorkNest_FE` | Everything below |
+| Mobile app (React Native) | `WorkNest-Mobile` | Sign-in, customer features, announcements and push tokens, door unlock |
+| Public website | `WorkNest-MainWeb` | `GET /api/gallery`, `GET /api/location/all`, `POST /api/book-tour` |
 
-## Table of Contents
+Production base URL: `https://aeo.eaccounting360.com.pk/WorkNest/api`. Swagger UI is served at `/swagger`.
 
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-- [Configuration](#configuration)
-- [Authentication](#authentication)
-- [API Reference](#api-reference)
-  - [Auth](#auth)
-  - [User](#user)
-  - [Space](#space)
-  - [Booking](#booking)
-  - [Payment](#payment)
-  - [Membership](#membership)
-  - [Pricing Plan](#pricing-plan)
-  - [Plan Feature](#plan-feature)
-  - [Location](#location)
-  - [Branch / Company / City](#branch--company--city)
-  - [Floor](#floor)
-  - [Space Type](#space-type)
-  - [Space Config](#space-config)
-  - [Amenity](#amenity)
-  - [Gallery](#gallery)
-  - [Contact / Book Tour](#contact--book-tour)
-  - [Dashboard](#dashboard)
-- [Response Format](#response-format)
-- [Pagination](#pagination)
-- [Error Handling](#error-handling)
-- [Logging](#logging)
-- [CORS](#cors)
+## Main areas
 
----
+| Area | Controllers | Routes (prefix) |
+|---|---|---|
+| Auth and users | `AuthController`, `UserController` | `api/auth/*` (sync, register, login, google-login, me, logout), `api/user` |
+| Customers | `CustomerController` | `api/customer` |
+| Spaces and catalog | `LocationController`, `BranchController`, `FloorController`, `SpaceController`, `SpaceTypeController`, `SpaceConfigController`, `AmenityController`, `PricingPlanController`, `PlanFeatureController`, `MembershipController`, `GalleryController` | `api/location`, `api/branch`, `api/city`, `api/company`, `api/floor`, `api/space`, `api/spacetype`, `api/space-config`, `api/amenity`, `api/pricingplan`, `api/planfeature`, `api/membership`, `api/gallery` |
+| Bookings | `BookingController` | `api/booking` (calendar, availability, smart, admin create, my) |
+| Quotations | `QuotationController` | `api/quotation`, `api/quotations`, `api/offering-types` |
+| Agreements and e-sign | `AgreementController`, `LeaseTemplatesController`, `LeasesController` | `api/agreement` (send, sign, e-signature, signed PDF upload), `api/lease-templates`, `api/leases` |
+| Invoices, payments, challans | `InvoiceController`, `PaymentController`, `ChallanController`, `AmountFieldController`, `AccountCoaController`, `SecurityDepositReportController` | `api/invoice` (incl. advance, sales tax, PDFs), `api/payment` (PayFast, card, voucher), `api/challan`, `api/amount-fields` (incl. WHT rates), `api/account-coa`, `api/securitydepositreport` |
+| KYC | `KycController` | `api/kyc` (upload, verify, reject, documents, history) |
+| Contacts, tour inquiries, complaints | `ContactController`, `ComplaintController` | `api/contact`, `api/book-tour`, `api/complaints` |
+| Attendants and Hikvision access control | `AttendantController`, `AccessCardController`, `HikDeviceController`, `HikStaffController`, `HikAccessController`, `HikSyncController` | `api/attendants`, `api/access-status`, `api/access-suspensions`, `api/capacity-requests`, `api/access-card`, `api/hik/*`, `api/devices` |
+| Mobile door unlock | `MobileAccessController` | `api/mobile/access` (verify, confirm, doors, open) |
+| Announcements | `AdminAnnouncementController`, `MobileAnnouncementController` | `api/admin/announcements`, `api/mobile/announcements`, `api/mobile/device-token` |
+| UniFi network | `UnifiController` | `api/unifi/*` (summary, clients, devices, Wi-Fi, WAN, ISP, usage, logs) |
+| Dashboards and reports | `DashboardController`, `ReportsController` | `api/dashboard/*` (overview, summary, role, forecast), `api/admin/nav-badges`, `api/reports/weekly` |
+| WhatsApp | `WhatsAppWebhookController`, `WhatsAppInboxController` | `api/whatsapp/webhook` (Meta Cloud API), `api/whatsapp/conversations`, `contacts`, `broadcast` |
 
 ## Architecture
 
-The solution follows **Clean Architecture** with 5 projects:
+Clean Architecture, five projects plus tests:
 
 ```
-WorkNest.API             → Presentation layer (Controllers, Middleware, Config)
-WorkNest.Application     → Business logic (Services, Interfaces, DTOs, Validators)
-WorkNest.Infrastructure  → Data access (DB Repository, JWT, Encryption, Email, PayFast)
-WorkNest.Domain          → Core domain (Enums, Constants)
-WorkNest.Common          → Shared utilities (Responses, Helpers, Constants)
+WorkNest.API             Controllers, filters, middleware, background services, Program.cs
+WorkNest.Application     Services, interfaces, DTOs, FluentValidation validators
+WorkNest.Infrastructure  Repositories (SQL), JWT, encryption, email, PDF, PayFast, Hikvision, UniFi, WhatsApp
+WorkNest.Domain          Entities, enums
+WorkNest.Common          ApiResponse, constants (roles), configuration, helpers
+WorkNest.Tests           xUnit tests (references WorkNest.Application)
 ```
 
-**Dependency flow:**
-```
-API → Application → Infrastructure
-         ↓
-       Domain
-         ↓
-       Common
-```
+Patterns to follow when adding endpoints:
 
----
+- **Data access**: plain ADO.NET (`Microsoft.Data.SqlClient`, `SqlCommand`) calling stored procedures, mainly through `DbRepository` (`IDbRepository`). No Entity Framework, no migrations.
+- **Response envelope**: every endpoint returns `ApiResponse<T>` serialized in camelCase: `{ isSuccessful, data, message }` (plus `errors` on failure). `FriendlyErrorResultFilter` replaces raw SQL/.NET error text with a friendly message; `ExceptionMiddleware` handles unhandled exceptions.
+- **Roles**: `[Authorize(Roles = ...)]` with `super_admin`, `admin`, `sales_executive`, `receptionist`; customers are `general`. KYC uses the `KycAccessPolicy` and `KycVerifyPolicy` policies.
+- **Location scoping**: `admin` and `sales_executive` are limited to their assigned location(s); `super_admin` sees everything. Enforced by `ValidateLocationScope` (request payload and query), `RecordScope` (record ids in the route, other locations answer 404) and `UnifiLocationScopeFilter`.
+- **Rate limiting**: built-in ASP.NET Core rate limiter with `auth`, `public-forms` and `pdf` policies (`RateLimiting` section).
+- **Dates**: business dates are Pakistan time (`IBusinessClock`, `Business:TimeZone`, default `Asia/Karachi`). Wall-clock values are written without an offset; only true UTC values get a `Z`.
+- **PDFs**: QuestPDF and PdfSharpCore, plus HTML-to-PDF through PuppeteerSharp (headless Chromium, downloaded on first use and pre-warmed at startup).
+- **Logging**: Serilog, configured from the `Serilog` section (console and rolling files under `Logs/`).
 
-## Tech Stack
+### Background services
 
-| Component        | Technology                          |
-|-----------------|-------------------------------------|
-| Framework        | ASP.NET Core 8                      |
-| Language         | C# 12                               |
-| Database         | Microsoft SQL Server                |
-| ORM / Data       | ADO.NET (raw stored procedures)     |
-| Authentication   | JWT Bearer Tokens                   |
-| Validation       | FluentValidation                    |
-| Documentation    | Swagger / OpenAPI (Swashbuckle)     |
-| Logging          | Serilog (Console + File sinks)      |
-| Payments         | PayFast integration                 |
-| Email            | Gmail SMTP (App Password)           |
-| Encryption       | AES (custom EncryptionService)      |
+Registered in `Program.cs` (`WorkNest.API/Services`):
 
----
-
-## Project Structure
-
-```
-WN_APIs/
-├── WorkNest.API/
-│   ├── Controllers/         # 17 API controllers
-│   ├── Configurations/      # Swagger & CORS setup
-│   ├── Middleware/          # ExceptionMiddleware, RequestLoggingMiddleware
-│   ├── Properties/          # launchSettings.json
-│   ├── Program.cs           # App bootstrap & DI registration
-│   └── appsettings.json     # App configuration
-│
-├── WorkNest.Application/
-│   ├── DTOs/                # Request/Response models per feature
-│   ├── Interfaces/          # Service contracts (IAuthService, IBookingService, etc.)
-│   ├── Services/            # Business logic implementations
-│   └── Validators/          # FluentValidation validators
-│
-├── WorkNest.Infrastructure/
-│   ├── Database/            # DatabaseSettings, connection string builder
-│   ├── Repositories/        # DbRepository (ADO.NET stored procedure calls)
-│   ├── Security/            # JwtService, EncryptionService
-│   └── ExternalServices/    # EmailService, PayFastService
-│
-├── WorkNest.Domain/
-│   └── Enums/               # Shared enumerations
-│
-├── WorkNest.Common/
-│   ├── Responses/           # ApiResponse<T>, PaginatedResponse<T>
-│   ├── Helpers/             # PaginationHelper, DateHelper, GuidHelper
-│   └── Constants/           # AppConstants, Roles
-│
-└── SQL/
-    ├── SchemaDiscovery.sql
-    └── MissingStoredProcedures.sql
-```
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- SQL Server instance (local or remote)
-- Gmail account with App Password (for email)
-- PayFast merchant account (for payments)
-
-### Run the API
-
-```bash
-cd WN_APIs
-dotnet run --project WorkNest.API/WorkNest.API.csproj
-```
-
-The API will be available at:
-- HTTPS: `https://localhost:7200`
-- HTTP:  `http://localhost:5200`
-- Swagger UI: `https://localhost:7200/swagger`
-
-### Health Check
-
-```
-GET /
-```
-Returns: `{ "app": "WorkNest ASP.NET Core API", "status": "healthy" }`
-
----
-
-## Configuration
-
-All settings live in `WorkNest.API/appsettings.json`. For local development, override values in `appsettings.Development.json`.
-
-```json
-{
-  "DatabaseSettings": {
-    "Server": "<sql-server-host>",
-    "Port": 1433,
-    "User": "<db-user>",
-    "Password": "<db-password>",
-    "Database": "<db-name>"
-  },
-
-  "JwtSettings": {
-    "SecretKey": "<min-32-char-secret>",
-    "Issuer": "WorkNestAPI",
-    "Audience": "WorkNestClients",
-    "ExpiryMinutes": 1440
-  },
-
-  "Encryption": {
-    "Key": "<aes-key>",
-    "IV": "<aes-iv>"
-  },
-
-  "Email": {
-    "FromEmail": "<sender@gmail.com>",
-    "ToEmail": "<admin@example.com>",
-    "GmailAppPassword": "<gmail-app-password>"
-  },
-
-  "PayFast": {
-    "MerchantId": "<merchant-id>",
-    "SecuredKey": "<secured-key>",
-    "Sandbox": true,
-    "SandboxUrl": "https://sandbox.payfast.pk/v2/hosted_payment",
-    "ReturnUrl": "<frontend-return-url>",
-    "NotifyUrl": "<api-notify-url>"
-  },
-
-  "Cors": {
-    "AllowedOrigins": [
-      "http://localhost:4200",
-      "http://localhost:5173"
-    ]
-  }
-}
-```
-
----
+| Service | What it does |
+|---|---|
+| `BillingAutomationService` | Generates recurring invoices 5 days before each billing cycle ends |
+| `InvoiceDeliveryRetryService` | Retries failed invoice emails (backoff, max 3 attempts) |
+| `AccessCardRestrictionService` | Daily: re-restricts access cards when a partial payment period lapses unpaid |
+| `AnnouncementDeliveryService` | Sends announcements by push and email, with retries |
+| `ChallanAccessSuspensionService` | Hourly: suspends door access on Hikvision devices for overdue unpaid challans (`HikAccessSuspension:Enabled`) |
+| `HikSyncBackgroundService` | Hikvision device and database sync (`HikSync:Enabled`; enable on one server only, never on a dev machine pointed at the live database) |
+| `BookingAutoConfirmService` | Every 5 minutes: confirms Pending bookings whose first invoice is paid (`BookingAutoConfirm:Enabled`) |
+| `AgreementReminderService` | Hourly: emails reminders for agreements awaiting signature (`AgreementReminders`) |
+| `WeeklyReportService` | Emails the weekly report to super admins (`Reports:Weekly`, default Monday 09:00 Pakistan time) |
+| `UnifiPollingService` | Keeps UniFi dashboard data fresh (`Unifi:Enabled`, `Unifi:RefreshSeconds`) |
 
 ## Authentication
 
-The API uses **JWT Bearer authentication**.
-
-- Most endpoints require a valid JWT token in the `Authorization` header.
-- Several endpoints also require the user's email in the `x-user-email` custom header.
-- Some public endpoints are marked `[AllowAnonymous]` (see table below).
-
-### Getting a Token
-
-```
-POST /api/auth/login
-```
-
-Use the returned token in subsequent requests:
-
-```
-Authorization: Bearer <your-jwt-token>
-x-user-email: user@example.com
-```
-
-In Swagger UI, click **Authorize** and enter: `Bearer <your-token>`
-
----
-
-## API Reference
-
-> **Base URL:** `https://localhost:7200`
-> 
-> **Auth required:** All endpoints require `Authorization: Bearer <token>` unless marked 🔓 (public)
-
----
-
-### Auth
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| POST | `/api/auth/sync` | 🔓 Public | Sync user from external provider (e.g. Firebase) |
-| POST | `/api/auth/register` | 🔓 Public | Register a new user |
-| POST | `/api/auth/login` | 🔓 Public | Login with email & password, returns JWT |
-| POST | `/api/auth/google-login` | 🔓 Public | Login with Google OAuth token |
-| GET | `/api/auth/me` | 🔒 JWT + `x-user-email` | Get current authenticated user profile |
-| POST | `/api/auth/logout` | 🔒 JWT | Logout current user |
-
----
-
-### User
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/user` | 🔒 JWT | List all users (paginated) |
-| GET | `/api/user/{id}` | 🔒 JWT | Get user by ID |
-| GET | `/api/user/{id}/history` | 🔒 JWT | Get user booking/activity history |
-| POST | `/api/user` | 🔒 JWT | Create a new user |
-| PUT | `/api/user/{id}` | 🔒 JWT | Update user details |
-| DELETE | `/api/user/{id}` | 🔒 JWT | Delete a user |
-| PATCH | `/api/user/{id}/activate` | 🔒 JWT | Activate a user account |
-| PATCH | `/api/user/{id}/deactivate` | 🔒 JWT | Deactivate a user account |
-| PATCH | `/api/user/{id}/role` | 🔒 JWT | Update user role |
-
-**Query params for GET `/api/user`:** `page`, `limit`, `search`
-
----
-
-### Space
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/space/available` | 🔓 Public | Get all currently available spaces |
-| GET | `/api/space/available-by-type` | 🔓 Public | Get available spaces filtered by type and date range |
-| GET | `/api/space/availability-counts` | 🔓 Public | Get availability counts per space type |
-| GET | `/api/space` | 🔒 JWT | List all spaces (paginated) |
-| GET | `/api/space/{id}/summary` | 🔒 JWT | Get detailed space summary |
-| POST | `/api/space` | 🔒 JWT | Create a new space |
-| PUT | `/api/space/{id}` | 🔒 JWT | Update a space |
-| DELETE | `/api/space/{id}` | 🔒 JWT | Delete a space |
-
-**Query params for GET `/api/space/available-by-type`:** `spaceType`, `startDateTime`, `endDateTime`
-
----
-
-### Booking
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/booking/available-spaces` | 🔓 Public | Get spaces available for a given type and time range |
-| GET | `/api/booking/available-spaces-reassignment` | 🔓 Public | Get spaces available for reassignment (excludes a booking) |
-| GET | `/api/booking/smart/available` | 🔓 Public | Smart availability search by category and capacity |
-| GET | `/api/booking/my` | 🔒 JWT + `x-user-email` | Get bookings for the current user |
-| GET | `/api/booking/recent` | 🔒 JWT | Get most recent bookings |
-| GET | `/api/booking/calendar` | 🔒 JWT | Get booking calendar for a space by month |
-| GET | `/api/booking` | 🔒 JWT | List all bookings (paginated) |
-| GET | `/api/booking/{id}` | 🔒 JWT + `x-user-email` | Get booking by ID |
-| POST | `/api/booking` | 🔒 JWT + `x-user-email` | Create a new booking |
-| POST | `/api/booking/smart` | 🔒 JWT + `x-user-email` | Create a smart booking (auto-assigns best space) |
-| PUT | `/api/booking/{id}` | 🔒 JWT | Update a booking |
-| PATCH | `/api/booking/{id}/cancel` | 🔒 JWT + `x-user-email` | Cancel a booking |
-| PATCH | `/api/booking/{id}/status` | 🔒 JWT | Update booking status |
-| PATCH | `/api/booking/{id}/reassign` | 🔒 JWT + `x-user-email` | Reassign booking to a different space |
-
-**Query params for calendar:** `spaceId`, `year`, `month`
-**Query params for smart available:** `spaceCategory`, `startDateTime`, `endDateTime`, `capacity`
-
----
-
-### Payment
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/payment/my` | 🔒 JWT + `x-user-email` | Get payments for the current user |
-| GET | `/api/payment` | 🔒 JWT | List all payments (paginated) |
-| GET | `/api/payment/{id}/summary` | 🔒 JWT | Get payment summary by ID |
-| POST | `/api/payment` | 🔒 JWT + `x-user-email` | Create a payment record |
-| POST | `/api/payment/card` | 🔒 JWT + `x-user-email` | Process a card payment |
-| POST | `/api/payment/voucher/generate` | 🔒 JWT + `x-user-email` | Generate a payment voucher |
-| POST | `/api/payment/payfast/initiate` | 🔒 JWT + `x-user-email` | Initiate a PayFast hosted payment |
-| POST | `/api/payment/payfast/notify` | 🔓 Public | PayFast IPN (webhook) callback |
-| PATCH | `/api/payment/{id}/status` | 🔒 JWT | Update payment status |
-| DELETE | `/api/payment/{id}` | 🔒 JWT | Delete a payment record |
-
----
-
-### Membership
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/membership` | 🔒 JWT | List all memberships (paginated) |
-| GET | `/api/membership/{id}/summary` | 🔒 JWT | Get membership summary |
-| POST | `/api/membership` | 🔒 JWT | Create a new membership |
-| PATCH | `/api/membership/{id}/status` | 🔒 JWT | Update membership status |
-| DELETE | `/api/membership/{id}` | 🔒 JWT | Delete a membership |
-
----
-
-### Pricing Plan
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/pricingplan/all` | 🔓 Public | Get all pricing plans (no pagination) |
-| GET | `/api/pricingplan` | 🔓 Public | List pricing plans (paginated) |
-| GET | `/api/pricingplan/{id}/summary` | 🔓 Public | Get pricing plan summary with features |
-| POST | `/api/pricingplan` | 🔒 JWT | Create a pricing plan |
-| PUT | `/api/pricingplan/{id}` | 🔒 JWT | Update a pricing plan |
-| DELETE | `/api/pricingplan/{id}` | 🔒 JWT | Delete a pricing plan |
-
----
-
-### Plan Feature
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/planfeature/by-plan/{planId}` | 🔒 JWT | Get all features for a pricing plan |
-| POST | `/api/planfeature` | 🔒 JWT | Create a plan feature |
-| PUT | `/api/planfeature/{id}` | 🔒 JWT | Update a plan feature |
-| DELETE | `/api/planfeature/{id}` | 🔒 JWT | Delete a plan feature |
-
----
-
-### Location
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/location/all` | 🔓 Public | Get all locations (no pagination) |
-| GET | `/api/location` | 🔓 Public | List locations (paginated) |
-| POST | `/api/location` | 🔒 JWT | Create a location |
-| PUT | `/api/location/{id}` | 🔒 JWT | Update a location |
-| DELETE | `/api/location/{id}` | 🔒 JWT | Delete a location |
-
----
-
-### Branch / Company / City
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/branch` | 🔓 Public | Get all branches |
-| GET | `/api/company` | 🔓 Public | Get all companies |
-| GET | `/api/city` | 🔓 Public | Get all cities |
-
----
-
-### Floor
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/floor` | 🔒 JWT | List floors (optionally filtered by `locationId`) |
-| POST | `/api/floor` | 🔒 JWT | Create a floor |
-
----
-
-### Space Type
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/spacetype/all` | 🔓 Public | Get all space types (no pagination) |
-| GET | `/api/spacetype` | 🔓 Public | List space types (paginated) |
-| POST | `/api/spacetype` | 🔒 JWT | Create a space type |
-| PUT | `/api/spacetype/{id}` | 🔒 JWT | Update a space type |
-| DELETE | `/api/spacetype/{id}` | 🔒 JWT | Delete a space type |
-
----
-
-### Space Config
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/space-config` | 🔓 Public | Get all space configuration settings |
-| GET | `/api/space-config/deposit/{category}` | 🔓 Public | Get security deposit amount for a space category |
-| PUT | `/api/space-config/{category}` | 🔒 JWT + `x-user-email` | Update space config for a category |
-| POST | `/api/space-config/generate-inventory` | 🔒 JWT | Auto-generate space inventory |
-
----
-
-### Amenity
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/amenity` | 🔓 Public | Get all amenities |
-| POST | `/api/amenity` | 🔒 JWT | Create an amenity |
-
----
-
-### Gallery
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/gallery/all` | 🔓 Public | Get all gallery images (no pagination) |
-| GET | `/api/gallery` | 🔓 Public | List gallery images (paginated) |
-| POST | `/api/gallery` | 🔒 JWT | Upload/create a gallery image |
-| PUT | `/api/gallery/{id}` | 🔒 JWT | Update a gallery image |
-| DELETE | `/api/gallery/{id}` | 🔒 JWT | Delete a gallery image |
-
----
-
-### Contact / Book Tour
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/contact/recent` | 🔒 JWT | Get recent contact submissions |
-| GET | `/api/contact` | 🔒 JWT | List all contacts (paginated) |
-| POST | `/api/contact` | 🔓 Public | Submit a contact form |
-| POST | `/api/book-tour` | 🔓 Public | Submit a book-a-tour request (same handler as contact) |
-| PATCH | `/api/contact/{id}/status` | 🔒 JWT | Update contact status |
-| DELETE | `/api/contact/{id}` | 🔒 JWT | Delete a contact entry |
-
----
-
-### Dashboard
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/dashboard/summary` | 🔒 JWT | Get dashboard summary stats |
-| GET | `/` | 🔓 Public | Health check |
-
----
-
-## Response Format
-
-All endpoints return a consistent JSON envelope:
-
-### Success
-```json
-{
-  "isSuccessful": true,
-  "message": "Success",
-  "data": { ... }
-}
+1. The client signs in with Firebase Authentication (email/password or Google) and sends the Firebase ID token to `api/auth/login`, `api/auth/google-login`, `api/auth/register` or `api/auth/sync`.
+2. The API verifies the Firebase token (`FirebaseTokenVerifier`, `Firebase:ProjectId`) and takes the email from it. With `Firebase:RequireIdToken = true`, requests without a valid token are refused.
+3. The API issues its own JWT (`JwtSettings`). Clients send it as `Authorization: Bearer <token>` (a `token` or `access_token` query parameter is also accepted).
+
+Sign-in can never set a role or company; roles are assigned by staff.
+
+## Configuration
+
+Settings live in `WorkNest.API/appsettings.json` and `appsettings.Development.json`. Both are gitignored and hold credentials, so get them from the team (see `SECRETS.md`). Never commit them.
+
+| Section | Purpose |
+|---|---|
+| `ConnectionStrings:DefaultConnection` | SQL Server connection |
+| `Cors:AllowedOrigins` | Allowed browser origins (production only; Development allows any origin) |
+| `JwtSettings` | API token signing, issuer, audience, expiry |
+| `Firebase` | `ProjectId`, `RequireIdToken` |
+| `Encryption` | Field encryption key and IV |
+| `Email` | SMTP sender and recipients |
+| `PayFast` | Payment gateway |
+| `FileStorage`, `KycStorage` | Upload folders for signed agreements and KYC documents |
+| `Unifi` | UniFi network dashboard |
+| `HikSync`, `HikAccessSuspension`, `Hikvision` | Hikvision sync, access suspension, API key for the HIK backend |
+| `WhatsApp` | WhatsApp Cloud API bot and inbox |
+| `RateLimiting` | Rate limit policies |
+| `AgreementReminders`, `BookingAutoConfirm`, `Reports` | Background job switches and schedules |
+| `Application`, `Business`, `PathBase` | Public base URL, business time zone, optional path base |
+| `Serilog` | Logging |
+
+> CORS origins are read once at startup. After changing `Cors:AllowedOrigins` on the server, recycle the IIS app pool.
+
+## Run locally
+
+Requires the .NET 10 SDK and access to the SQL Server database.
+
+```bash
+dotnet run --project WorkNest.API --launch-profile WorkNest.API
 ```
 
-### Failure
-```json
-{
-  "isSuccessful": false,
-  "message": "Error description",
-  "errors": ["field error 1", "field error 2"]
-}
+This runs in Development on http://localhost:5200 (Swagger at http://localhost:5200/swagger). Front-end dev setups (for example the public site's `proxy.conf.json`) point at this port.
+
+> If the local connection string points at the live database, everything you do locally (bookings, invoices, emails) is real. Keep `HikSync:Enabled` off locally.
+
+There is no solution file; build or run a project directly (`dotnet build WorkNest.API`).
+
+**Build breaks with a strange folder name.** On macOS/Linux a Windows upload path from config can create an empty folder named like `D:\WorkNest_Uploads...` inside `WorkNest.API`, which breaks the build. Remove it:
+
+```bash
+find WorkNest.API -maxdepth 1 -name 'D:*' -type d -empty -exec rmdir {} \;
 ```
 
-### HTTP Status Codes
+## Database
 
-| Code | Meaning |
-|------|---------|
-| 200 | OK — successful GET, PUT, PATCH, DELETE |
-| 201 | Created — successful POST |
-| 400 | Bad Request — validation failure |
-| 401 | Unauthorized — missing or invalid token |
-| 404 | Not Found — resource does not exist |
-| 500 | Internal Server Error — unhandled exception |
+- SQL Server database `SAC400`. Tables use the `WN_` prefix (`WN_HIK_*` for Hikvision).
+- The app does not create or alter tables at startup.
+- Schema changes and stored procedures are kept in `Database/` as `.txt` scripts (each starts with `USE [SAC400]`), grouped by feature (`Agreements`, `Booking`, `HikSync`, `Invoicing`, `Reports`, `Unifi`, `Wht`). The DBA runs them manually; check the folder's README where present (for example `Database/Wht/README.md`) for run order.
+- `Sp.sql` is a reference dump of the stored procedures. Compare with the live procedure before replacing one.
 
----
+## Deploy (IIS on Windows)
 
-## Pagination
-
-Paginated list endpoints accept these query parameters:
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `page` | int | 1 | Page number (1-based) |
-| `limit` | int | 10 | Items per page |
-| `search` | string | `""` | Search/filter term |
-
-Paginated response shape:
-```json
-{
-  "data": [ ... ],
-  "total": 42
-}
+```bash
+dotnet publish WorkNest.API -c Release -o publish
 ```
 
----
+1. Copy the `publish` folder to the IIS site folder (the API runs as the `/WorkNest` application). The server needs the ASP.NET Core 10 Hosting Bundle.
+2. Keep the server's own `appsettings.json`; do not overwrite it with a local copy.
+3. `web.config` (in-process hosting, `AspNetCoreModuleV2`) is included in the publish output.
+4. The server needs outbound internet access the first time a PDF is rendered (Chromium download) and for Firebase, WhatsApp, email and PayFast.
+5. Recycle the app pool, then check `https://aeo.eaccounting360.com.pk/WorkNest/swagger`.
 
-## Error Handling
+## Tests
 
-A global `ExceptionMiddleware` catches all unhandled exceptions and returns:
-
-```json
-{
-  "isSuccessful": false,
-  "message": "An unexpected error occurred. Please try again later."
-}
+```bash
+dotnet test WorkNest.Tests
 ```
 
-Stack traces are never exposed to the client. All exceptions are logged via Serilog.
+xUnit tests for business logic in `WorkNest.Application` (billing periods, withholding tax calculation). Note that `WorkNest.Tests/` is listed in `.gitignore`, so it is only present in local checkouts.
 
----
+## Project structure
 
-## Logging
-
-Serilog is configured with two sinks:
-
-- **Console** — structured logs during development
-- **File** — rolling daily logs at `WorkNest.API/Logs/worknest-YYYYMMDD.log`, retained for 7 days
-
-Log levels:
-- Default: `Information`
-- Microsoft / System namespaces: `Warning`
-
----
-
-## CORS
-
-Allowed origins are configured in `appsettings.json` under `Cors:AllowedOrigins`:
-
-```json
-"Cors": {
-  "AllowedOrigins": [
-    "http://localhost:4200",
-    "http://localhost:5173",
-    "https://worknest.vercel.app",
-    "https://worknestpk.com",
-    "https://www.worknestpk.com"
-  ]
-}
 ```
-All methods, headers, and credentials are allowed. Wildcard subdomains are supported.
+WorkNest.API/
+  Controllers/      one controller per area (see Main areas)
+  Services/         background (hosted) services
+  Filters/          location scope, record scope, friendly errors
+  Middleware/       exception handling, request logging
+  Configurations/   CORS, rate limiting, Swagger
+  Security/         Firebase token verification
+  Program.cs        DI registration and pipeline
+WorkNest.Application/   Services/, Interfaces/, DTOs/, Validators/, Helpers/
+WorkNest.Infrastructure/ Repositories/, ExternalServices/, Security/
+WorkNest.Domain/        Entities/, Enums/
+WorkNest.Common/        Responses/, Constants/, Configurations/, Helpers/
+WorkNest.Tests/         xUnit tests
+Database/               DDL and stored procedure scripts (.txt), run manually
+Forms/, Tasks/          reference documents (agreement and KYC forms, invoice prompts)
+```
+
+## Related repos
+
+- `WorkNest_FE`: staff and customer web portal
+- `WorkNest-Mobile`: React Native mobile app
+- `WorkNest-MainWeb`: public website

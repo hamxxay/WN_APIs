@@ -1,0 +1,28 @@
+USE [SAC400];
+
+-- Over-capacity requests: a sales executive adds a person to a room that is already full.
+-- Instead of assigning them, a Pending request is saved; an admin / super admin approves it (the person is then
+-- assigned and the overage is billed as usual) or rejects it. One pending request per person per room.
+IF OBJECT_ID(N'dbo.WN_AttendantCapacityRequests', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.WN_AttendantCapacityRequests (
+        Id               INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_WN_AttendantCapacityRequests PRIMARY KEY,
+        BookingDetailId  INT            NOT NULL,   -- the room (booking line) the person should join
+        PersonId         INT            NOT NULL,   -- WN_Persons
+        CustomerId       INT            NOT NULL,
+        RequestedByEmail NVARCHAR(256)  NOT NULL,   -- the sales executive
+        RequestedAt      DATETIME2(0)   NOT NULL,   -- UTC
+        Status           NVARCHAR(20)   NOT NULL CONSTRAINT DF_WN_AttendantCapacityRequests_Status DEFAULT N'Pending', -- Pending / Approved / Rejected / Cancelled
+        DecidedByEmail   NVARCHAR(256)  NULL,       -- the admin who approved / rejected
+        DecidedAt        DATETIME2(0)   NULL,       -- UTC
+        DecisionNote     NVARCHAR(500)  NULL        -- optional reason, shown to the sales executive
+    );
+
+    CREATE INDEX IX_WN_AttendantCapacityRequests_Status_Booking
+        ON dbo.WN_AttendantCapacityRequests (Status, BookingDetailId);
+
+    -- At most one pending request for the same person and room.
+    CREATE UNIQUE INDEX UQ_WN_AttendantCapacityRequests_Pending
+        ON dbo.WN_AttendantCapacityRequests (BookingDetailId, PersonId)
+        WHERE Status = N'Pending';
+END
