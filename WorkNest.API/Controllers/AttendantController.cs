@@ -120,6 +120,8 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> CheckCapacity(int bookingDetailId)
         {
             var check = await _attendants.CheckCapacityBeforeAssignAsync(bookingDetailId);
+            // Sales executives fill a room only up to its capacity; over-capacity (billed) seats are for admins.
+            if (IsSalesExecutiveOnly()) check.AllowsOverCapacity = false;
             return Ok(check);
         }
 
@@ -133,12 +135,115 @@ namespace WorkNest.API.Controllers
             if (request == null) return BadRequest("Invalid request payload.");
             request.BookingDetailId = bookingDetailId;
 
+            if (IsSalesExecutiveOnly())
+            {
+                var cap = await _attendants.CheckCapacityBeforeAssignAsync(bookingDetailId);
+                if (cap.WouldExceedCapacity)
+                    return BadRequest(new { message = $"{cap.SpaceName} is full ({cap.CurrentActiveAttendants} of {cap.RoomCapacity} seats). Only an admin can add more people to this room." });
+            }
+
             var result = await _attendants.AssignAttendantToBookingAsync(request);
             return Ok(new
             {
                 message = "Attendant successfully assigned to booking.",
                 data = result
             });
+        }
+
+        /// <summary>
+        /// Sales executive: the room is full, so ask an admin to approve adding this person (over-capacity, billed).
+        /// </summary>
+        [Authorize]
+        [HttpPost("api/bookings/{bookingDetailId}/capacity-requests")]
+        public async Task<IActionResult> RequestOverCapacity(int bookingDetailId, [FromBody] CreateCapacityRequestBody body)
+        {
+            if (body == null || body.PersonId <= 0 || body.CustomerId <= 0)
+                return BadRequest(new { message = "Choose the person to add." });
+            var cap = await _attendants.CheckCapacityBeforeAssignAsync(bookingDetailId);
+            if (!cap.WouldExceedCapacity)
+                return BadRequest(new { message = $"{cap.SpaceName} still has free seats. Add the person directly." });
+
+            var id = await _attendants.RequestOverCapacityAsync(bookingDetailId, body.PersonId, body.CustomerId, User.GetEmail() ?? "");
+            return id switch
+            {
+                -1 => StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Requests aren't set up yet. Run WN_AttendantCapacityRequests.txt on the database first." }),
+                0 => Ok(new { isSuccessful = true, message = "A request for this person is already waiting for an admin." }),
+                _ => Ok(new { isSuccessful = true, id, message = $"{cap.SpaceName} is full, so an admin has been asked to approve adding this person." })
+            };
+        }
+
+        /// <summary>
+        /// Over-capacity requests (default: pending) for the staff member's locations; optionally for one room.
+        /// </summary>
+        [Authorize]
+        [HttpGet("api/capacity-requests")]
+        public async Task<IActionResult> GetCapacityRequests([FromQuery] string? status = "Pending", [FromQuery] int? bookingDetailId = null)
+        {
+            var rows = await _attendants.GetCapacityRequestsAsync(
+                string.Equals(status, "all", StringComparison.OrdinalIgnoreCase) ? null : status,
+                bookingDetailId,
+                User.IsLocationBoundRole() ? User.GetLocationIds() : null);
+            return Ok(rows);
+        }
+
+        /// <summary>Admin / super admin: approve a request; the person is assigned to the room (over-capacity billed).</summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [HttpPost("api/capacity-requests/{requestId:int}/approve")]
+        public async Task<IActionResult> ApproveCapacityRequest(int requestId)
+        {
+            var denied = await CapacityRequestAccessAsync(requestId);
+            if (denied != null) return denied;
+            try
+            {
+                await _attendants.ApproveCapacityRequestAsync(requestId, User.GetEmail() ?? "");
+                return Ok(new { isSuccessful = true, message = "Approved. The person has been added to the room." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Admin / super admin: reject a request (optional note for the sales executive).</summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [HttpPost("api/capacity-requests/{requestId:int}/reject")]
+        public async Task<IActionResult> RejectCapacityRequest(int requestId, [FromBody] CapacityRequestDecisionBody? body)
+        {
+            var denied = await CapacityRequestAccessAsync(requestId);
+            if (denied != null) return denied;
+            return await _attendants.CloseCapacityRequestAsync(requestId, "Rejected", User.GetEmail() ?? "", body?.Note)
+                ? Ok(new { isSuccessful = true, message = "Request rejected." })
+                : BadRequest(new { message = "This request has already been handled." });
+        }
+
+        /// <summary>The sales executive who asked (or an admin) withdraws a pending request.</summary>
+        [Authorize]
+        [HttpPost("api/capacity-requests/{requestId:int}/cancel")]
+        public async Task<IActionResult> CancelCapacityRequest(int requestId)
+        {
+            var denied = await CapacityRequestAccessAsync(requestId);
+            if (denied != null) return denied;
+            var req = await _attendants.GetCapacityRequestAsync(requestId);
+            var mine = string.Equals(req?["RequestedByEmail"]?.ToString(), User.GetEmail(), StringComparison.OrdinalIgnoreCase);
+            if (!mine && !User.IsAdminOrSuperAdmin())
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Only the person who asked, or an admin, can withdraw this request." });
+            return await _attendants.CloseCapacityRequestAsync(requestId, "Cancelled", User.GetEmail() ?? "", null)
+                ? Ok(new { isSuccessful = true, message = "Request withdrawn." })
+                : BadRequest(new { message = "This request has already been handled." });
+        }
+
+        /// <summary>404 if the request doesn't exist; 403 if it's for a room at another location.</summary>
+        private async Task<IActionResult?> CapacityRequestAccessAsync(int requestId)
+        {
+            var req = await _attendants.GetCapacityRequestAsync(requestId);
+            if (req == null) return NotFound(new { message = "Request not found." });
+            if (User.IsLocationBoundRole())
+            {
+                var loc = req.TryGetValue("LocationId", out var l) && l != null ? Convert.ToInt32(l) : (int?)null;
+                if (loc is not int id || !User.GetLocationIds().Contains(id))
+                    return StatusCode(StatusCodes.Status403Forbidden, new { message = "This request is for a room at another location." });
+            }
+            return null;
         }
 
         /// <summary>
@@ -290,5 +395,9 @@ namespace WorkNest.API.Controllers
             if (string.IsNullOrEmpty(supplied)) return false;
             return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(configuredKey), Encoding.UTF8.GetBytes(supplied));
         }
+
+        /// <summary>Sales executive without an admin role: may not assign people beyond a room's capacity.</summary>
+        private bool IsSalesExecutiveOnly() =>
+            (User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive")) && !User.IsAdminOrSuperAdmin();
     }
 }

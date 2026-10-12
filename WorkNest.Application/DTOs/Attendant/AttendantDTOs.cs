@@ -28,6 +28,19 @@ namespace WorkNest.Application.DTOs.Attendant
         public DateTime AssignedFrom { get; set; } = WorkNest.Application.Services.BusinessClock.Default.Today;
     }
 
+    /// <summary>Body of POST api/bookings/{bookingDetailId}/capacity-requests.</summary>
+    public class CreateCapacityRequestBody
+    {
+        public int PersonId { get; set; }
+        public int CustomerId { get; set; }
+    }
+
+    /// <summary>Body of POST api/capacity-requests/{id}/reject (optional reason shown to the sales executive).</summary>
+    public class CapacityRequestDecisionBody
+    {
+        public string? Note { get; set; }
+    }
+
     public class ToggleAccessStatusRequest
     {
         public int BookingDetailId { get; set; }
