@@ -52,7 +52,7 @@ namespace WorkNest.Application.Interfaces
         /// let it back on, whatever the mode), mode (policy = allow | deny | off; macs = MACs to add to the list in the same step). Returns the updated SSID, or
         /// { error } for a bad request. Every change is written to WN_UNIFI_MacFilterLog.
         /// </summary>
-        Task<JsonObject> UpdateMacFilterAsync(string wlanId, string action, string? mac, string? policy, string? reason, string? byEmail, int? byUserId, IReadOnlyList<string>? macs = null, string? deviceName = null, string? roomNo = null);
+        Task<JsonObject> UpdateMacFilterAsync(string wlanId, string action, string? mac, string? policy, string? reason, string? byEmail, int? byUserId, IReadOnlyList<string>? macs = null, string? deviceName = null, string? roomNo = null, bool devicesOnly = false);
         /// <summary>Shows or hides the SSID name (UniFi hide_ssid). Logged like MAC filter changes. Returns the SSID or { error }.</summary>
         Task<JsonObject> SetSsidHiddenAsync(string wlanId, bool hidden, string? reason, string? byEmail, int? byUserId);
         /// <summary>UniFi speed profiles (user groups, except Default) with their per-device speeds and the SSIDs using them.</summary>

@@ -1667,9 +1667,12 @@ namespace WorkNest.Application.Services
             };
         }
 
-        public async Task<JsonObject> UpdateMacFilterAsync(string wlanId, string action, string? mac, string? policy, string? reason, string? byEmail, int? byUserId, IReadOnlyList<string>? macs = null, string? deviceName = null, string? roomNo = null)
+        public async Task<JsonObject> UpdateMacFilterAsync(string wlanId, string action, string? mac, string? policy, string? reason, string? byEmail, int? byUserId, IReadOnlyList<string>? macs = null, string? deviceName = null, string? roomNo = null, bool devicesOnly = false)
         {
             static JsonObject Error(string message) => new() { ["error"] = message };
+            // Sales executives: only add / remove devices, and only on an SSID an admin set to "Allowed devices only".
+            if (devicesOnly && (action ?? "").Trim().ToLowerInvariant() is not ("add" or "remove"))
+                return Error("Only an admin can change this SSID's access mode or block devices. You can add or remove allowed devices.");
             await InitializeAsync();
             if (!WlanIdRe.IsMatch(wlanId ?? "")) return Error("Unknown SSID.");
             action = (action ?? "").Trim().ToLowerInvariant();
@@ -1686,6 +1689,8 @@ namespace WorkNest.Application.Services
             var previous = JsonSerializer.Serialize(list);
             var enabled = Truthy(P(wlan, "mac_filter_enabled"));
             var pol = Str(P(wlan, "mac_filter_policy")) == "allow" ? "allow" : "deny";
+            if (devicesOnly && !(enabled && pol == "allow"))
+                return Error("Devices can be added here only after an admin sets this SSID to \u201cAllowed devices only\u201d.");
 
             switch (action)
             {
