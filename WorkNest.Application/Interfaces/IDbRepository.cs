@@ -282,7 +282,7 @@ namespace WorkNest.Application.Interfaces
         Task<bool> SetUserLocationsAsync(int userId, IReadOnlyCollection<int> locationIds, int? actorId);
         Task<int?> GetSpaceLocationIdAsync(int spaceId);
         Task<IEnumerable<IDictionary<string, object?>>> GetActiveAttendantAssignmentCandidatesDbAsync(string email, string idNumber, string phoneKey, string name);
-        Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom);
+        Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom, bool allowOverCapacity = true);
         Task SoftRemoveAttendantFromBookingDbAsync(int bookingDetailId, int personId);
         Task<int> ToggleAccessStatusSpAsync(int bookingDetailId, int customerId, int? personId, bool isEnabled);
         Task<IEnumerable<IDictionary<string, object?>>> GetAccessStatusExportDbAsync();

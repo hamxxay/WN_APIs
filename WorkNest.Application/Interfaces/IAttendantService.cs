@@ -12,7 +12,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAttendantsAsync(int customerId);
         Task<IEnumerable<BookingAttendantDetailDto>> GetBookingAttendantsAsync(int bookingDetailId);
         Task<AttendantCapacityCheckDto> CheckCapacityBeforeAssignAsync(int bookingDetailId);
-        Task<IDictionary<string, object?>> AssignAttendantToBookingAsync(AssignBookingAttendantRequest request);
+        Task<IDictionary<string, object?>> AssignAttendantToBookingAsync(AssignBookingAttendantRequest request, bool allowOverCapacity = true);
 
         // Over-capacity requests: a sales executive asks to add a person to a full room; an admin approves or rejects.
         /// <summary>New request id; 0 if one is already pending for this person and room; -1 if the table isn't set up yet.</summary>

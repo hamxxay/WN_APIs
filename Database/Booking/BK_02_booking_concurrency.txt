@@ -1,0 +1,318 @@
+USE [SAC400];
+
+-- ============================================================================================
+-- Booking concurrency fixes (two staff acting on the same space or room at the same moment).
+--
+--   1. WN_Bookings_Reassign: the "is the new space free?" check now keeps its date range locked until COMMIT
+--      (UPDLOCK, HOLDLOCK). Before, a booking saved for that space at the same moment could also pass.
+--      (Also returns the real AffectedRows; it read @@ROWCOUNT after COMMIT and always returned 0.)
+--   2. WN_Bookings_Update: changing a booking's dates now checks, under the same locks as WN_Bookings_Insert,
+--      that the new dates do not overlap another active booking of the space:
+--      "Space is already booked for the selected date range and shift." Before there was no check at all.
+--   3. WN_AssignAttendantToBooking: counting the people in a room and adding one is now one transaction with a
+--      per-room lock, so two staff adding the last seat at once can no longer both get it (the second waits,
+--      then sees the room as full). New optional @AllowOverCapacity (default 1 = unchanged behaviour); the API
+--      passes 0 for sales executives so a full room is refused instead of over-filled.
+--
+-- WN_Bookings_Insert and WN_Bookings_InsertSmart need no change: the final insert already checks for an
+-- overlapping booking inside a transaction with UPDLOCK, HOLDLOCK.
+--
+-- Safety: before changing anything this checks that each live procedure has the expected parameters and key
+-- lines (the 30/09/2026 versions in Sp.sql, or this script's own versions on a re-run). If any differs, NOTHING
+-- is changed and the reason is shown. The current definitions are returned first as a result set: keep a copy.
+-- All three procedures are replaced in ONE transaction (all or nothing). No tables are changed. Safe to run again.
+-- Run against SAC400 as ONE statement in DBeaver (select all, execute). Run this BEFORE publishing the API.
+-- ============================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @Defs TABLE (ProcName SYSNAME, Params NVARCHAR(400), Def NVARCHAR(MAX), Stripped NVARCHAR(MAX));
+INSERT INTO @Defs (ProcName, Params, Def)
+SELECT p.name,
+       STUFF((SELECT N',' + pr.name FROM sys.parameters pr WHERE pr.object_id = p.object_id ORDER BY pr.parameter_id
+              FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(400)'), 1, 1, N''),
+       OBJECT_DEFINITION(p.object_id)
+  FROM sys.procedures p
+ WHERE p.schema_id = SCHEMA_ID(N'dbo')
+   AND p.name IN (N'WN_Bookings_Reassign', N'WN_Bookings_Update', N'WN_AssignAttendantToBooking');
+UPDATE @Defs SET Stripped = REPLACE(REPLACE(REPLACE(REPLACE(Def, N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'');
+
+-- Backup of the current definitions (copy these from the result grid if you ever need to go back).
+SELECT ProcName, Params, Def AS CurrentDefinition FROM @Defs ORDER BY ProcName;
+
+DECLARE @Problem NVARCHAR(800) = N'';
+
+IF NOT EXISTS (SELECT 1 FROM @Defs WHERE ProcName = N'WN_Bookings_Reassign'
+                AND Params = N'@Id,@NewSpaceId,@NewPricingId,@UserEmail,@UpdatedById'
+                AND Stripped LIKE N'%Newspaceisnotavailableforthebookingperiod.%'
+                AND Stripped LIKE N'%UPDATEdbo.WN_BookingsSET%SpaceId=@NewSpaceId,%PricingId=@NewPricingId,%')
+    SET @Problem = @Problem + N'WN_Bookings_Reassign differs from the expected version. ';
+
+IF NOT EXISTS (SELECT 1 FROM @Defs WHERE ProcName = N'WN_Bookings_Update'
+                AND Params = N'@Id,@StartOn,@EndOn,@Notes,@UpdatedById'
+                AND Stripped LIKE N'%StartOn=ISNULL(@StartOn,StartOn),%'
+                AND Stripped LIKE N'%Notes=ISNULL(@Notes,Notes),%')
+    SET @Problem = @Problem + N'WN_Bookings_Update differs from the expected version. ';
+
+IF NOT EXISTS (SELECT 1 FROM @Defs WHERE ProcName = N'WN_AssignAttendantToBooking'
+                AND Params IN (N'@BookingDetailId,@PersonId,@CustomerId,@AssignedFrom',
+                               N'@BookingDetailId,@PersonId,@CustomerId,@AssignedFrom,@AllowOverCapacity')
+                AND Stripped LIKE N'%SurchargeApplied=CAST((@ExcessSeatCount*0.5*@SeatPrice)ASDECIMAL(10,2))%'
+                AND Stripped LIKE N'%INSERTINTO\[dbo\].\[WN_AccessStatus\]%' ESCAPE N'\')
+    SET @Problem = @Problem + N'WN_AssignAttendantToBooking differs from the expected version. ';
+
+IF @Problem <> N''
+BEGIN
+    SELECT N'NOTHING CHANGED. ' + @Problem + N'Send the CurrentDefinition above to update this script.' AS Result;
+    RETURN;
+END
+
+BEGIN TRANSACTION;
+
+-- 1. Reassign ------------------------------------------------------------------------------------------------
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Bookings_Reassign
+    @Id           INT,
+    @NewSpaceId   INT,
+    @NewPricingId INT,
+    @UserEmail    NVARCHAR(256) = NULL,
+    @UpdatedById  INT           = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        DECLARE @StartOn DATETIME2, @EndOn DATETIME2, @Affected INT;
+        SELECT @StartOn = StartOn, @EndOn = EndOn
+        FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id AND IsDeleted = 0;
+
+        IF @StartOn IS NULL
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR(''Booking not found.'', 16, 1); RETURN;
+        END
+
+        -- HOLDLOCK keeps the checked date range of the new space locked until COMMIT: a booking saved for that
+        -- space at the same moment waits, then sees this one (without it both could pass the check).
+        IF EXISTS (
+            SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK)
+            WHERE SpaceId         = @NewSpaceId
+              AND IsDeleted       = 0
+              AND BookingStatusId IN (1, 2, 5, 33)
+              AND Id             <> @Id
+              AND @StartOn        < EndOn
+              AND @EndOn          > StartOn
+        )
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR(''New space is not available for the booking period.'', 16, 1); RETURN;
+        END
+
+        UPDATE dbo.WN_Bookings SET
+            SpaceId     = @NewSpaceId,
+            PricingId   = @NewPricingId,
+            UpdatedOn   = SYSUTCDATETIME(),
+            UpdatedById = @UpdatedById
+        WHERE Id = @Id;
+        SET @Affected = @@ROWCOUNT;
+
+        COMMIT TRANSACTION;
+        SELECT @Affected AS AffectedRows;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END');
+
+-- 2. Update (dates / notes) ----------------------------------------------------------------------------------
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Bookings_Update
+    @Id          INT,
+    @StartOn     DATETIME2     = NULL,
+    @EndOn       DATETIME2     = NULL,
+    @Notes       NVARCHAR(MAX) = NULL,
+    @UpdatedById INT           = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        DECLARE @SpaceId INT, @CurStart DATETIME2, @CurEnd DATETIME2, @StatusId INT, @Shift NVARCHAR(20), @Affected INT;
+        SELECT @SpaceId  = SpaceId,
+               @CurStart = StartOn,
+               @CurEnd   = EndOn,
+               @StatusId = BookingStatusId,
+               @Shift    = ISNULL(NULLIF(ShiftType, N''''), N''24_7'')
+        FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK)
+        WHERE Id = @Id AND IsDeleted = 0;
+
+        DECLARE @NewStart DATETIME2 = ISNULL(@StartOn, @CurStart);
+        DECLARE @NewEnd   DATETIME2 = ISNULL(@EndOn,   @CurEnd);
+
+        -- New dates of an active booking must not overlap another active booking of the same space
+        -- (same rule and locks as WN_Bookings_Insert).
+        IF @SpaceId IS NOT NULL
+           AND @StatusId IN (1, 2, 5, 33)
+           AND (@NewStart <> @CurStart OR @NewEnd <> @CurEnd)
+           AND EXISTS (
+               SELECT 1 FROM dbo.WN_Bookings bk WITH (UPDLOCK, HOLDLOCK)
+               WHERE bk.SpaceId         = @SpaceId
+                 AND bk.Id             <> @Id
+                 AND bk.IsDeleted       = 0
+                 AND bk.BookingStatusId IN (1, 2, 5, 33)
+                 AND @NewStart          < bk.EndOn
+                 AND @NewEnd            > bk.StartOn
+                 AND (
+                     @Shift = N''24_7''
+                     OR ISNULL(bk.ShiftType, N''24_7'') = N''24_7''
+                     OR @Shift = ISNULL(bk.ShiftType, N''24_7'')
+                 )
+           )
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR(''Space is already booked for the selected date range and shift.'', 16, 1); RETURN;
+        END
+
+        UPDATE dbo.WN_Bookings SET
+            StartOn     = ISNULL(@StartOn, StartOn),
+            EndOn       = ISNULL(@EndOn,   EndOn),
+            Notes       = ISNULL(@Notes,   Notes),
+            UpdatedOn   = SYSUTCDATETIME(),
+            UpdatedById = @UpdatedById
+        WHERE Id = @Id AND IsDeleted = 0;
+        SET @Affected = @@ROWCOUNT;
+
+        COMMIT TRANSACTION;
+        SELECT @Affected AS AffectedRows;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END');
+
+-- 3. Add a person to a room ----------------------------------------------------------------------------------
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_AssignAttendantToBooking
+    @BookingDetailId   INT,
+    @PersonId          INT,
+    @CustomerId        INT,
+    @AssignedFrom      DATE,
+    @AllowOverCapacity BIT = 1   -- 0 = refuse when the room is full (sales executives); 1 = allow with surcharge
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @RoomCapacity INT = 0;
+    DECLARE @SpaceCategory NVARCHAR(100) = '''';
+    DECLARE @RentAmount DECIMAL(18,2) = 0;
+    DECLARE @SpacePrice DECIMAL(18,2) = NULL;
+    DECLARE @SeatPrice DECIMAL(10,2) = 0;
+    DECLARE @CurrentAttendantCount INT = 0;
+    DECLARE @IsOverCapacity BIT = 0;
+    DECLARE @ExcessSeatCount INT = 0;
+    DECLARE @SurchargeApplied DECIMAL(10,2) = 0;
+    DECLARE @BookingEndTo DATE = NULL;
+    DECLARE @Msg NVARCHAR(400);
+    DECLARE @LockResult INT;
+    DECLARE @LockName NVARCHAR(255) = CONCAT(N''WN_BookingAttendants:'', @BookingDetailId);
+
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- One assignment per room at a time: a second request for the same booking detail waits here until the
+        -- first has committed, then counts the people again (before, two staff could both take the last seat).
+        EXEC @LockResult = sys.sp_getapplock @Resource = @LockName, @LockMode = N''Exclusive'',
+                                             @LockOwner = N''Transaction'', @LockTimeout = 15000;
+        IF @LockResult < 0
+            THROW 50000, N''This room is being updated by someone else. Please try again.'', 1;
+
+        -- Fetch Booking Detail & Space Capacity/Price/EndDateTime info
+        SELECT TOP 1
+            @SpaceCategory = ISNULL(bd.SpaceCategory, ''''),
+            @RentAmount = ISNULL(bd.RentAmount, ISNULL(bd.Amount, 0)),
+            @RoomCapacity = ISNULL(s.Capacity, 1),
+            @SpacePrice = s.Price,
+            @BookingEndTo = CAST(bd.EndDateTime AS DATE)
+        FROM [dbo].[WN_BookingDetails] bd WITH (NOLOCK)
+        LEFT JOIN [dbo].[WN_Spaces] s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
+        WHERE bd.Id = @BookingDetailId;
+
+        IF @RoomCapacity <= 0 SET @RoomCapacity = 1;
+
+        -- Seat Price formula per rule: 0.5 * (column Price, table dbo.WN_Spaces)
+        IF @SpacePrice IS NOT NULL AND @SpacePrice > 0
+            SET @SeatPrice = @SpacePrice;
+        ELSE
+            SET @SeatPrice = @RentAmount / @RoomCapacity;
+
+        -- Count active attendants currently assigned to this BookingDetailId (under the room lock above)
+        SELECT @CurrentAttendantCount = COUNT(1)
+        FROM [dbo].[WN_BookingAttendants]
+        WHERE BookingDetailId = @BookingDetailId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE));
+
+        -- Meeting rooms & shared spaces hard block over-capacity
+        IF (@SpaceCategory LIKE ''%Meeting%'' OR @SpaceCategory LIKE ''%Shared%'') AND (@CurrentAttendantCount >= @RoomCapacity)
+            THROW 50000, N''Over-capacity attendant assignment is not allowed for meeting rooms and shared spaces.'', 1;
+
+        -- Check if this new addition exceeds capacity
+        IF (@CurrentAttendantCount + 1) > @RoomCapacity
+        BEGIN
+            SET @IsOverCapacity = 1;
+            SET @ExcessSeatCount = (@CurrentAttendantCount + 1) - @RoomCapacity;
+            -- SurchargeApplied = ExcessSeatCount * 0.5 * SeatPrice
+            SET @SurchargeApplied = CAST((@ExcessSeatCount * 0.5 * @SeatPrice) AS DECIMAL(10,2));
+        END
+
+        IF @IsOverCapacity = 1 AND @AllowOverCapacity = 0
+        BEGIN
+            SET @Msg = CONCAT(N''This room is full ('', @CurrentAttendantCount, N'' of '', @RoomCapacity,
+                              N'' seats). Only an admin can add more people to this room.'');
+            THROW 50000, @Msg, 1;
+        END
+
+        -- Check if person is already active on this booking detail
+        IF EXISTS (SELECT 1 FROM [dbo].[WN_BookingAttendants] WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE)))
+            THROW 50000, N''Attendant is already actively assigned to this booking.'', 1;
+
+        -- Insert into WN_BookingAttendants with AssignedTo populated from Booking EndDate
+        INSERT INTO [dbo].[WN_BookingAttendants] (
+            BookingDetailId, PersonId, CustomerId, AssignedFrom, AssignedTo, IsOverCapacity, ExcessSeatCount, SurchargeApplied
+        )
+        VALUES (
+            @BookingDetailId, @PersonId, @CustomerId, @AssignedFrom, @BookingEndTo, @IsOverCapacity, @ExcessSeatCount, @SurchargeApplied
+        );
+
+        DECLARE @NewAssignmentId INT = SCOPE_IDENTITY();
+
+        -- Ensure WN_AccessStatus row exists and is enabled
+        IF EXISTS (SELECT 1 FROM [dbo].[WN_AccessStatus] WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId)
+        BEGIN
+            UPDATE [dbo].[WN_AccessStatus]
+            SET IsEnabled = 1, GrantedAt = SYSUTCDATETIME(), RevokedAt = NULL
+            WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId;
+        END
+        ELSE
+        BEGIN
+            INSERT INTO [dbo].[WN_AccessStatus] (BookingDetailId, PersonId, CustomerId, IsEnabled, GrantedAt)
+            VALUES (@BookingDetailId, @PersonId, @CustomerId, 1, SYSUTCDATETIME());
+        END
+
+        COMMIT TRANSACTION;
+
+        SELECT
+            @NewAssignmentId AS BookingAttendantId,
+            @IsOverCapacity AS IsOverCapacity,
+            @ExcessSeatCount AS ExcessSeatCount,
+            @SurchargeApplied AS SurchargeApplied;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END');
+
+COMMIT TRANSACTION;
+
+SELECT N'Done: WN_Bookings_Reassign, WN_Bookings_Update and WN_AssignAttendantToBooking updated (booking concurrency).' AS Result,
+       DB_NAME() AS DatabaseName;

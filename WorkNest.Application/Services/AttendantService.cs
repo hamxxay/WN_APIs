@@ -288,7 +288,7 @@ namespace WorkNest.Application.Services
         public Task<bool> CloseCapacityRequestAsync(int id, string status, string decidedByEmail, string? note) =>
             _db.DecideCapacityRequestDbAsync(id, status, decidedByEmail, note, DateTime.UtcNow);
 
-        public async Task<IDictionary<string, object?>> AssignAttendantToBookingAsync(AssignBookingAttendantRequest request)
+        public async Task<IDictionary<string, object?>> AssignAttendantToBookingAsync(AssignBookingAttendantRequest request, bool allowOverCapacity = true)
         {
             var capCheck = await CheckCapacityBeforeAssignAsync(request.BookingDetailId);
             if (capCheck.WouldExceedCapacity && !capCheck.AllowsOverCapacity)
@@ -300,7 +300,8 @@ namespace WorkNest.Application.Services
                 request.BookingDetailId,
                 request.PersonId,
                 request.CustomerId,
-                request.AssignedFrom
+                request.AssignedFrom,
+                allowOverCapacity
             );
 
             // Automatically create Custom Invoice & send Email if assignment is over-capacity

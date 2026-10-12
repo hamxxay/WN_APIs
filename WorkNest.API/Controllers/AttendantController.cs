@@ -142,7 +142,8 @@ namespace WorkNest.API.Controllers
                     return BadRequest(new { message = $"{cap.SpaceName} is full ({cap.CurrentActiveAttendants} of {cap.RoomCapacity} seats). Only an admin can add more people to this room." });
             }
 
-            var result = await _attendants.AssignAttendantToBookingAsync(request);
+            // The check above can race with another assignment; the procedure re-checks under a per-room lock.
+            var result = await _attendants.AssignAttendantToBookingAsync(request, allowOverCapacity: !IsSalesExecutiveOnly());
             return Ok(new
             {
                 message = "Attendant successfully assigned to booking.",

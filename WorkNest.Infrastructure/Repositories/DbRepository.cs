@@ -3564,7 +3564,7 @@ END";
             return v is null || v is DBNull ? null : Convert.ToInt32(v);
         }
 
-        public async Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom)
+        public async Task<IDictionary<string, object?>> AssignAttendantToBookingSpAsync(int bookingDetailId, int personId, int customerId, DateTime assignedFrom, bool allowOverCapacity = true)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_AssignAttendantToBooking", c);
@@ -3572,6 +3572,9 @@ END";
             cmd.Parameters.AddWithValue("@PersonId", personId);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
             cmd.Parameters.AddWithValue("@AssignedFrom", assignedFrom.Date);
+            // Refuse a full room inside the procedure (under its per-room lock). Only sent when refusing, so an
+            // admin assignment still works before Database/Booking/BK_02_booking_concurrency.txt has been run.
+            if (!allowOverCapacity) cmd.Parameters.AddWithValue("@AllowOverCapacity", false);
 
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
