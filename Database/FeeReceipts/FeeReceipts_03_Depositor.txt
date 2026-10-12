@@ -1,0 +1,116 @@
+USE [SAC400];
+
+-- ============================================================================================
+-- Fee Receipts: depositor details on dbo.WN_FeeReceipts (additive only - never drops the table or data).
+--   1. DepositorName NVARCHAR(150) NULL: added if missing.
+--   2. DepositorCNIC VARCHAR(15) NULL: added if missing.
+--   3. CK_WN_FeeReceipts_DepositorCNIC: DepositorCNIC is NULL or 12345-1234567-1 - created only if missing
+--      and no stored value breaks it.
+-- Existing receipts keep NULL in both columns (the API requires them only for new receipts).
+-- Every step checks first, so it is safe to run again. Each result tab says what was done or skipped.
+-- Run AFTER FeeReceipts_01_Table.txt and BEFORE FeeReceipts_02_Procedures.txt (the procedures read these columns),
+-- as ONE statement in DBeaver (no GO needed).
+-- ============================================================================================
+SET NOCOUNT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET NUMERIC_ROUNDABORT OFF;
+
+IF OBJECT_ID(N'dbo.WN_FeeReceipts', N'U') IS NULL
+BEGIN
+    SELECT 'Table dbo.WN_FeeReceipts is missing. This script only updates the existing table. Nothing was changed.' AS Result;
+    RETURN;
+END
+
+DECLARE @Type    SYSNAME,
+        @Length  INT,
+        @Count   INT,
+        @Summary NVARCHAR(MAX) = N'';
+
+-- --------------------------------------------------------------------------------------------
+-- 1. DepositorName NVARCHAR(150) NULL
+-- --------------------------------------------------------------------------------------------
+SELECT @Type = DATA_TYPE, @Length = CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'WN_FeeReceipts' AND COLUMN_NAME = 'DepositorName';
+
+IF @Type IS NULL
+BEGIN
+    ALTER TABLE dbo.WN_FeeReceipts ADD DepositorName NVARCHAR(150) NULL;
+    SET @Summary += N' DepositorName added;';
+END
+ELSE IF @Type <> 'nvarchar' OR @Length <> 150
+BEGIN
+    SELECT 'DepositorName already exists as ' + @Type + '(' + ISNULL(CAST(@Length AS VARCHAR(10)), '?') + '), not nvarchar(150) - left unchanged. Check it by hand.' AS Result;
+    SET @Summary += N' DepositorName already exists (different type, left unchanged);';
+END
+ELSE
+    SET @Summary += N' DepositorName already in place;';
+
+-- --------------------------------------------------------------------------------------------
+-- 2. DepositorCNIC VARCHAR(15) NULL
+-- --------------------------------------------------------------------------------------------
+SELECT @Type = NULL, @Length = NULL;
+SELECT @Type = DATA_TYPE, @Length = CHARACTER_MAXIMUM_LENGTH
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'WN_FeeReceipts' AND COLUMN_NAME = 'DepositorCNIC';
+
+IF @Type IS NULL
+BEGIN
+    ALTER TABLE dbo.WN_FeeReceipts ADD DepositorCNIC VARCHAR(15) NULL;
+    SET @Summary += N' DepositorCNIC added;';
+END
+ELSE IF @Type <> 'varchar' OR @Length <> 15
+BEGIN
+    SELECT 'DepositorCNIC already exists as ' + @Type + '(' + ISNULL(CAST(@Length AS VARCHAR(10)), '?') + '), not varchar(15) - left unchanged. Check it by hand.' AS Result;
+    SET @Summary += N' DepositorCNIC already exists (different type, left unchanged);';
+END
+ELSE
+    SET @Summary += N' DepositorCNIC already in place;';
+
+-- --------------------------------------------------------------------------------------------
+-- 3. CK_WN_FeeReceipts_DepositorCNIC: NULL or exactly 5 digits - 7 digits - 1 digit (LIKE has no regex;
+--    this pattern is ^\d{5}-\d{7}-\d$). Statements that use DepositorCNIC run as dynamic SQL so this
+--    single batch compiles before the column exists.
+-- --------------------------------------------------------------------------------------------
+IF EXISTS (SELECT 1 FROM sys.check_constraints
+            WHERE name = N'CK_WN_FeeReceipts_DepositorCNIC' AND parent_object_id = OBJECT_ID(N'dbo.WN_FeeReceipts'))
+BEGIN
+    SET @Summary += N' CK_WN_FeeReceipts_DepositorCNIC already in place;';
+END
+ELSE
+BEGIN
+    EXEC sp_executesql N'SELECT @c = COUNT(1) FROM dbo.WN_FeeReceipts WITH (NOLOCK)
+                          WHERE DepositorCNIC IS NOT NULL
+                            AND DepositorCNIC NOT LIKE ''[0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9]'';',
+                       N'@c INT OUTPUT', @c = @Count OUTPUT;
+
+    IF @Count > 0
+    BEGIN
+        SELECT 'Skipped CK_WN_FeeReceipts_DepositorCNIC: ' + CAST(@Count AS VARCHAR(20))
+               + ' receipt(s) have a DepositorCNIC not in the format 12345-1234567-1 (listed next). Fix them, then run this script again.' AS Result;
+        EXEC(N'SELECT TOP (500) Id, Code, DepositorCNIC FROM dbo.WN_FeeReceipts WITH (NOLOCK)
+               WHERE DepositorCNIC IS NOT NULL
+                 AND DepositorCNIC NOT LIKE ''[0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9]''
+               ORDER BY Id;');
+        SET @Summary += N' CK_WN_FeeReceipts_DepositorCNIC SKIPPED (invalid CNICs, listed above);';
+    END
+    ELSE
+    BEGIN
+        BEGIN TRY
+            EXEC(N'ALTER TABLE dbo.WN_FeeReceipts WITH CHECK ADD CONSTRAINT CK_WN_FeeReceipts_DepositorCNIC
+                   CHECK (DepositorCNIC IS NULL OR DepositorCNIC LIKE ''[0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9]'');');
+            SET @Summary += N' CK_WN_FeeReceipts_DepositorCNIC created;';
+        END TRY
+        BEGIN CATCH
+            SELECT 'CK_WN_FeeReceipts_DepositorCNIC was NOT created: ' + ERROR_MESSAGE() AS Result;
+            SET @Summary += N' CK_WN_FeeReceipts_DepositorCNIC failed (see above);';
+        END CATCH
+    END
+END
+
+SELECT 'Done: dbo.WN_FeeReceipts depositor columns checked.' + @Summary AS Result;

@@ -6477,7 +6477,7 @@ END";
             return await ReadAll(r);
         }
 
-        public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, int createdById, string? allowedLocationIds)
+        public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_FeeReceipts_Insert", c);
@@ -6486,6 +6486,8 @@ END";
             cmd.Parameters.AddWithValue("@PaymentType", (object?)paymentType ?? "Cash");
             cmd.Parameters.AddWithValue("@ReceiptDate", receiptDate.Date);
             cmd.Parameters.AddWithValue("@Remarks", (object?)remarks ?? DBNull.Value);
+            cmd.Parameters.Add("@DepositorName", SqlDbType.NVarChar, 150).Value = depositorName;
+            cmd.Parameters.Add("@DepositorCNIC", SqlDbType.VarChar, 15).Value = depositorCnic;
             cmd.Parameters.AddWithValue("@CreatedById", createdById);
             cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
             try
