@@ -255,6 +255,39 @@ namespace WorkNest.Application.Services
             };
         }
 
+        public Task<int> RequestOverCapacityAsync(int bookingDetailId, int personId, int customerId, string requestedByEmail) =>
+            _db.CreateCapacityRequestDbAsync(bookingDetailId, personId, customerId, requestedByEmail, DateTime.UtcNow);
+
+        public Task<List<IDictionary<string, object?>>> GetCapacityRequestsAsync(string? status, int? bookingDetailId, IReadOnlyCollection<int>? locationIds) =>
+            _db.GetCapacityRequestsDbAsync(status, bookingDetailId, locationIds);
+
+        public Task<IDictionary<string, object?>?> GetCapacityRequestAsync(int id) => _db.GetCapacityRequestDbAsync(id);
+
+        public async Task<IDictionary<string, object?>> ApproveCapacityRequestAsync(int id, string decidedByEmail)
+        {
+            var req = await _db.GetCapacityRequestDbAsync(id) ?? throw new KeyNotFoundException("Request not found.");
+            // Claim the request first so two admins can't approve (and assign) it twice.
+            if (!await _db.DecideCapacityRequestDbAsync(id, "Approved", decidedByEmail, null, DateTime.UtcNow))
+                throw new InvalidOperationException("This request has already been handled.");
+            try
+            {
+                return await AssignAttendantToBookingAsync(new AssignBookingAttendantRequest
+                {
+                    BookingDetailId = Convert.ToInt32(req["BookingDetailId"]),
+                    PersonId = Convert.ToInt32(req["PersonId"]),
+                    CustomerId = Convert.ToInt32(req["CustomerId"]),
+                });
+            }
+            catch
+            {
+                await _db.ReopenCapacityRequestDbAsync(id); // nothing was assigned: leave it for another try
+                throw;
+            }
+        }
+
+        public Task<bool> CloseCapacityRequestAsync(int id, string status, string decidedByEmail, string? note) =>
+            _db.DecideCapacityRequestDbAsync(id, status, decidedByEmail, note, DateTime.UtcNow);
+
         public async Task<IDictionary<string, object?>> AssignAttendantToBookingAsync(AssignBookingAttendantRequest request)
         {
             var capCheck = await CheckCapacityBeforeAssignAsync(request.BookingDetailId);

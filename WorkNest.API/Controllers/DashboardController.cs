@@ -12,8 +12,10 @@ namespace WorkNest.API.Controllers
         private readonly IDashboardService _dashboard;
         private readonly IRoleDashboardService _roleDashboard;
         private readonly IForecastService _forecast;
-        public DashboardController(IDashboardService dashboard, IRoleDashboardService roleDashboard, IForecastService forecast)
+        private readonly IAttendantService _attendants;
+        public DashboardController(IDashboardService dashboard, IRoleDashboardService roleDashboard, IForecastService forecast, IAttendantService attendants)
         {
+            _attendants = attendants;
             _dashboard = dashboard;
             _roleDashboard = roleDashboard;
             _forecast = forecast;
@@ -110,6 +112,16 @@ namespace WorkNest.API.Controllers
             var badges = await _dashboard.GetNavBadgesAsync(scope, includeMachines: isAdmin, User.GetEmail());
             if (!isAdmin)
                 badges = badges.Where(kv => SalesExecutiveRoutes.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
+            else
+            {
+                // Sales executives' requests to add people to full rooms wait on Attendants & Access until an admin decides.
+                var pending = (await _attendants.GetCapacityRequestsAsync("Pending", null, User.IsLocationBoundRole() ? User.GetLocationIds() : null)).Count;
+                if (pending > 0)
+                {
+                    badges = new Dictionary<string, int>(badges);
+                    badges["/admin/attendants"] = badges.GetValueOrDefault("/admin/attendants") + pending;
+                }
+            }
             return Ok(badges);
         }
 
