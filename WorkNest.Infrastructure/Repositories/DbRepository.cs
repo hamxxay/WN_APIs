@@ -6488,11 +6488,18 @@ END";
             cmd.Parameters.AddWithValue("@Remarks", (object?)remarks ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CreatedById", createdById);
             cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
-            await using var r = await cmd.ExecuteReaderAsync();
-            return await r.ReadAsync() ? ToDict(r) : null;
+            try
+            {
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? ToDict(r) : null;
+            }
+            catch (SqlException ex) when (ex.Number == 50000)
+            {
+                throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(ex.Message, ex.State, ex);
+            }
         }
 
-        public async Task<(bool IsSuccessful, string Message, int? ReceiptId)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById)
+        public async Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_FeeReceipts_Void", c);
@@ -6500,16 +6507,27 @@ END";
             cmd.Parameters.AddWithValue("@ReceiptGUID", (object?)receiptGuid ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@VoidReason", voidReason);
             cmd.Parameters.AddWithValue("@UpdatedById", updatedById);
-            await using var r = await cmd.ExecuteReaderAsync();
-            if (await r.ReadAsync())
+            cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
+            try
             {
-                var dict = ToDict(r);
-                bool ok = dict.TryGetValue("IsSuccessful", out var s) && s is not null && Convert.ToInt32(s) == 1;
-                string msg = dict.TryGetValue("Message", out var m) && m is not null ? m.ToString()! : "Success";
-                int? rid = dict.TryGetValue("ReceiptId", out var id) && id is not null ? Convert.ToInt32(id) : null;
-                return (ok, msg, rid);
+                await using var r = await cmd.ExecuteReaderAsync();
+                if (await r.ReadAsync())
+                {
+                    var dict = ToDict(r);
+                    bool ok = dict.TryGetValue("IsSuccessful", out var s) && s is not null && Convert.ToInt32(s) == 1;
+                    string msg = dict.TryGetValue("Message", out var m) && m is not null ? m.ToString()! : "Success";
+                    int? rid = dict.TryGetValue("ReceiptId", out var id) && id is not null ? Convert.ToInt32(id) : null;
+                    bool restored = dict.TryGetValue("InvoiceRestored", out var ir) && ir is not null && Convert.ToBoolean(ir);
+                    bool cards = dict.TryGetValue("AccessCardsNeedReview", out var ac) && ac is not null && Convert.ToBoolean(ac);
+                    return (ok, msg, rid, restored, cards);
+                }
             }
-            return (true, "Voided", receiptId);
+            catch (SqlException ex) when (ex.Number == 50000)
+            {
+                throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(ex.Message, ex.State, ex);
+            }
+            // The procedure always returns a row on success; no row means the void was not confirmed.
+            return (false, "The fee receipt could not be voided. Please try again.", receiptId, false, false);
         }
 
         public async Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds)
@@ -6537,12 +6555,13 @@ END";
             return (items, total);
         }
 
-        public async Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid)
+        public async Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid, string? allowedLocationIds)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_FeeReceipts_GetById", c);
             cmd.Parameters.AddWithValue("@Id", (object?)id ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@IdGUID", (object?)guid ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? ToDict(r) : null;
         }
