@@ -12,5 +12,8 @@ namespace WorkNest.Application.DTOs.Customer
         public int? CityId { get; set; }
         public string? Notes { get; set; }
         public bool? IsActive { get; set; }
+        public string? CustomerTypeId { get; set; }
+        public int CountryId { get; set; }
+        public string? IdentificationDocumentTypeId { get; set; }
     }
 }
