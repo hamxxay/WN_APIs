@@ -6495,6 +6495,99 @@ END";
 
             return WorkNest.Application.Services.InvoiceCalculationEngine.CalculateInvoice(request);
         }
+
+        // --- Fee Receipts ---
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptUnpaidInvoicesDbAsync(string? search, int? locationId, string? allowedLocationIds, int top)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_GetUnpaidInvoices", c);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Top", top);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptAccountsDbAsync(int? companyId)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_GetAccounts", c);
+            cmd.Parameters.AddWithValue("@CompanyId", (object?)companyId ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, int createdById, string? allowedLocationIds)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_Insert", c);
+            cmd.Parameters.AddWithValue("@InvoiceIdGUID", invoiceIdGuid);
+            cmd.Parameters.AddWithValue("@CashInHandAccountId", cashInHandAccountId);
+            cmd.Parameters.AddWithValue("@PaymentType", (object?)paymentType ?? "Cash");
+            cmd.Parameters.AddWithValue("@ReceiptDate", receiptDate.Date);
+            cmd.Parameters.AddWithValue("@Remarks", (object?)remarks ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedById", createdById);
+            cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        public async Task<(bool IsSuccessful, string Message, int? ReceiptId)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_Void", c);
+            cmd.Parameters.AddWithValue("@ReceiptId", (object?)receiptId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ReceiptGUID", (object?)receiptGuid ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@VoidReason", voidReason);
+            cmd.Parameters.AddWithValue("@UpdatedById", updatedById);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var dict = ToDict(r);
+                bool ok = dict.TryGetValue("IsSuccessful", out var s) && s is not null && Convert.ToInt32(s) == 1;
+                string msg = dict.TryGetValue("Message", out var m) && m is not null ? m.ToString()! : "Success";
+                int? rid = dict.TryGetValue("ReceiptId", out var id) && id is not null ? Convert.ToInt32(id) : null;
+                return (ok, msg, rid);
+            }
+            return (true, "Voided", receiptId);
+        }
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_GetList", c);
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
+
+            int total = 0;
+            var items = new List<IDictionary<string, object?>>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                total = r.GetInt32(0);
+            }
+            if (await r.NextResultAsync())
+            {
+                items = await ReadAll(r);
+            }
+            return (items, total);
+        }
+
+        public async Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_GetById", c);
+            cmd.Parameters.AddWithValue("@Id", (object?)id ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@IdGUID", (object?)guid ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
     }
 }
 

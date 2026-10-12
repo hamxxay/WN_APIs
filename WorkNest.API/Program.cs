@@ -206,6 +206,7 @@ try
     builder.Services.AddScoped<ICustomerService, CustomerService>();
     builder.Services.AddScoped<IMembershipService, MembershipService>();
     builder.Services.AddScoped<IAccountCoaService, AccountCoaService>();
+    builder.Services.AddScoped<IFeeReceiptService, FeeReceiptService>();
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
     builder.Services.AddScoped<IQuotationService, QuotationService>();
     builder.Services.AddScoped<IAgreementService, AgreementService>();
