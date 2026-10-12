@@ -3,7 +3,7 @@ USE [SAC400];
 -- ============================================================================================
 -- Fee Receipts: stored procedures (dbo.WN_FeeReceipts_*).
 -- 6 procedures, CREATE OR ALTER: no table is created or changed. Safe to run again.
--- Run AFTER FeeReceipts_01_Table.txt, as ONE statement in DBeaver (no GO needed).
+-- Run AFTER FeeReceipts_01_Table.txt and FeeReceipts_03_Depositor.txt, as ONE statement in DBeaver (no GO needed).
 -- Needs SQL Server 2016+ with compatibility level 130+ (STRING_SPLIT).
 -- ============================================================================================
 SET NOCOUNT ON;
@@ -23,6 +23,13 @@ IF OBJECT_ID(N'dbo.WN_FeeReceipts', N'U') IS NULL
    OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'VoidReason') IS NULL
 BEGIN
     SELECT 'dbo.WN_FeeReceipts or its new columns are missing - run FeeReceipts_01_Table.txt first. Nothing was changed.' AS Result;
+    RETURN;
+END
+
+IF COL_LENGTH(N'dbo.WN_FeeReceipts', N'DepositorName') IS NULL
+   OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'DepositorCNIC') IS NULL
+BEGIN
+    SELECT 'dbo.WN_FeeReceipts has no DepositorName / DepositorCNIC columns - run FeeReceipts_03_Depositor.txt first. Nothing was changed.' AS Result;
     RETURN;
 END
 
@@ -226,6 +233,8 @@ BEGIN
         fr.ReceiptDate,
         fr.Remarks,
         fr.VoidReason,
+        fr.DepositorName,
+        fr.DepositorCNIC,
         fr.CreatedOn,
         fr.UpdatedOn,
         fr.CreatedById,
@@ -334,6 +343,8 @@ BEGIN
         fr.ReceiptDate,
         fr.Remarks,
         fr.VoidReason,
+        fr.DepositorName,
+        fr.DepositorCNIC,
         fr.CreatedOn,
         fr.UpdatedOn,
         fr.CreatedById,
@@ -386,6 +397,8 @@ EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_Insert
     @PaymentType         VARCHAR(50)   = ''Cash'',
     @ReceiptDate         DATE,
     @Remarks             NVARCHAR(500) = NULL,
+    @DepositorName       NVARCHAR(150) = NULL,   -- required by the API for new receipts; NULL kept for older callers
+    @DepositorCNIC       VARCHAR(15)   = NULL,   -- 12345-1234567-1 (API formats it; CK_WN_FeeReceipts_DepositorCNIC checks it)
     @CreatedById         INT,
     @AllowedLocationIds  NVARCHAR(MAX) = NULL   -- NULL = every location (super admin)
 AS
@@ -552,7 +565,8 @@ BEGIN
             IdGUID, Code, CustomerIdGUID, InvoiceIdGUID, InvoiceTypeId, TotalAmount,
             RoomRentExclTax, ServiceCharges, TaxOnServiceCharges, WHTAmount, SecurityDepositAmount,
             CashInHandAccountId, PaymentType, BranchId, CompanyId, FeeStatus, Status, ReceiptDate,
-            CreatedOn, UpdatedOn, CreatedById, Remarks, UpdatedById, VoidReason
+            CreatedOn, UpdatedOn, CreatedById, Remarks, UpdatedById, VoidReason,
+            DepositorName, DepositorCNIC
         )
         VALUES (
             @ReceiptGUID, @Code, @CustomerIdGUID, @InvoiceIdGUID, @InvoiceTypeId, @NetTotal,
@@ -561,7 +575,8 @@ BEGIN
             1,   -- FeeStatus 1 = Paid
             1,   -- Status 1 = Active
             @ReceiptDate,
-            SYSUTCDATETIME(), NULL, @CreatedById, NULLIF(LTRIM(RTRIM(@Remarks)), ''''), NULL, NULL
+            SYSUTCDATETIME(), NULL, @CreatedById, NULLIF(LTRIM(RTRIM(@Remarks)), ''''), NULL, NULL,
+            NULLIF(LTRIM(RTRIM(@DepositorName)), ''''), NULLIF(LTRIM(RTRIM(@DepositorCNIC)), '''')
         );
 
         SET @ReceiptId = CAST(SCOPE_IDENTITY() AS INT);

@@ -11,6 +11,10 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public string PaymentType { get; set; } = "Cash";
         public DateTime ReceiptDate { get; set; }
         public string? Remarks { get; set; }
+        /// <summary>Person who paid at the counter. Required for new receipts (2-150 characters).</summary>
+        public string? DepositorName { get; set; }
+        /// <summary>Depositor's CNIC: 12345-1234567-1, or 13 digits without dashes (the API adds them). Required.</summary>
+        public string? DepositorCnic { get; set; }
 
         public Guid GetResolvedInvoiceIdGuid() => InvoiceIdGUID;
 
@@ -103,6 +107,9 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public DateTime ReceiptDate { get; set; }
         public string? Remarks { get; set; }
         public string? VoidReason { get; set; }
+        /// <summary>NULL on receipts saved before the depositor fields were added.</summary>
+        public string? DepositorName { get; set; }
+        public string? DepositorCnic { get; set; }
         public DateTime CreatedOn { get; set; }
         public DateTime? UpdatedOn { get; set; }
         public int? CreatedById { get; set; }

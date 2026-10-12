@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.FeeReceipt;
 using WorkNest.Application.Interfaces;
@@ -12,6 +13,13 @@ namespace WorkNest.Application.Services
     {
         private const int MaxTextLength = 500;     // Remarks / VoidReason columns are NVARCHAR(500)
         private const int MaxSearchLength = 60;    // escaped search must fit the procedures' NVARCHAR(200)
+        private const int MinDepositorNameLength = 2;
+        private const int MaxDepositorNameLength = 150;   // DepositorName column is NVARCHAR(150)
+        private const string DepositorCnicFormatMessage = "Depositor CNIC must be in the format 12345-1234567-1.";
+
+        // ASCII digits only ([0-9], not \d, which also matches other scripts' digits) - same as CK_WN_FeeReceipts_DepositorCNIC.
+        private static readonly Regex CnicDigitsOnly = new(@"^[0-9]{13}$", RegexOptions.Compiled);
+        private static readonly Regex CnicFormatted = new(@"^[0-9]{5}-[0-9]{7}-[0-9]$", RegexOptions.Compiled);
 
         // Payment types a fee receipt can record (cash or bank accounts from WN_FeeReceipts_GetAccounts).
         // The web form currently sends only "Cash"; values are stored in this canonical spelling.
@@ -67,6 +75,20 @@ namespace WorkNest.Application.Services
             if (remarks != null && remarks.Length > MaxTextLength)
                 return BadRequest($"Remarks cannot be longer than {MaxTextLength} characters.");
 
+            var depositorName = dto.DepositorName?.Trim();
+            if (string.IsNullOrEmpty(depositorName))
+                return BadRequest("Depositor name is required.");
+            if (depositorName.Length < MinDepositorNameLength || depositorName.Length > MaxDepositorNameLength)
+                return BadRequest($"Depositor name must be between {MinDepositorNameLength} and {MaxDepositorNameLength} characters.");
+
+            var depositorCnic = dto.DepositorCnic?.Trim();
+            if (string.IsNullOrEmpty(depositorCnic))
+                return BadRequest("Depositor CNIC is required.");
+            if (CnicDigitsOnly.IsMatch(depositorCnic))
+                depositorCnic = $"{depositorCnic[..5]}-{depositorCnic.Substring(5, 7)}-{depositorCnic[12..]}";
+            if (!CnicFormatted.IsMatch(depositorCnic))
+                return BadRequest(DepositorCnicFormatMessage);
+
             string? allowedCsv = isSuperAdmin ? null : ToCsv(allowedLocationIds);
 
             try
@@ -77,6 +99,8 @@ namespace WorkNest.Application.Services
                     paymentType,
                     dto.ReceiptDate.Date,
                     remarks,
+                    depositorName,
+                    depositorCnic,
                     createdById,
                     allowedCsv);
 
@@ -259,6 +283,8 @@ namespace WorkNest.Application.Services
                 ReceiptDate = GetDateTime(r, "ReceiptDate"),
                 Remarks = GetStringOrNull(r, "Remarks"),
                 VoidReason = GetStringOrNull(r, "VoidReason"),
+                DepositorName = GetStringOrNull(r, "DepositorName"),
+                DepositorCnic = GetStringOrNull(r, "DepositorCNIC"),
                 CreatedOn = GetDateTime(r, "CreatedOn"),
                 UpdatedOn = GetDateTimeOrNull(r, "UpdatedOn"),
                 CreatedById = GetIntOrNull(r, "CreatedById"),
