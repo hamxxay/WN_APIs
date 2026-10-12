@@ -166,7 +166,7 @@ namespace WorkNest.API.Controllers
             var id = await _attendants.RequestOverCapacityAsync(bookingDetailId, body.PersonId, body.CustomerId, User.GetEmail() ?? "");
             return id switch
             {
-                -1 => StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Requests aren't set up yet. Run WN_AttendantCapacityRequests.txt on the database first." }),
+                -1 => StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = "Requests aren't set up yet. Run WN_AttendantCapacityRequests.txt and WN_AttendantCapacityRequests_Procedures.txt on the database first." }),
                 0 => Ok(new { isSuccessful = true, message = "A request for this person is already waiting for an admin." }),
                 _ => Ok(new { isSuccessful = true, id, message = $"{cap.SpaceName} is full, so an admin has been asked to approve adding this person." })
             };
