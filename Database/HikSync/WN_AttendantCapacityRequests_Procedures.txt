@@ -1,0 +1,111 @@
+USE [SAC400];
+
+-- ============================================================================================
+-- Procedures for over-capacity requests (table dbo.WN_AttendantCapacityRequests).
+-- A sales executive asks to add a person to a full room; an admin approves or rejects.
+-- 4 procedures, CREATE OR ALTER: no table is created or changed. Safe to run again.
+-- Run after WN_AttendantCapacityRequests.txt, as ONE statement in DBeaver (no GO needed).
+-- ============================================================================================
+SET NOCOUNT ON;
+
+IF OBJECT_ID(N'dbo.WN_AttendantCapacityRequests', N'U') IS NULL
+BEGIN
+    SELECT 'Table dbo.WN_AttendantCapacityRequests is missing - run WN_AttendantCapacityRequests.txt first. Nothing was changed.' AS Result;
+    RETURN;
+END
+
+-- New pending request. Returns Id = new request id, or 0 if this person already has a pending request for the room.
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_AttendantCapacityRequest_Create
+    @BookingDetailId  INT,
+    @PersonId         INT,
+    @CustomerId       INT,
+    @RequestedByEmail NVARCHAR(256),
+    @RequestedAt      DATETIME2(0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF EXISTS (SELECT 1 FROM dbo.WN_AttendantCapacityRequests WITH (NOLOCK)
+                WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND Status = N''Pending'')
+    BEGIN
+        SELECT 0 AS Id;
+        RETURN;
+    END
+
+    BEGIN TRY
+        INSERT INTO dbo.WN_AttendantCapacityRequests (BookingDetailId, PersonId, CustomerId, RequestedByEmail, RequestedAt, Status)
+        VALUES (@BookingDetailId, @PersonId, @CustomerId, @RequestedByEmail, @RequestedAt, N''Pending'');
+        SELECT CAST(SCOPE_IDENTITY() AS INT) AS Id;
+    END TRY
+    BEGIN CATCH
+        -- A pending request for the same person and room was created at the same moment (UQ_..._Pending).
+        IF ERROR_NUMBER() IN (2601, 2627) SELECT 0 AS Id;
+        ELSE THROW;
+    END CATCH
+END');
+
+-- Requests with person, room, customer, seats and the room''s location.
+-- All filters optional: @Id (one request), @Status, @BookingDetailId,
+-- @LocationIds = comma-separated location ids for admins / sales executives (NULL = every location; '''' = none).
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_AttendantCapacityRequest_List
+    @Id              INT           = NULL,
+    @Status          NVARCHAR(20)  = NULL,
+    @BookingDetailId INT           = NULL,
+    @LocationIds     NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT r.Id, r.BookingDetailId, r.PersonId, r.CustomerId, r.RequestedByEmail, r.RequestedAt, r.Status,
+           r.DecidedByEmail, r.DecidedAt, r.DecisionNote,
+           p.Name AS PersonName, p.Email AS PersonEmail, p.Phone AS PersonPhone,
+           bd.SpaceName, bd.SpaceCategory,
+           LTRIM(RTRIM(COALESCE(NULLIF(cu.Company, N''''), CONCAT(cu.FirstName, N'' '', cu.LastName), cu.Email))) AS CustomerName,
+           ISNULL(s.Capacity, 1) AS RoomCapacity,
+           (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+             WHERE ba.BookingDetailId = r.BookingDetailId
+               AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE))) AS CurrentAttendants,
+           ls.LocationId
+      FROM dbo.WN_AttendantCapacityRequests r WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId = r.PersonId
+      LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id = r.BookingDetailId
+      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
+      LEFT JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = r.CustomerId
+      OUTER APPLY (SELECT TOP 1 sx.LocationId
+                     FROM dbo.WN_Bookings b WITH (NOLOCK)
+                     JOIN dbo.WN_Spaces sx WITH (NOLOCK) ON sx.Id = b.SpaceId
+                    WHERE b.IdGUID = bd.BookingGuid) ls
+     WHERE (@Id IS NULL OR r.Id = @Id)
+       AND (@Status IS NULL OR r.Status = @Status)
+       AND (@BookingDetailId IS NULL OR r.BookingDetailId = @BookingDetailId)
+       AND (@LocationIds IS NULL
+            OR CHARINDEX(N'','' + CAST(ls.LocationId AS NVARCHAR(20)) + N'','', N'','' + @LocationIds + N'','') > 0)
+     ORDER BY r.RequestedAt DESC;
+END');
+
+-- Pending -> Approved / Rejected / Cancelled. Returns Affected = 1, or 0 if it was no longer pending.
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_AttendantCapacityRequest_Decide
+    @Id             INT,
+    @Status         NVARCHAR(20),
+    @DecidedByEmail NVARCHAR(256),
+    @DecisionNote   NVARCHAR(500) = NULL,
+    @DecidedAt      DATETIME2(0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_AttendantCapacityRequests
+       SET Status = @Status, DecidedByEmail = @DecidedByEmail, DecidedAt = @DecidedAt, DecisionNote = NULLIF(LTRIM(RTRIM(@DecisionNote)), N'''')
+     WHERE Id = @Id AND Status = N''Pending'';
+    SELECT @@ROWCOUNT AS Affected;
+END');
+
+-- Approved -> Pending again (used when adding the person after approval failed).
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_AttendantCapacityRequest_Reopen
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_AttendantCapacityRequests
+       SET Status = N''Pending'', DecidedByEmail = NULL, DecidedAt = NULL, DecisionNote = NULL
+     WHERE Id = @Id AND Status = N''Approved'';
+END');
+
+SELECT 'Done: 4 procedures created or updated (WN_AttendantCapacityRequest_Create / _List / _Decide / _Reopen).' AS Result;
