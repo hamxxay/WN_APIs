@@ -4994,7 +4994,7 @@ END";
         }
 
         /// <summary>
-        /// Active booked rooms per machine employee # â€” attendants enrolled from Attendants &amp; Access
+        /// Active booked rooms per machine employee # - attendants enrolled from Attendants &amp; Access
         /// (WN_HIK_PersonMap â†’ WN_BookingAttendants â†’ WN_BookingDetails â†’ WN_Customers).
         /// </summary>
         public async Task<IEnumerable<IDictionary<string, object?>>> GetHikBookedRoomsDbAsync()
@@ -5176,7 +5176,7 @@ END";
             return await GetOrCreateHikEmployeeNoDbAsync(personId, floor);
         }
 
-        /// <summary>Devices that still have queued ops (any kind) for this machine user â€” read only.</summary>
+        /// <summary>Devices that still have queued ops (any kind) for this machine user - read only.</summary>
         public async Task<HashSet<int>> GetHikPendingOpDeviceIdsForEmployeeDbAsync(string employeeNo)
         {
             await using var c = await Open();
@@ -5419,7 +5419,7 @@ END";
         }
 
         /// <summary>
-        /// Challans of the booking behind a booked space â€” read only.
+        /// Challans of the booking behind a booked space - read only.
         /// Result sets: [0] booking (Id, ChallanNumber, ValidityDate), [1] invoices (void = 5 excluded),
         /// [2] booking challans (WN_Challans + amounts from WN_vw_BookingSummary + voucher status from WN_Payments).
         /// </summary>
@@ -5463,7 +5463,7 @@ END";
             return await ReadResultSets(r);
         }
 
-        /// <summary>Booked spaces (WN_BookingDetails) of a booking â€” read only.</summary>
+        /// <summary>Booked spaces (WN_BookingDetails) of a booking - read only.</summary>
         public async Task<IEnumerable<int>> GetBookingDetailIdsForBookingDbAsync(int bookingId)
         {
             await using var c = await Open();
@@ -5480,7 +5480,7 @@ END";
             return ids;
         }
 
-        // --- Hikvision Staff (janitors, office boys, â€¦ â€” tagged machine users without a booking) ---
+        // --- Hikvision Staff (janitors, office boys, ... - tagged machine users without a booking) ---
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetHikStaffDbAsync(string? employeeNo = null)
         {
@@ -5527,7 +5527,7 @@ END";
 
         /// <summary>
         /// Allocates the next free member employee # (same range and lock as attendants) and records the
-        /// staff member in WN_HIK_Users (CNIC + tag) â€” the HIK sync keeps that row across its rebuilds.
+        /// staff member in WN_HIK_Users (CNIC + tag) - the HIK sync keeps that row across its rebuilds.
         /// </summary>
         public async Task<string> CreateHikStaffDbAsync(string name, string cnic, int? tagId, int floor = 0)
         {
