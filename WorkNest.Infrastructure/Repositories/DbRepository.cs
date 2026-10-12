@@ -2625,35 +2625,47 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
 
                 -- [2] overdue invoices
                 SELECT TOP 6 i.BookingId, i.InvoiceNumber AS Reference, i.DueOn AS [Date], (i.GrandTotal - i.WhtAmount - i.PaidTotal) AS Amount,
-                       sp.Name AS Space, cust.Name AS Customer
+                       sp.Name AS Space,
+                       COALESCE(NULLIF(cust.Name, ''), NULLIF(u.Name, ''), NULLIF(u.UserName, ''), NULLIF(u.Email, ''), 'Customer') AS Customer
                   FROM @Inv i
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                   LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(b.UserId, i.UserId)
                  OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
                                 FROM dbo.WN_Customers cu WITH (NOLOCK)
-                               WHERE cu.Code = b.CustomerCode OR cu.UserId = ISNULL(b.UserId, i.UserId)) cust
+                               WHERE (b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode)
+                                  OR (ISNULL(b.UserId, i.UserId) IS NOT NULL AND cu.UserId = ISNULL(b.UserId, i.UserId))
+                                  OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
                  WHERE i.StatusId IN ({open}) AND i.DueOn < @Today
                  ORDER BY i.DueOn, i.Id;
 
                 -- [3] leases ending soon
                 SELECT TOP 6 l.Id AS BookingId, CONCAT('#', l.Id) AS Reference, l.EndOn AS [Date], l.TotalAmount AS Amount,
-                       sp.Name AS Space, cust.Name AS Customer
+                       sp.Name AS Space,
+                       COALESCE(NULLIF(cust.Name, ''), NULLIF(u.Name, ''), NULLIF(u.UserName, ''), NULLIF(u.Email, ''), 'Customer') AS Customer
                   FROM @Live l
                   JOIN @Spaces sp ON sp.Id = l.SpaceId
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = l.UserId
                  OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
                                 FROM dbo.WN_Customers cu WITH (NOLOCK)
-                               WHERE cu.Code = l.CustomerCode OR cu.UserId = l.UserId) cust
+                               WHERE (l.CustomerCode IS NOT NULL AND cu.Code = l.CustomerCode)
+                                  OR (l.UserId IS NOT NULL AND cu.UserId = l.UserId)
+                                  OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
                  WHERE l.StatusId IN (2, 33) AND l.EndOn >= @Now AND l.EndOn <= @SoonEnd
                  ORDER BY l.EndOn;
 
                 -- [4] bookings waiting for confirmation
                 SELECT TOP 6 l.Id AS BookingId, CONCAT('#', l.Id) AS Reference, l.StartOn AS [Date], l.TotalAmount AS Amount,
-                       sp.Name AS Space, cust.Name AS Customer
+                       sp.Name AS Space,
+                       COALESCE(NULLIF(cust.Name, ''), NULLIF(u.Name, ''), NULLIF(u.UserName, ''), NULLIF(u.Email, ''), 'Customer') AS Customer
                   FROM @Live l
                   JOIN @Spaces sp ON sp.Id = l.SpaceId
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = l.UserId
                  OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
                                 FROM dbo.WN_Customers cu WITH (NOLOCK)
-                               WHERE cu.Code = l.CustomerCode OR cu.UserId = l.UserId) cust
+                               WHERE (l.CustomerCode IS NOT NULL AND cu.Code = l.CustomerCode)
+                                  OR (l.UserId IS NOT NULL AND cu.UserId = l.UserId)
+                                  OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
                  WHERE l.StatusId IN (1, 5) AND l.EndOn >= @Now
                  ORDER BY l.StartOn;
 
@@ -2688,12 +2700,15 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 SELECT TOP 5 t.Customer, SUM(t.GrandTotal) AS Amount, COUNT(*) AS Invoices
                   FROM (
                         SELECT i.GrandTotal,
-                               COALESCE(cust.Name, CONCAT('Customer #', ISNULL(b.UserId, i.UserId))) AS Customer
+                               COALESCE(NULLIF(cust.Name, ''), NULLIF(u.Name, ''), NULLIF(u.UserName, ''), CONCAT('Customer #', ISNULL(b.UserId, i.UserId))) AS Customer
                           FROM @Inv i
                           LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                          LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(b.UserId, i.UserId)
                          OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
                                         FROM dbo.WN_Customers cu WITH (NOLOCK)
-                                       WHERE cu.Code = b.CustomerCode OR cu.UserId = ISNULL(b.UserId, i.UserId)) cust
+                                       WHERE (b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode)
+                                          OR (ISNULL(b.UserId, i.UserId) IS NOT NULL AND cu.UserId = ISNULL(b.UserId, i.UserId))
+                                          OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
                          WHERE i.IssuedOn >= @PStart
                   ) t
                  GROUP BY t.Customer
@@ -5268,7 +5283,7 @@ END";
             var ids = locationIds?.Distinct().ToList();
             var locFilter = ids is null ? "" :
                 $"AND EXISTS (SELECT 1 FROM dbo.WN_Spaces sp WITH (NOLOCK) WHERE sp.Id = b.SpaceId AND sp.LocationId IN ({(ids.Count == 0 ? "-1" : string.Join(",", ids))}))";
-            const string sql = @"
+            var sql = $@"
                 DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
                 SELECT
                     (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE 1 = 1{devLoc}) AS Devices,

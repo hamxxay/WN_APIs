@@ -56,7 +56,7 @@ namespace WorkNest.Infrastructure.Repositories
               FROM dbo.WN_Spaces s WITH (NOLOCK)
              WHERE s.Status = 1 {(locationIds is null ? "" : $"AND s.LocationId IN ({IdList(locationIds)})")};";
 
-        private const string CustomerName = @"COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email)";
+        private const string CustomerName = @"COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, NULLIF(u.Name, ''), NULLIF(u.UserName, ''), 'Customer')";
 
         public Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds,
             DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays) =>
@@ -92,11 +92,15 @@ namespace WorkNest.Infrastructure.Repositories
                 -- [2] bookings waiting for confirmation
                 SELECT TOP 8 b.Id AS BookingId, CONCAT('#', b.Id) AS Reference, b.StartOn AS [Date], b.TotalAmount AS Amount,
                        sp.Name AS Space, {CustomerName} AS Customer
-                  FROM dbo.WN_Bookings b WITH (NOLOCK)
-                  JOIN @Spaces sp ON sp.Id = b.SpaceId
-                  OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK) WHERE c2.Code = b.CustomerCode OR c2.UserId = b.UserId) cu
-                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 5) AND b.EndOn >= @Now
-                 ORDER BY b.StartOn;
+                    FROM dbo.WN_Bookings b WITH (NOLOCK)
+                    JOIN @Spaces sp ON sp.Id = b.SpaceId
+                    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+                    OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK)
+                                  WHERE (b.CustomerCode IS NOT NULL AND c2.Code = b.CustomerCode)
+                                     OR (b.UserId IS NOT NULL AND c2.UserId = b.UserId)
+                                     OR (u.Email IS NOT NULL AND c2.Email = u.Email)) cu
+                   WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 5) AND b.EndOn >= @Now
+                   ORDER BY b.StartOn;
 
                 -- [3] tour inquiries (not tied to a location)
                 DECLARE @NewInquiries INT = (SELECT COUNT(*) FROM dbo.WN_Contacts WITH (NOLOCK) WHERE StatusId = 1);
@@ -129,12 +133,16 @@ namespace WorkNest.Infrastructure.Repositories
                 -- [5] renewals: running bookings ending in the next @RenewalDays days
                 SELECT TOP 10 b.Id AS BookingId, CONCAT('#', b.Id) AS Reference, b.EndOn AS [Date], b.MonthlyRent AS Amount,
                        sp.Name AS Space, {CustomerName} AS Customer
-                  FROM dbo.WN_Bookings b WITH (NOLOCK)
-                  JOIN @Spaces sp ON sp.Id = b.SpaceId
-                  OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK) WHERE c2.Code = b.CustomerCode OR c2.UserId = b.UserId) cu
-                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
-                   AND b.EndOn >= @Now AND b.EndOn <= DATEADD(DAY, @RenewalDays, @Now)
-                 ORDER BY b.EndOn;
+                    FROM dbo.WN_Bookings b WITH (NOLOCK)
+                    JOIN @Spaces sp ON sp.Id = b.SpaceId
+                    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+                    OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK)
+                                  WHERE (b.CustomerCode IS NOT NULL AND c2.Code = b.CustomerCode)
+                                     OR (b.UserId IS NOT NULL AND c2.UserId = b.UserId)
+                                     OR (u.Email IS NOT NULL AND c2.Email = u.Email)) cu
+                   WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
+                     AND b.EndOn >= @Now AND b.EndOn <= DATEADD(DAY, @RenewalDays, @Now)
+                   ORDER BY b.EndOn;
                 SELECT COUNT(*) AS RenewalsDue
                   FROM dbo.WN_Bookings b WITH (NOLOCK) JOIN @Spaces sp ON sp.Id = b.SpaceId
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
@@ -156,7 +164,11 @@ namespace WorkNest.Infrastructure.Repositories
                 SELECT TOP 10 inv.BookingId, inv.InvoiceNumber AS Reference, inv.DueOn AS [Date], inv.Balance AS Amount,
                        inv.SpaceName AS Space, {CustomerName} AS Customer
                   FROM @Inv inv
-                  OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK) WHERE c2.Code = inv.CustomerCode OR c2.UserId = inv.UserId) cu
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = inv.UserId
+                  OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK)
+                                WHERE (inv.CustomerCode IS NOT NULL AND c2.Code = inv.CustomerCode)
+                                   OR (inv.UserId IS NOT NULL AND c2.UserId = inv.UserId)
+                                   OR (u.Email IS NOT NULL AND c2.Email = u.Email)) cu
                  WHERE inv.DueOn < @Today
                  ORDER BY inv.DueOn, inv.Id;",
                 p =>
