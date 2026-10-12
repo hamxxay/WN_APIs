@@ -84,6 +84,7 @@ namespace WorkNest.Infrastructure.Repositories
                   JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
                   JOIN @Spaces sp ON sp.Id = q.SpaceId
                   LEFT JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId   -- customer name falls back to the user's name
                  WHERE a.BookingId IS NULL AND a.SignedDate IS NULL AND a.SentDate IS NOT NULL
                    AND ISNULL(q.Status, '') NOT IN ('Declined', 'Rejected', 'Cancelled', 'Expired', 'Converted')
                    AND NOT EXISTS (SELECT 1 FROM dbo.WN_Agreements a2 WITH (NOLOCK) WHERE a2.QuotationId = a.QuotationId AND a2.Id > a.Id)
