@@ -59,6 +59,7 @@ namespace WorkNest.Application.Services
 
             var capture = await _isapi.CaptureFingerprintAsync(prep.Capture!, fingerNo);
             if (!capture.Ok) return Fail(prep, capture.Error);
+            if (prep.RegisterAfterCapture != null && await prep.RegisterAfterCapture() is { } notRegistered) return notRegistered;
 
             var added = await _isapi.AddFingerprintAsync(prep.Capture!, prep.EmployeeNo, capture.FingerData!, fingerNo);
             if (!added.Ok) return Fail(prep, added.Error);
@@ -85,6 +86,7 @@ namespace WorkNest.Application.Services
                 if (!capture.Ok) return Fail(prep, capture.Error);
                 cardNo = capture.CardNo!;
             }
+            if (prep.RegisterAfterCapture != null && await prep.RegisterAfterCapture() is { } notRegistered) return notRegistered;
 
             var added = await _isapi.AddCardAsync(prep.Capture!, prep.EmployeeNo, cardNo);
             if (!added.Ok) return Fail(prep, added.Error);
@@ -103,6 +105,7 @@ namespace WorkNest.Application.Services
         {
             var capture = await _isapi.CaptureFaceAsync(prep.Capture!);
             if (!capture.Ok) return Fail(prep, capture.Error);
+            if (prep.RegisterAfterCapture != null && await prep.RegisterAfterCapture() is { } notRegistered) return notRegistered;
 
             var added = await _isapi.AddFaceByImageAsync(prep.Capture!, prep.EmployeeNo, capture.Jpeg!);
             if (!added.Ok) return Fail(prep, added.Error);
@@ -342,6 +345,12 @@ namespace WorkNest.Application.Services
             public List<HikDeviceConnection> Others { get; } = new();
             /// <summary>Offline machines (credential goes to WN_HIK_PendingOps).</summary>
             public List<HikDeviceConnection> Offline { get; } = new();
+            /// <summary>
+            /// Attendants: puts the person on their machines. Runs only once a fingerprint / face / card has been captured,
+            /// so a cancelled or failed capture never leaves a person without credentials on the machines.
+            /// Returns a failure result, or null when the capture machine has the person. Null for staff (already registered).
+            /// </summary>
+            public Func<Task<HikEnrollResultDto?>>? RegisterAfterCapture { get; set; }
         }
 
         /// <summary>
@@ -397,6 +406,19 @@ namespace WorkNest.Application.Services
             prep.Offline.AddRange(devices.Where(d => d.Id != prep.Capture.Id && (!d.Online || pending.Contains(d.Id))));
             var online = devices.Where(d => d.Online && (d.Id == prep.Capture.Id || !pending.Contains(d.Id))).ToList();
 
+            // Nothing is written to the machines yet: the person is registered only after a successful capture.
+            prep.RegisterAfterCapture = () => RegisterOnMachinesAsync(prep, online);
+            return prep;
+        }
+
+        /// <summary>
+        /// Registers the attendant on every online machine (room + entrances), right after a credential was captured.
+        /// Machines that turn out to be unreachable are queued with the credential. Returns a failure result if the
+        /// capture machine itself refused the person, otherwise null.
+        /// </summary>
+        private async Task<HikEnrollResultDto?> RegisterOnMachinesAsync(Prepared prep, List<HikDeviceConnection> online)
+        {
+            var captureId = prep.Capture!.Id;
             var registered = await Task.WhenAll(online.Select(async d =>
             {
                 // Respect the Access Status tick and challan suspension: enrolling must not re-enable a blocked person.
@@ -407,19 +429,18 @@ namespace WorkNest.Application.Services
 
             foreach (var (device, result) in registered)
             {
-                if (device.Id == prep.Capture.Id) continue;
+                if (device.Id == captureId) continue;
                 if (result.Ok) prep.Others.Add(device);
                 else if (result.Unreachable) prep.Offline.Add(device);
                 else prep.Result.Devices.Add(new HikEnrollDeviceResultDto { DeviceId = device.Id, Device = device.Name, Ok = false, Error = result.Error });
             }
 
-            var onCapture = registered.First(x => x.Device.Id == prep.Capture.Id).Result;
+            var onCapture = registered.First(x => x.Device.Id == captureId).Result;
             if (!onCapture.Ok)
             {
-                prep.Failed = Fail(prep, onCapture.Unreachable
-                    ? $"{prep.Capture.Name} (the booked room's machine) is not reachable — enrollment can't be captured until it is back online."
-                    : $"Could not register the user on {prep.Capture.Name}: {onCapture.Error}");
-                return prep;
+                return Fail(prep, onCapture.Unreachable
+                    ? $"{prep.Capture!.Name} (the booked room's machine) went offline before the enrollment could be saved. Please try again."
+                    : $"Could not register the user on {prep.Capture!.Name}: {onCapture.Error}");
             }
 
             try
@@ -434,7 +455,7 @@ namespace WorkNest.Application.Services
                 _logger.LogWarning(ex, "Failed to save CNIC for employee #{Emp}", prep.EmployeeNo);
             }
 
-            return prep;
+            return null;
         }
 
         /// <summary>
