@@ -167,7 +167,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Changes one SSID's MAC filter: body { action: add | remove | block | unblock | mode, mac, name, roomNo, policy, macs, reason }.
         /// block / unblock act on this SSID only; mode sets allow | deny | off. Logged in WN_UNIFI_MacFilterLog.
-        /// All staff roles may use it.
+        /// Admins / super admins: everything. Sales executives: add / remove devices on an "Allowed devices only" SSID.
         /// </summary>
         [HttpPost("api/unifi/ssids/{wlanId}/mac-filter")]
         public Task<IActionResult> UpdateMacFilter(string wlanId, [FromBody] JsonElement body) => Run(async () =>
@@ -179,12 +179,14 @@ namespace WorkNest.API.Controllers
                 ? m.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).Take(500).ToList()
                 : null;
             var result = await _unifi.UpdateMacFilterAsync(wlanId, Field(body, "action") ?? "", Field(body, "mac"),
-                Field(body, "policy"), Field(body, "reason"), email, userId, macs, Field(body, "name"), Field(body, "roomNo"));
+                Field(body, "policy"), Field(body, "reason"), email, userId, macs, Field(body, "name"), Field(body, "roomNo"),
+                devicesOnly: !User.IsAdminOrSuperAdmin());
             return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
         });
 
-        /// <summary>Shows or hides the SSID name: body { hidden: true | false, reason }. All staff roles; logged.</summary>
+        /// <summary>Shows or hides the SSID name: body { hidden: true | false, reason }. Admin / super admin; logged.</summary>
         [HttpPost("api/unifi/ssids/{wlanId}/visibility")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
         public Task<IActionResult> SetSsidVisibility(string wlanId, [FromBody] JsonElement body) => Run(async () =>
         {
             if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("hidden", out var h) || h.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
