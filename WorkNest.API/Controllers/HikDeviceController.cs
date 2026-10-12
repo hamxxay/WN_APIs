@@ -50,7 +50,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetRosters([FromQuery] string? location = null)
         {
             // Machine-admin users are only visible to admin / super admin.
-            var result = await _deviceService.GetRostersAsync(location, User.IsAdminOrSuperAdmin(), User.IsLocationBoundRole() ? User.GetLocationIds() : null);
+            var result = await _deviceService.GetRostersAsync(location, User.CanSeeMachineAdmins(), User.IsLocationBoundRole() ? User.GetLocationIds() : null);
             return Ok(result);
         }
 
@@ -61,7 +61,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/devices/{id:int}/users")]
         public async Task<IActionResult> GetDeviceUsers(int id)
         {
-            var result = await _deviceService.GetDeviceUsersAsync(id, User.IsAdminOrSuperAdmin());
+            var result = await _deviceService.GetDeviceUsersAsync(id, User.CanSeeMachineAdmins());
             return Ok(result);
         }
 
