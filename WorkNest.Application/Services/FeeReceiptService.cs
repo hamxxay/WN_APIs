@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Data.Common;
 using WorkNest.Application.DTOs.FeeReceipt;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -11,109 +10,130 @@ namespace WorkNest.Application.Services
 {
     public class FeeReceiptService : IFeeReceiptService
     {
-        private readonly IDbRepository _db;
+        private const int MaxTextLength = 500;     // Remarks / VoidReason columns are NVARCHAR(500)
+        private const int MaxSearchLength = 60;    // escaped search must fit the procedures' NVARCHAR(200)
 
-        public FeeReceiptService(IDbRepository db)
+        // Payment types a fee receipt can record (cash or bank accounts from WN_FeeReceipts_GetAccounts).
+        // The web form currently sends only "Cash"; values are stored in this canonical spelling.
+        private static readonly string[] AllowedPaymentTypes = { "Cash", "Bank Transfer", "Cheque", "Card" };
+
+        private readonly IDbRepository _db;
+        private readonly IBusinessClock _clock;
+
+        public FeeReceiptService(IDbRepository db, IBusinessClock clock)
         {
             _db = db;
+            _clock = clock;
         }
 
         public async Task<ApiResponse> GetUnpaidInvoicesAsync(string? search, int? locationId, List<int>? allowedLocationIds, int top = 50)
         {
-            string? allowedCsv = allowedLocationIds != null && allowedLocationIds.Count > 0
-                ? string.Join(",", allowedLocationIds)
-                : null;
-
-            var rows = await _db.GetFeeReceiptUnpaidInvoicesDbAsync(search, locationId, allowedCsv, top);
+            var rows = await _db.GetFeeReceiptUnpaidInvoicesDbAsync(CleanSearch(search), locationId, ToCsv(allowedLocationIds), top);
             var items = rows.Select(MapToUnpaidInvoiceDto).ToList();
             return ApiResponse.Ok(items);
         }
 
         public async Task<ApiResponse> GetAccountsAsync(int? companyId)
         {
-            var rows = await _db.GetFeeReceiptAccountsDbAsync(companyId);
+            var rows = await _db.GetFeeReceiptAccountsDbAsync(companyId is > 0 ? companyId : null);
             var items = rows.Select(MapToAccountDto).ToList();
             return ApiResponse.Ok(items);
         }
 
-        public async Task<ApiResponse> CreateReceiptAsync(FeeReceiptCreateDto dto, int createdById, List<int>? allowedLocationIds, bool isSuperAdmin)
+        public async Task<FeeReceiptResult> CreateReceiptAsync(FeeReceiptCreateDto dto, int createdById, List<int>? allowedLocationIds, bool isSuperAdmin)
         {
             var invoiceGuid = dto.GetResolvedInvoiceIdGuid();
             var accountId = dto.GetResolvedAccountId();
 
             if (invoiceGuid == Guid.Empty)
-                return ApiResponse.Fail("A valid invoice must be selected.");
+                return BadRequest("A valid invoice must be selected.");
 
             if (accountId <= 0)
-                return ApiResponse.Fail("A valid Cash / Bank account must be selected.");
+                return BadRequest("A valid Cash / Bank account must be selected.");
 
             if (dto.ReceiptDate == default)
-                return ApiResponse.Fail("A valid receipt date is required.");
+                return BadRequest("A valid receipt date is required.");
 
-            string? allowedCsv = !isSuperAdmin && allowedLocationIds != null && allowedLocationIds.Count > 0
-                ? string.Join(",", allowedLocationIds)
-                : null;
+            if (dto.ReceiptDate.Date > _clock.Today)
+                return BadRequest("Receipt date cannot be in the future.");
+
+            var paymentType = string.IsNullOrWhiteSpace(dto.PaymentType)
+                ? "Cash"
+                : AllowedPaymentTypes.FirstOrDefault(t => string.Equals(t, dto.PaymentType.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (paymentType == null)
+                return BadRequest($"Payment type must be one of: {string.Join(", ", AllowedPaymentTypes)}.");
+
+            var remarks = string.IsNullOrWhiteSpace(dto.Remarks) ? null : dto.Remarks.Trim();
+            if (remarks != null && remarks.Length > MaxTextLength)
+                return BadRequest($"Remarks cannot be longer than {MaxTextLength} characters.");
+
+            string? allowedCsv = isSuperAdmin ? null : ToCsv(allowedLocationIds);
 
             try
             {
                 var row = await _db.InsertFeeReceiptDbAsync(
                     invoiceGuid,
                     accountId,
-                    dto.PaymentType,
-                    dto.ReceiptDate,
-                    dto.Remarks,
+                    paymentType,
+                    dto.ReceiptDate.Date,
+                    remarks,
                     createdById,
-                    allowedCsv
-                );
+                    allowedCsv);
 
                 if (row == null)
-                    return ApiResponse.Fail("Failed to create fee receipt.");
+                    throw new InvalidOperationException("WN_FeeReceipts_Insert returned no receipt row.");
 
-                var receiptDto = MapToReceiptDto(row);
-                return ApiResponse.Ok(receiptDto, "Fee receipt created successfully.");
+                return FeeReceiptResult.Ok(ApiResponse.Ok(MapToReceiptDto(row), "Fee receipt created successfully."));
             }
-            catch (DbException ex)
+            catch (FeeReceiptRuleException ex)
             {
-                return ApiResponse.Fail(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse.Fail(ex.Message);
+                // Business rule raised by the procedure (safe to show). Anything else goes to ExceptionMiddleware.
+                return FeeReceiptResult.Fail(ex.Outcome, ex.Message);
             }
         }
 
-        public async Task<ApiResponse> VoidReceiptAsync(FeeReceiptVoidDto dto, int updatedById)
+        public async Task<FeeReceiptResult> VoidReceiptAsync(FeeReceiptVoidDto dto, int updatedById, List<int>? allowedLocationIds)
         {
-            if (string.IsNullOrWhiteSpace(dto.VoidReason))
-                return ApiResponse.Fail("A reason is required to void a fee receipt.");
+            var reason = dto.VoidReason?.Trim();
+            if (string.IsNullOrEmpty(reason))
+                return BadRequest("A reason is required to void a fee receipt.");
+
+            if (reason.Length > MaxTextLength)
+                return BadRequest($"Void reason cannot be longer than {MaxTextLength} characters.");
 
             var receiptId = dto.GetResolvedReceiptId();
             var receiptGuid = dto.GetResolvedReceiptGuid();
 
+            if (receiptId is not > 0)
+                receiptId = null;
+            if (receiptGuid == Guid.Empty)
+                receiptGuid = null;
+
             if (!receiptId.HasValue && !receiptGuid.HasValue)
-                return ApiResponse.Fail("Receipt identifier is required.");
+                return BadRequest("Receipt identifier is required.");
 
             try
             {
-                var (isSuccessful, message, resReceiptId) = await _db.VoidFeeReceiptDbAsync(
+                var result = await _db.VoidFeeReceiptDbAsync(
                     receiptId,
-                    receiptGuid,
-                    dto.VoidReason.Trim(),
-                    updatedById
-                );
+                    receiptId.HasValue ? null : receiptGuid,   // Id wins when both are sent
+                    reason,
+                    updatedById,
+                    ToCsv(allowedLocationIds));
 
-                if (!isSuccessful)
-                    return ApiResponse.Fail(message);
+                if (!result.IsSuccessful)
+                    return BadRequest(result.Message);
 
-                return ApiResponse.Ok(new { receiptId = resReceiptId }, message);
+                return FeeReceiptResult.Ok(ApiResponse.Ok(new
+                {
+                    receiptId = result.ReceiptId,
+                    invoiceRestored = result.InvoiceRestored,
+                    accessCardsNeedReview = result.AccessCardsNeedReview
+                }, result.Message));
             }
-            catch (DbException ex)
+            catch (FeeReceiptRuleException ex)
             {
-                return ApiResponse.Fail(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                return ApiResponse.Fail(ex.Message);
+                return FeeReceiptResult.Fail(ex.Outcome, ex.Message);
             }
         }
 
@@ -122,11 +142,7 @@ namespace WorkNest.Application.Services
             page = Math.Max(1, page);
             limit = Math.Clamp(limit, 1, 100);
 
-            string? allowedCsv = allowedLocationIds != null && allowedLocationIds.Count > 0
-                ? string.Join(",", allowedLocationIds)
-                : null;
-
-            var (rows, total) = await _db.GetFeeReceiptsListDbAsync(page, limit, search, locationId, status, allowedCsv);
+            var (rows, total) = await _db.GetFeeReceiptsListDbAsync(page, limit, CleanSearch(search), locationId, status, ToCsv(allowedLocationIds));
             var items = rows.Select(MapToReceiptDto).ToList();
 
             return ApiResponse.Ok(new
@@ -138,16 +154,32 @@ namespace WorkNest.Application.Services
             });
         }
 
-        public async Task<ApiResponse> GetByIdAsync(int? id, Guid? guid)
+        public async Task<FeeReceiptResult> GetByIdAsync(int? id, Guid? guid, List<int>? allowedLocationIds)
         {
             if (!id.HasValue && !guid.HasValue)
-                return ApiResponse.Fail("Receipt identifier is required.");
+                return BadRequest("Receipt identifier is required.");
 
-            var row = await _db.GetFeeReceiptByIdDbAsync(id, guid);
+            // Receipts outside the caller's locations are not returned, so they read as not found.
+            var row = await _db.GetFeeReceiptByIdDbAsync(id, id.HasValue ? null : guid, ToCsv(allowedLocationIds));
             if (row == null)
-                return ApiResponse.Fail("Fee receipt not found.");
+                return FeeReceiptResult.Fail(FeeReceiptOutcome.NotFound, "Fee receipt not found.");
 
-            return ApiResponse.Ok(MapToReceiptDto(row));
+            return FeeReceiptResult.Ok(ApiResponse.Ok(MapToReceiptDto(row)));
+        }
+
+        private static FeeReceiptResult BadRequest(string message) => FeeReceiptResult.Fail(FeeReceiptOutcome.BadRequest, message);
+
+        /// <summary>NULL = every location; otherwise the caller's ids (the controller sends -1 for "none", which matches nothing).</summary>
+        private static string? ToCsv(List<int>? allowedLocationIds) =>
+            allowedLocationIds == null ? null : string.Join(",", allowedLocationIds);
+
+        /// <summary>Trims, caps the length and escapes LIKE wildcards ([ % _) so the text is matched literally.</summary>
+        private static string? CleanSearch(string? search)
+        {
+            if (string.IsNullOrWhiteSpace(search)) return null;
+            var s = search.Trim();
+            if (s.Length > MaxSearchLength) s = s.Substring(0, MaxSearchLength);
+            return s.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
         }
 
         private static FeeReceiptUnpaidInvoiceDto MapToUnpaidInvoiceDto(IDictionary<string, object?> r)
@@ -181,7 +213,9 @@ namespace WorkNest.Application.Services
                 LocationId = GetIntOrNull(r, "LocationId"),
                 LocationName = GetStringOrNull(r, "LocationName"),
                 CompanyId = GetIntOrNull(r, "CompanyId"),
-                BranchId = GetIntOrNull(r, "BranchId")
+                BranchId = GetIntOrNull(r, "BranchId"),
+                StatusId = GetInt(r, "StatusId"),
+                StatusLabel = GetString(r, "StatusLabel", "Unpaid")
             };
         }
 
@@ -248,43 +282,59 @@ namespace WorkNest.Application.Services
             };
         }
 
+        // Row values come typed from SqlDataReader (DBNull already turned into null), so convert directly:
+        // no string round-trips, and DateTime values keep their Kind (UTC audit columns serialise with "Z").
+        private static object? Value(IDictionary<string, object?> d, string key) =>
+            d.TryGetValue(key, out var v) && v is not null and not DBNull ? v : null;
+
         private static int GetInt(IDictionary<string, object?> d, string key, int fallback = 0) =>
-            d.TryGetValue(key, out var v) && v != null && int.TryParse(v.ToString(), out var i) ? i : fallback;
+            Value(d, key) is { } v ? Convert.ToInt32(v) : fallback;
 
         private static int? GetIntOrNull(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null && int.TryParse(v.ToString(), out var i) ? i : null;
+            Value(d, key) is { } v ? Convert.ToInt32(v) : null;
 
         private static decimal GetDecimal(IDictionary<string, object?> d, string key, decimal fallback = 0m) =>
-            d.TryGetValue(key, out var v) && v != null && decimal.TryParse(v.ToString(), out var dec) ? dec : fallback;
+            Value(d, key) is { } v ? Convert.ToDecimal(v) : fallback;
 
         private static decimal? GetDecimalOrNull(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null && decimal.TryParse(v.ToString(), out var dec) ? dec : null;
+            Value(d, key) is { } v ? Convert.ToDecimal(v) : null;
 
         private static string GetString(IDictionary<string, object?> d, string key, string fallback = "") =>
-            d.TryGetValue(key, out var v) && v != null ? v.ToString()! : fallback;
+            Value(d, key)?.ToString() ?? fallback;
 
         private static string? GetStringOrNull(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null ? v.ToString() : null;
+            Value(d, key)?.ToString();
 
         private static Guid GetGuid(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null && Guid.TryParse(v.ToString(), out var g) ? g : Guid.Empty;
+            GetGuidOrNull(d, key) ?? Guid.Empty;
 
         private static Guid? GetGuidOrNull(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null && Guid.TryParse(v.ToString(), out var g) ? g : null;
+            Value(d, key) switch
+            {
+                Guid g => g,
+                { } v when Guid.TryParse(v.ToString(), out var g) => g,
+                _ => null
+            };
 
         private static DateTime GetDateTime(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null && DateTime.TryParse(v.ToString(), out var dt) ? dt : default;
+            GetDateTimeOrNull(d, key) ?? default;
 
         private static DateTime? GetDateTimeOrNull(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null && DateTime.TryParse(v.ToString(), out var dt) ? dt : null;
+            Value(d, key) switch
+            {
+                DateTime dt => dt,
+                DateTimeOffset dto => dto.UtcDateTime,
+                { } v => Convert.ToDateTime(v),
+                _ => null
+            };
 
         private static byte GetByte(IDictionary<string, object?> d, string key, byte fallback = 0) =>
-            d.TryGetValue(key, out var v) && v != null && byte.TryParse(v.ToString(), out var b) ? b : fallback;
+            Value(d, key) is { } v ? Convert.ToByte(v) : fallback;
 
         private static byte? GetByteOrNull(IDictionary<string, object?> d, string key) =>
-            d.TryGetValue(key, out var v) && v != null && byte.TryParse(v.ToString(), out var b) ? b : null;
+            Value(d, key) is { } v ? Convert.ToByte(v) : null;
 
         private static bool GetBool(IDictionary<string, object?> d, string key, bool fallback = false) =>
-            d.TryGetValue(key, out var v) && v != null ? Convert.ToBoolean(v) : fallback;
+            Value(d, key) is { } v ? Convert.ToBoolean(v) : fallback;
     }
 }

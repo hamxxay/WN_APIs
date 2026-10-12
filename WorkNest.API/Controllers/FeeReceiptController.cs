@@ -16,22 +16,43 @@ namespace WorkNest.API.Controllers
     [Route("api/fee-receipts")]
     public class FeeReceiptController : ControllerBase
     {
-        private readonly IFeeReceiptService _service;
+        private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
 
-        public FeeReceiptController(IFeeReceiptService service)
+        private readonly IFeeReceiptService _service;
+        private readonly IDbRepository _db;
+
+        public FeeReceiptController(IFeeReceiptService service, IDbRepository db)
         {
             _service = service;
+            _db = db;
         }
 
-        private int GetCurrentUserId()
+        /// <summary>
+        /// The signed-in user's WN_Users.Id (for CreatedById / UpdatedById), or null if they can't be matched.
+        /// The token carries the user's public id (a GUID) and email, not the numeric id, so the user is looked up
+        /// by email (dbo.WN_Users_GetByEmail), as the complaints / contacts / WhatsApp controllers do.
+        /// </summary>
+        private async Task<int?> GetCurrentUserIdAsync()
         {
-            var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                       ?? User.FindFirst("id")?.Value
-                       ?? User.FindFirst("userId")?.Value
-                       ?? User.FindFirst("sub")?.Value;
-
-            return int.TryParse(idClaim, out var id) ? id : 0;
+            var email = User.GetEmail();
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                var (id, _) = await _db.GetUserIdByEmailAsync(email);
+                if (id is > 0) return id;
+            }
+            // Older tokens that carried the numeric id directly.
+            var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("id")?.Value;
+            return int.TryParse(idClaim, out var n) && n > 0 ? n : null;
         }
+
+        /// <summary>Maps a service result to its HTTP status (400 / 403 / 404), keeping the ApiResponse body.</summary>
+        private IActionResult ToActionResult(FeeReceiptResult result, int successStatus = 200) => result.Outcome switch
+        {
+            FeeReceiptOutcome.Ok => StatusCode(successStatus, result.Response),
+            FeeReceiptOutcome.NotFound => NotFound(result.Response),
+            FeeReceiptOutcome.Forbidden => StatusCode(403, result.Response),
+            _ => BadRequest(result.Response)
+        };
 
         private List<int>? ResolveAllowedLocations()
         {
@@ -80,32 +101,34 @@ namespace WorkNest.API.Controllers
             if (request == null)
                 return BadRequest(ApiResponse.Fail("Invalid request body."));
 
-            var userId = GetCurrentUserId();
+            var userId = await GetCurrentUserIdAsync();
+            if (userId == null)
+                return Unauthorized(ApiResponse.Fail("Your login could not be matched to a user account. Please sign in again."));
+
             var allowedLocations = ResolveAllowedLocations();
             var isSuperAdmin = User.IsSuperAdmin();
 
-            var result = await _service.CreateReceiptAsync(request, userId, allowedLocations, isSuperAdmin);
-            if (!result.IsSuccessful)
-                return BadRequest(result);
-
-            return StatusCode(201, result);
+            var result = await _service.CreateReceiptAsync(request, userId.Value, allowedLocations, isSuperAdmin);
+            return ToActionResult(result, 201);
         }
 
         /// <summary>
-        /// Voids an active fee receipt with a required reason, restoring the invoice to unpaid.
+        /// Voids an active fee receipt with a required reason, restoring the invoice to unpaid
+        /// (only while it is still paid by this receipt). Admin / super admin only, within their locations.
         /// </summary>
         [HttpPost("void")]
+        [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Void([FromBody] FeeReceiptVoidDto request)
         {
             if (request == null || string.IsNullOrWhiteSpace(request.VoidReason))
                 return BadRequest(ApiResponse.Fail("A void reason is required."));
 
-            var userId = GetCurrentUserId();
-            var result = await _service.VoidReceiptAsync(request, userId);
-            if (!result.IsSuccessful)
-                return BadRequest(result);
+            var userId = await GetCurrentUserIdAsync();
+            if (userId == null)
+                return Unauthorized(ApiResponse.Fail("Your login could not be matched to a user account. Please sign in again."));
 
-            return Ok(result);
+            var result = await _service.VoidReceiptAsync(request, userId.Value, ResolveAllowedLocations());
+            return ToActionResult(result);
         }
 
         /// <summary>
@@ -125,16 +148,13 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// Gets a fee receipt by integer Id.
+        /// Gets a fee receipt by integer Id. 404 when it does not exist or is outside the caller's locations.
         /// </summary>
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var result = await _service.GetByIdAsync(id, null);
-            if (!result.IsSuccessful)
-                return NotFound(result);
-
-            return Ok(result);
+            var result = await _service.GetByIdAsync(id, null, ResolveAllowedLocations());
+            return ToActionResult(result);
         }
 
         /// <summary>
@@ -143,11 +163,8 @@ namespace WorkNest.API.Controllers
         [HttpGet("guid/{guid:guid}")]
         public async Task<IActionResult> GetByGuid(Guid guid)
         {
-            var result = await _service.GetByIdAsync(null, guid);
-            if (!result.IsSuccessful)
-                return NotFound(result);
-
-            return Ok(result);
+            var result = await _service.GetByIdAsync(null, guid, ResolveAllowedLocations());
+            return ToActionResult(result);
         }
     }
 }

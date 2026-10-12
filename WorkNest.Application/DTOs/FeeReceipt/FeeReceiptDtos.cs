@@ -1,4 +1,5 @@
 using System;
+using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.DTOs.FeeReceipt
 {
@@ -62,6 +63,9 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public string? LocationName { get; set; }
         public int? CompanyId { get; set; }
         public int? BranchId { get; set; }
+        public int StatusId { get; set; }
+        /// <summary>Unpaid | Overdue (Challan Expire invoices can also get a receipt).</summary>
+        public string StatusLabel { get; set; } = "Unpaid";
     }
 
     public class FeeReceiptAccountDto
@@ -119,5 +123,45 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public int? LocationId { get; set; }
         public string? LocationName { get; set; }
         public string? LocationCity { get; set; }
+    }
+
+    /// <summary>How a fee receipt call ended; the controller maps it to the HTTP status.</summary>
+    public enum FeeReceiptOutcome
+    {
+        Ok,
+        BadRequest,
+        NotFound,
+        Forbidden
+    }
+
+    public sealed class FeeReceiptResult
+    {
+        public FeeReceiptOutcome Outcome { get; init; }
+        public ApiResponse Response { get; init; } = ApiResponse.Ok();
+
+        public static FeeReceiptResult Ok(ApiResponse response) => new() { Outcome = FeeReceiptOutcome.Ok, Response = response };
+        public static FeeReceiptResult Fail(FeeReceiptOutcome outcome, string message) => new() { Outcome = outcome, Response = ApiResponse.Fail(message) };
+    }
+
+    /// <summary>
+    /// A business rule raised by a WN_FeeReceipts_* procedure (RAISERROR, error number 50000).
+    /// State: 1 = rule broken (400), 2 = not found (404), 3 = outside the caller's locations (403).
+    /// Thrown by the repository so the message can be shown; any other database error is not caught.
+    /// </summary>
+    public sealed class FeeReceiptRuleException : Exception
+    {
+        public byte State { get; }
+
+        public FeeReceiptRuleException(string message, byte state, Exception inner) : base(message, inner)
+        {
+            State = state;
+        }
+
+        public FeeReceiptOutcome Outcome => State switch
+        {
+            2 => FeeReceiptOutcome.NotFound,
+            3 => FeeReceiptOutcome.Forbidden,
+            _ => FeeReceiptOutcome.BadRequest
+        };
     }
 }

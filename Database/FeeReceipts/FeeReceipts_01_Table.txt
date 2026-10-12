@@ -1,0 +1,224 @@
+USE [SAC400];
+
+-- ============================================================================================
+-- Fee Receipts: updates the existing table dbo.WN_FeeReceipts (additive only - never drops the table or data).
+--   1. ReceiptDate DATE: added if missing, NULLs backfilled from CreatedOn (UTC -> Pakistan date),
+--      datetime2 converted to date (rows that have a time part are listed first), NOT NULL only when no NULL is left.
+--   2. Remarks NVARCHAR(500), UpdatedById INT, VoidReason NVARCHAR(500): added if missing.
+--   3. UQ_WN_FeeReceipts_InvoiceIdGUID_Active: one active receipt per invoice - created only if no invoice has two.
+--   4. UQ_WN_FeeReceipts_Code: unique receipt code - created only if no code is used twice.
+-- Every step checks first, so it is safe to run again. Each result tab says what was done or skipped.
+-- Run BEFORE FeeReceipts_02_Procedures.txt, as ONE statement in DBeaver (no GO needed).
+-- ============================================================================================
+SET NOCOUNT ON;
+-- Settings a filtered index needs.
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET ANSI_PADDING ON;
+SET ANSI_WARNINGS ON;
+SET ARITHABORT ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET NUMERIC_ROUNDABORT OFF;
+
+IF OBJECT_ID(N'dbo.WN_FeeReceipts', N'U') IS NULL
+BEGIN
+    SELECT 'Table dbo.WN_FeeReceipts is missing. This script only updates the existing table. Nothing was changed.' AS Result;
+    RETURN;
+END
+
+DECLARE @Type        SYSNAME,
+        @Nullable    VARCHAR(3),
+        @CreatedType SYSNAME,
+        @Count       INT,
+        @Sql         NVARCHAR(MAX),
+        @Summary     NVARCHAR(MAX) = N'';
+
+-- --------------------------------------------------------------------------------------------
+-- 1. ReceiptDate
+-- --------------------------------------------------------------------------------------------
+SELECT @Type = DATA_TYPE, @Nullable = IS_NULLABLE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'WN_FeeReceipts' AND COLUMN_NAME = 'ReceiptDate';
+
+IF @Type IS NULL
+BEGIN
+    ALTER TABLE dbo.WN_FeeReceipts ADD ReceiptDate DATE NULL;
+    SELECT @Type = 'date', @Nullable = 'YES';
+    SET @Summary += N' ReceiptDate added;';
+END
+
+IF @Type NOT IN ('date', 'datetime2', 'datetime', 'smalldatetime', 'datetimeoffset')
+BEGIN
+    SELECT 'ReceiptDate is ' + @Type + ', not a date type - left unchanged. Convert it by hand before running the procedures.' AS Result;
+    SET @Summary += N' ReceiptDate left as ' + @Type + N' (not a date type);';
+END
+ELSE
+BEGIN
+    -- 1a. Backfill missing ReceiptDate from CreatedOn. CreatedOn is written in UTC (SYSUTCDATETIME()),
+    --     so the receipt date is the Pakistan date of that moment.
+    SELECT @CreatedType = DATA_TYPE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'WN_FeeReceipts' AND COLUMN_NAME = 'CreatedOn';
+
+    EXEC sp_executesql N'SELECT @c = COUNT(1) FROM dbo.WN_FeeReceipts WITH (NOLOCK) WHERE ReceiptDate IS NULL;',
+                       N'@c INT OUTPUT', @c = @Count OUTPUT;
+
+    IF @Count > 0 AND @CreatedType IN ('datetime2', 'datetime', 'smalldatetime', 'datetimeoffset')
+    BEGIN
+        SET @Sql = N'UPDATE dbo.WN_FeeReceipts SET ReceiptDate = '
+                 + CASE WHEN @CreatedType = 'datetimeoffset'
+                        THEN N'CAST(CreatedOn AT TIME ZONE ''Pakistan Standard Time'' AS DATE)'
+                        ELSE N'CAST((CAST(CreatedOn AS DATETIME2) AT TIME ZONE ''UTC'') AT TIME ZONE ''Pakistan Standard Time'' AS DATE)' END
+                 + N' WHERE ReceiptDate IS NULL AND CreatedOn IS NOT NULL; SET @c = @@ROWCOUNT;';
+        EXEC sp_executesql @Sql, N'@c INT OUTPUT', @c = @Count OUTPUT;
+        SELECT CAST(@Count AS VARCHAR(20)) + ' receipt(s) had no ReceiptDate - filled with the Pakistan date of CreatedOn.' AS Result;
+        SET @Summary += N' ReceiptDate backfilled from CreatedOn;';
+    END
+
+    -- 1b. datetime2 (or other date-time type) -> date: list rows whose time part will be dropped, before converting.
+    IF @Type <> 'date'
+    BEGIN
+        EXEC sp_executesql N'SELECT @c = COUNT(1) FROM dbo.WN_FeeReceipts WITH (NOLOCK)
+                              WHERE ReceiptDate IS NOT NULL AND CAST(ReceiptDate AS TIME) <> ''00:00:00'';',
+                           N'@c INT OUTPUT', @c = @Count OUTPUT;
+
+        SELECT 'ReceiptDate is ' + @Type + ' and will be converted to date. Rows with a time part (time is dropped, date kept): '
+               + CAST(@Count AS VARCHAR(20)) AS Result;
+
+        IF @Count > 0
+            EXEC(N'SELECT TOP (500) Id, Code, ReceiptDate AS ReceiptDateNow, CAST(ReceiptDate AS DATE) AS ReceiptDateAfter, CreatedOn
+                   FROM dbo.WN_FeeReceipts WITH (NOLOCK)
+                   WHERE ReceiptDate IS NOT NULL AND CAST(ReceiptDate AS TIME) <> ''00:00:00''
+                   ORDER BY Id;');
+    END
+
+    -- 1c. NOT NULL only when no row is still missing a date.
+    EXEC sp_executesql N'SELECT @c = COUNT(1) FROM dbo.WN_FeeReceipts WITH (NOLOCK) WHERE ReceiptDate IS NULL;',
+                       N'@c INT OUTPUT', @c = @Count OUTPUT;
+
+    IF @Count > 0
+    BEGIN
+        SELECT CAST(@Count AS VARCHAR(20)) + ' receipt(s) still have no ReceiptDate (no CreatedOn either) - ReceiptDate stays NULL-able. Fill them and run this script again.' AS Result;
+        EXEC(N'SELECT Id, Code, InvoiceIdGUID, CreatedOn FROM dbo.WN_FeeReceipts WITH (NOLOCK) WHERE ReceiptDate IS NULL ORDER BY Id;');
+    END
+
+    IF @Type <> 'date' OR (@Nullable = 'YES' AND @Count = 0)
+    BEGIN
+        SET @Sql = N'ALTER TABLE dbo.WN_FeeReceipts ALTER COLUMN ReceiptDate DATE ' + CASE WHEN @Count = 0 THEN N'NOT NULL;' ELSE N'NULL;' END;
+        BEGIN TRY
+            EXEC sp_executesql @Sql;
+            SET @Summary += N' ReceiptDate is now DATE ' + CASE WHEN @Count = 0 THEN N'NOT NULL;' ELSE N'NULL;' END;
+        END TRY
+        BEGIN CATCH
+            SELECT 'ReceiptDate was NOT changed: ' + ERROR_MESSAGE() + ' (an index, default or constraint may use the column).' AS Result;
+            SET @Summary += N' ReceiptDate change failed (see above);';
+        END CATCH
+    END
+END
+
+-- --------------------------------------------------------------------------------------------
+-- 2. Remarks / UpdatedById / VoidReason
+-- --------------------------------------------------------------------------------------------
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'WN_FeeReceipts' AND COLUMN_NAME = 'Remarks')
+BEGIN
+    ALTER TABLE dbo.WN_FeeReceipts ADD Remarks NVARCHAR(500) NULL;
+    SET @Summary += N' Remarks added;';
+END
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'WN_FeeReceipts' AND COLUMN_NAME = 'UpdatedById')
+BEGIN
+    ALTER TABLE dbo.WN_FeeReceipts ADD UpdatedById INT NULL;
+    SET @Summary += N' UpdatedById added;';
+END
+
+IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'WN_FeeReceipts' AND COLUMN_NAME = 'VoidReason')
+BEGIN
+    ALTER TABLE dbo.WN_FeeReceipts ADD VoidReason NVARCHAR(500) NULL;
+    SET @Summary += N' VoidReason added;';
+END
+
+-- --------------------------------------------------------------------------------------------
+-- 3. One active receipt per invoice: UQ_WN_FeeReceipts_InvoiceIdGUID_Active (InvoiceIdGUID) WHERE Status = 1
+-- --------------------------------------------------------------------------------------------
+IF EXISTS (SELECT 1 FROM sys.indexes
+            WHERE object_id = OBJECT_ID(N'dbo.WN_FeeReceipts') AND name = N'UQ_WN_FeeReceipts_InvoiceIdGUID_Active'
+              AND is_unique = 1 AND has_filter = 1
+              AND REPLACE(REPLACE(filter_definition, ' ', ''), '''', '') = '([Status]=(1))')
+BEGIN
+    SET @Summary += N' UQ_WN_FeeReceipts_InvoiceIdGUID_Active already in place;';
+END
+ELSE IF EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts WITH (NOLOCK) WHERE Status = 1
+                 GROUP BY InvoiceIdGUID HAVING COUNT(1) > 1)
+BEGIN
+    SELECT 'Skipped UQ_WN_FeeReceipts_InvoiceIdGUID_Active: these invoices have more than one active receipt. Void the extra receipts, then run this script again.' AS Result;
+    SELECT fr.InvoiceIdGUID, i.Id AS InvoiceId, i.InvoiceNumber, fr.Id AS ReceiptId, fr.Code, fr.CreatedOn
+    FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = fr.InvoiceIdGUID
+    WHERE fr.Status = 1
+      AND fr.InvoiceIdGUID IN (SELECT d.InvoiceIdGUID FROM dbo.WN_FeeReceipts d WITH (NOLOCK) WHERE d.Status = 1
+                                GROUP BY d.InvoiceIdGUID HAVING COUNT(1) > 1)
+    ORDER BY fr.InvoiceIdGUID, fr.Id;
+    SET @Summary += N' UQ_WN_FeeReceipts_InvoiceIdGUID_Active SKIPPED (duplicate active receipts, listed above);';
+END
+ELSE
+BEGIN
+    BEGIN TRY
+        -- an index with this name but a different definition is rebuilt
+        IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_FeeReceipts') AND name = N'UQ_WN_FeeReceipts_InvoiceIdGUID_Active')
+            EXEC(N'DROP INDEX UQ_WN_FeeReceipts_InvoiceIdGUID_Active ON dbo.WN_FeeReceipts;');
+        EXEC(N'CREATE UNIQUE NONCLUSTERED INDEX UQ_WN_FeeReceipts_InvoiceIdGUID_Active ON dbo.WN_FeeReceipts (InvoiceIdGUID) WHERE Status = 1;');
+        SET @Summary += N' UQ_WN_FeeReceipts_InvoiceIdGUID_Active created;';
+    END TRY
+    BEGIN CATCH
+        SELECT 'UQ_WN_FeeReceipts_InvoiceIdGUID_Active was NOT created: ' + ERROR_MESSAGE() AS Result;
+        SET @Summary += N' UQ_WN_FeeReceipts_InvoiceIdGUID_Active failed (see above);';
+    END CATCH
+END
+
+-- --------------------------------------------------------------------------------------------
+-- 4. Unique receipt code: UQ_WN_FeeReceipts_Code (Code) WHERE Code IS NOT NULL
+-- --------------------------------------------------------------------------------------------
+IF EXISTS (SELECT 1
+             FROM sys.indexes ix
+             JOIN sys.index_columns ic ON ic.object_id = ix.object_id AND ic.index_id = ix.index_id AND ic.key_ordinal > 0
+             JOIN sys.columns col ON col.object_id = ic.object_id AND col.column_id = ic.column_id
+            WHERE ix.object_id = OBJECT_ID(N'dbo.WN_FeeReceipts') AND ix.is_unique = 1
+            GROUP BY ix.index_id
+           HAVING COUNT(1) = 1 AND MAX(col.name) = N'Code')
+BEGIN
+    SET @Summary += N' a unique index on Code already exists;';
+END
+ELSE IF COL_LENGTH(N'dbo.WN_FeeReceipts', N'Code') IS NULL
+     OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'Code') = -1
+     OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'Code') > 1700
+BEGIN
+    SELECT 'Skipped UQ_WN_FeeReceipts_Code: Code is missing or too long (MAX) to index.' AS Result;
+    SET @Summary += N' UQ_WN_FeeReceipts_Code SKIPPED (Code column cannot be indexed);';
+END
+ELSE IF EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts WITH (NOLOCK) WHERE Code IS NOT NULL
+                 GROUP BY Code HAVING COUNT(1) > 1)
+BEGIN
+    SELECT 'Skipped UQ_WN_FeeReceipts_Code: these receipt codes are used more than once. Fix them, then run this script again.' AS Result;
+    SELECT fr.Code, fr.Id AS ReceiptId, fr.InvoiceIdGUID, fr.Status, fr.CreatedOn
+    FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+    WHERE fr.Code IN (SELECT d.Code FROM dbo.WN_FeeReceipts d WITH (NOLOCK) WHERE d.Code IS NOT NULL
+                       GROUP BY d.Code HAVING COUNT(1) > 1)
+    ORDER BY fr.Code, fr.Id;
+    SET @Summary += N' UQ_WN_FeeReceipts_Code SKIPPED (duplicate codes, listed above);';
+END
+ELSE
+BEGIN
+    BEGIN TRY
+        EXEC(N'CREATE UNIQUE NONCLUSTERED INDEX UQ_WN_FeeReceipts_Code ON dbo.WN_FeeReceipts (Code) WHERE Code IS NOT NULL;');
+        SET @Summary += N' UQ_WN_FeeReceipts_Code created;';
+    END TRY
+    BEGIN CATCH
+        SELECT 'UQ_WN_FeeReceipts_Code was NOT created: ' + ERROR_MESSAGE() AS Result;
+        SET @Summary += N' UQ_WN_FeeReceipts_Code failed (see above);';
+    END CATCH
+END
+
+SELECT 'Done: dbo.WN_FeeReceipts checked.' + @Summary AS Result;

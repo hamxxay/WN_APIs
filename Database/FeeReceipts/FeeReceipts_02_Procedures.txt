@@ -1,0 +1,746 @@
+USE [SAC400];
+
+-- ============================================================================================
+-- Fee Receipts: stored procedures (dbo.WN_FeeReceipts_*).
+-- 6 procedures, CREATE OR ALTER: no table is created or changed. Safe to run again.
+-- Run AFTER FeeReceipts_01_Table.txt, as ONE statement in DBeaver (no GO needed).
+-- Needs SQL Server 2016+ with compatibility level 130+ (STRING_SPLIT).
+-- ============================================================================================
+SET NOCOUNT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+
+IF (SELECT compatibility_level FROM sys.databases WHERE name = DB_NAME()) < 130
+BEGIN
+    SELECT 'Database compatibility level is below 130 (needed for STRING_SPLIT). Nothing was changed.' AS Result;
+    RETURN;
+END
+
+IF OBJECT_ID(N'dbo.WN_FeeReceipts', N'U') IS NULL
+   OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'ReceiptDate') IS NULL
+   OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'Remarks') IS NULL
+   OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'UpdatedById') IS NULL
+   OR COL_LENGTH(N'dbo.WN_FeeReceipts', N'VoidReason') IS NULL
+BEGIN
+    SELECT 'dbo.WN_FeeReceipts or its new columns are missing - run FeeReceipts_01_Table.txt first. Nothing was changed.' AS Result;
+    RETURN;
+END
+
+-- Unpaid invoices that can get a fee receipt: Un Paid or Challan Expire (overdue), nothing paid, no active receipt.
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_GetUnpaidInvoices
+    @Search             NVARCHAR(200) = NULL,
+    @LocationId         INT           = NULL,
+    @AllowedLocationIds NVARCHAR(MAX) = NULL,
+    @Top                INT           = 50
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Top IS NULL OR @Top <= 0 SET @Top = 50;
+    IF @Top > 200 SET @Top = 200;
+    SET @Search = NULLIF(LTRIM(RTRIM(@Search)), '''');   -- LIKE wildcards are escaped by the API
+
+    -- @AllowedLocationIds: comma-separated location ids of the caller. NULL = every location; '''' or no valid id = none.
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, '','')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    -- Invoice statuses looked up in dbo.OrderStatus by description (falls back to the legacy ids 1-5 when a row is missing).
+    -- Legacy ids still on older rows: 1 Unpaid, 2 Paid, 3 Partial, 4 Overdue, 5 Cancelled (see InvoiceStatuses.cs).
+    DECLARE @UnPaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Un Paid'' ORDER BY Id), 1);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Partial'' ORDER BY Id), 3);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Challan Expire'' ORDER BY Id), 4);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5);
+
+    SELECT TOP (@Top)
+        i.Id                                  AS InvoiceId,
+        i.PublicId                            AS InvoiceIdGUID,
+        i.InvoiceNumber,
+        -- Display name: {CustomerName}-{CustomerCode}-{InvoiceNumber}
+        CONCAT(ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))), ''''), ISNULL(u.Name, u.Email)), ''-'', ISNULL(c.Code, ''WN-N/A''), ''-'', i.InvoiceNumber) AS DisplayName,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))), ''''), ISNULL(u.Name, u.Email)) AS CustomerName,
+        c.Code                                AS CustomerCode,
+        u.Email                               AS CustomerEmail,
+        c.PhoneNumber                         AS CustomerPhone,
+        c.Company                             AS CustomerCompany,
+        c.IdGUID                              AS CustomerIdGUID,
+        i.IssuedOn,
+        i.DueOn,
+        ISNULL(i.RoomRentExclTax, 0)          AS RoomRentExclTax,
+        ISNULL(i.ServiceCharges, 0)           AS ServiceCharges,
+        ISNULL(i.TaxOnServiceCharges, 0)      AS TaxOnServiceCharges,
+        ISNULL(i.WHTAmount, 0)                AS WHTAmount,
+        ISNULL(i.WHTRate, 0)                  AS WHTRate,
+        ISNULL(i.SecurityDepositAmount, 0)    AS SecurityDepositAmount,
+        ISNULL(i.GrandTotal, 0)               AS GrandTotal,
+        ISNULL(i.PaidTotal, 0)                AS PaidTotal,
+        -- What the customer pays: GrandTotal - WHTAmount for WHT invoices
+        CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0
+             THEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0)
+             ELSE ISNULL(i.GrandTotal, 0) END AS NetReceivableAmount,
+        i.InvoiceTypeId,
+        i.CurrencyCode,
+        i.BookingId,
+        i.UserId,
+        x.LocationId                          AS LocationId,
+        loc.Name                              AS LocationName,
+        loc.CompanyId,
+        loc.BranchId,
+        i.StatusId,
+        CASE WHEN i.StatusId IN (4, @OverdueId) THEN ''Overdue'' ELSE ''Unpaid'' END AS StatusLabel
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    OUTER APPLY (SELECT TOP 1 cu.Code, cu.FirstName, cu.LastName, cu.PhoneNumber, cu.Company, cu.IdGUID
+                   FROM dbo.WN_Customers cu WITH (NOLOCK)
+                  WHERE cu.UserId = i.UserId
+                  ORDER BY cu.Id) c
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
+    WHERE i.StatusId IN (1, 4, @UnPaidId, @OverdueId)
+      AND ISNULL(i.PaidTotal, 0) = 0
+      AND NOT EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+                       WHERE fr.InvoiceIdGUID = i.PublicId AND fr.Status = 1)
+      AND (@LocationId IS NULL OR x.LocationId = @LocationId)
+      AND (@AllowedLocationIds IS NULL OR x.LocationId IN (SELECT LocId FROM @AllowedLocs))
+      AND (
+          @Search IS NULL
+          OR i.InvoiceNumber LIKE ''%'' + @Search + ''%''
+          OR c.Code LIKE ''%'' + @Search + ''%''
+          OR c.FirstName LIKE ''%'' + @Search + ''%''
+          OR c.LastName LIKE ''%'' + @Search + ''%''
+          OR u.Email LIKE ''%'' + @Search + ''%''
+          OR u.Name LIKE ''%'' + @Search + ''%''
+      )
+    ORDER BY i.Id DESC;
+END');
+
+-- Cash / bank accounts for the receipt form. Company accounts when the company has any, else the default ones.
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_GetAccounts
+    @CompanyId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @CompanyId IS NOT NULL AND @CompanyId <= 0 SET @CompanyId = NULL;
+
+    DECLARE @HasCompanyAccounts BIT = 0;
+    IF @CompanyId IS NOT NULL
+       AND EXISTS (SELECT 1 FROM dbo.AccountsCOA a WITH (NOLOCK)
+                    WHERE a.CompanyId = @CompanyId
+                      AND (
+            a.Id = 101
+            OR a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+            OR a.AccountsCategoryId = 21
+            OR a.Description LIKE ''%Cash%''
+            OR a.Description LIKE ''%Bank%''
+        )
+        AND ISNULL(a.ActiveStatus, 1) = 1
+        AND a.Description NOT LIKE ''%DONATION%'')
+        SET @HasCompanyAccounts = 1;
+
+    SELECT
+        a.Id                                  AS AccountId,
+        LTRIM(RTRIM(a.Description))           AS Description,
+        LTRIM(RTRIM(ISNULL(a.ShortDesc, ''''))) AS ShortDesc,
+        ISNULL(a.AccountNature, '''')           AS AccountNature,
+        a.CompanyId,
+        -- Cash in hand flag, lets the form preselect it without a hard-coded id
+        CASE
+            WHEN a.Id = 101 THEN CAST(1 AS BIT)
+            WHEN a.Description = ''CASH'' THEN CAST(1 AS BIT)
+            WHEN a.Description = ''CASH IN HAND'' AND a.Id = 21 THEN CAST(1 AS BIT)
+            WHEN a.AccountNature = ''Cash in Hand'' THEN CAST(1 AS BIT)
+            ELSE CAST(0 AS BIT)
+        END AS IsCashInHand
+    FROM dbo.AccountsCOA a WITH (NOLOCK)
+    WHERE (
+            (@HasCompanyAccounts = 1 AND a.CompanyId = @CompanyId)
+            OR (@HasCompanyAccounts = 0 AND (a.CompanyId = 1 OR a.IsForAllCompanies = 1 OR a.CompanyId IS NULL))
+            OR a.Id = 101
+          )
+      AND (
+            a.Id = 101
+            OR a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+            OR a.AccountsCategoryId = 21
+            OR a.Description LIKE ''%Cash%''
+            OR a.Description LIKE ''%Bank%''
+        )
+        AND ISNULL(a.ActiveStatus, 1) = 1
+        AND a.Description NOT LIKE ''%DONATION%''
+    ORDER BY
+        CASE
+            WHEN a.Id = 101 THEN 0
+            WHEN a.Id = 21 THEN 1
+            WHEN a.Description = ''CASH'' THEN 2
+            WHEN a.Description = ''CASH IN HAND'' THEN 3
+            WHEN a.AccountNature = ''Cash in Hand'' THEN 4
+            ELSE 5
+        END,
+        a.Description ASC;
+END');
+
+-- One receipt by @Id (wins when both are given) or @IdGUID. Returns no row outside @AllowedLocationIds (NULL = every location).
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_GetById
+    @Id                 INT              = NULL,
+    @IdGUID             UNIQUEIDENTIFIER = NULL,
+    @AllowedLocationIds NVARCHAR(MAX)    = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- @AllowedLocationIds: comma-separated location ids of the caller. NULL = every location; '''' or no valid id = none.
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, '','')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    SELECT TOP 1
+        fr.Id,
+        fr.IdGUID,
+        fr.Code,
+        fr.CustomerIdGUID,
+        fr.InvoiceIdGUID,
+        fr.InvoiceTypeId,
+        fr.TotalAmount,
+        fr.RoomRentExclTax,
+        fr.ServiceCharges,
+        fr.TaxOnServiceCharges,
+        fr.WHTAmount,
+        fr.SecurityDepositAmount,
+        fr.CashInHandAccountId,
+        coa.Description                     AS CashInHandAccountName,
+        fr.PaymentType,
+        fr.BranchId,
+        fr.CompanyId,
+        fr.FeeStatus,
+        fr.Status,
+        CASE fr.Status WHEN 1 THEN ''Active'' WHEN 0 THEN ''Void'' ELSE ''Unknown'' END AS StatusLabel,
+        fr.ReceiptDate,
+        fr.Remarks,
+        fr.VoidReason,
+        fr.CreatedOn,
+        fr.UpdatedOn,
+        fr.CreatedById,
+        creator.Name                        AS CreatedByName,
+        fr.UpdatedById,
+        updater.Name                        AS UpdatedByName,
+        i.Id                                AS InvoiceId,
+        i.InvoiceNumber,
+        i.IssuedOn                          AS InvoiceIssuedOn,
+        i.DueOn                             AS InvoiceDueOn,
+        i.GrandTotal                        AS InvoiceGrandTotal,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))), ''''), ISNULL(u.Name, u.Email)) AS CustomerName,
+        c.Code                              AS CustomerCode,
+        u.Email                             AS CustomerEmail,
+        c.PhoneNumber                       AS CustomerPhone,
+        c.Company                           AS CustomerCompany,
+        c.Address                           AS CustomerAddress,
+        x.LocationId                        AS LocationId,
+        loc.Name                            AS LocationName,
+        loc.City                            AS LocationCity
+    FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = fr.InvoiceIdGUID
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.IdGUID = fr.CustomerIdGUID
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
+    LEFT JOIN dbo.AccountsCOA coa WITH (NOLOCK) ON coa.Id = fr.CashInHandAccountId
+    LEFT JOIN dbo.WN_Users creator WITH (NOLOCK) ON creator.Id = fr.CreatedById
+    LEFT JOIN dbo.WN_Users updater WITH (NOLOCK) ON updater.Id = fr.UpdatedById
+    WHERE ((@Id IS NOT NULL AND fr.Id = @Id)
+           OR (@Id IS NULL AND @IdGUID IS NOT NULL AND fr.IdGUID = @IdGUID))
+      AND (@AllowedLocationIds IS NULL OR x.LocationId IN (SELECT LocId FROM @AllowedLocs));
+END');
+
+-- Paged receipt list with search, location and status (1 Active, 0 Void, NULL all). Result 1 = TotalCount, result 2 = rows.
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_GetList
+    @Page               INT           = 1,
+    @Limit              INT           = 10,
+    @Search             NVARCHAR(200) = NULL,
+    @LocationId         INT           = NULL,
+    @Status             TINYINT       = NULL,
+    @AllowedLocationIds NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Page IS NULL OR @Page < 1 SET @Page = 1;
+    IF @Limit IS NULL OR @Limit < 1 SET @Limit = 10;
+    IF @Limit > 100 SET @Limit = 100;
+    DECLARE @Offset INT = (@Page - 1) * @Limit;
+    SET @Search = NULLIF(LTRIM(RTRIM(@Search)), '''');   -- LIKE wildcards are escaped by the API
+
+    -- @AllowedLocationIds: comma-separated location ids of the caller. NULL = every location; '''' or no valid id = none.
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, '','')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    SELECT COUNT(1) AS TotalCount
+    FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = fr.InvoiceIdGUID
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.IdGUID = fr.CustomerIdGUID
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
+    WHERE (@Status IS NULL OR fr.Status = @Status)
+      AND (@LocationId IS NULL OR x.LocationId = @LocationId)
+      AND (@AllowedLocationIds IS NULL OR x.LocationId IN (SELECT LocId FROM @AllowedLocs))
+      AND (
+          @Search IS NULL
+          OR fr.Code LIKE ''%'' + @Search + ''%''
+          OR i.InvoiceNumber LIKE ''%'' + @Search + ''%''
+          OR c.Code LIKE ''%'' + @Search + ''%''
+          OR c.FirstName LIKE ''%'' + @Search + ''%''
+          OR c.LastName LIKE ''%'' + @Search + ''%''
+          OR u.Email LIKE ''%'' + @Search + ''%''
+      );
+
+    SELECT
+        fr.Id,
+        fr.IdGUID,
+        fr.Code,
+        fr.CustomerIdGUID,
+        fr.InvoiceIdGUID,
+        fr.InvoiceTypeId,
+        fr.TotalAmount,
+        fr.RoomRentExclTax,
+        fr.ServiceCharges,
+        fr.TaxOnServiceCharges,
+        fr.WHTAmount,
+        fr.SecurityDepositAmount,
+        fr.CashInHandAccountId,
+        coa.Description                     AS CashInHandAccountName,
+        fr.PaymentType,
+        fr.BranchId,
+        fr.CompanyId,
+        fr.FeeStatus,
+        fr.Status,
+        CASE fr.Status WHEN 1 THEN ''Active'' WHEN 0 THEN ''Void'' ELSE ''Unknown'' END AS StatusLabel,
+        fr.ReceiptDate,
+        fr.Remarks,
+        fr.VoidReason,
+        fr.CreatedOn,
+        fr.UpdatedOn,
+        fr.CreatedById,
+        creator.Name                        AS CreatedByName,
+        fr.UpdatedById,
+        updater.Name                        AS UpdatedByName,
+        i.Id                                AS InvoiceId,
+        i.InvoiceNumber,
+        i.IssuedOn                          AS InvoiceIssuedOn,
+        i.DueOn                             AS InvoiceDueOn,
+        i.GrandTotal                        AS InvoiceGrandTotal,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))), ''''), ISNULL(u.Name, u.Email)) AS CustomerName,
+        c.Code                              AS CustomerCode,
+        u.Email                             AS CustomerEmail,
+        c.Company                           AS CustomerCompany,
+        x.LocationId                        AS LocationId,
+        loc.Name                            AS LocationName
+    FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = fr.InvoiceIdGUID
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.IdGUID = fr.CustomerIdGUID
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
+    LEFT JOIN dbo.AccountsCOA coa WITH (NOLOCK) ON coa.Id = fr.CashInHandAccountId
+    LEFT JOIN dbo.WN_Users creator WITH (NOLOCK) ON creator.Id = fr.CreatedById
+    LEFT JOIN dbo.WN_Users updater WITH (NOLOCK) ON updater.Id = fr.UpdatedById
+    WHERE (@Status IS NULL OR fr.Status = @Status)
+      AND (@LocationId IS NULL OR x.LocationId = @LocationId)
+      AND (@AllowedLocationIds IS NULL OR x.LocationId IN (SELECT LocId FROM @AllowedLocs))
+      AND (
+          @Search IS NULL
+          OR fr.Code LIKE ''%'' + @Search + ''%''
+          OR i.InvoiceNumber LIKE ''%'' + @Search + ''%''
+          OR c.Code LIKE ''%'' + @Search + ''%''
+          OR c.FirstName LIKE ''%'' + @Search + ''%''
+          OR c.LastName LIKE ''%'' + @Search + ''%''
+          OR u.Email LIKE ''%'' + @Search + ''%''
+      )
+    ORDER BY fr.Id DESC
+    OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+END');
+
+-- New receipt for an Un Paid / Challan Expire invoice: saves the receipt, marks the invoice Paid, activates the booking's access cards.
+-- Returns the new receipt (same columns as WN_FeeReceipts_GetById).
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_Insert
+    @InvoiceIdGUID       UNIQUEIDENTIFIER,
+    @CashInHandAccountId INT,
+    @PaymentType         VARCHAR(50)   = ''Cash'',
+    @ReceiptDate         DATE,
+    @Remarks             NVARCHAR(500) = NULL,
+    @CreatedById         INT,
+    @AllowedLocationIds  NVARCHAR(MAX) = NULL   -- NULL = every location (super admin)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    -- Errors are RAISERROR(..., 16, state): state 1 = rule broken (HTTP 400), 2 = not found (404),
+    -- 3 = outside the caller''s locations (403). The API maps them by state.
+
+    -- @AllowedLocationIds: comma-separated location ids of the caller. NULL = every location; '''' or no valid id = none.
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, '','')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    -- Invoice statuses looked up in dbo.OrderStatus by description (falls back to the legacy ids 1-5 when a row is missing).
+    -- Legacy ids still on older rows: 1 Unpaid, 2 Paid, 3 Partial, 4 Overdue, 5 Cancelled (see InvoiceStatuses.cs).
+    DECLARE @UnPaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Un Paid'' ORDER BY Id), 1);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Partial'' ORDER BY Id), 3);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Challan Expire'' ORDER BY Id), 4);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5);
+
+    DECLARE
+        @InvoiceId             INT,
+        @IssuedOn              DATE,
+        @StatusId              INT,
+        @GrandTotal            DECIMAL(18,4),
+        @PaidTotal             DECIMAL(18,4),
+        @InvoiceTypeId         INT,
+        @RoomRentExclTax       DECIMAL(18,4),
+        @ServiceCharges        DECIMAL(18,4),
+        @TaxOnServiceCharges   DECIMAL(18,4),
+        @WHTAmount             DECIMAL(18,4),
+        @SecurityDepositAmount DECIMAL(18,2),
+        @BookingId             INT,
+        @UserId                INT,
+        @BillingPeriodEnd      DATETIME2,
+        @LocationId            INT,
+        @CompanyId             INT,
+        @BranchId              INT,
+        @CustomerIdGUID        UNIQUEIDENTIFIER,
+        @NetTotal              DECIMAL(18,4),
+        @Prefix                VARCHAR(40),
+        @NextSeq               INT,
+        @Code                  VARCHAR(50),
+        @ReceiptId             INT,
+        @ReceiptGUID           UNIQUEIDENTIFIER = NEWID(),
+        @Today                 DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE),
+        @IssuedOnStr           NVARCHAR(30);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- 1. Lock the invoice first (WN_FeeReceipts_Void uses the same order: invoice, then receipt).
+        SELECT
+            @InvoiceId             = i.Id,
+            @IssuedOn              = CAST(i.IssuedOn AS DATE),
+            @StatusId              = ISNULL(i.StatusId, 0),
+            @GrandTotal            = ISNULL(i.GrandTotal, 0),
+            @PaidTotal             = ISNULL(i.PaidTotal, 0),
+            @InvoiceTypeId         = ISNULL(i.InvoiceTypeId, 1),
+            @RoomRentExclTax       = ISNULL(i.RoomRentExclTax, 0),
+            @ServiceCharges        = ISNULL(i.ServiceCharges, 0),
+            @TaxOnServiceCharges   = ISNULL(i.TaxOnServiceCharges, 0),
+            @WHTAmount             = ISNULL(i.WHTAmount, 0),
+            @SecurityDepositAmount = ISNULL(i.SecurityDepositAmount, 0),
+            @BookingId             = i.BookingId,
+            @UserId                = i.UserId,
+            @BillingPeriodEnd      = i.BillingPeriodEnd
+        FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+        WHERE i.PublicId = @InvoiceIdGUID;
+
+        IF @InvoiceId IS NULL
+            RAISERROR(''Invoice not found.'', 16, 2);
+
+        -- 2. Location: booking space''s location, else the user''s location (same rule as GetList / GetById / Void).
+        SELECT @LocationId = ISNULL(s.LocationId, u.LocationId)
+        FROM (SELECT 1 AS One) z
+        LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = @BookingId
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = @UserId;
+
+        IF @AllowedLocationIds IS NOT NULL
+           AND (@LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @AllowedLocs WHERE LocId = @LocationId))
+            RAISERROR(''You are not authorized to create receipts for invoices outside your assigned location(s).'', 16, 3);
+
+        -- 3. Status: only Un Paid / Challan Expire (overdue) with nothing paid.
+        IF @StatusId IN (5, @CancelledId)
+            RAISERROR(''Invoice is cancelled and cannot receive fee receipts.'', 16, 1);
+
+        IF @StatusId IN (2, 3, @PaidId, @PartialId) OR @PaidTotal > 0
+            RAISERROR(''Invoice is already paid or partially settled.'', 16, 1);
+
+        IF @StatusId NOT IN (1, 4, @UnPaidId, @OverdueId)
+            RAISERROR(''Invoice is not in an eligible unpaid status.'', 16, 1);
+
+        -- 4. One active receipt per invoice (receipt rows are locked after the invoice row).
+        IF EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts WITH (UPDLOCK, HOLDLOCK)
+                    WHERE InvoiceIdGUID = @InvoiceIdGUID AND Status = 1)
+            RAISERROR(''An active fee receipt already exists for this invoice.'', 16, 1);
+
+        -- 5. Receipt date: required, not in the future (Pakistan date), not before the invoice issue date.
+        IF @ReceiptDate IS NULL
+            RAISERROR(''A valid receipt date is required.'', 16, 1);
+
+        IF @ReceiptDate > @Today
+            RAISERROR(''Receipt date cannot be in the future.'', 16, 1);
+
+        IF @IssuedOn IS NOT NULL AND @ReceiptDate < @IssuedOn
+        BEGIN
+            SET @IssuedOnStr = CONVERT(NVARCHAR(30), @IssuedOn, 23);
+            RAISERROR(''Receipt date cannot be earlier than invoice issue date (%s).'', 16, 1, @IssuedOnStr);
+        END;
+
+        -- 6. Company / branch of the location.
+        IF @LocationId IS NOT NULL
+            SELECT TOP 1 @CompanyId = l.CompanyId, @BranchId = l.BranchId
+            FROM dbo.WN_Locations l WITH (NOLOCK)
+            WHERE l.Id = @LocationId;
+
+        -- 7. The account must be one WN_FeeReceipts_GetAccounts offers for this company.
+        IF NOT EXISTS (
+            SELECT 1 FROM dbo.AccountsCOA a WITH (NOLOCK)
+            WHERE a.Id = @CashInHandAccountId
+              AND (a.Id = 101 OR @CompanyId IS NULL OR a.CompanyId = @CompanyId OR a.CompanyId = 1
+                   OR a.CompanyId IS NULL OR a.IsForAllCompanies = 1)
+              AND (
+            a.Id = 101
+            OR a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+            OR a.AccountsCategoryId = 21
+            OR a.Description LIKE ''%Cash%''
+            OR a.Description LIKE ''%Bank%''
+        )
+        AND ISNULL(a.ActiveStatus, 1) = 1
+        AND a.Description NOT LIKE ''%DONATION%'')
+            RAISERROR(''Selected account is invalid or not an allowed cash/bank account for this invoice.'', 16, 1);
+
+        -- 8. Customer of the invoice user.
+        SELECT TOP 1 @CustomerIdGUID = c.IdGUID
+        FROM dbo.WN_Customers c WITH (NOLOCK)
+        WHERE c.UserId = @UserId
+        ORDER BY c.Id;
+
+        -- 9. Amount the customer pays: GrandTotal - WHTAmount for WHT invoices.
+        SET @NetTotal = CASE WHEN @InvoiceTypeId = 6 OR @WHTAmount > 0 THEN @GrandTotal - @WHTAmount ELSE @GrandTotal END;
+
+        -- 10. Code FR-{CompanyId}-{BranchId}-{YYYY}-{NNNNN}: next number for this prefix.
+        --     Code LIKE prefix (no YEAR() on a column) so the range lock on the Code index serialises concurrent inserts.
+        SET @Prefix = ''FR-'' + CAST(ISNULL(@CompanyId, 0) AS VARCHAR(10))
+                    + ''-'' + CAST(ISNULL(@BranchId, 0) AS VARCHAR(10))
+                    + ''-'' + CAST(YEAR(@ReceiptDate) AS VARCHAR(4)) + ''-'';
+
+        SELECT @NextSeq = ISNULL(MAX(TRY_CAST(SUBSTRING(fr.Code, LEN(@Prefix) + 1, 20) AS INT)), 0) + 1
+        FROM dbo.WN_FeeReceipts fr WITH (UPDLOCK, HOLDLOCK)
+        WHERE fr.Code LIKE @Prefix + ''%'';
+
+        SET @Code = @Prefix + RIGHT(''00000'' + CAST(@NextSeq AS VARCHAR(10)), CASE WHEN @NextSeq > 99999 THEN LEN(CAST(@NextSeq AS VARCHAR(10))) ELSE 5 END);
+
+        -- 11. Save the receipt.
+        INSERT INTO dbo.WN_FeeReceipts (
+            IdGUID, Code, CustomerIdGUID, InvoiceIdGUID, InvoiceTypeId, TotalAmount,
+            RoomRentExclTax, ServiceCharges, TaxOnServiceCharges, WHTAmount, SecurityDepositAmount,
+            CashInHandAccountId, PaymentType, BranchId, CompanyId, FeeStatus, Status, ReceiptDate,
+            CreatedOn, UpdatedOn, CreatedById, Remarks, UpdatedById, VoidReason
+        )
+        VALUES (
+            @ReceiptGUID, @Code, @CustomerIdGUID, @InvoiceIdGUID, @InvoiceTypeId, @NetTotal,
+            @RoomRentExclTax, @ServiceCharges, @TaxOnServiceCharges, @WHTAmount, @SecurityDepositAmount,
+            @CashInHandAccountId, ISNULL(NULLIF(LTRIM(RTRIM(@PaymentType)), ''''), ''Cash''), @BranchId, @CompanyId,
+            1,   -- FeeStatus 1 = Paid
+            1,   -- Status 1 = Active
+            @ReceiptDate,
+            SYSUTCDATETIME(), NULL, @CreatedById, NULLIF(LTRIM(RTRIM(@Remarks)), ''''), NULL, NULL
+        );
+
+        SET @ReceiptId = CAST(SCOPE_IDENTITY() AS INT);
+
+        -- 12. Invoice fully paid. PaidTotal = net amount, like WN_RecordInvoicePayment (fully paid = GrandTotal - WHTAmount),
+        --     so BalanceDue (GrandTotal - WHTAmount - PaidTotal) becomes 0.
+        UPDATE dbo.WN_Invoices
+        SET PaidTotal = @NetTotal,
+            StatusId  = @PaidId
+        WHERE Id = @InvoiceId;
+
+        -- NOTE: no dbo.WN_Payments row is written here (WN_RecordInvoicePayment writes one). Whether a fee receipt
+        -- should also create a payment row is a pending business decision - add it here once decided.
+
+        -- 13. Activate the booking''s access cards, same as WN_RecordInvoicePayment does on full payment.
+        IF @BookingId IS NOT NULL AND @BookingId > 0
+            UPDATE dbo.WN_AccessCards
+            SET Status    = 1,   -- Active
+                EndDate   = ISNULL(@BillingPeriodEnd, EndDate),
+                UpdatedOn = SYSUTCDATETIME()
+            WHERE BookingId = @BookingId;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        IF ERROR_NUMBER() IN (2601, 2627)
+        BEGIN
+            -- unique index hit (active receipt per invoice / receipt code): another receipt was saved at the same moment
+            RAISERROR(''Another fee receipt was saved for this invoice at the same moment. Refresh and try again.'', 16, 1);
+            RETURN;
+        END;
+        THROW;
+    END CATCH;
+
+    EXEC dbo.WN_FeeReceipts_GetById @Id = @ReceiptId;
+END');
+
+-- Voids an active receipt (by @ReceiptId, which wins, else @ReceiptGUID). Restores the invoice to Un Paid only while it is
+-- still Paid by this receipt. Returns IsSuccessful, Message, ReceiptId, InvoiceRestored, AccessCardsNeedReview.
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_Void
+    @ReceiptId          INT              = NULL,
+    @ReceiptGUID        UNIQUEIDENTIFIER = NULL,
+    @VoidReason         NVARCHAR(500),
+    @UpdatedById        INT,
+    @AllowedLocationIds NVARCHAR(MAX)    = NULL   -- NULL = every location
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    -- Errors are RAISERROR(..., 16, state): state 1 = rule broken (HTTP 400), 2 = not found (404),
+    -- 3 = outside the caller''s locations (403). The API maps them by state.
+
+    -- @AllowedLocationIds: comma-separated location ids of the caller. NULL = every location; '''' or no valid id = none.
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, '','')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    -- Invoice statuses looked up in dbo.OrderStatus by description (falls back to the legacy ids 1-5 when a row is missing).
+    -- Legacy ids still on older rows: 1 Unpaid, 2 Paid, 3 Partial, 4 Overdue, 5 Cancelled (see InvoiceStatuses.cs).
+    DECLARE @UnPaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Un Paid'' ORDER BY Id), 1);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Partial'' ORDER BY Id), 3);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Challan Expire'' ORDER BY Id), 4);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5);
+
+    DECLARE
+        @TargetReceiptId       INT,
+        @InvoiceGUID           UNIQUEIDENTIFIER,
+        @CurrentStatus         TINYINT,
+        @ReceiptTotal          DECIMAL(18,4),
+        @InvoiceId             INT,
+        @InvStatusId           INT,
+        @InvPaidTotal          DECIMAL(18,4),
+        @InvGrandTotal         DECIMAL(18,4),
+        @BookingId             INT,
+        @UserId                INT,
+        @LocationId            INT,
+        @InvoiceRestored       BIT = 0,
+        @AccessCardsNeedReview BIT = 0,
+        @Message               NVARCHAR(300);
+
+    BEGIN TRY
+        IF @VoidReason IS NULL OR LTRIM(RTRIM(@VoidReason)) = ''''
+            RAISERROR(''A void reason is required.'', 16, 1);
+
+        IF @ReceiptId IS NULL AND @ReceiptGUID IS NULL
+            RAISERROR(''Receipt identifier is required.'', 16, 1);
+
+        -- Find the receipt and its invoice (no lock yet; a receipt''s invoice never changes).
+        SELECT @TargetReceiptId = fr.Id, @InvoiceGUID = fr.InvoiceIdGUID
+        FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+        WHERE (@ReceiptId IS NOT NULL AND fr.Id = @ReceiptId)
+           OR (@ReceiptId IS NULL AND fr.IdGUID = @ReceiptGUID);
+
+        IF @TargetReceiptId IS NULL
+            RAISERROR(''Fee receipt not found.'', 16, 2);
+
+        BEGIN TRANSACTION;
+
+        -- Same lock order as WN_FeeReceipts_Insert: invoice first, then receipt.
+        SELECT
+            @InvoiceId     = i.Id,
+            @InvStatusId   = ISNULL(i.StatusId, 0),
+            @InvPaidTotal  = ISNULL(i.PaidTotal, 0),
+            @InvGrandTotal = ISNULL(i.GrandTotal, 0),
+            @BookingId     = i.BookingId,
+            @UserId        = i.UserId
+        FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+        WHERE i.PublicId = @InvoiceGUID;
+
+        SELECT @CurrentStatus = fr.Status, @ReceiptTotal = ISNULL(fr.TotalAmount, 0)
+        FROM dbo.WN_FeeReceipts fr WITH (UPDLOCK, HOLDLOCK)
+        WHERE fr.Id = @TargetReceiptId;
+
+        IF @CurrentStatus IS NULL
+            RAISERROR(''Fee receipt not found.'', 16, 2);
+
+        -- Location: booking space''s location, else the user''s location (same rule as the other fee receipt procedures).
+        SELECT @LocationId = ISNULL(s.LocationId, u.LocationId)
+        FROM (SELECT 1 AS One) z
+        LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = @BookingId
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = @UserId;
+
+        IF @AllowedLocationIds IS NOT NULL
+           AND (@LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @AllowedLocs WHERE LocId = @LocationId))
+            RAISERROR(''You are not authorized to void receipts for invoices outside your assigned location(s).'', 16, 3);
+
+        IF @CurrentStatus = 0
+            RAISERROR(''Fee receipt is already void.'', 16, 1);
+
+        UPDATE dbo.WN_FeeReceipts
+        SET Status      = 0,   -- 0 = Void
+            VoidReason  = LTRIM(RTRIM(@VoidReason)),
+            UpdatedById = @UpdatedById,
+            UpdatedOn   = SYSUTCDATETIME()
+        WHERE Id = @TargetReceiptId;
+
+        -- Restore the invoice only while it is still Paid by this receipt (PaidTotal = this receipt''s net amount,
+        -- or GrandTotal for receipts saved before the net-amount fix). Otherwise it was changed afterwards: leave it.
+        -- The status before the receipt is not stored, so a restored invoice goes back to Un Paid (not Challan Expire).
+        IF @InvoiceId IS NOT NULL
+           AND @InvStatusId IN (2, @PaidId)
+           AND (@InvPaidTotal = @ReceiptTotal OR @InvPaidTotal = @InvGrandTotal)
+        BEGIN
+            UPDATE dbo.WN_Invoices
+            SET PaidTotal = 0,
+                StatusId  = @UnPaidId
+            WHERE Id = @InvoiceId;
+            SET @InvoiceRestored = 1;
+        END;
+
+        -- Access cards: Insert set them Active with EndDate = BillingPeriodEnd, but their earlier Status / EndDate
+        -- are not stored, so there is no clean reversal. They are left as they are and flagged for review instead.
+        IF @InvoiceRestored = 1 AND @BookingId IS NOT NULL AND @BookingId > 0
+           AND EXISTS (SELECT 1 FROM dbo.WN_AccessCards ac WITH (NOLOCK) WHERE ac.BookingId = @BookingId AND ac.Status = 1)
+            SET @AccessCardsNeedReview = 1;
+
+        COMMIT TRANSACTION;
+
+        SET @Message = CASE WHEN @InvoiceRestored = 1
+                            THEN ''Fee receipt voided successfully and invoice restored to unpaid.''
+                            ELSE ''Fee receipt voided. The invoice was not changed because it is no longer paid by this receipt.'' END;
+
+        SELECT
+            1                      AS IsSuccessful,
+            @Message               AS Message,
+            @TargetReceiptId       AS ReceiptId,
+            @InvoiceRestored       AS InvoiceRestored,
+            @AccessCardsNeedReview AS AccessCardsNeedReview;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END');
+
+SELECT 'Done: 6 procedures created or updated (dbo.WN_FeeReceipts_GetUnpaidInvoices, dbo.WN_FeeReceipts_GetAccounts, dbo.WN_FeeReceipts_GetById, dbo.WN_FeeReceipts_GetList, dbo.WN_FeeReceipts_Insert, dbo.WN_FeeReceipts_Void).' AS Result;
