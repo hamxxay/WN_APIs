@@ -84,7 +84,7 @@ namespace WorkNest.API.Filters
                                 return;
                             }
                         }
-                        else if (prop.CanWrite)
+                        else if (prop.CanWrite && !KeepsMissingLocation(context))
                         {
                             // If property is nullable or 0, pre-fill with claim location ID
                             if (prop.PropertyType == typeof(int?) || prop.PropertyType == typeof(int))
@@ -105,5 +105,17 @@ namespace WorkNest.API.Filters
 
             await next();
         }
+
+        private static bool KeepsMissingLocation(ActionExecutingContext context) =>
+            context.ActionDescriptor.EndpointMetadata.OfType<KeepMissingLocationAttribute>().Any();
+    }
+
+    /// <summary>
+    /// For updates where a missing LocationId means "unchanged": [ValidateLocationScope] still checks a LocationId that
+    /// is sent, but does not fill a missing one with the caller's location (that would move the record there).
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Method)]
+    public sealed class KeepMissingLocationAttribute : Attribute
+    {
     }
 }
