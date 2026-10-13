@@ -197,6 +197,7 @@ try
     builder.Services.AddScoped<IRoleDashboardService, RoleDashboardService>();
     // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
     builder.Services.AddScoped<IReportRepository, WorkNest.Infrastructure.Repositories.ReportRepository>();
+    builder.Services.AddScoped<IAuditLogRepository, WorkNest.Infrastructure.Repositories.AuditLogRepository>();
     builder.Services.AddScoped<IForecastService, ForecastService>();
     builder.Services.AddScoped<IWeeklyReportGenerator, WeeklyReportGenerator>();
     builder.Services.AddScoped<IPlanFeatureService, PlanFeatureService>();
