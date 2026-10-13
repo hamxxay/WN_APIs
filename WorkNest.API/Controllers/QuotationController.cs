@@ -13,6 +13,7 @@ namespace WorkNest.API.Controllers
     [ApiController]
     [Authorize]
     [ValidateLocationScope]
+    [RecordScope(RecordKind.Quotation, "id")] // location-bound staff: only quotations of their locations
     public class QuotationController : ControllerBase
     {
         private readonly IQuotationService _quotations;
@@ -31,6 +32,17 @@ namespace WorkNest.API.Controllers
 
         /// <summary>Signed-in user's email from the JWT only (the x-user-email header is no longer trusted).</summary>
         private string? ResolveUserEmail() => User.GetEmail();
+
+        /// <summary>
+        /// Locations a location-bound admin / sales executive may see (an id that matches nothing when they have none);
+        /// null for everyone else (all locations).
+        /// </summary>
+        private IReadOnlyCollection<int>? CallerLocations()
+        {
+            if (!User.IsLocationBoundRole()) return null;
+            var mine = User.GetLocationIds();
+            return mine.Count > 0 ? mine : new[] { -1 };
+        }
 
         private async Task<int?> ResolveActorIdAsync()
         {
@@ -127,6 +139,7 @@ namespace WorkNest.API.Controllers
 
         // Was anonymous: staff, or the customer themselves.
         [HttpGet("api/quotation/by-customer/{customerId:int}")]
+        [RecordScope(RecordKind.Customer, "customerId")]
         public async Task<IActionResult> GetByCustomer(int customerId)
         {
             try
@@ -168,6 +181,7 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("api/quotation/history")]
         [Authorize(Roles = StaffRoles)]
+        [RecordScope(RecordKind.Customer, "customerId", FromQuery = true)]
         public async Task<IActionResult> GetHistory([FromQuery] int customerId, [FromQuery] int spaceId)
         {
             var res = await _quotations.GetQuotationHistoryAsync(customerId, spaceId);
@@ -334,9 +348,10 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/quotation/activities")]
         [Authorize(Roles = StaffRoles)]
         [HttpGet("api/quotations/activities")]
+        [RecordScope(RecordKind.Quotation, "quotationId", FromQuery = true)]
         public async Task<IActionResult> GetActivities([FromQuery] int? quotationId = null, [FromQuery] int limit = 20)
         {
-            var res = await _quotations.GetActivitiesAsync(quotationId, Math.Clamp(limit, 1, 200)); // goes into SELECT TOP
+            var res = await _quotations.GetActivitiesAsync(quotationId, Math.Clamp(limit, 1, 200), CallerLocations()); // goes into SELECT TOP
             return Ok(ApiResponse.Ok(res));
         }
 
@@ -346,7 +361,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/quotation-responses")]
         public async Task<IActionResult> GetResponses([FromQuery] int page = 1, [FromQuery] int limit = 20, [FromQuery] string? search = null)
         {
-            var (rows, total) = await _quotations.GetQuotationResponsesAsync(page, limit, search);
+            var (rows, total) = await _quotations.GetQuotationResponsesAsync(page, limit, search, CallerLocations());
             return Ok(new { data = rows, total = total, page = page, limit = limit });
         }
 

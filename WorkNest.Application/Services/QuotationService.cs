@@ -686,9 +686,9 @@ namespace WorkNest.Application.Services
             return list;
         }
 
-        public async Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit)
+        public async Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit, IReadOnlyCollection<int>? locationIds = null)
         {
-            var rows = await _db.GetQuotationActivitiesAsync(quotationId, limit);
+            var rows = await _db.GetQuotationActivitiesAsync(quotationId, limit, locationIds);
             var list = new List<QuotationActivityDto>();
             foreach (var a in rows)
             {
@@ -706,9 +706,9 @@ namespace WorkNest.Application.Services
             return list;
         }
 
-        public async Task<(IEnumerable<QuotationResponseItemDto> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search)
+        public async Task<(IEnumerable<QuotationResponseItemDto> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search, IReadOnlyCollection<int>? locationIds = null)
         {
-            var (rows, total) = await _db.GetQuotationResponsesAsync(page, limit, search);
+            var (rows, total) = await _db.GetQuotationResponsesAsync(page, limit, search, locationIds);
             var list = new List<QuotationResponseItemDto>();
             foreach (var r in rows)
             {

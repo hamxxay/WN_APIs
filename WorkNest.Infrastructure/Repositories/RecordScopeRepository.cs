@@ -6,7 +6,7 @@ using WorkNest.Application.Interfaces;
 namespace WorkNest.Infrastructure.Repositories
 {
     /// <summary>
-    /// Location of a single record (booking / payment / agreement / customer / user), read with NOLOCK. Every query
+    /// Location of a single record (booking / payment / agreement / customer / user / quotation / invoice), read with NOLOCK. Every query
     /// returns one row per record match with the location (NULL when none), so "no rows" means "no such record".
     /// </summary>
     public class RecordScopeRepository : IRecordScopeRepository
@@ -67,6 +67,26 @@ namespace WorkNest.Infrastructure.Repositories
             IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
                 SELECT ul.LocationId FROM dbo.WN_UserLocations ul WITH (NOLOCK) JOIN @U x ON x.Id = ul.UserId;";
 
+        // A quotation belongs to the location of its quoted space (same rule as the quotation list).
+        private const string QuotationSql = @"
+            SELECT s.LocationId FROM dbo.WN_Quotations q WITH (NOLOCK)
+              LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+             WHERE q.Id = @Id;";
+
+        // An invoice belongs to its booking's location and to its user's location (same rule as WN_GetInvoicesList).
+        // A GUID is the invoice's PublicId or the PublicId of its sales-tax invoice (WN_CustomerSTInvoice).
+        private const string InvoiceSql = @"
+            DECLARE @I TABLE (Id INT, BookingId INT NULL, UserId INT NULL);
+            INSERT INTO @I SELECT i.Id, i.BookingId, i.UserId FROM dbo.WN_Invoices i WITH (NOLOCK)
+             WHERE (@Id IS NOT NULL AND i.Id = @Id)
+                OR (@Guid IS NOT NULL AND (i.PublicId = @Guid OR i.Id IN (
+                       SELECT st.CustomerInvoiceId FROM dbo.WN_CustomerSTInvoice st WITH (NOLOCK) WHERE st.PublicId = @Guid)));
+            SELECT s.LocationId FROM @I x
+              LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = x.BookingId
+              LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+            UNION ALL
+            SELECT u.LocationId FROM @I x JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = x.UserId;";
+
         // A booking detail (one space of a booking) belongs to the location of its space.
         private const string BookingDetailSql = @"
             SELECT s.LocationId
@@ -81,7 +101,7 @@ namespace WorkNest.Infrastructure.Repositories
             Guid? guid = Guid.TryParse(key, out var g) ? g : null;
             string? email = kind == RecordKind.User && id == null && guid == null && key.Contains('@') ? key : null;
             if (id == null && guid == null && email == null) return null;
-            if (kind is RecordKind.Agreement or RecordKind.BookingDetail && id == null) return null;
+            if (kind is RecordKind.Agreement or RecordKind.BookingDetail or RecordKind.Quotation && id == null) return null;
 
             var sql = kind switch
             {
@@ -90,6 +110,8 @@ namespace WorkNest.Infrastructure.Repositories
                 RecordKind.Agreement => AgreementSql,
                 RecordKind.Customer => CustomerSql,
                 RecordKind.BookingDetail => BookingDetailSql,
+                RecordKind.Quotation => QuotationSql,
+                RecordKind.Invoice => InvoiceSql,
                 _ => UserSql
             };
             await using var c = new SqlConnection(_connectionString);
