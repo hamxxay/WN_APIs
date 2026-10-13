@@ -35,12 +35,30 @@ namespace WorkNest.Application.Services
             int page,
             int limit,
             string? search,
-            int? userLocationId,
-            bool isSuperAdmin)
+            IReadOnlyCollection<int>? locationIds)
         {
-            int? effectiveLocationId = isSuperAdmin ? null : userLocationId;
-            var (rows, total) = await _db.GetCustomersKycListDbAsync(page, limit, search, effectiveLocationId);
-            
+            // A location-bound caller with no location assigned sees nobody (it used to mean "every location").
+            if (locationIds is { Count: 0 }) return (Enumerable.Empty<KycCustomerListItemViewModel>(), 0);
+
+            IEnumerable<KycCustomerListItemViewModel> rows;
+            int total;
+            if (locationIds == null || locationIds.Count == 1)
+            {
+                (rows, total) = await _db.GetCustomersKycListDbAsync(page, limit, search, locationIds?.First());
+            }
+            else
+            {
+                // The list procedure takes one location: read each location's customers in full, merge them (a customer
+                // can be in several) and page here, newest first like the procedure.
+                var merged = new Dictionary<int, KycCustomerListItemViewModel>();
+                foreach (var locationId in locationIds.Distinct())
+                    foreach (var row in (await _db.GetCustomersKycListDbAsync(1, int.MaxValue, search, locationId)).Rows)
+                        merged.TryAdd(row.Id, row);
+                int size = limit < 1 ? 20 : limit;
+                total = merged.Count;
+                rows = merged.Values.OrderByDescending(c => c.Id).Skip((Math.Max(page, 1) - 1) * size).Take(size).ToList();
+            }
+
             // Calculate completeness percentage and status dynamically for each customer
             var activeTypes = (await _db.GetActiveKycDocumentTypesDbAsync(null)).ToList();
 
@@ -59,8 +77,7 @@ namespace WorkNest.Application.Services
 
         public async Task<CustomerKycPageViewModel?> GetCustomerKycPortalAsync(
             string customerIdOrGuid,
-            int? userLocationId,
-            bool isSuperAdmin,
+            IReadOnlyCollection<int>? locationIds,
             bool canVerifyAndReject)
         {
             var customer = await _db.GetCustomerByIdOrGuidDbAsync(customerIdOrGuid);
@@ -68,15 +85,8 @@ namespace WorkNest.Application.Services
 
             int customerId = Convert.ToInt32(customer["Id"]);
 
-            // Location Scoping Check
-            if (!isSuperAdmin && userLocationId.HasValue)
-            {
-                bool allowed = await _db.CustomerBelongsToLocationDbAsync(customerId, userLocationId.Value);
-                if (!allowed)
-                {
-                    throw new UnauthorizedAccessException("You do not have permission to view KYC details for this customer's location.");
-                }
-            }
+            // Location Scoping Check (answers like a missing customer)
+            if (!await ReachesCustomerAsync(customerId, locationIds)) return null;
 
             string? company = customer.TryGetValue("Company", out var comp) && comp != null ? comp.ToString() : null;
             var (category, isUnrecognized, warningMessage) = KycCategoryMapper.ResolveCategory(company);
@@ -167,8 +177,7 @@ namespace WorkNest.Application.Services
             DateTime? expiryDate,
             IFormFile file,
             int uploadedByUserId,
-            int? userLocationId,
-            bool isSuperAdmin)
+            IReadOnlyCollection<int>? locationIds)
         {
             if (file == null || file.Length == 0)
             {
@@ -176,13 +185,9 @@ namespace WorkNest.Application.Services
             }
 
             // Location Scoping Check
-            if (!isSuperAdmin && userLocationId.HasValue)
+            if (!await ReachesCustomerAsync(customerId, locationIds))
             {
-                bool allowed = await _db.CustomerBelongsToLocationDbAsync(customerId, userLocationId.Value);
-                if (!allowed)
-                {
-                    return (false, "Access denied: Customer does not belong to your assigned location.", null);
-                }
+                return (false, "Access denied: Customer does not belong to your assigned location.", null);
             }
 
             var customer = await _db.GetCustomerByIdOrGuidDbAsync(customerId.ToString());
@@ -295,8 +300,7 @@ namespace WorkNest.Application.Services
             string? remarks,
             int verifiedByUserId,
             string userRole,
-            int? userLocationId,
-            bool isSuperAdmin)
+            IReadOnlyCollection<int>? locationIds)
         {
             // Strict role-based enforcement in service layer: Admin or SuperAdmin ONLY
             if (!Roles.IsAdminRole(userRole))
@@ -316,13 +320,9 @@ namespace WorkNest.Application.Services
             }
 
             // Location Scoping Check
-            if (!isSuperAdmin && userLocationId.HasValue)
+            if (!await ReachesCustomerAsync(doc.CustomerId, locationIds))
             {
-                bool allowed = await _db.CustomerBelongsToLocationDbAsync(doc.CustomerId, userLocationId.Value);
-                if (!allowed)
-                {
-                    return (false, "Access denied: Document belongs to a customer outside your assigned location.");
-                }
+                return (false, "Access denied: Document belongs to a customer outside your assigned location.");
             }
 
             await _db.SetCustomerKycDocumentStatusDbAsync(documentId, status, remarks?.Trim(), verifiedByUserId);
@@ -331,8 +331,7 @@ namespace WorkNest.Application.Services
 
         public async Task<(Stream? Stream, string ContentType, string FileName, string Error)> DownloadDocumentAsync(
             int documentId,
-            int? userLocationId,
-            bool isSuperAdmin)
+            IReadOnlyCollection<int>? locationIds)
         {
             var doc = await _db.GetCustomerKycDocumentByIdDbAsync(documentId);
             if (doc == null)
@@ -341,13 +340,9 @@ namespace WorkNest.Application.Services
             }
 
             // Location Scoping Check
-            if (!isSuperAdmin && userLocationId.HasValue)
+            if (!await ReachesCustomerAsync(doc.CustomerId, locationIds))
             {
-                bool allowed = await _db.CustomerBelongsToLocationDbAsync(doc.CustomerId, userLocationId.Value);
-                if (!allowed)
-                {
-                    return (null, string.Empty, string.Empty, "Access denied: Customer does not belong to your assigned location.");
-                }
+                return (null, string.Empty, string.Empty, "Access denied: Customer does not belong to your assigned location.");
             }
 
             var stream = await _fileStorage.OpenReadAsync(doc.StoredPath);
@@ -368,26 +363,30 @@ namespace WorkNest.Application.Services
             return (stream, contentType, doc.OriginalFileName, string.Empty);
         }
 
-        public async Task<IEnumerable<CustomerKYCDocument>> GetDocumentHistoryAsync(
+        public async Task<IEnumerable<CustomerKYCDocument>?> GetDocumentHistoryAsync(
             int customerId,
             int documentTypeId,
             byte slotNo,
-            int? userLocationId,
-            bool isSuperAdmin)
+            IReadOnlyCollection<int>? locationIds)
         {
-            if (!isSuperAdmin && userLocationId.HasValue)
-            {
-                bool allowed = await _db.CustomerBelongsToLocationDbAsync(customerId, userLocationId.Value);
-                if (!allowed)
-                {
-                    throw new UnauthorizedAccessException("Access denied for this location.");
-                }
-            }
+            if (!await ReachesCustomerAsync(customerId, locationIds)) return null;
 
             var allDocs = await _db.GetCustomerKycDocumentsDbAsync(customerId, includeInactive: true);
             return allDocs
                 .Where(d => d.DocumentTypeId == documentTypeId && d.SlotNo == slotNo)
                 .OrderByDescending(d => d.VersionNo);
+        }
+
+        /// <summary>
+        /// Null <paramref name="locationIds"/> (not location-bound) reaches every customer. Otherwise the customer must belong
+        /// to one of the caller's locations through a booking or their user account; no locations reaches nobody.
+        /// </summary>
+        private async Task<bool> ReachesCustomerAsync(int customerId, IReadOnlyCollection<int>? locationIds)
+        {
+            if (locationIds == null) return true;
+            foreach (var locationId in locationIds.Distinct())
+                if (await _db.CustomerBelongsToLocationDbAsync(customerId, locationId)) return true;
+            return false;
         }
 
         #region Helper Validation & Solvers

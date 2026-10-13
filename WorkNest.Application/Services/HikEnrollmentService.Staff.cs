@@ -31,7 +31,7 @@ namespace WorkNest.Application.Services
             var devices = devicesTask.Result.ToDictionary(d => d.Id);
             var rosters = ParseRosters(snapsTask.Result);
 
-            return rowsTask.Result
+            var list = rowsTask.Result
                 .GroupBy(r => Convert.ToString(r["employee_no"]) ?? "")
                 .Select(g =>
                 {
@@ -63,8 +63,32 @@ namespace WorkNest.Application.Services
                     return staff;
                 })
                 .Where(s => includeMachineAdmins || !s.IsMachineAdmin)
-                .Where(s => locationIds == null || s.Machines.Count > 0 || s.PendingOps > 0)
                 .ToList();
+            if (locationIds == null) return list;
+
+            // Location-bound callers: staff on their machines, or with changes queued for one of them.
+            var visible = new List<HikStaffDto>();
+            foreach (var staff in list)
+                if (staff.Machines.Count > 0
+                    || (staff.PendingOps > 0 && (await _db.GetHikPendingOpDeviceIdsForEmployeeDbAsync(staff.EmployeeNo)).Overlaps(devices.Keys)))
+                    visible.Add(staff);
+            return visible;
+        }
+
+        public async Task<HashSet<int>> GetStaffLocationIdsAsync(HikStaffDto staff)
+        {
+            var deviceIds = staff.Machines.Select(m => m.DeviceId).ToHashSet();
+            deviceIds.UnionWith(await _db.GetHikPendingOpDeviceIdsForEmployeeDbAsync(staff.EmployeeNo));
+            return (await _db.GetHikDevicesAsync())
+                .Where(d => deviceIds.Contains(d.Id) && d.LocationId != null)
+                .Select(d => d.LocationId!.Value)
+                .ToHashSet();
+        }
+
+        public async Task<bool> DevicesInLocationsAsync(IEnumerable<int> deviceIds, IReadOnlyCollection<int> locationIds)
+        {
+            var allowed = (await _db.GetHikDevicesAsync(null, locationIds)).Select(d => d.Id).ToHashSet();
+            return deviceIds.All(allowed.Contains);
         }
 
         public async Task<IEnumerable<HikTagDto>> GetTagsAsync()
@@ -119,6 +143,8 @@ namespace WorkNest.Application.Services
             var desired = await StaffTargetDevicesAsync(request!.RoomDeviceIds, request.CallerLocationIds);
             var desiredIds = desired.Select(d => d.Id).ToHashSet();
             var m = await StaffCurrentMachinesAsync(employeeNo, staff);
+            var elsewhere = await KeepToCallerLocationsAsync(m, request.CallerLocationIds);
+            if (elsewhere != null) return new HikStaffResultDto { MachineId = employeeNo, Error = elsewhere };
             var enabled = await StaffLiveEnabledAsync(employeeNo, m, staff);
             // Entrance machines are always in `desired`, so only de-selected room machines are removed.
             var removeFrom = m.Present.Concat(m.Queue).Where(d => !desiredIds.Contains(d.Id)).ToList();
@@ -132,13 +158,15 @@ namespace WorkNest.Application.Services
             return result;
         }
 
-        public async Task<HikAccessSyncResultDto> SetStaffEnabledAsync(string employeeNo, bool isEnabled)
+        public async Task<HikAccessSyncResultDto> SetStaffEnabledAsync(string employeeNo, bool isEnabled, IReadOnlyCollection<int>? callerLocationIds = null)
         {
             var result = new HikAccessSyncResultDto { Enabled = isEnabled, People = 1 };
             var staff = (await GetStaffAsync()).FirstOrDefault(s => s.EmployeeNo == employeeNo);
             if (staff == null) return new HikAccessSyncResultDto { Enabled = isEnabled, Error = "Staff member not found." };
 
             var m = await StaffCurrentMachinesAsync(employeeNo, staff);
+            var elsewhere = await KeepToCallerLocationsAsync(m, callerLocationIds);
+            if (elsewhere != null) return new HikAccessSyncResultDto { Enabled = isEnabled, Error = elsewhere };
             var op = isEnabled ? "unblock" : "block";
 
             var online = await Task.WhenAll(m.Present.Select(async d =>
@@ -158,12 +186,14 @@ namespace WorkNest.Application.Services
         /// Removes the staff member from every machine and from WN_HIK_Users. Machines that are offline or
         /// could not be checked get a queued 'delete-user' (WN_HIK_PendingOps) that HIK applies when they respond.
         /// </summary>
-        public async Task<HikStaffResultDto> DeleteStaffAsync(string employeeNo)
+        public async Task<HikStaffResultDto> DeleteStaffAsync(string employeeNo, IReadOnlyCollection<int>? callerLocationIds = null)
         {
             var staff = (await GetStaffAsync()).FirstOrDefault(s => s.EmployeeNo == employeeNo);
             if (staff == null) return new HikStaffResultDto { MachineId = employeeNo, Error = "Staff member not found." };
 
             var m = await StaffCurrentMachinesAsync(employeeNo, staff);
+            var elsewhere = await KeepToCallerLocationsAsync(m, callerLocationIds);
+            if (elsewhere != null) return new HikStaffResultDto { MachineId = employeeNo, Error = elsewhere };
             var result = new HikStaffResultDto { MachineId = employeeNo };
             result.Devices.AddRange(await Task.WhenAll(m.Present.Concat(m.Queue).Select(d => RemoveFromAsync(d, employeeNo, live: m.IsLive(d)))));
             // Machines that could not be checked (busy / error) get a queued 'delete-user' too: HIK's scheduler
@@ -179,7 +209,7 @@ namespace WorkNest.Application.Services
 
         // ---- Enrollment -------------------------------------------------------------------
 
-        public async Task<HikEnrollResultDto> EnrollStaffAsync(string employeeNo, string type, HikStaffEnrollRequest request)
+        public async Task<HikEnrollResultDto> EnrollStaffAsync(string employeeNo, string type, HikStaffEnrollRequest request, IReadOnlyCollection<int>? callerLocationIds = null)
         {
             if (type is not ("fingerprint" or "card" or "face"))
                 return new HikEnrollResultDto { Type = type, Error = "Unknown credential type." };
@@ -194,6 +224,8 @@ namespace WorkNest.Application.Services
             if (staff == null) return Fail(prep, "Staff member not found.");
 
             var m = await StaffCurrentMachinesAsync(employeeNo, staff);
+            var elsewhere = await KeepToCallerLocationsAsync(m, callerLocationIds);
+            if (elsewhere != null) return Fail(prep, elsewhere);
             prep.Capture = m.Present.FirstOrDefault(d => d.Id == request?.CaptureDeviceId);
             if (prep.Capture == null)
                 return Fail(prep, "Choose one of this staff member's online machines to capture on.");
@@ -217,12 +249,13 @@ namespace WorkNest.Application.Services
 
         /// <summary>
         /// The selected room machines + the Entrance machines of the same location(s). The location comes from
-        /// the selected machines, else from the caller (admins / sales executives); with neither, every Entrance.
-        /// Machines without a location yet count everywhere.
+        /// the selected machines, else from the caller (location-bound admins); with neither, every Entrance.
+        /// Machines without a location yet count everywhere. A location-bound caller's selection is limited to
+        /// their locations' machines (the API already refuses others).
         /// </summary>
         private async Task<List<HikDeviceConnection>> StaffTargetDevicesAsync(IEnumerable<int>? roomDeviceIds, IReadOnlyCollection<int>? callerLocationIds = null)
         {
-            var all = (await _db.GetHikDevicesAsync()).ToList();
+            var all = (await _db.GetHikDevicesAsync(null, callerLocationIds)).ToList();
             var requested = (roomDeviceIds ?? Enumerable.Empty<int>()).ToHashSet();
             var locations = all.Where(d => requested.Contains(d.Id) && d.LocationId != null).Select(d => d.LocationId!.Value).ToHashSet();
             if (locations.Count == 0 && callerLocationIds is { Count: > 0 }) locations = callerLocationIds.ToHashSet();
@@ -269,6 +302,21 @@ namespace WorkNest.Application.Services
                 else if (exists == null && d.Online) (known.Contains(d.Id) ? result.Queue : result.Unknown).Add(d);
             }
             return result;
+        }
+
+        /// <summary>
+        /// Location-bound callers change staff only on their locations' machines. The API already refuses staff of other
+        /// locations by the last roster; this catches a person found live on another location's machine (roster not
+        /// refreshed yet) and leaves other locations' machines that could not be checked alone. Null = go ahead.
+        /// </summary>
+        private async Task<string?> KeepToCallerLocationsAsync(StaffMachines m, IReadOnlyCollection<int>? callerLocationIds)
+        {
+            if (callerLocationIds == null) return null;
+            var allowed = (await _db.GetHikDevicesAsync(null, callerLocationIds)).Select(d => d.Id).ToHashSet();
+            if (m.Present.Concat(m.Queue).Any(d => !allowed.Contains(d.Id)))
+                return "This staff member also has access at another location. Only a super admin can change them.";
+            m.Unknown.RemoveAll(d => !allowed.Contains(d.Id));
+            return null;
         }
 
         /// <summary>The staff member's current Allowed/Blocked state, read live from a machine (WN-031).</summary>

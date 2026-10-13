@@ -131,8 +131,12 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Create([FromBody] SpaceInsertRequest request) =>
             StatusCode(201, await _spaces.CreateSpaceAsync(request, null));
 
+        // Location-bound admins: only spaces of their locations ([RecordScope]); a LocationId that is sent must be one of
+        // theirs ([ValidateLocationScope]) and a missing one keeps the space where it is ([KeepMissingLocation]).
         [HttpPut("api/space/{id:int}")]
         [Authorize(Roles = AdminRoles)]
+        [RecordScope(RecordKind.Space)]
+        [KeepMissingLocation]
         public async Task<IActionResult> Update(int id, [FromBody] SpaceUpdateRequest request)
         {
             var result = await _spaces.UpdateSpaceAsync(id, request, null);
@@ -142,6 +146,8 @@ namespace WorkNest.API.Controllers
 
         [HttpPut("api/space/{publicId:guid}")]
         [Authorize(Roles = AdminRoles)]
+        [RecordScope(RecordKind.Space)]
+        [KeepMissingLocation]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] SpaceUpdateRequest request)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
@@ -155,11 +161,13 @@ namespace WorkNest.API.Controllers
 
         [HttpDelete("api/space/{id:int}")]
         [Authorize(Roles = AdminRoles)]
+        [RecordScope(RecordKind.Space)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _spaces.DeleteSpaceAsync(id));
 
         [HttpDelete("api/space/{publicId:guid}")]
         [Authorize(Roles = AdminRoles)]
+        [RecordScope(RecordKind.Space)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);

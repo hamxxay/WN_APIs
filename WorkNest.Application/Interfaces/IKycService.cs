@@ -10,9 +10,14 @@ namespace WorkNest.Application.Interfaces
 {
     public interface IKycService
     {
-        Task<(IEnumerable<KycCustomerListItemViewModel> Items, int Total)> GetCustomerKycListAsync(int page, int limit, string? search, int? userLocationId, bool isSuperAdmin);
+        /// <summary>
+        /// <paramref name="locationIds"/> on every method: the caller's locations (main + extra) when they are location-bound,
+        /// null for everyone else. Location-bound callers reach only customers of those locations; an empty list reaches nobody.
+        /// </summary>
+        Task<(IEnumerable<KycCustomerListItemViewModel> Items, int Total)> GetCustomerKycListAsync(int page, int limit, string? search, IReadOnlyCollection<int>? locationIds);
         
-        Task<CustomerKycPageViewModel?> GetCustomerKycPortalAsync(string customerIdOrGuid, int? userLocationId, bool isSuperAdmin, bool canVerifyAndReject);
+        /// <summary>Null when there is no such customer or the caller's locations don't reach them.</summary>
+        Task<CustomerKycPageViewModel?> GetCustomerKycPortalAsync(string customerIdOrGuid, IReadOnlyCollection<int>? locationIds, bool canVerifyAndReject);
         
         Task<(bool Success, string Message, int? DocumentId)> UploadOrReplaceDocumentAsync(
             int customerId,
@@ -22,8 +27,7 @@ namespace WorkNest.Application.Interfaces
             DateTime? expiryDate,
             IFormFile file,
             int uploadedByUserId,
-            int? userLocationId,
-            bool isSuperAdmin);
+            IReadOnlyCollection<int>? locationIds);
 
         Task<(bool Success, string Message)> VerifyOrRejectDocumentAsync(
             int documentId,
@@ -31,19 +35,17 @@ namespace WorkNest.Application.Interfaces
             string? remarks,
             int verifiedByUserId,
             string userRole,
-            int? userLocationId,
-            bool isSuperAdmin);
+            IReadOnlyCollection<int>? locationIds);
 
         Task<(Stream? Stream, string ContentType, string FileName, string Error)> DownloadDocumentAsync(
             int documentId,
-            int? userLocationId,
-            bool isSuperAdmin);
+            IReadOnlyCollection<int>? locationIds);
 
-        Task<IEnumerable<CustomerKYCDocument>> GetDocumentHistoryAsync(
+        /// <summary>Null when the caller's locations don't reach the customer.</summary>
+        Task<IEnumerable<CustomerKYCDocument>?> GetDocumentHistoryAsync(
             int customerId,
             int documentTypeId,
             byte slotNo,
-            int? userLocationId,
-            bool isSuperAdmin);
+            IReadOnlyCollection<int>? locationIds);
     }
 }

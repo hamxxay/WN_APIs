@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Attendant;
 using WorkNest.Application.DTOs.HikDevice;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Application.Services
@@ -47,6 +48,9 @@ namespace WorkNest.Application.Services
             var (ctx, doors, devices) = await MobileDoorsOfAsync(bookingDetailId, personId);
             var blocked = MobileDoorBlocked(ctx);
             if (blocked != null) return new MobileOpenDoorResult { Message = blocked };
+            // Only the account with the person's registered email opens their door; no email on record = no app unlock.
+            var refusal = MobileDoorAccount.Refusal(ctx!.Email, byEmail);
+            if (refusal != null) return new MobileOpenDoorResult { Message = refusal };
             var device = devices.FirstOrDefault(d => d.Id == deviceId);
             if (device == null) return new MobileOpenDoorResult { Message = "You can only unlock your own room's door from the app." };
 
