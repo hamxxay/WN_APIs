@@ -3785,13 +3785,20 @@ END";
             string whereClause = @"
                 WHERE (
                     (@CustomerId > 0 AND (
-                        i.UserId = @CustomerId
-                        OR i.UserId IN (SELECT UserId FROM dbo.WN_Customers WHERE Id = @CustomerId AND UserId IS NOT NULL)
-                        OR i.BookingId IN (SELECT Id FROM dbo.WN_Bookings WHERE CustomerId = @CustomerId)
+                        -- Never compare i.UserId with @CustomerId: user and customer ids are different sequences,
+                        -- so customer #50 would get user #50's invoices (another person's).
+                        i.UserId IN (SELECT UserId FROM dbo.WN_Customers WHERE Id = @CustomerId AND UserId IS NOT NULL)
+                        -- WN_Bookings has no CustomerId: a booking belongs to the customer by CustomerCode or UserId.
+                        OR i.BookingId IN (
+                            SELECT bk.Id FROM dbo.WN_Bookings bk WITH (NOLOCK)
+                            JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = @CustomerId
+                            WHERE bk.CustomerCode = cu.Code OR (cu.UserId IS NOT NULL AND bk.UserId = cu.UserId)
+                        )
                         OR i.UserId IN (
                             SELECT u.Id FROM dbo.WN_Users u WITH (NOLOCK)
                             INNER JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Email = u.Email
                             WHERE c.Id = @CustomerId
+                              AND LTRIM(RTRIM(ISNULL(c.Email, ''))) <> ''  -- a blank email must not match other blank-email accounts
                         )
                     ))
                     OR (@UserId > 0 AND i.UserId = @UserId)
