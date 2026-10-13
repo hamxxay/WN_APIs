@@ -838,6 +838,22 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return await r.ReadAsync() ? ToDict(r) : null;
         }
 
+        public async Task<(int? Id, bool IsActive)?> CheckUserEmailStatusAsync(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT TOP 1 Id, IsActive FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @Email", c);
+            cmd.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 256) { Value = email.Trim() });
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var id = r.IsDBNull(0) ? (int?)null : r.GetInt32(0);
+                var active = !r.IsDBNull(1) && Convert.ToBoolean(r.GetValue(1));
+                return (id, active);
+            }
+            return null;
+        }
+
         public async Task<IDictionary<string, object?>?> GetUserByIdAsync(int id)
         {
             await using var c = await Open();

@@ -206,6 +206,8 @@ try
     // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
     builder.Services.AddScoped<IReportRepository, WorkNest.Infrastructure.Repositories.ReportRepository>();
     builder.Services.AddScoped<IAuditLogRepository, WorkNest.Infrastructure.Repositories.AuditLogRepository>();
+    builder.Services.AddScoped<ILoginHistoryService, WorkNest.Infrastructure.Repositories.LoginHistoryService>();
+    builder.Services.AddScoped<ILoginHistoryRepository, WorkNest.Infrastructure.Repositories.LoginHistoryRepository>();
     builder.Services.AddScoped<IForecastService, ForecastService>();
     builder.Services.AddScoped<IWeeklyReportGenerator, WeeklyReportGenerator>();
     builder.Services.AddScoped<IPlanFeatureService, PlanFeatureService>();

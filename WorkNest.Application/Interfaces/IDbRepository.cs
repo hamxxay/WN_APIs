@@ -23,6 +23,7 @@ namespace WorkNest.Application.Interfaces
         Task SetUserStatusAsync(int id, bool isActive);
         Task SetUserRoleAsync(int id, int roleId);
         Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId);
+        Task<(int? Id, bool IsActive)?> CheckUserEmailStatusAsync(string email);
 
         // --- Space ---
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpacesAsync(int page, int limit, string? search);

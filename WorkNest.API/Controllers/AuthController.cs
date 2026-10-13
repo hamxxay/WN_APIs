@@ -17,14 +17,25 @@ namespace WorkNest.API.Controllers
         private readonly IConfiguration _config;
         private readonly ILogger<AuthController> _logger;
         private readonly TokenSessionValidator _sessions;
+        private readonly ILoginHistoryService _loginHistory;
+        private readonly IDbRepository _db;
 
-        public AuthController(IAuthService auth, FirebaseTokenVerifier firebase, IConfiguration config, ILogger<AuthController> logger, TokenSessionValidator sessions)
+        public AuthController(
+            IAuthService auth,
+            FirebaseTokenVerifier firebase,
+            IConfiguration config,
+            ILogger<AuthController> logger,
+            TokenSessionValidator sessions,
+            ILoginHistoryService loginHistory,
+            IDbRepository db)
         {
             _auth = auth;
             _firebase = firebase;
             _config = config;
             _logger = logger;
             _sessions = sessions;
+            _loginHistory = loginHistory;
+            _db = db;
         }
 
         /// <summary>
@@ -110,7 +121,15 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Login([FromBody] UserLoginRequest request)
         {
             var (email, reject, verified) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "login");
-            if (reject != null) return reject;
+            if (reject != null)
+            {
+                try
+                {
+                    await _loginHistory.Record("FAILED", null, request.Email, "InvalidToken");
+                }
+                catch { }
+                return reject;
+            }
             request.Email = email!;
             request.CompanyId = null;     // a sign-in can never move the user to another company
             // Retain request.Password for credential verification
@@ -172,8 +191,35 @@ namespace WorkNest.API.Controllers
         /// </summary>
         [HttpPost("api/auth/logout")]
         [AllowAnonymous]
-        public IActionResult Logout()
+        public async Task<IActionResult> Logout()
         {
+            try
+            {
+                var email = User.FindFirst(ClaimTypes.Email)?.Value
+                            ?? User.FindFirst("email")?.Value
+                            ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Email)?.Value;
+
+                int? userId = null;
+                var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                          ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+                if (int.TryParse(sub, out var parsedId))
+                {
+                    userId = parsedId;
+                }
+                else if (!string.IsNullOrWhiteSpace(email))
+                {
+                    var userRow = await _db.GetUserByEmailAsync(email);
+                    if (userRow != null && userRow.TryGetValue("Id", out var uid) && uid != null)
+                        userId = Convert.ToInt32(uid);
+                }
+
+                await _loginHistory.Record("LOGOUT", userId, email, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to record logout event");
+            }
+
             _sessions.RevokeCurrent(HttpContext);
             return Ok(_auth.Logout());
         }

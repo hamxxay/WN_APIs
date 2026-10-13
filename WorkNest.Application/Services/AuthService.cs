@@ -12,12 +12,14 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IJwtService _jwt;
         private readonly ILogger<AuthService> _logger;
+        private readonly ILoginHistoryService _loginHistory;
 
-        public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger)
+        public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger, ILoginHistoryService loginHistory)
         {
             _db = db;
             _jwt = jwt;
             _logger = logger;
+            _loginHistory = loginHistory;
         }
 
         public async Task<ApiResponse> SyncUserAsync(UserSyncRequest request)
@@ -61,6 +63,17 @@ namespace WorkNest.Application.Services
             {
                 if (!isFirebaseVerified)
                 {
+                    try
+                    {
+                        var status = await _db.CheckUserEmailStatusAsync(request.Email);
+                        var failureReason = (status.HasValue && !status.Value.IsActive) ? "Inactive" : "UnknownUser";
+                        var uid = status?.Id;
+                        await _loginHistory.Record("FAILED", uid, request.Email, failureReason);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to record failed login for {Email}", request.Email);
+                    }
                     return ApiResponse.Fail("Invalid email or password.");
                 }
                 var (newId, pid) = await _db.SyncUserAsync(request.Email, name, null, request.Password, Roles.GeneralId, request.CompanyId);
@@ -70,6 +83,25 @@ namespace WorkNest.Application.Services
             }
             else
             {
+                var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
+
+                // Check lockout if present
+                if (row.TryGetValue("LockoutEnd", out var lo) && lo != null && lo != DBNull.Value)
+                {
+                    if (DateTimeOffset.TryParse(lo.ToString(), out var lockoutEnd) && lockoutEnd > DateTimeOffset.UtcNow)
+                    {
+                        try
+                        {
+                            await _loginHistory.Record("FAILED", userId, request.Email, "LockedOut");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to record locked out login for {Email}", request.Email);
+                        }
+                        return ApiResponse.Fail("Account is locked out.");
+                    }
+                }
+
                 if (!isFirebaseVerified)
                 {
                     var dbPassword = row.TryGetValue("PasswordHash", out var pw) ? pw?.ToString() : null;
@@ -78,6 +110,14 @@ namespace WorkNest.Application.Services
                     if (string.IsNullOrWhiteSpace(request.Password) || string.IsNullOrWhiteSpace(dbPassword) ||
                         !string.Equals(dbPassword, request.Password, StringComparison.Ordinal))
                     {
+                        try
+                        {
+                            await _loginHistory.Record("FAILED", userId, request.Email, "WrongPassword");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to record wrong password login for {Email}", request.Email);
+                        }
                         return ApiResponse.Fail("Invalid email or password.");
                     }
                 }
@@ -88,7 +128,6 @@ namespace WorkNest.Application.Services
                 role = Roles.FromRow(row);
                 locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : (int?)null;
 
-                var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
                 var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
                 var nameToUse = !string.IsNullOrWhiteSpace(existingName) ? existingName : name;
 
@@ -98,8 +137,23 @@ namespace WorkNest.Application.Services
 
             var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
                 row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
+
+            var resolvedUserId = (row != null && row.TryGetValue("Id", out var rUid) && rUid is not null) 
+                ? Convert.ToInt32(rUid) 
+                : (int?)null;
+
+            try
+            {
+                await _loginHistory.Record("LOGIN", resolvedUserId, request.Email, null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to record successful login for {Email}", request.Email);
+            }
+
             return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Login successful.");
         }
+
         public async Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request)
         {
             try
@@ -136,11 +190,30 @@ namespace WorkNest.Application.Services
 
                 var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
                 row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
+
+                var resolvedUserId = (row != null && row.TryGetValue("Id", out var rUid) && rUid is not null) 
+                    ? Convert.ToInt32(rUid) 
+                    : (int?)null;
+
+                try
+                {
+                    await _loginHistory.Record("LOGIN", resolvedUserId, request.Email, null);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to record Google login for {Email}", request.Email);
+                }
+
                 return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Google login successful.");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Google login failed for {Email}", request.Email);
+                try
+                {
+                    await _loginHistory.Record("FAILED", null, request.Email, "GoogleLoginFailed");
+                }
+                catch { }
                 return ApiResponse.Fail("Google login failed. Please try again.");
             }
         }
