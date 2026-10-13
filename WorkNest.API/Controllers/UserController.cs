@@ -112,6 +112,15 @@ namespace WorkNest.API.Controllers
         [HttpPut("api/user/{id:int}")]
         public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest request)
         {
+            // Everyone may edit their own profile, but not their own role or locations (an admin can't promote
+            // themselves or add locations); the profile fields are saved and the rest is left as it is.
+            if (request != null && !CallerIsSuperAdmin() && await IsSelfAsync(id))
+            {
+                request.Role = null;
+                request.LocationId = null;
+                request.LocationIds = null;
+                return Ok(await _users.UpdateUserAsync(id, request));
+            }
             if (GrantsAdminRole(request?.Role) || await IsProtectedAsync(id)) return OnlySuperAdmin();
             if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
                 return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
@@ -131,6 +140,7 @@ namespace WorkNest.API.Controllers
         [HttpDelete("api/user/{id:int}")]
         public async Task<IActionResult> Delete(int id)
         {
+            if (await IsSelfAsync(id)) return NotOnYourself("delete");
             if (await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.DeleteUserAsync(id));
         }
@@ -148,6 +158,7 @@ namespace WorkNest.API.Controllers
         [HttpPatch("api/user/{id:int}/activate")]
         public async Task<IActionResult> Activate(int id)
         {
+            if (await IsSelfAsync(id)) return NotOnYourself("activate");
             if (await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.ActivateUserAsync(id));
         }
@@ -165,6 +176,7 @@ namespace WorkNest.API.Controllers
         [HttpPatch("api/user/{id:int}/deactivate")]
         public async Task<IActionResult> Deactivate(int id)
         {
+            if (await IsSelfAsync(id)) return NotOnYourself("deactivate");
             if (await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.DeactivateUserAsync(id));
         }
@@ -182,6 +194,7 @@ namespace WorkNest.API.Controllers
         [HttpPatch("api/user/{id:int}/role")]
         public async Task<IActionResult> UpdateRole(int id, [FromBody] UserRoleUpdateRequest request)
         {
+            if (await IsSelfAsync(id)) return NotOnYourself("change the role of");
             if (GrantsAdminRole(request?.Role) || await IsProtectedAsync(id)) return OnlySuperAdmin();
             return Ok(await _users.UpdateUserRoleAsync(id, request!));
         }
@@ -200,7 +213,8 @@ namespace WorkNest.API.Controllers
 
         /// <summary>
         /// Only a Super Admin creates, promotes or changes Admins (and Super Admins). An Admin manages Sales Executives
-        /// and customers, giving them one, some or all of the Admin's own locations.
+        /// and customers, giving them one, some or all of the Admin's own locations, and edits their own profile
+        /// (not their own role, locations or status).
         /// </summary>
         private bool GrantsAdminRole(string? role)
         {
@@ -221,6 +235,21 @@ namespace WorkNest.API.Controllers
 
         private IActionResult OnlySuperAdmin() =>
             StatusCode(403, ApiResponse.Fail("Only a Super Admin can create or change Admin accounts."));
+
+        /// <summary>True when the user record is the signed-in user's own account (matched on the JWT email).</summary>
+        private async Task<bool> IsSelfAsync(int id)
+        {
+            var email = User.GetEmail();
+            if (string.IsNullOrWhiteSpace(email)) return false;
+            var row = await _db.GetUserByIdAsync(id);
+            var rowEmail = row != null && row.TryGetValue("Email", out var e) ? e?.ToString() : null;
+            return !string.IsNullOrWhiteSpace(rowEmail)
+                && string.Equals(rowEmail.Trim(), email.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Nobody deletes, locks or re-roles their own account (it would lock them out or let them promote themselves).</summary>
+        private IActionResult NotOnYourself(string action) =>
+            StatusCode(403, ApiResponse.Fail($"You can't {action} your own account."));
 
         private async Task<int?> ResolveIdAsync(Guid publicId)
         {
