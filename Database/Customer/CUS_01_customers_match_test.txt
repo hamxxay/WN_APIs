@@ -1,0 +1,165 @@
+USE [WorkNestAEO];
+
+-- ============================================================================================
+-- Brings dbo.WN_Customers on this database up to the design used by the test database
+-- (SAC400 on 119.159.146.178, rebuilt 2026-10-12) WITHOUT deleting anything.
+--
+-- Adds only what is missing: columns, column defaults, the unique keys on Code / Email / UserId and
+-- the UserId -> WN_Users link. Existing columns, data, keys and links are never changed or dropped.
+-- A unique key or link is skipped (and reported) when existing data would break it, e.g. two
+-- customers with the same email. Columns that the test database requires (NOT NULL) but that have no
+-- default are added as nullable here, so existing rows stay valid.
+-- Not included: the audit trigger TR_WN_Customers_Audit (needs dbo.WN_AuditLog on this database).
+--
+-- Run against the LIVE database as ONE script in DBeaver (select all, execute). Safe to run again.
+-- The last result lists every step: Added / Already there / Skipped (with the reason).
+-- ============================================================================================
+SET NOCOUNT ON;
+
+IF OBJECT_ID(N'dbo.WN_Customers', N'U') IS NULL
+BEGIN
+    SELECT N'dbo.WN_Customers was not found on this database. Nothing changed.' AS Result;
+    RETURN;
+END
+
+DECLARE @Log TABLE (Step INT IDENTITY(1,1), Item NVARCHAR(200), Result NVARCHAR(400));
+DECLARE @Cols TABLE (Ord INT, Name SYSNAME, Def NVARCHAR(400), DefaultName SYSNAME NULL, DefaultExpr NVARCHAR(100) NULL);
+
+-- Same columns, types and sizes as the test database (sizes in characters).
+INSERT INTO @Cols (Ord, Name, Def, DefaultName, DefaultExpr) VALUES
+ ( 1, N'IdGUID',                       N'UNIQUEIDENTIFIER NOT NULL CONSTRAINT DF_WN_Customers_IdGUID DEFAULT NEWID()', N'DF_WN_Customers_IdGUID',  N'NEWID()'),
+ ( 2, N'Code',                         N'VARCHAR(7) NULL',        NULL, NULL),
+ ( 3, N'FirstName',                    N'NVARCHAR(100) NULL',     NULL, NULL),
+ ( 4, N'LastName',                     N'NVARCHAR(100) NULL',     NULL, NULL),
+ ( 5, N'Email',                        N'NVARCHAR(255) NULL',     NULL, NULL),
+ ( 6, N'PhoneNumber',                  N'NVARCHAR(50) NULL',      NULL, NULL),
+ ( 7, N'CnicOrPassport',               N'NVARCHAR(50) NULL',      NULL, NULL),
+ ( 8, N'Address',                      N'NVARCHAR(500) NULL',     NULL, NULL),
+ ( 9, N'CityId',                       N'INT NULL',               NULL, NULL),
+ (10, N'IsActive',                     N'BIT NOT NULL CONSTRAINT DF_WN_Customers_IsActive DEFAULT 1',            N'DF_WN_Customers_IsActive',  N'1'),
+ (11, N'Notes',                        N'NVARCHAR(1000) NULL',    NULL, NULL),
+ (12, N'CreatedAt',                    N'DATETIME NOT NULL CONSTRAINT DF_WN_Customers_CreatedAt DEFAULT GETDATE()', N'DF_WN_Customers_CreatedAt', N'GETDATE()'),
+ (13, N'UpdatedAt',                    N'DATETIME NULL',          NULL, NULL),
+ (14, N'CreatedBy',                    N'NVARCHAR(255) NULL',     NULL, NULL),
+ (15, N'UserId',                       N'INT NULL',               NULL, NULL),
+ (16, N'Company',                      N'NVARCHAR(255) NULL',     NULL, NULL),
+ (17, N'NTN',                          N'NVARCHAR(50) NULL',      NULL, NULL),
+ (18, N'SecpRegistrationNo',           N'NVARCHAR(50) NULL',      NULL, NULL),
+ (19, N'CustomerTypeId',               N'INT NULL',               NULL, NULL),
+ (20, N'CountryId',                    N'INT NULL',               NULL, NULL),
+ (21, N'IdentificationDocumentTypeId', N'INT NULL',               NULL, NULL),
+ (22, N'UpdatedById',                  N'INT NULL',               NULL, NULL);
+
+DECLARE @Ord INT = 0, @Name SYSNAME, @Def NVARCHAR(400), @DfName SYSNAME, @DfExpr NVARCHAR(100), @Sql NVARCHAR(MAX);
+
+-- 1. Columns (and the defaults of IdGUID / IsActive / CreatedAt) -------------------------------
+WHILE 1 = 1
+BEGIN
+    SELECT TOP 1 @Ord = Ord, @Name = Name, @Def = Def, @DfName = DefaultName, @DfExpr = DefaultExpr
+      FROM @Cols WHERE Ord > @Ord ORDER BY Ord;
+    IF @@ROWCOUNT = 0 BREAK;
+
+    IF COL_LENGTH(N'dbo.WN_Customers', @Name) IS NULL
+    BEGIN
+        SET @Sql = N'ALTER TABLE dbo.WN_Customers ADD ' + QUOTENAME(@Name) + N' ' + @Def + N';';
+        EXEC sys.sp_executesql @Sql;
+        INSERT INTO @Log (Item, Result) VALUES (N'Column ' + @Name, N'Added');
+    END
+    ELSE
+    BEGIN
+        INSERT INTO @Log (Item, Result) VALUES (N'Column ' + @Name, N'Already there (not changed)');
+        IF @DfName IS NOT NULL AND NOT EXISTS (
+            SELECT 1 FROM sys.default_constraints dc
+             WHERE dc.parent_object_id = OBJECT_ID(N'dbo.WN_Customers')
+               AND dc.parent_column_id = COLUMNPROPERTY(OBJECT_ID(N'dbo.WN_Customers'), @Name, 'ColumnId'))
+        BEGIN
+            SET @Sql = N'ALTER TABLE dbo.WN_Customers ADD CONSTRAINT ' + QUOTENAME(@DfName)
+                     + N' DEFAULT ' + @DfExpr + N' FOR ' + QUOTENAME(@Name) + N';';
+            EXEC sys.sp_executesql @Sql;
+            INSERT INTO @Log (Item, Result) VALUES (N'Default for ' + @Name, N'Added');
+        END
+    END
+END
+
+-- 2. Unique keys on Code and Email (only when no other unique key covers the column and the data has no
+--    duplicates; a plain unique key allows only one empty value, so empty values count as duplicates).
+DECLARE @Uq TABLE (Name SYSNAME, Col SYSNAME);
+INSERT INTO @Uq VALUES (N'UQ_WN_Customers_Code', N'Code'), (N'UQ_WN_Customers_Email', N'Email');
+DECLARE @UqName SYSNAME, @UqCol SYSNAME, @Dups INT;
+DECLARE uq CURSOR LOCAL FAST_FORWARD FOR SELECT Name, Col FROM @Uq;
+OPEN uq;
+FETCH NEXT FROM uq INTO @UqName, @UqCol;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM sys.indexes i
+          JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+         WHERE i.object_id = OBJECT_ID(N'dbo.WN_Customers') AND i.is_unique = 1
+           AND COL_NAME(ic.object_id, ic.column_id) = @UqCol
+           AND (SELECT COUNT(*) FROM sys.index_columns x WHERE x.object_id = i.object_id AND x.index_id = i.index_id AND x.is_included_column = 0) = 1)
+        INSERT INTO @Log (Item, Result) VALUES (N'Unique key on ' + @UqCol, N'Already there (not changed)');
+    ELSE
+    BEGIN
+        SET @Sql = N'SELECT @n = COUNT(*) FROM (SELECT ' + QUOTENAME(@UqCol) + N' AS v FROM dbo.WN_Customers GROUP BY '
+                 + QUOTENAME(@UqCol) + N' HAVING COUNT(*) > 1) d;';
+        EXEC sys.sp_executesql @Sql, N'@n INT OUTPUT', @n = @Dups OUTPUT;
+        IF @Dups > 0
+            INSERT INTO @Log (Item, Result) VALUES (N'Unique key on ' + @UqCol,
+                N'Skipped: ' + CAST(@Dups AS NVARCHAR(10)) + N' value(s) appear more than once (or are empty more than once). Clean these first.');
+        ELSE
+        BEGIN
+            SET @Sql = N'ALTER TABLE dbo.WN_Customers ADD CONSTRAINT ' + QUOTENAME(@UqName) + N' UNIQUE (' + QUOTENAME(@UqCol) + N');';
+            EXEC sys.sp_executesql @Sql;
+            INSERT INTO @Log (Item, Result) VALUES (N'Unique key on ' + @UqCol, N'Added');
+        END
+    END
+    FETCH NEXT FROM uq INTO @UqName, @UqCol;
+END
+CLOSE uq; DEALLOCATE uq;
+
+-- 3. One customer per user account (unique UserId, empty values allowed) ------------------------
+IF EXISTS (
+    SELECT 1 FROM sys.indexes i
+      JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+     WHERE i.object_id = OBJECT_ID(N'dbo.WN_Customers') AND i.is_unique = 1
+       AND COL_NAME(ic.object_id, ic.column_id) = N'UserId')
+    INSERT INTO @Log (Item, Result) VALUES (N'Unique key on UserId', N'Already there (not changed)');
+ELSE
+BEGIN
+    EXEC sys.sp_executesql
+        N'SELECT @n = COUNT(*) FROM (SELECT UserId FROM dbo.WN_Customers WHERE UserId IS NOT NULL GROUP BY UserId HAVING COUNT(*) > 1) d;',
+        N'@n INT OUTPUT', @n = @Dups OUTPUT;
+    IF @Dups > 0
+        INSERT INTO @Log (Item, Result) VALUES (N'Unique key on UserId',
+            N'Skipped: ' + CAST(@Dups AS NVARCHAR(10)) + N' user account(s) have more than one customer record. Clean these first.');
+    ELSE
+    BEGIN
+        EXEC sys.sp_executesql N'CREATE UNIQUE NONCLUSTERED INDEX UQ_WN_Customers_UserId ON dbo.WN_Customers (UserId) WHERE UserId IS NOT NULL;';
+        INSERT INTO @Log (Item, Result) VALUES (N'Unique key on UserId', N'Added');
+    END
+END
+
+-- 4. Link UserId -> WN_Users (only when every filled-in UserId exists in WN_Users) ---------------
+IF EXISTS (
+    SELECT 1 FROM sys.foreign_key_columns fc
+     WHERE fc.parent_object_id = OBJECT_ID(N'dbo.WN_Customers')
+       AND COL_NAME(fc.parent_object_id, fc.parent_column_id) = N'UserId'
+       AND fc.referenced_object_id = OBJECT_ID(N'dbo.WN_Users'))
+    INSERT INTO @Log (Item, Result) VALUES (N'Link UserId -> WN_Users', N'Already there (not changed)');
+ELSE
+BEGIN
+    EXEC sys.sp_executesql
+        N'SELECT @n = COUNT(*) FROM dbo.WN_Customers c WHERE c.UserId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Users u WHERE u.Id = c.UserId);',
+        N'@n INT OUTPUT', @n = @Dups OUTPUT;
+    IF @Dups > 0
+        INSERT INTO @Log (Item, Result) VALUES (N'Link UserId -> WN_Users',
+            N'Skipped: ' + CAST(@Dups AS NVARCHAR(10)) + N' customer(s) point to a user account that does not exist.');
+    ELSE
+    BEGIN
+        EXEC sys.sp_executesql N'ALTER TABLE dbo.WN_Customers WITH CHECK ADD CONSTRAINT FK_WN_Customers_User FOREIGN KEY (UserId) REFERENCES dbo.WN_Users (Id);';
+        INSERT INTO @Log (Item, Result) VALUES (N'Link UserId -> WN_Users', N'Added');
+    END
+END
+
+SELECT Step, Item, Result FROM @Log ORDER BY Step;
+SELECT COUNT(*) AS CustomersAfter, DB_NAME() AS DatabaseName FROM dbo.WN_Customers;
