@@ -1,0 +1,29 @@
+USE [WorkNestAEO];
+-- For the test database change the first line to USE [SAC400];
+-- ============================================================================================
+-- OPTIONAL one-time data clean-up that goes with BK_05 (run BK_05 first).
+-- BK_05 voids the open challan of a booking from the moment it is rejected; bookings that were rejected BEFORE
+-- that still have an open challan (WN_Challans.StatusId 1), so their customers are still asked to pay.
+--
+-- This voids those challans (StatusId 1 -> 4), the same change BK_05 / WN_Bookings_Cancel make. Only challans of
+-- bookings whose status is Rejected (3) are touched; nothing else changes. No tables or procedures are changed.
+-- The first result set lists the challans that will be voided (keep a copy); the second shows how many were.
+-- One transaction (all or nothing). Safe to run again (the second run finds nothing to change).
+-- Run as ONE statement in DBeaver (select all, execute).
+-- ============================================================================================
+SET XACT_ABORT ON;
+
+SELECT c.Id AS ChallanId, c.ChallanNumber, c.BookingId, b.UserId, c.StatusId AS ChallanStatusBefore
+FROM dbo.WN_Challans c WITH (NOLOCK)
+JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = c.BookingId
+WHERE c.StatusId = 1 AND b.BookingStatusId = 3 AND b.IsDeleted = 0
+ORDER BY c.BookingId;
+
+BEGIN TRANSACTION;
+    UPDATE c SET c.StatusId = 4
+    FROM dbo.WN_Challans c
+    JOIN dbo.WN_Bookings b ON b.Id = c.BookingId
+    WHERE c.StatusId = 1 AND b.BookingStatusId = 3 AND b.IsDeleted = 0;
+
+    SELECT @@ROWCOUNT AS ChallansVoided, DB_NAME() AS DatabaseName;
+COMMIT TRANSACTION;

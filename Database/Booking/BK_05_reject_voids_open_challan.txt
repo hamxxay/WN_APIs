@@ -1,0 +1,34 @@
+USE [WorkNestAEO];
+-- For the test database change the first line to USE [SAC400];
+-- ============================================================================================
+-- Fix: when staff REJECT a booking (PATCH /api/booking/{id}/status with statusId 3) its challan stays open
+-- (WN_Challans.StatusId 1), so the customer is still asked to pay it.
+--
+-- WN_Bookings_UpdateStatus now also voids the booking's open challans (StatusId 1 -> 4) when the new status is
+-- Rejected (3), exactly as WN_Bookings_Cancel already does when a booking is cancelled. There is no separate
+-- "void challan" procedure the API could call, so the change is made here. Every other status change
+-- (Pending, Confirmed, No Show, Cancelled, the automatic "paid -> Confirmed") is unchanged.
+-- No tables are changed. Safe to run again.
+-- Run as ONE statement in DBeaver (select all, execute).
+-- ============================================================================================
+EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_UpdateStatus]
+    @Id              INT,
+    @BookingStatusId TINYINT,
+    @UpdatedById     INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_Bookings SET
+        BookingStatusId = @BookingStatusId,
+        UpdatedOn       = SYSUTCDATETIME(),
+        UpdatedById     = @UpdatedById
+    WHERE Id = @Id AND IsDeleted = 0;
+    DECLARE @Updated INT = @@ROWCOUNT;
+
+    -- Rejected (3): void the open challan, as WN_Bookings_Cancel does, so the customer is no longer asked to pay it.
+    IF @BookingStatusId = 3 AND @Updated > 0
+        UPDATE dbo.WN_Challans SET StatusId = 4
+        WHERE BookingId = @Id AND StatusId = 1;
+END');
+
+SELECT 'WN_Bookings_UpdateStatus now voids the open challan when a booking is rejected' AS Result, DB_NAME() AS DatabaseName;
