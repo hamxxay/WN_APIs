@@ -58,6 +58,9 @@ try
     // ── Rate limiting (built-in; "RateLimiting" config section) ──────────────
     builder.Services.AddRateLimitingConfiguration(builder.Configuration);
 
+    // ── Reverse proxy: X-Forwarded-For only from "ReverseProxy:TrustedProxies" (default: worknestpk.com relay) ─
+    builder.Services.AddReverseProxyConfiguration(builder.Configuration);
+
     // ── Swagger ───────────────────────────────────────────────────────────────
     builder.Services.AddSwaggerConfiguration();
     builder.Services.AddEndpointsApiExplorer();
@@ -245,18 +248,15 @@ try
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
 
+    // ── Forwarded Headers: first, so everything after (rate limits, logs, e-signature IP) sees the real client ─
+    app.UseForwardedHeadersWithConfig();
+
     // ── Path base for IIS sub-application (configurable via appsettings/env) ─
     var pathBase = builder.Configuration["PathBase"];
     if (!string.IsNullOrWhiteSpace(pathBase))
     {
         app.UsePathBase(pathBase);
     }
-
-    // ── Forwarded Headers (for IIS / Reverse Proxy SSL offloading) ───────────
-    app.UseForwardedHeaders(new ForwardedHeadersOptions
-    {
-        ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
-    });
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
     app.UseStaticFiles();

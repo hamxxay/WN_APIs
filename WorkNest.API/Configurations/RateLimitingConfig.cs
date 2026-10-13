@@ -12,7 +12,8 @@ namespace WorkNest.API.Configurations
     ///   PublicForms: PermitLimit (5), WindowSeconds (600) — per IP
     ///   Pdf: ConcurrentLimit (4, shared by the whole API), QueueLimit (10), PerMinute (30 per user / IP)
     /// Logged-in callers are partitioned by user id (JWT NameIdentifier, else email); anonymous callers by
-    /// Connection.RemoteIpAddress, which UseForwardedHeaders has already resolved from X-Forwarded-For.
+    /// Connection.RemoteIpAddress, which UseForwardedHeaders has already resolved from X-Forwarded-For — only for
+    /// requests from ReverseProxy:TrustedProxies (the worknestpk.com relay), see ReverseProxyConfig.
     /// Machine endpoints (PayFast notify, access-status export) carry [DisableRateLimiting].
     /// </summary>
     public static class RateLimitingConfig
