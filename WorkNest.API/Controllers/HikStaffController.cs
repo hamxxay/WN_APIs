@@ -10,10 +10,11 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// Staff Access — janitors, office boys, etc. on the Hikvision machines (not linked to a booking).
     /// Every Entrance machine is always included; room machines are chosen per staff member.
-    /// Admins and super admins only; admins work with their locations' machines and staff only.
+    /// Super admins, admins and sales executives; admins and sales executives work with their locations' machines and
+    /// staff only, and machine-admin users are super-admin only.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
     [ValidateLocationScope]
     public class HikStaffController : ControllerBase
     {
@@ -46,8 +47,9 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// Add a job tag.
+        /// Add a job tag (admins and super admins: tags are shared by every location).
         /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
         [HttpPost("api/hik/staff/tags")]
         public async Task<IActionResult> AddTag([FromBody] HikTagCreateRequest request)
         {
