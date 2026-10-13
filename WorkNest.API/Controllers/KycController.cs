@@ -34,9 +34,9 @@ namespace WorkNest.API.Controllers
         }
 
         private string GetCurrentUserRole() => User.GetRole();
-        // Only Sales Executives are limited to their location; Admins and Super Admins see every location.
-        private int? GetCurrentLocationId() => User.IsLocationBoundRole() ? User.GetLocationId() : null;
-        private bool SeesAllLocations() => !User.IsLocationBoundRole();
+        // Admins and Sales Executives are limited to their locations (main + extra); Super Admins see every location (null).
+        // A location-bound user with no location gets an empty list and so reaches no customer.
+        private IReadOnlyCollection<int>? Scope() => User.IsLocationBoundRole() ? User.GetLocationIds() : null;
         private bool CanVerify() => Roles.IsAdminRole(GetCurrentUserRole());
 
         /// <summary>
@@ -48,7 +48,7 @@ namespace WorkNest.API.Controllers
             [FromQuery] int limit = 20,
             [FromQuery] string? search = null)
         {
-            var (items, total) = await _kycService.GetCustomerKycListAsync(page, limit, search, GetCurrentLocationId(), SeesAllLocations());
+            var (items, total) = await _kycService.GetCustomerKycListAsync(page, limit, search, Scope());
             return Ok(new { items, total, page, limit });
         }
 
@@ -58,7 +58,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("{id}")]
         public async Task<IActionResult> CustomerKyc(string id)
         {
-            var model = await _kycService.GetCustomerKycPortalAsync(id, GetCurrentLocationId(), SeesAllLocations(), CanVerify());
+            var model = await _kycService.GetCustomerKycPortalAsync(id, Scope(), CanVerify());
             if (model == null)
             {
                 return NotFound(new { message = "Customer not found or access is unauthorized for your location." });
@@ -86,8 +86,7 @@ namespace WorkNest.API.Controllers
                 request.ExpiryDate,
                 request.File,
                 GetCurrentUserId(),
-                GetCurrentLocationId(),
-                SeesAllLocations()
+                Scope()
             );
 
             if (!success)
@@ -111,8 +110,7 @@ namespace WorkNest.API.Controllers
                 request.Remarks,
                 GetCurrentUserId(),
                 GetCurrentUserRole(),
-                GetCurrentLocationId(),
-                SeesAllLocations()
+                Scope()
             );
 
             if (!success)
@@ -141,8 +139,7 @@ namespace WorkNest.API.Controllers
                 request.Remarks,
                 GetCurrentUserId(),
                 GetCurrentUserRole(),
-                GetCurrentLocationId(),
-                SeesAllLocations()
+                Scope()
             );
 
             if (!success)
@@ -160,11 +157,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("document/{id}/view")]
         public async Task<IActionResult> StreamDocument(int id, [FromQuery] bool inline = false)
         {
-            var (stream, contentType, fileName, error) = await _kycService.DownloadDocumentAsync(
-                id,
-                GetCurrentLocationId(),
-                SeesAllLocations() // anonymous visitors used to be treated as super admin here
-            );
+            var (stream, contentType, fileName, error) = await _kycService.DownloadDocumentAsync(id, Scope());
 
             if (stream == null)
             {
@@ -183,13 +176,11 @@ namespace WorkNest.API.Controllers
         [HttpGet("history/{customerId}/{documentTypeId}/{slotNo}")]
         public async Task<IActionResult> GetDocumentHistory(int customerId, int documentTypeId, byte slotNo = 1)
         {
-            var history = await _kycService.GetDocumentHistoryAsync(
-                customerId,
-                documentTypeId,
-                slotNo,
-                GetCurrentLocationId(),
-                SeesAllLocations()
-            );
+            var history = await _kycService.GetDocumentHistoryAsync(customerId, documentTypeId, slotNo, Scope());
+            if (history == null)
+            {
+                return NotFound(new { message = "Customer not found or access is unauthorized for your location." });
+            }
 
             return Ok(history);
         }
