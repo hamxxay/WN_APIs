@@ -7,6 +7,7 @@ using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using WorkNest.API.Configurations;
 using WorkNest.API.Middleware;
+using WorkNest.API.Security;
 using WorkNest.API.Services;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
@@ -108,9 +109,13 @@ try
                         context.Token = accessToken;
                     }
                     return Task.CompletedTask;
-                }
+                },
+                // Signed-out tokens, and users deactivated or given another role / location since the token was issued, get a 401.
+                OnTokenValidated = context => context.HttpContext.RequestServices
+                    .GetRequiredService<TokenSessionValidator>().ValidateAsync(context)
             };
         });
+    builder.Services.AddSingleton<TokenSessionValidator>();
 
     builder.Services.AddAuthorization(options =>
     {
@@ -247,6 +252,20 @@ try
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
+
+    // ── JWT signing key check (logged, never stops the site) ──────────────────
+    if (app.Environment.IsProduction())
+    {
+        var devKey = JwtKeyCheck.DevelopmentKeyFrom(Path.Combine(app.Environment.ContentRootPath, "appsettings.Development.json"));
+        var keyWeaknesses = JwtKeyCheck.Weaknesses(secretKey, devKey);
+        if (keyWeaknesses.Count > 0)
+        {
+            Log.Fatal("CRITICAL: JwtSettings:SecretKey is not safe for the live server: {Weaknesses}. Anyone who guesses it can sign in " +
+                      "as any user, including super admin. Generate a random key (64 random bytes, base64), put it in JwtSettings:SecretKey " +
+                      "(appsettings.json on the server, or the JwtSettings__SecretKey environment variable of the app pool) and recycle the " +
+                      "app pool. Everyone then signs in again once.", string.Join("; ", keyWeaknesses));
+        }
+    }
 
     // ── Forwarded Headers: first, so everything after (rate limits, logs, e-signature IP) sees the real client ─
     app.UseForwardedHeadersWithConfig();
