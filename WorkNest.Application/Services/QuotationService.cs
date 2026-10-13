@@ -592,12 +592,36 @@ namespace WorkNest.Application.Services
             return list;
         }
 
-        public async Task<IEnumerable<QuotationResponse>> GetQuotationsByCustomerAsync(int customerId)
+        public async Task<IEnumerable<QuotationResponse>> GetQuotationsByCustomerAsync(int customerId) =>
+            (await GetQuotationsByCustomerPageAsync(customerId, null, null)).Items;
+
+        /// <summary>
+        /// False for a quotation the customer has not been sent yet: Draft = a new version waiting for staff to send it
+        /// (POST quotation/{id}/versions/{v}/send moves it to Sent). Every other status was sent or is past that stage;
+        /// a first quotation is saved as "Active" and the CMS emails it straight away ("Save &amp; email"), which records
+        /// no status change, so Active stays visible.
+        /// </summary>
+        private static bool WasSentToCustomer(IDictionary<string, object?> row) =>
+            !string.Equals(row.TryGetValue("Status", out var s) ? s?.ToString()?.Trim() : null, "Draft", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// A customer's quotations, newest first. <paramref name="limit"/> null or &lt; 1 = all of them (the old behaviour);
+        /// otherwise one page (only that page's quotations are read in full). Total = count before paging.
+        /// <paramref name="sentToCustomerOnly"/>: only quotations that were sent to the customer (the customer's own list).
+        /// </summary>
+        public async Task<(IEnumerable<QuotationResponse> Items, int Total)> GetQuotationsByCustomerPageAsync(
+            int customerId, int? page, int? limit, bool sentToCustomerOnly = false)
         {
-            var rows = await _db.GetQuotationsByCustomerAsync(customerId);
+            IEnumerable<IDictionary<string, object?>> rows = await _db.GetQuotationsByCustomerAsync(customerId);
+            if (sentToCustomerOnly) rows = rows.Where(WasSentToCustomer);
+            var all = rows.ToList();
+            int total = all.Count;
+            if (limit is > 0)
+                all = all.Skip((Math.Max(page ?? 1, 1) - 1) * limit.Value).Take(limit.Value).ToList();
+
             var list = new List<QuotationResponse>();
 
-            foreach (var r in rows)
+            foreach (var r in all)
             {
                 int id = r.TryGetValue("Id", out var idVal) && idVal is not null ? Convert.ToInt32(idVal) : 0;
                 if (id > 0)
@@ -610,7 +634,7 @@ namespace WorkNest.Application.Services
                 }
             }
 
-            return list;
+            return (list, total);
         }
 
         public async Task SendQuotationEmailAsync(int quotationId, string? overrideEmail)

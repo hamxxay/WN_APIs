@@ -56,6 +56,10 @@ namespace WorkNest.Application.Interfaces
         /// <summary>True when the invoice / booking belongs to the user with this email (customer self-service checks).</summary>
         Task<bool> IsInvoiceOwnedByDbAsync(int invoiceId, string email);
         Task<bool> IsBookingOwnedByDbAsync(int bookingId, string email);
+        /// <summary>For a customer's own cancel: the booking's status id and whether any payment is recorded on it. Null when it is not this user's booking.</summary>
+        Task<(int StatusId, bool HasPayment)?> GetBookingCancelCheckDbAsync(int bookingId, string email);
+        /// <summary>Amount recorded as paid per booking (same rule as the cancel check). Key = booking id.</summary>
+        Task<IDictionary<int, decimal>> GetBookingPaidAmountsDbAsync(IEnumerable<int> bookingIds);
         /// <summary>Agreements of one customer (via the quotation's CustomerId), newest first.</summary>
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAgreementsDbAsync(int customerId);
         /// <summary>Set WN_Agreements.Status (and optionally the proposed SignedDate) on an agreement with no booking yet.</summary>
@@ -257,6 +261,8 @@ namespace WorkNest.Application.Interfaces
         // --- Booking ---
         Task<(IDictionary<string, object?>? Header, IEnumerable<IDictionary<string, object?>> Lines)> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail);
         Task<(IDictionary<string, object?>? ChallanHeader, IEnumerable<IDictionary<string, object?>> Lines)> GetChallanWithDetailsAsync(int bookingId);
+        /// <summary>GetChallanWithDetailsAsync for several bookings in one round trip (same procedure). Key = booking id.</summary>
+        Task<IDictionary<int, (IDictionary<string, object?>? ChallanHeader, IEnumerable<IDictionary<string, object?>> Lines)>> GetChallansWithDetailsAsync(IEnumerable<int> bookingIds);
         // --- AccessCard ---
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAccessCardsAsync(int page, int limit, string? search, int? bookingId, int? customerId, int? spaceId, int? status);
         Task<IDictionary<string, object?>?> GetAccessCardByIdAsync(string id);

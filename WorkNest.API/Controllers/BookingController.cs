@@ -251,6 +251,8 @@ namespace WorkNest.API.Controllers
             var email = ResolveUserEmail();
             if (string.IsNullOrWhiteSpace(email))
                 return Unauthorized(new { isSuccessful = false, message = "User identity required" });
+            var refused = await RefuseCustomerCancelAsync(id, email);
+            if (refused is not null) return refused;
             var result = await _bookings.CancelBookingAsync(id, email, request?.CancelReason);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
@@ -264,7 +266,11 @@ namespace WorkNest.API.Controllers
                 return Unauthorized(new { isSuccessful = false, message = "User identity required" });
             var booking = await _db.GetBookingByPublicIdAsync(publicId, email);
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
-            var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
+            // WN_Bookings_GetByPublicId returns WN_vw_BookingSummary, whose id column is BookingId (there is no "Id").
+            var id = booking.TryGetValue("Id", out var bid) && bid is not null ? Convert.ToInt32(bid)
+                   : booking.TryGetValue("BookingId", out var vbid) && vbid is not null ? Convert.ToInt32(vbid) : 0;
+            var refused = await RefuseCustomerCancelAsync(id, email);
+            if (refused is not null) return refused;
             var result = await _bookings.CancelBookingAsync(id, email, request?.CancelReason);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
@@ -392,6 +398,24 @@ namespace WorkNest.API.Controllers
             if (!await CanSeeBookingAsync(bookingId))
                 return NotFound(ApiResponse.Fail("Booking not found."));
             return Ok(await _bookings.GetBookingFinancialBreakdownAsync(bookingId));
+        }
+
+        /// <summary>
+        /// A customer may cancel their own booking only while it is Pending and nothing has been paid on it (a paid
+        /// WN_Payments row, or an invoice with PaidTotal > 0); WN_Bookings_Cancel itself only checks the owner's email.
+        /// Null = go ahead. Staff are not affected (they cancel with PATCH booking/{id}/status, status 86).
+        /// </summary>
+        private async Task<IActionResult?> RefuseCustomerCancelAsync(int bookingId, string email)
+        {
+            if (User.IsStaff()) return null;
+            var check = await _db.GetBookingCancelCheckDbAsync(bookingId, email);
+            if (check is null)
+                return NotFound(ApiResponse.Fail("Booking not found."));
+            if (check.Value.HasPayment)
+                return BadRequest(ApiResponse.Fail("This booking has a payment recorded and can't be cancelled from the app. Please contact WorkNest."));
+            if (check.Value.StatusId != 1 && check.Value.StatusId != (int)WorkNest.Domain.Enums.BookingStatus.Pending) // 1 = older "pending" value
+                return BadRequest(ApiResponse.Fail("Only bookings that are still pending payment can be cancelled from the app. Please contact WorkNest."));
+            return null;
         }
 
         /// <summary>Staff see every booking; a customer only their own (these were anonymous before).</summary>

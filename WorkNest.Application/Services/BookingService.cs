@@ -36,8 +36,29 @@ namespace WorkNest.Application.Services
             return (rows.Cast<object>(), total);
         }
 
-        public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail) =>
-            (await _db.GetMyBookingsAsync(userEmail)).Cast<object>();
+        public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail)
+        {
+            var rows = (await _db.GetMyBookingsAsync(userEmail)).ToList();
+
+            // TotalPayable = the amount on the booking's challan, exactly as GET booking/{id}/challan returns it
+            // (same procedure, same calculation), read for all the bookings in one round trip. Null when there is no challan.
+            var ids = rows.Select(r => r.TryGetValue("BookingId", out var v) && v is not null ? Convert.ToInt32(v) : 0).ToList();
+            var challans = await _db.GetChallansWithDetailsAsync(ids);
+            // TotalPaidAmount: what is recorded as paid on the booking (0 = nothing; the customer cancel is refused when > 0).
+            var paid = await _db.GetBookingPaidAmountsDbAsync(ids);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                rows[i]["TotalPaidAmount"] = paid.TryGetValue(ids[i], out var paidAmount) ? paidAmount : 0m;
+                decimal? totalPayable = null;
+                if (challans.TryGetValue(ids[i], out var ch) && ch.ChallanHeader is not null)
+                {
+                    try { totalPayable = (await BuildChallanAsync(ch.ChallanHeader, ch.Lines)).TotalPayable; }
+                    catch (Exception) { totalPayable = null; } // one odd challan must not break the whole list
+                }
+                rows[i]["TotalPayable"] = totalPayable;
+            }
+            return rows.Cast<object>();
+        }
 
         public async Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10) =>
             (await _db.GetRecentBookingsAsync(top)).Cast<object>();
@@ -520,6 +541,14 @@ namespace WorkNest.Application.Services
                 Details = lines.Cast<object>().ToList()
             };
 
+            // Same challan number / validity as GET booking/{guid} and GET booking/my (WN_vw_BookingSummary).
+            var summary = await _db.GetBookingSummaryRowDbAsync(result.BookingId);
+            if (summary is not null)
+            {
+                result.ChallanNumber = summary.TryGetValue("ChallanNumber", out var chn) && chn is not null ? chn.ToString() : null;
+                result.ChallanValidUntil = ParseDateSafely(summary.TryGetValue("ChallanValidUntil", out var chv) ? chv : null);
+            }
+
             return ApiResponse.Ok(result);
         }
 
@@ -538,6 +567,12 @@ namespace WorkNest.Application.Services
             if (header == null)
                 return ApiResponse.Fail("Challan not found");
 
+            return ApiResponse.Ok(await BuildChallanAsync(header, lines));
+        }
+
+        /// <summary>The challan (and its totalPayable) from a WN_Challans_GetFullByBooking header + lines.</summary>
+        private async Task<ChallanResponseDto> BuildChallanAsync(IDictionary<string, object?> header, IEnumerable<IDictionary<string, object?>> lines)
+        {
             var startOn = ParseDateSafely(header["StartOn"]);
             var endOn = ParseDateSafely(header["EndOn"]);
             var contractStart = ParseDateSafely(header.TryGetValue("ContractStartDate", out var csd) ? csd : header["StartOn"]);
@@ -675,7 +710,7 @@ namespace WorkNest.Application.Services
                     SpaceNumber = dto.SpaceNumber
                 };
             }
-            return ApiResponse.Ok(dto);
+            return dto;
         }
 
         public async Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null)

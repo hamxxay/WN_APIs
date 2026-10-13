@@ -49,6 +49,8 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal TotalPayable { get; set; }
         public decimal TotalPaidAmount { get; set; }
         public DateTime? BookedOn { get; set; }
+        public string? ChallanNumber { get; set; }
+        public DateTime? ChallanValidUntil { get; set; }
         public ContractDetailsDto Contract { get; set; } = new();
         public List<object> Details { get; set; } = new();
     }

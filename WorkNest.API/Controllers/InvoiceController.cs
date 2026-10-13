@@ -553,6 +553,24 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
+                // WN_GetInvoiceDetailsById has no StatusLabel: the same label the invoice list (WN_GetInvoicesList) shows.
+                if (!invoice.ContainsKey("StatusLabel"))
+                {
+                    using var labelCmd = new SqlCommand(@"
+                        SELECT COALESCE(
+                            -- legacy values on older rows
+                            CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
+                            -- OrderStatus IDs (looked up, not hard-coded)
+                            (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
+                               FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
+                            'Unknown') AS StatusLabel
+                          FROM dbo.WN_Invoices i WITH (NOLOCK)
+                         WHERE i.Id = @InvoiceId;", conn);
+                    labelCmd.Parameters.Add("@InvoiceId", SqlDbType.Int).Value = id;
+                    var label = await labelCmd.ExecuteScalarAsync();
+                    invoice["StatusLabel"] = label is null or DBNull ? null : label.ToString();
+                }
+
                 invoice["lines"] = lines;
                 return Ok(new { isSuccessful = true, data = invoice });
             }

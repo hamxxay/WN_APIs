@@ -128,7 +128,8 @@ namespace WorkNest.API.Controllers
                 if (userRow == null) return Unauthorized(ApiResponse.Fail("User not found."));
                 int customerId = await ResolveCallerCustomerIdAsync();
                 if (customerId <= 0) return Ok(ApiResponse.Ok(new List<object>()));
-                var res = await _quotations.GetQuotationsByCustomerAsync(customerId);
+                // Only quotations sent to the customer (not Draft / not-yet-sent ones).
+                var (res, _) = await _quotations.GetQuotationsByCustomerPageAsync(customerId, null, null, sentToCustomerOnly: true);
                 return Ok(ApiResponse.Ok(res));
             }
             catch (Exception ex)
@@ -138,16 +139,30 @@ namespace WorkNest.API.Controllers
         }
 
         // Was anonymous: staff, or the customer themselves.
+        // Optional page / limit: without limit every quotation is returned (as before, the CMS relies on it);
+        // totalCount is the number before paging.
         [HttpGet("api/quotation/by-customer/{customerId:int}")]
         [RecordScope(RecordKind.Customer, "customerId")]
-        public async Task<IActionResult> GetByCustomer(int customerId)
+        public async Task<IActionResult> GetByCustomer(int customerId, [FromQuery] int? page = null, [FromQuery] int? limit = null)
         {
             try
             {
                 if (!await CanSeeCustomerAsync(customerId))
                     return NotFound(ApiResponse.Fail("Quotations not found."));
-                var res = await _quotations.GetQuotationsByCustomerAsync(customerId);
-                return Ok(ApiResponse.Ok(res));
+                if (limit is > 100) limit = 100;
+                // A customer reading their own list sees only quotations sent to them (same rule as quotation/my).
+                var (res, total) = await _quotations.GetQuotationsByCustomerPageAsync(customerId, page, limit, sentToCustomerOnly: !User.IsStaff());
+                bool paged = limit is > 0;
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    message = "Success",
+                    data = res,
+                    errors = (object?)null,
+                    totalCount = total,
+                    page = paged ? Math.Max(page ?? 1, 1) : (int?)null,
+                    limit = paged ? limit : null
+                });
             }
             catch (Exception ex)
             {
