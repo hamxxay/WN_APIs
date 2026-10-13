@@ -16,13 +16,15 @@ namespace WorkNest.API.Controllers
         private readonly FirebaseTokenVerifier _firebase;
         private readonly IConfiguration _config;
         private readonly ILogger<AuthController> _logger;
+        private readonly TokenSessionValidator _sessions;
 
-        public AuthController(IAuthService auth, FirebaseTokenVerifier firebase, IConfiguration config, ILogger<AuthController> logger)
+        public AuthController(IAuthService auth, FirebaseTokenVerifier firebase, IConfiguration config, ILogger<AuthController> logger, TokenSessionValidator sessions)
         {
             _auth = auth;
             _firebase = firebase;
             _config = config;
             _logger = logger;
+            _sessions = sessions;
         }
 
         /// <summary>
@@ -164,8 +166,16 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        /// <summary>
+        /// Signs out the bearer token sent with this request: it gets a 401 from now until it expires (kept in this
+        /// server's memory, see TokenSessionValidator). Still anonymous: without a valid token it just answers OK.
+        /// </summary>
         [HttpPost("api/auth/logout")]
         [AllowAnonymous]
-        public IActionResult Logout() => Ok(_auth.Logout());
+        public IActionResult Logout()
+        {
+            _sessions.RevokeCurrent(HttpContext);
+            return Ok(_auth.Logout());
+        }
     }
 }

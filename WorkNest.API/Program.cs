@@ -7,6 +7,7 @@ using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using WorkNest.API.Configurations;
 using WorkNest.API.Middleware;
+using WorkNest.API.Security;
 using WorkNest.API.Services;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
@@ -58,6 +59,9 @@ try
     // ── Rate limiting (built-in; "RateLimiting" config section) ──────────────
     builder.Services.AddRateLimitingConfiguration(builder.Configuration);
 
+    // ── Reverse proxy: X-Forwarded-For only from "ReverseProxy:TrustedProxies" (default: worknestpk.com relay) ─
+    builder.Services.AddReverseProxyConfiguration(builder.Configuration);
+
     // ── Swagger ───────────────────────────────────────────────────────────────
     builder.Services.AddSwaggerConfiguration();
     builder.Services.AddEndpointsApiExplorer();
@@ -105,9 +109,13 @@ try
                         context.Token = accessToken;
                     }
                     return Task.CompletedTask;
-                }
+                },
+                // Signed-out tokens, and users deactivated or given another role / location since the token was issued, get a 401.
+                OnTokenValidated = context => context.HttpContext.RequestServices
+                    .GetRequiredService<TokenSessionValidator>().ValidateAsync(context)
             };
         });
+    builder.Services.AddSingleton<TokenSessionValidator>();
 
     builder.Services.AddAuthorization(options =>
     {
@@ -245,18 +253,29 @@ try
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
 
+    // ── JWT signing key check (logged, never stops the site) ──────────────────
+    if (app.Environment.IsProduction())
+    {
+        var devKey = JwtKeyCheck.DevelopmentKeyFrom(Path.Combine(app.Environment.ContentRootPath, "appsettings.Development.json"));
+        var keyWeaknesses = JwtKeyCheck.Weaknesses(secretKey, devKey);
+        if (keyWeaknesses.Count > 0)
+        {
+            Log.Fatal("CRITICAL: JwtSettings:SecretKey is not safe for the live server: {Weaknesses}. Anyone who guesses it can sign in " +
+                      "as any user, including super admin. Generate a random key (64 random bytes, base64), put it in JwtSettings:SecretKey " +
+                      "(appsettings.json on the server, or the JwtSettings__SecretKey environment variable of the app pool) and recycle the " +
+                      "app pool. Everyone then signs in again once.", string.Join("; ", keyWeaknesses));
+        }
+    }
+
+    // ── Forwarded Headers: first, so everything after (rate limits, logs, e-signature IP) sees the real client ─
+    app.UseForwardedHeadersWithConfig();
+
     // ── Path base for IIS sub-application (configurable via appsettings/env) ─
     var pathBase = builder.Configuration["PathBase"];
     if (!string.IsNullOrWhiteSpace(pathBase))
     {
         app.UsePathBase(pathBase);
     }
-
-    // ── Forwarded Headers (for IIS / Reverse Proxy SSL offloading) ───────────
-    app.UseForwardedHeaders(new ForwardedHeadersOptions
-    {
-        ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
-    });
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
     app.UseStaticFiles();
