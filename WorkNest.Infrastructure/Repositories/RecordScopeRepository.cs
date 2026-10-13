@@ -6,7 +6,8 @@ using WorkNest.Application.Interfaces;
 namespace WorkNest.Infrastructure.Repositories
 {
     /// <summary>
-    /// Location of a single record (booking / payment / agreement / customer / user / quotation / invoice), read with NOLOCK. Every query
+    /// Location of a single record (booking / payment / agreement / customer / user / quotation / invoice / space /
+    /// location), read with NOLOCK. Every query
     /// returns one row per record match with the location (NULL when none), so "no rows" means "no such record".
     /// </summary>
     public class RecordScopeRepository : IRecordScopeRepository
@@ -95,6 +96,16 @@ namespace WorkNest.Infrastructure.Repositories
               LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
              WHERE d.Id = @Id;";
 
+        // A space belongs to its own location (WN_Spaces.LocationId).
+        private const string SpaceSql = @"
+            SELECT s.LocationId FROM dbo.WN_Spaces s WITH (NOLOCK)
+             WHERE (@Id IS NOT NULL AND s.Id = @Id) OR (@Guid IS NOT NULL AND s.IdGUID = @Guid);";
+
+        // A location is its own scope: location-bound staff reach only the locations they are assigned to.
+        private const string LocationSql = @"
+            SELECT l.Id AS LocationId FROM dbo.WN_Locations l WITH (NOLOCK)
+             WHERE (@Id IS NOT NULL AND l.Id = @Id) OR (@Guid IS NOT NULL AND l.IdGUID = @Guid);";
+
         public async Task<List<int>?> GetLocationIdsAsync(RecordKind kind, string key)
         {
             int? id = int.TryParse(key, out var n) ? n : null;
@@ -112,6 +123,8 @@ namespace WorkNest.Infrastructure.Repositories
                 RecordKind.BookingDetail => BookingDetailSql,
                 RecordKind.Quotation => QuotationSql,
                 RecordKind.Invoice => InvoiceSql,
+                RecordKind.Space => SpaceSql,
+                RecordKind.Location => LocationSql,
                 _ => UserSql
             };
             await using var c = new SqlConnection(_connectionString);

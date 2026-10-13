@@ -10,9 +10,11 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// Staff Access — janitors, office boys, etc. on the Hikvision machines (not linked to a booking).
     /// Every Entrance machine is always included; room machines are chosen per staff member.
+    /// Super admins, admins and sales executives; admins and sales executives work with their locations' machines and
+    /// staff only, and machine-admin users are super-admin only.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
     [ValidateLocationScope]
     public class HikStaffController : ControllerBase
     {
@@ -29,7 +31,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/staff")]
         public async Task<IActionResult> GetStaff()
         {
-            // Machine-admin users are only visible to admin / super admin.
+            // Machine-admin users are only visible to super admins.
             var result = await _staff.GetStaffAsync(User.CanSeeMachineAdmins(), Scope());
             return Ok(result);
         }
@@ -45,7 +47,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// Add a job tag (admin / super admin only).
+        /// Add a job tag (admins and super admins: tags are shared by every location).
         /// </summary>
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
         [HttpPost("api/hik/staff/tags")]
@@ -64,6 +66,8 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/hik/staff")]
         public async Task<IActionResult> CreateStaff([FromBody] HikStaffCreateRequest request)
         {
+            if (await ForeignMachinesAsync(request.RoomDeviceIds) is { } refused) return refused;
+
             request.CallerLocationIds = Scope();
             var result = await _staff.CreateStaffAsync(request);
             return result.Ok ? Ok(result) : BadRequest(result);
@@ -75,7 +79,8 @@ namespace WorkNest.API.Controllers
         [HttpPut("api/hik/staff/{employeeNo}/machines")]
         public async Task<IActionResult> UpdateMachines(string employeeNo, [FromBody] HikStaffMachinesRequest request)
         {
-            if (await IsHiddenMachineAdminAsync(employeeNo)) return Forbid();
+            if (await GuardStaffAsync(employeeNo) is { } refused) return refused;
+            if (await ForeignMachinesAsync(request?.RoomDeviceIds) is { } foreign) return foreign;
 
             if (request != null) request.CallerLocationIds = Scope();
             var result = await _staff.UpdateStaffMachinesAsync(employeeNo, request);
@@ -88,9 +93,9 @@ namespace WorkNest.API.Controllers
         [HttpPatch("api/hik/staff/{employeeNo}/access")]
         public async Task<IActionResult> SetAccess(string employeeNo, [FromBody] HikStaffEnableRequest request)
         {
-            if (await IsHiddenMachineAdminAsync(employeeNo)) return Forbid();
+            if (await GuardStaffAsync(employeeNo) is { } refused) return refused;
 
-            var result = await _staff.SetStaffEnabledAsync(employeeNo, request?.IsEnabled ?? true);
+            var result = await _staff.SetStaffEnabledAsync(employeeNo, request?.IsEnabled ?? true, Scope());
             return result.Error == null ? Ok(result) : BadRequest(result);
         }
 
@@ -100,9 +105,10 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/hik/staff/{employeeNo}/{type:regex(^(fingerprint|card|face)$)}")]
         public async Task<IActionResult> Enroll(string employeeNo, string type, [FromBody] HikStaffEnrollRequest request)
         {
-            if (await IsHiddenMachineAdminAsync(employeeNo)) return Forbid();
+            if (await GuardStaffAsync(employeeNo) is { } refused) return refused;
+            if (request.CaptureDeviceId > 0 && await ForeignMachinesAsync(new[] { request.CaptureDeviceId }) is { } foreign) return foreign;
 
-            var result = await _staff.EnrollStaffAsync(employeeNo, type, request);
+            var result = await _staff.EnrollStaffAsync(employeeNo, type, request, Scope());
             return result.Ok ? Ok(result) : BadRequest(result);
         }
 
@@ -112,21 +118,42 @@ namespace WorkNest.API.Controllers
         [HttpDelete("api/hik/staff/{employeeNo}")]
         public async Task<IActionResult> DeleteStaff(string employeeNo)
         {
-            if (await IsHiddenMachineAdminAsync(employeeNo)) return Forbid();
+            if (await GuardStaffAsync(employeeNo) is { } refused) return refused;
 
-            var result = await _staff.DeleteStaffAsync(employeeNo);
+            var result = await _staff.DeleteStaffAsync(employeeNo, Scope());
             return result.Ok ? Ok(result) : BadRequest(result);
         }
-    
-        /// <summary>Non-admins may not change machine-admin users (they can't see them either).</summary>
-        private async Task<bool> IsHiddenMachineAdminAsync(string employeeNo)
+
+        /// <summary>
+        /// Who may change a staff member. Super admins: anyone. Admins: not machine-admin users (only super admins see
+        /// them), and only staff whose machines (last roster + queued changes) are all at the admin's locations — 404 when
+        /// none are, as if the person did not exist; 403 when they also have access at another location. Null = go ahead.
+        /// </summary>
+        private async Task<IActionResult?> GuardStaffAsync(string employeeNo)
         {
-            if (User.IsAdminOrSuperAdmin()) return false;
-            var staff = await _staff.GetStaffAsync();
-            return staff.Any(s => s.EmployeeNo == employeeNo && s.IsMachineAdmin);
+            if (User.CanSeeMachineAdmins()) return null;
+            var staff = (await _staff.GetStaffAsync()).FirstOrDefault(s => s.EmployeeNo == employeeNo);
+            if (staff == null) return NotFound(new HikStaffResultDto { MachineId = employeeNo, Error = "Staff member not found." });
+            if (staff.IsMachineAdmin) return Forbid();
+
+            var mine = Scope();
+            if (mine == null) return null;
+            var theirs = await _staff.GetStaffLocationIdsAsync(staff);
+            if (theirs.All(mine.Contains)) return null;
+            return theirs.Any(mine.Contains)
+                ? StatusCode(403, new HikStaffResultDto { MachineId = employeeNo, Error = "This staff member also has access at another location. Only a super admin can change them." })
+                : NotFound(new HikStaffResultDto { MachineId = employeeNo, Error = "Staff member not found." });
         }
 
-        /// <summary>Admins / sales executives / receptionists work with their locations' machines; super admins with all.</summary>
+        /// <summary>403 when a location-bound admin picks a machine of another location (or one that doesn't exist).</summary>
+        private async Task<IActionResult?> ForeignMachinesAsync(IEnumerable<int>? deviceIds)
+        {
+            var mine = Scope();
+            if (mine == null || deviceIds == null || await _staff.DevicesInLocationsAsync(deviceIds, mine)) return null;
+            return StatusCode(403, new HikStaffResultDto { Error = "You can only choose machines of your own location." });
+        }
+
+        /// <summary>Admins work with their locations' machines; super admins with all.</summary>
         private IReadOnlyCollection<int>? Scope() => User.IsLocationBoundRole() ? User.GetLocationIds() : null;
     }
 }

@@ -1,0 +1,20 @@
+USE [WorkNestAEO];
+
+-- ============================================================================================
+-- Fix: creating a quotation fails with "Something went wrong on our side" on live.
+-- The API log shows: POST /api/quotation -> Invalid column name 'LocationId' (also on
+-- GET /api/quotation/offering-types). Since 2026-10-09 the API reads dbo.WN_OfferingType.LocationId
+-- (offering types per location), but the column was only ever added by hand on the test database.
+--
+-- Adds the column when it is missing. Existing offering types keep an empty LocationId, which means
+-- "every location", so quotations work again straight away. Nothing else changes. Safe to run again.
+-- Live database: WorkNestAEO. For the test database change the first line to USE [SAC400]; (it already has the column).
+-- Run as ONE statement in DBeaver (select all, execute).
+-- ============================================================================================
+IF COL_LENGTH('dbo.WN_OfferingType', 'LocationId') IS NULL
+BEGIN
+    ALTER TABLE dbo.WN_OfferingType ADD LocationId INT NULL;
+    SELECT 'Added WN_OfferingType.LocationId (existing offering types apply to every location)' AS Result, DB_NAME() AS DatabaseName;
+END
+ELSE
+    SELECT 'Already there: WN_OfferingType.LocationId' AS Result, DB_NAME() AS DatabaseName;
