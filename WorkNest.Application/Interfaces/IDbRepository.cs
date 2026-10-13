@@ -101,7 +101,7 @@ namespace WorkNest.Application.Interfaces
             int quotationId
         );
 
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search, IReadOnlyCollection<int>? locationIds = null);
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationsAsync(
             int page,
             int limit,
@@ -126,7 +126,7 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>> DeclineQuotationAsync(int quotationId, int version, int customerId, string note, int? userId);
         Task<IDictionary<string, object?>> CreateQuotationNewVersionAsync(int quotationId, int? createdById);
         Task<IEnumerable<IDictionary<string, object?>>> GetQuotationVersionsAsync(int quotationId);
-        Task<IEnumerable<IDictionary<string, object?>>> GetQuotationActivitiesAsync(int? quotationId, int limit);
+        Task<IEnumerable<IDictionary<string, object?>>> GetQuotationActivitiesAsync(int? quotationId, int limit, IReadOnlyCollection<int>? locationIds = null);
         Task SendQuotationStatusAsync(int quotationId, string status, int? userId);
         // --- Payment ---
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetPaymentsAsync(int page, int limit, string? search);

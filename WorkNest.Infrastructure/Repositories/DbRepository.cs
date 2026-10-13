@@ -429,23 +429,29 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetQuotationResponsesAsync(
             int page,
             int limit,
-            string? search)
+            string? search,
+            IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
             int offset = Math.Max(0, (page - 1) * limit);
 
-            string whereClause = "";
+            var conditions = new List<string>();
             if (!string.IsNullOrWhiteSpace(search))
             {
                 string escaped = search.Replace("'", "''");
-                whereClause = $"WHERE (q.QuotationNumber LIKE '%{escaped}%' OR c.FirstName LIKE '%{escaped}%' OR c.LastName LIKE '%{escaped}%' OR c.Company LIKE '%{escaped}%' OR c.Email LIKE '%{escaped}%' OR qr.Note LIKE '%{escaped}%' OR qr.ResponseType LIKE '%{escaped}%')";
+                conditions.Add($"(q.QuotationNumber LIKE '%{escaped}%' OR c.FirstName LIKE '%{escaped}%' OR c.LastName LIKE '%{escaped}%' OR c.Company LIKE '%{escaped}%' OR c.Email LIKE '%{escaped}%' OR qr.Note LIKE '%{escaped}%' OR qr.ResponseType LIKE '%{escaped}%')");
             }
+            // Location-bound staff: only quotations of their locations. Ids are ints from the caller's claims.
+            if (locationIds != null)
+                conditions.Add($"s.LocationId IN ({string.Join(",", locationIds)})");
+            string whereClause = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
 
             string countSql = $@"
                 SELECT COUNT(1)
                 FROM dbo.WN_QuotationResponses qr WITH (NOLOCK)
                 LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = qr.QuotationId
                 LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Id = COALESCE(qr.RespondedByCustomerId, q.CustomerId)
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
                 {whereClause};";
 
             await using var countCmd = new SqlCommand(countSql, c);
@@ -774,12 +780,19 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                        .ToList();
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationActivitiesAsync(int? quotationId, int limit)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationActivitiesAsync(int? quotationId, int limit, IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
 
-            string whereClause = quotationId.HasValue ? $"WHERE QuotationId = {quotationId.Value}" : "";
-            string sql = $"SELECT TOP ({limit}) * FROM dbo.WN_QuotationActivities {whereClause} ORDER BY CreatedDate DESC";
+            var conditions = new List<string>();
+            if (quotationId.HasValue) conditions.Add($"a.QuotationId = {quotationId.Value}");
+            // Location ids are ints from the caller's claims, never user text.
+            if (locationIds != null)
+                conditions.Add($@"EXISTS (SELECT 1 FROM dbo.WN_Quotations q WITH (NOLOCK)
+                    JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+                    WHERE q.Id = a.QuotationId AND s.LocationId IN ({string.Join(",", locationIds)}))");
+            string whereClause = conditions.Count > 0 ? "WHERE " + string.Join(" AND ", conditions) : "";
+            string sql = $"SELECT TOP ({limit}) a.* FROM dbo.WN_QuotationActivities a {whereClause} ORDER BY a.CreatedDate DESC";
             await using var cmd = new SqlCommand(sql, c);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);

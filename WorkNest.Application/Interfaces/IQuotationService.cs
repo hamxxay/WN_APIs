@@ -18,8 +18,10 @@ namespace WorkNest.Application.Interfaces
         Task<QuotationResponse> DeclineQuotationAsync(int quotationId, int version, int customerId, string note, int? userId);
         Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById);
         Task<IEnumerable<QuotationResponse>> GetVersionsAsync(int quotationId);
-        Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit);
-        Task<(IEnumerable<QuotationResponseItemDto> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search);
+        /// <param name="locationIds">Only quotations of these locations (location-bound staff); null = all.</param>
+        Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit, IReadOnlyCollection<int>? locationIds = null);
+        /// <param name="locationIds">Only quotations of these locations (location-bound staff); null = all.</param>
+        Task<(IEnumerable<QuotationResponseItemDto> Rows, int Total)> GetQuotationResponsesAsync(int page, int limit, string? search, IReadOnlyCollection<int>? locationIds = null);
         Task SendQuotationAsync(int quotationId, int? userId);
         Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync(bool? activeOnly = null, int? locationId = null);
     }

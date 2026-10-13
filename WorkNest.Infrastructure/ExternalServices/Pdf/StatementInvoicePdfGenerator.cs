@@ -44,7 +44,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public bool IsWhtInvoice { get; set; }
         public string CurrencyCode { get; set; } = "PKR";
 
-        public string? SupportChargesInvoiceUrl { get; set; }
+        /// <summary>
+        /// The sales-tax invoice for the support services on this invoice. When set, its pages are added after the
+        /// invoice in the same PDF (replaces the old public download link).
+        /// </summary>
+        public WorkNest.Application.DTOs.Payment.CustomerSTInvoiceDto? SalesTaxInvoice { get; set; }
 
         public List<StatementInvoiceLineItemDto> LineItems { get; set; } = new();
 
@@ -109,7 +113,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 });
             }
 
-            return Document.Create(container =>
+            var invoicePdf = Document.Create(container =>
             {
                 container.Page(page =>
                 {
@@ -147,6 +151,19 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     });
                 });
             }).GeneratePdf();
+
+            if (data.SalesTaxInvoice == null) return invoicePdf;
+            // The sales-tax invoice follows the invoice in the same file. If it can't be added, the invoice alone is
+            // still returned (the sales-tax invoice stays available to staff and to the customer when signed in).
+            try
+            {
+                var salesTaxPdf = SalesTaxInvoicePdfGenerator.GeneratePdf(data.SalesTaxInvoice);
+                return new PdfMergeService().MergePdfs(new[] { invoicePdf, salesTaxPdf });
+            }
+            catch
+            {
+                return invoicePdf;
+            }
         }
 
         // #region Page 1 — Statement of Account
@@ -379,13 +396,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
                     });
 
-                    if (!string.IsNullOrWhiteSpace(data.SupportChargesInvoiceUrl))
+                    if (data.SalesTaxInvoice != null)
                     {
-                        c.Item().PaddingTop(6).AlignRight().Text(tx =>
-                        {
-                            tx.Hyperlink("View Sales Tax Invoice for Support Services", data.SupportChargesInvoiceUrl)
-                              .Bold().FontSize(9).FontColor("#1d4ed8").Underline();
-                        });
+                        c.Item().PaddingTop(6).AlignRight()
+                            .Text($"Sales Tax Invoice for Support Services ({data.SalesTaxInvoice.STInvoiceNumber}): see the following page")
+                            .Bold().FontSize(9).FontColor("#000000");
                     }
                 });
             }

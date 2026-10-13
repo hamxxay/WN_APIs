@@ -20,6 +20,7 @@ namespace WorkNest.API.Controllers
     [ApiController]
     [Authorize]
     [ValidateLocationScope]
+    [RecordScope(RecordKind.Invoice, "id", "publicId")] // location-bound staff: only invoices of their locations
     public class InvoiceController : ControllerBase
     {
         /// <summary>Every invoice is due this many days after its invoice date (the invoice date is the day it is issued).</summary>
@@ -135,6 +136,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/customer/{customerId:int}/invoices")]
         [Authorize(Roles = StaffRoles)]
         [HttpGet("api/customers/{customerId:int}/invoices")]
+        [RecordScope(RecordKind.Customer, "customerId")]
         public async Task<IActionResult> GetInvoicesByCustomerId(
             int customerId,
             [FromQuery] int page = 1,
@@ -210,9 +212,21 @@ namespace WorkNest.API.Controllers
         [HttpGet("WorkNest/api/invoice/sales-tax/{publicId:guid}/download")]
         [HttpGet("api/invoice/sales-tax/{publicId:guid}/pdf")]
         [HttpGet("api/invoice/sales-tax/{publicId:guid}/download")]
-        [AllowAnonymous]
         public async Task<IActionResult> GetSalesTaxPdf(Guid publicId)
         {
+            // Was anonymous: anyone holding the link could read the invoice (and opening it created the sales-tax
+            // invoice). Now staff (location-bound staff via [RecordScope]) or the customer the invoice belongs to.
+            // Invoice PDFs carry the sales-tax invoice as extra pages instead of this link.
+            var invoiceId = await ResolveInvoiceIdForSalesTaxAsync(publicId);
+            if (invoiceId == null)
+                return NotFound(new { isSuccessful = false, message = "Sales Tax Invoice not found." });
+            if (!User.IsStaff())
+            {
+                var email = User.GetEmail();
+                if (string.IsNullOrWhiteSpace(email) || !await _db.IsInvoiceOwnedByDbAsync(invoiceId.Value, email))
+                    return NotFound(new { isSuccessful = false, message = "Sales Tax Invoice not found." });
+            }
+
             try
             {
                 var dto = await _db.GetCustomerSTInvoiceByPublicIdAsync(publicId);
@@ -281,6 +295,20 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        /// <summary>The invoice behind a sales-tax link GUID: a sales-tax invoice's PublicId or the invoice's own PublicId.</summary>
+        private async Task<int?> ResolveInvoiceIdForSalesTaxAsync(Guid publicId)
+        {
+            using var conn = await OpenConnectionAsync();
+            using var cmd = new SqlCommand(@"
+                SELECT TOP 1 Id FROM (
+                    SELECT st.CustomerInvoiceId AS Id, 0 AS Pref FROM dbo.WN_CustomerSTInvoice st WITH (NOLOCK) WHERE st.PublicId = @Guid
+                    UNION ALL
+                    SELECT i.Id, 1 FROM dbo.WN_Invoices i WITH (NOLOCK) WHERE i.PublicId = @Guid) x
+                ORDER BY Pref;", conn);
+            cmd.Parameters.Add("@Guid", SqlDbType.UniqueIdentifier).Value = publicId;
+            return await cmd.ExecuteScalarAsync() is int id ? id : null;
+        }
+
         private static bool HasColumn(SqlDataReader reader, string columnName)
         {
             for (int i = 0; i < reader.FieldCount; i++)
@@ -341,11 +369,7 @@ namespace WorkNest.API.Controllers
                         && Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId"))) == 6;
                     if (HasColumn(reader, "WithholdingTaxRate") && !reader.IsDBNull(reader.GetOrdinal("WithholdingTaxRate")))
                         dto.WithholdingTaxRate = reader.GetDecimal(reader.GetOrdinal("WithholdingTaxRate"));
-                    if (HasColumn(reader, "STPublicId") && !reader.IsDBNull(reader.GetOrdinal("STPublicId")))
-                    {
-                        var stPublicId = reader.GetGuid(reader.GetOrdinal("STPublicId"));
-                        dto.SupportChargesInvoiceUrl = $"/api/invoice/sales-tax/{stPublicId}/pdf";
-                    }
+                    // The sales-tax invoice (STPublicId) is attached further down, after it is made sure to exist.
                 }
                 else
                 {
@@ -445,7 +469,7 @@ namespace WorkNest.API.Controllers
             {
                 dto.AppliedTaxPercentage = 0m;
                 dto.AppliedChargePercentage = 0m;
-                dto.SupportChargesInvoiceUrl = null;
+                dto.SalesTaxInvoice = null;
             }
             else
             {
@@ -476,26 +500,11 @@ namespace WorkNest.API.Controllers
                 stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
             }
 
-            if (stPublicId.HasValue && hasTax)
-            {
-                var baseUrl = _config["Application:PublicBaseUrl"];
-                if ((string.IsNullOrWhiteSpace(baseUrl) || baseUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase)) && Request != null)
-                {
-                    baseUrl = $"{Request.Scheme}://{Request.Host}{Request.PathBase}";
-                }
-                if (string.IsNullOrWhiteSpace(baseUrl))
-                {
-                    baseUrl = "http://localhost:5200";
-                }
-
-                var cleanBase = baseUrl.TrimEnd('/');
-                var pathPrefix = cleanBase.EndsWith("/WorkNest", StringComparison.OrdinalIgnoreCase) ? "" : "/WorkNest";
-                dto.SupportChargesInvoiceUrl = $"{cleanBase}{pathPrefix}/api/invoice/sales-tax/{stPublicId.Value}/pdf";
-            }
-            else
-            {
-                dto.SupportChargesInvoiceUrl = null;
-            }
+            // The sales-tax invoice for support services goes into the same PDF as extra pages. It used to be a link to
+            // an anonymous download, so anyone the PDF was forwarded to could open it.
+            dto.SalesTaxInvoice = stPublicId.HasValue && hasTax
+                ? await _db.GetCustomerSTInvoiceByPublicIdAsync(stPublicId.Value)
+                : null;
             }
 
             return dto;
@@ -561,6 +570,9 @@ namespace WorkNest.API.Controllers
             if (string.IsNullOrWhiteSpace(email))
                 return Unauthorized(new { isSuccessful = false, message = "User identity required" });
 
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Booking, request.BookingId.ToString()))
+                return NotFound(new { isSuccessful = false, message = "Booking not found." });
+
             var result = await _payments.CreateAdvanceInvoiceAsync(request, email);
             if (!result.IsSuccessful) return BadRequest(result);
             return StatusCode(201, result);
@@ -574,6 +586,13 @@ namespace WorkNest.API.Controllers
             {
                 if (req == null || req.UserId <= 0 || req.Lines == null || req.Lines.Count == 0)
                     return BadRequest(new { isSuccessful = false, message = "UserId and at least one line item are required." });
+
+                // Location-bound staff: only for bookings / customers of their locations.
+                var inScope = req.BookingId is > 0
+                    ? await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Booking, req.BookingId.Value.ToString())
+                    : await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.User, req.UserId.ToString());
+                if (!inScope)
+                    return NotFound(new { isSuccessful = false, message = "Customer not found." });
 
                 using var conn = await OpenConnectionAsync();
 
@@ -922,6 +941,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/invoice/send-initial/{bookingId:int}")]
         [Authorize(Roles = StaffRoles)]
         [HttpPost("api/booking/{bookingId:int}/send-initial-invoice")]
+        [RecordScope(RecordKind.Booking, "bookingId")]
         public async Task<IActionResult> SendInitialInvoiceForBooking(int bookingId, [FromQuery] DateTime? issuedOn = null, [FromQuery] bool preview = false,
             [FromQuery] string? invoiceType = null, [FromQuery] decimal? whTaxId = null)
         {
@@ -1282,6 +1302,7 @@ namespace WorkNest.API.Controllers
 
         [HttpPost("api/booking/{bookingId:int}/generate-next-invoice")]
         [Authorize(Roles = StaffRoles)]
+        [RecordScope(RecordKind.Booking, "bookingId")]
         public async Task<IActionResult> GenerateNextInvoiceForBooking(int bookingId)
         {
             // Read-the-last-period-then-insert is not atomic: a double click or two staff members could both bill the
