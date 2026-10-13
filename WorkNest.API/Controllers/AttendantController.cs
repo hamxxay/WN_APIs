@@ -390,7 +390,8 @@ namespace WorkNest.API.Controllers
         private bool HasValidHikvisionApiKey()
         {
             var configuredKey = _configuration["Hikvision:ApiKey"];
-            if (string.IsNullOrWhiteSpace(configuredKey)) configuredKey = "WN-Hikvision-Secret-Key-2026";
+            // No key configured: the export needs a staff sign-in (there used to be a built-in fallback key, public in the repo).
+            if (string.IsNullOrWhiteSpace(configuredKey)) return false;
             if (!Request.Headers.TryGetValue("X-Hikvision-Api-Key", out var apiKeyHeader)) return false;
             var supplied = apiKeyHeader.ToString();
             if (string.IsNullOrEmpty(supplied)) return false;

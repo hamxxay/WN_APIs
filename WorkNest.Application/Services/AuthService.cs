@@ -45,7 +45,7 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User registered successfully.");
         }
 
-        public async Task<ApiResponse> LoginAsync(UserLoginRequest request)
+        public async Task<ApiResponse> LoginAsync(UserLoginRequest request, bool firebaseVerified = false)
         {
             var row = await _db.GetUserByEmailAsync(request.Email);
             string? publicId;
@@ -53,7 +53,9 @@ namespace WorkNest.Application.Services
             int? locationId = null;
 
             var name = ResolveName(request.Name, request.FirstName, request.LastName, request.Email);
-            bool isFirebaseVerified = !string.IsNullOrWhiteSpace(request.FirebaseIdToken);
+            // Set by AuthController only after the Firebase ID token verified. A token merely being present proves nothing
+            // (any text used to skip the password check).
+            bool isFirebaseVerified = firebaseVerified;
 
             if (row is null)
             {
@@ -71,8 +73,10 @@ namespace WorkNest.Application.Services
                 if (!isFirebaseVerified)
                 {
                     var dbPassword = row.TryGetValue("PasswordHash", out var pw) ? pw?.ToString() : null;
-                    if (string.IsNullOrWhiteSpace(request.Password) ||
-                        (!string.IsNullOrWhiteSpace(dbPassword) && !string.Equals(dbPassword, request.Password, StringComparison.Ordinal)))
+                    // Without Firebase proof only a password matching the stored one signs in. An account with no stored
+                    // password (created through Firebase) can't be entered this way; it used to accept any password.
+                    if (string.IsNullOrWhiteSpace(request.Password) || string.IsNullOrWhiteSpace(dbPassword) ||
+                        !string.Equals(dbPassword, request.Password, StringComparison.Ordinal))
                     {
                         return ApiResponse.Fail("Invalid email or password.");
                     }

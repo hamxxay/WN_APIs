@@ -8,7 +8,8 @@ namespace WorkNest.Application.Interfaces
     {
         Task<ApiResponse> SyncUserAsync(UserSyncRequest request);
         Task<ApiResponse> RegisterAsync(UserRegisterRequest request);
-        Task<ApiResponse> LoginAsync(UserLoginRequest request);
+        /// <param name="firebaseVerified">True only when the caller verified the request's Firebase ID token.</param>
+        Task<ApiResponse> LoginAsync(UserLoginRequest request, bool firebaseVerified = false);
         Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request);
         Task<ApiResponse> GetMeAsync(string email);
         Task<ApiResponse> UpdateMeAsync(string email, UpdateMyProfileRequest request);
