@@ -52,8 +52,11 @@ namespace WorkNest.API.Controllers
 
         /// <summary>
         /// Dashboard / sync activity (WN_HIK_SyncLog): machine online/offline, enrollments, syncs.
+        /// Admin / super admin only: the log also holds sign-in audit rows with client IPs, and the CMS and the app
+        /// show the Access Activity Log to admins only.
         /// </summary>
         [HttpGet("api/hik/access/activity")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
         public async Task<IActionResult> GetActivity([FromQuery] int limit = 200)
         {
             var result = await _access.GetSyncActivityAsync(limit, Scope());

@@ -12,6 +12,8 @@ namespace WorkNest.Application.Interfaces
         Task<(IEnumerable<QuotationResponse> Rows, int Total)> GetQuotationsAsync(int page, int limit, string? search, int? locationId = null);
         Task<IEnumerable<QuotationResponse>> GetQuotationHistoryAsync(int customerId, int spaceId);
         Task<IEnumerable<QuotationResponse>> GetQuotationsByCustomerAsync(int customerId);
+        /// <summary>A customer's quotations; limit null / &lt; 1 = all. sentToCustomerOnly: only those sent to the customer. Total = before paging.</summary>
+        Task<(IEnumerable<QuotationResponse> Items, int Total)> GetQuotationsByCustomerPageAsync(int customerId, int? page, int? limit, bool sentToCustomerOnly = false);
         Task<IDictionary<string, object?>> ConvertQuotationToBookingAsync(int quotationId, int? createdById);
         Task SendQuotationEmailAsync(int quotationId, string? overrideEmail);
         Task<QuotationResponse> AcceptQuotationAsync(int quotationId, int version, int customerId, string? note, int? userId);

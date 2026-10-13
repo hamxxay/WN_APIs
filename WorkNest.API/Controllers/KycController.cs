@@ -35,7 +35,8 @@ namespace WorkNest.API.Controllers
 
         private string GetCurrentUserRole() => User.GetRole();
         // Admins and Sales Executives are limited to their locations (main + extra); Super Admins see every location (null).
-        // A location-bound user with no location gets an empty list and so reaches no customer.
+        // One customer is reachable with the same rule as GET customer/{id} ([RecordScope]): customers of the caller's
+        // locations and customers with no location yet; customers tied only to other locations are refused.
         private IReadOnlyCollection<int>? Scope() => User.IsLocationBoundRole() ? User.GetLocationIds() : null;
         private bool CanVerify() => Roles.IsAdminRole(GetCurrentUserRole());
 

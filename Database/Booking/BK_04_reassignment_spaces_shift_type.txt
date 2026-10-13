@@ -1,0 +1,68 @@
+USE [WorkNestAEO];
+-- For the test database change the first line to USE [SAC400];
+-- ============================================================================================
+-- Fix: GET /api/booking/available-spaces-reassignment (the CMS "Reassign space" dialog) fails ("Procedure or
+-- function WN_Bookings_GetAvailableSpacesForReassignment has too many arguments specified"). Since 25/09/2026
+-- the API passes @ShiftType, but this procedure never had it.
+--
+-- Adds @ShiftType NVARCHAR(20) = N'24_7' and the same shift-overlap rule that WN_Bookings_GetAvailableSpaces,
+-- WN_Spaces_GetAvailable and WN_Bookings_Insert already use: a booking blocks the space when either side is
+-- 24/7 or both are the same shift. With the default (24_7, what the CMS sends) the result is the same list as
+-- before. Nothing else changes. No tables are changed. Safe to run again.
+-- Run as ONE statement in DBeaver (select all, execute).
+-- ============================================================================================
+EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]
+    @SpaceTypeId      INT,
+    @StartOn          DATETIME2,
+    @EndOn            DATETIME2,
+    @ExcludeBookingId INT,
+    @ShiftType        NVARCHAR(20) = N''24_7''
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @NormalizedShift NVARCHAR(20) = CASE
+        WHEN @ShiftType IS NULL OR @ShiftType = '''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+        WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+        WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+        ELSE LOWER(@ShiftType)
+    END;
+
+    SELECT
+        s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
+        s.LocationId AS LocationId, l.Name AS LocationName,
+        s.Capacity, s.ImageUrl,
+        vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit
+    FROM dbo.WN_Spaces    s  WITH (NOLOCK)
+    JOIN dbo.WN_Locations l  WITH (NOLOCK) ON l.Id = s.LocationId
+    OUTER APPLY (
+        SELECT TOP 1
+            sp.SeatPrice,
+            sp.SeatPrice * s.Capacity AS RoomPrice,
+            sp.SecurityDeposit
+        FROM dbo.WN_SpacePricing sp
+        WHERE sp.SpaceId      = s.Id
+          AND sp.IsActive     = 1
+          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE)
+          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE))
+        ORDER BY sp.EffectiveFrom DESC
+    ) vp
+    WHERE s.IsActive       = 1
+      AND s.SpaceTypeId = @SpaceTypeId
+      AND NOT EXISTS (
+          SELECT 1 FROM dbo.WN_Bookings bk
+          WHERE bk.SpaceId         = s.Id
+            AND bk.IsDeleted       = 0
+            AND bk.BookingStatusId IN (1, 2, 5, 33)
+            AND bk.Id             <> @ExcludeBookingId
+            AND @StartOn           < bk.EndOn
+            AND @EndOn             > bk.StartOn
+            AND (
+                @NormalizedShift = ''24_7''
+                OR ISNULL(bk.ShiftType, ''24_7'') = ''24_7''
+                OR @NormalizedShift = ISNULL(bk.ShiftType, ''24_7'')
+            )
+      )
+    ORDER BY TRY_CAST(s.Code AS INT), s.Code;
+END');
+
+SELECT 'WN_Bookings_GetAvailableSpacesForReassignment now accepts @ShiftType' AS Result, DB_NAME() AS DatabaseName;

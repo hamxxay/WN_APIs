@@ -1598,6 +1598,56 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
         }
 
+        // Amount recorded as paid on a booking (alias b): the larger of its invoices' PaidTotal (fee receipts and
+        // WN_RecordInvoicePayment set it) and its paid (StatusId 2) WN_Payments rows, by booking or by one of its
+        // invoices. Larger, not sum: WN_RecordInvoicePayment writes both for the same money. Used by the customer
+        // cancel check and GET booking/my (totalPaidAmount), so "anything paid" means the same in both.
+        private const string BookingPaidApplySql = @"
+                  OUTER APPLY (SELECT ISNULL(SUM(ISNULL(pi.PaidTotal, 0)), 0) AS InvoicePaid
+                                 FROM dbo.WN_Invoices pi WITH (NOLOCK) WHERE pi.BookingId = b.Id) paid_inv
+                  OUTER APPLY (SELECT ISNULL(SUM(ISNULL(pp.Amount, 0)), 0) AS PaymentsPaid
+                                 FROM dbo.WN_Payments pp WITH (NOLOCK)
+                                WHERE pp.StatusId = 2
+                                  AND (pp.BookingIdInt = b.Id
+                                       OR pp.InvoiceId IN (SELECT pi2.Id FROM dbo.WN_Invoices pi2 WITH (NOLOCK) WHERE pi2.BookingId = b.Id))) paid_pay";
+        private const string BookingPaidAmountSql =
+            "CAST(CASE WHEN paid_inv.InvoicePaid > paid_pay.PaymentsPaid THEN paid_inv.InvoicePaid ELSE paid_pay.PaymentsPaid END AS DECIMAL(18,2))";
+
+        public async Task<(int StatusId, bool HasPayment)?> GetBookingCancelCheckDbAsync(int bookingId, string email)
+        {
+            await using var c = await Open();
+            // Same owner rule as WN_Bookings_Cancel (the booking's user has this email).
+            const string sql = @"
+                SELECT b.BookingStatusId, " + BookingPaidAmountSql + @" AS TotalPaid
+                  FROM dbo.WN_Bookings b WITH (NOLOCK)
+                  JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId" + BookingPaidApplySql + @"
+                 WHERE b.Id = @Id AND b.IsDeleted = 0 AND u.Email = @Email;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = bookingId;
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return null;
+            return (r.IsDBNull(0) ? 0 : Convert.ToInt32(r.GetValue(0)), !r.IsDBNull(1) && Convert.ToDecimal(r.GetValue(1)) > 0m);
+        }
+
+        public async Task<IDictionary<int, decimal>> GetBookingPaidAmountsDbAsync(IEnumerable<int> bookingIds)
+        {
+            var result = new Dictionary<int, decimal>();
+            var ids = bookingIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            await using var c = await Open();
+            // Booking ids are ints read from the database, never user text.
+            var sql = @"
+                SELECT b.Id, " + BookingPaidAmountSql + @" AS TotalPaid
+                  FROM dbo.WN_Bookings b WITH (NOLOCK)" + BookingPaidApplySql + $@"
+                 WHERE b.Id IN ({string.Join(",", ids)});";
+            await using var cmd = new SqlCommand(sql, c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                result[r.GetInt32(0)] = r.IsDBNull(1) ? 0m : Convert.ToDecimal(r.GetValue(1));
+            return result;
+        }
+
         public async Task<IDictionary<string, object?>?> GetBookingSummaryRowDbAsync(int bookingId)
         {
             await using var c = await Open();
@@ -3077,8 +3127,25 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_GetByGuid", c);
             AddIdOrGuidParameters(cmd, guid);
-            await using var r = await cmd.ExecuteReaderAsync();
-            return await r.ReadAsync() ? ToDict(r) : null;
+            IDictionary<string, object?>? row;
+            await using (var r = await cmd.ExecuteReaderAsync())
+                row = await r.ReadAsync() ? ToDict(r) : null;
+            if (row is null) return null;
+
+            // WN_Customers_GetByGuid has no NTN / SECP columns; the list (WN_Customers_GetList) has them.
+            if (!row.ContainsKey("NTN") && row.TryGetValue("Id", out var cid) && cid is not null)
+            {
+                await using var tax = new SqlCommand(
+                    "SELECT NTN, SecpRegistrationNo FROM dbo.WN_Customers WITH (NOLOCK) WHERE Id = @Id;", c);
+                tax.Parameters.Add("@Id", SqlDbType.Int).Value = Convert.ToInt32(cid);
+                await using var tr = await tax.ExecuteReaderAsync();
+                if (await tr.ReadAsync())
+                {
+                    row["NTN"] = N(tr["NTN"]);
+                    row["SecpRegistrationNo"] = N(tr["SecpRegistrationNo"]);
+                }
+            }
+            return row;
         }
 
         public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? ntn = null, string? secp = null)
@@ -3198,6 +3265,45 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 lines = await ReadAll(r);
 
             return (header, lines);
+        }
+
+        /// <summary>
+        /// GetChallanWithDetailsAsync for several bookings in one round trip: the same procedure
+        /// (WN_Challans_GetFullByBooking) once per booking in one batch. Key = booking id.
+        /// </summary>
+        public async Task<IDictionary<int, (IDictionary<string, object?>? ChallanHeader, IEnumerable<IDictionary<string, object?>> Lines)>> GetChallansWithDetailsAsync(IEnumerable<int> bookingIds)
+        {
+            var result = new Dictionary<int, (IDictionary<string, object?>? ChallanHeader, IEnumerable<IDictionary<string, object?>> Lines)>();
+            var ids = bookingIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+
+            await using var c = await Open();
+            foreach (var chunk in ids.Chunk(100))
+            {
+                await using var cmd = new SqlCommand { Connection = c };
+                var sql = new System.Text.StringBuilder();
+                for (int i = 0; i < chunk.Length; i++)
+                {
+                    sql.Append("EXEC dbo.WN_Challans_GetFullByBooking @BookingId = @B").Append(i).Append(";\n");
+                    cmd.Parameters.Add("@B" + i, SqlDbType.Int).Value = chunk[i];
+                }
+                cmd.CommandText = sql.ToString();
+                await using var r = await cmd.ExecuteReaderAsync();
+
+                // Two result sets per booking, in order: challan header (first row = latest challan), then the lines.
+                for (int i = 0; i < chunk.Length; i++)
+                {
+                    if (i > 0 && !await r.NextResultAsync()) break;
+                    IDictionary<string, object?>? header = null;
+                    if (await r.ReadAsync())
+                        header = ToDict(r);
+                    var lines = new List<IDictionary<string, object?>>();
+                    if (await r.NextResultAsync())
+                        lines = await ReadAll(r);
+                    result[chunk[i]] = (header, lines);
+                }
+            }
+            return result;
         }
 
         public async Task InsertQuotationDetailsAsync(int quotationId, IEnumerable<QuotationDetailDto> details, int? createdById)
@@ -3671,10 +3777,15 @@ END";
                     ISNULL(s.Capacity, 1) AS Capacity,
                     (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))) AS ActiveAttendantsCount
                 FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
+                JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
                 LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = bd.CustomerCode OR c.Email = bd.CustomerEmail
                 LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
                 WHERE (c.Id = @CustomerId OR bd.CustomerCode = (SELECT Code FROM dbo.WN_Customers WHERE Id = @CustomerId))
                   AND bd.IsDeleted = 0
+                  -- current bookings only (same rule as the door-access overview / suspensions):
+                  AND ISNULL(b.IsDeleted, 0) = 0
+                  AND b.BookingStatusId NOT IN (3, 4, 6, 86) -- rejected / old cancelled / no show / cancelled
+                  AND bd.EndDateTime >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) -- not ended
                 ORDER BY bd.Id DESC;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);

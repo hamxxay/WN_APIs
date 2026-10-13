@@ -20,15 +20,18 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IKycFileStorage _fileStorage;
         private readonly KycStorageSettings _settings;
+        private readonly IRecordScopeRepository _scope;
 
         public KycService(
             IDbRepository db,
             IKycFileStorage fileStorage,
-            IOptions<KycStorageSettings> settings)
+            IOptions<KycStorageSettings> settings,
+            IRecordScopeRepository scope)
         {
             _db = db;
             _fileStorage = fileStorage;
             _settings = settings.Value;
+            _scope = scope;
         }
 
         public async Task<(IEnumerable<KycCustomerListItemViewModel> Items, int Total)> GetCustomerKycListAsync(
@@ -378,15 +381,16 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>
-        /// Null <paramref name="locationIds"/> (not location-bound) reaches every customer. Otherwise the customer must belong
-        /// to one of the caller's locations through a booking or their user account; no locations reaches nobody.
+        /// Same rule as [RecordScope] on GET customer/{id}: null <paramref name="locationIds"/> (not location-bound)
+        /// reaches every customer; a customer with no location yet (no booking and no location on their user account)
+        /// is open to location-bound staff too; otherwise one of the customer's locations (bookings or user account)
+        /// must be one of the caller's. A customer tied only to other locations is refused.
         /// </summary>
         private async Task<bool> ReachesCustomerAsync(int customerId, IReadOnlyCollection<int>? locationIds)
         {
             if (locationIds == null) return true;
-            foreach (var locationId in locationIds.Distinct())
-                if (await _db.CustomerBelongsToLocationDbAsync(customerId, locationId)) return true;
-            return false;
+            var customerLocations = await _scope.GetLocationIdsAsync(RecordKind.Customer, customerId.ToString());
+            return customerLocations == null || customerLocations.Count == 0 || customerLocations.Any(locationIds.Contains);
         }
 
         #region Helper Validation & Solvers

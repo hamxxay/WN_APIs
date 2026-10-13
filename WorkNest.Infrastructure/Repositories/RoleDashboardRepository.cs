@@ -199,7 +199,13 @@ namespace WorkNest.Infrastructure.Repositories
                     SELECT @AccessSuspended = COUNT(*) FROM dbo.WN_HIK_BookingAccessSuspensions sus WITH (NOLOCK)
                       JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = sus.BookingId
                       JOIN @Spaces sp ON sp.Id = b.SpaceId
-                     WHERE sus.ResolvedAt IS NULL AND (sus.OverrideUntil IS NULL OR sus.OverrideUntil < @Today);
+                     WHERE sus.ResolvedAt IS NULL AND (sus.OverrideUntil IS NULL OR sus.OverrideUntil < @Today)
+                       -- booking still running (same conditions as the door-access overview, GetHikAccessOverviewDbAsync)
+                       AND ISNULL(b.IsDeleted, 0) = 0
+                       AND b.BookingStatusId NOT IN (3, 4, 6, 86) -- rejected / old cancelled / no show / cancelled
+                       AND EXISTS (SELECT 1 FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                                    WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0
+                                      AND d.EndDateTime >= @Today);
                 SELECT @OpenComplaints AS OpenComplaints, @UnreadWhatsApp AS UnreadWhatsApp,
                        (SELECT COUNT(*) FROM dbo.WN_Contacts WITH (NOLOCK) WHERE StatusId = 1) AS NewInquiries,
                        @KycPending AS KycPending, @AccessSuspended AS AccessSuspended,
