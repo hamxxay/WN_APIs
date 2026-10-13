@@ -107,6 +107,8 @@ namespace WorkNest.Application.DTOs.HikDevice
         public int PersonId { get; set; }
         public int BookingDetailId { get; set; }
         public string Name { get; set; } = string.Empty;
+        /// <summary>WN_Persons.Email — the only account that may unlock this person's door from the app.</summary>
+        public string? Email { get; set; }
         public string IdType { get; set; } = string.Empty;
         public string IdNumber { get; set; } = string.Empty;
         public DateTime? StartDateTime { get; set; }

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using WorkNest.Application.DTOs.Attendant;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
@@ -30,18 +31,17 @@ namespace WorkNest.API.Controllers
 
         /// <summary>
         /// The person behind an app unlock: the details must match an access user again (same rule as verify), the
-        /// room must be one of theirs with access on, and when the company registered an email for them it must be the
-        /// email of the logged-in account — knowing someone's CNIC is not enough to open their door.
+        /// room must be one of theirs with access on, and the company must have registered an email for them that is the
+        /// email of the logged-in account — knowing someone's name and CNIC is not enough to open their door.
         /// </summary>
         private async Task<(int? PersonId, IActionResult? Error)> ResolveDoorUserAsync(MobileDoorRequest request)
         {
             var verified = await _attendants.VerifyMobileAccessAsync(request);
             if (!verified.Matched || verified.PersonId is not int personId)
                 return (null, Ok(ApiResponse.Fail(verified.Message)));
-            var account = User.GetEmail();
-            if (!string.IsNullOrWhiteSpace(verified.PersonEmail)
-                && !string.Equals(verified.PersonEmail, account?.Trim(), StringComparison.OrdinalIgnoreCase))
-                return (null, Ok(ApiResponse.Fail("Sign in with the email your company registered for you to unlock doors.")));
+            var refusal = MobileDoorAccount.Refusal(verified.PersonEmail, User.GetEmail());
+            if (refusal != null)
+                return (null, Ok(ApiResponse.Fail(refusal)));
             if (!verified.Spaces.Any(sp => sp.BookingDetailId == request.BookingDetailId && sp.IsEnabled))
                 return (null, Ok(ApiResponse.Fail("Your access to this room is turned off. Contact your company admin or reception.")));
             return (personId, null);
@@ -106,6 +106,9 @@ namespace WorkNest.API.Controllers
             var phoneError = WorkNest.Application.Helpers.Phone.Validate(request?.Phone);
             if (phoneError != null) return Ok(ApiResponse.Fail(phoneError));
             var result = await _attendants.VerifyMobileAccessAsync(request ?? new MobileAccessVerifyRequest());
+            // No email on record for the matched person: nothing ties their door to an account, so the app can't use it.
+            if (result.Matched && string.IsNullOrWhiteSpace(result.PersonEmail))
+                return Ok(ApiResponse.Fail(MobileDoorAccount.NoEmailOnRecord));
             return Ok(ApiResponse.Ok(result, result.Message));
         }
     }
