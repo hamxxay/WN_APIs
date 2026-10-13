@@ -1,0 +1,307 @@
+USE [WorkNestAEO];
+-- For the test database change the first line to USE [SAC400];
+-- ============================================================================================
+-- WorkNest app test fixes (13/10/2026): ALL database changes in ONE script.
+-- Run as ONE statement in DBeaver (select all, then execute). All or nothing: if any part fails, nothing changes.
+-- Safe to run again. No tables are created, altered or dropped.
+--
+--   1. WN_Bookings_GetSmartAvailable: accepts @ShiftType. Fixes the app's booking "is this space free?" check
+--      (GET /api/booking/smart/available), which fails on live with "too many arguments specified".
+--   2. WN_Bookings_GetAvailableSpacesForReassignment: accepts @ShiftType. Fixes "Reassign space" (app and CMS).
+--   3. WN_Bookings_UpdateStatus: rejecting a booking now also voids its open challan (StatusId 1 -> 4), exactly
+--      as cancelling already does, so the customer is no longer asked to pay a rejected booking.
+--   4. WN_Payments_GetMyList: fixes the app's Payments tab ("Invalid column name 'UserId'"). Applied ONLY when
+--      this database has the same broken version as the test database; otherwise skipped and reported.
+--   5. OPTIONAL data clean-up, off by default: voids the open challans of bookings that were rejected before
+--      today. To include it, change @VoidOldRejectedChallans below from 0 to 1.
+--
+-- The last result lists every step: Done / Skipped (with the reason). If something fails it says FAILED with
+-- the error, and nothing was changed.
+-- ============================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @VoidOldRejectedChallans BIT = 0;   -- 1 = also run part 5
+
+DECLARE @Log TABLE (Step INT IDENTITY(1,1), Item NVARCHAR(200), Result NVARCHAR(400));
+DECLARE @Count INT;
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 1. Booking availability check accepts @ShiftType -------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_GetSmartAvailable]
+        @CategoryCode NVARCHAR(30),
+        @StartOn      DATETIME2,
+        @EndOn        DATETIME2,
+        @Capacity     INT = NULL,
+        @ShiftType    NVARCHAR(20) = N''24_7''
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        DECLARE @NormalizedShift NVARCHAR(20) = CASE
+            WHEN @ShiftType IS NULL OR @ShiftType = '''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+            WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+            WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+            ELSE LOWER(@ShiftType)
+        END;
+
+        SELECT
+            s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
+            s.LocationId AS LocationId, l.Name AS LocationName,
+            s.SpaceTypeId AS SpaceTypeId, st.Name AS SpaceTypeName,
+            sc.Code AS CategoryCode, sc.Label AS CategoryLabel,
+            s.Capacity, s.ImageUrl,
+            vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit,
+            vp.BillingPeriodCode
+        FROM dbo.WN_Spaces          s  WITH (NOLOCK)
+        JOIN dbo.WN_Locations       l  WITH (NOLOCK) ON l.Id  = s.LocationId
+        JOIN dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+        JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
+        OUTER APPLY (
+            SELECT TOP 1
+                sp.SeatPrice,
+                sp.SeatPrice * s.Capacity AS RoomPrice,
+                sp.SecurityDeposit,
+                bp.Code AS BillingPeriodCode
+            FROM dbo.WN_SpacePricing   sp
+            JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
+            WHERE sp.SpaceId       = s.Id
+              AND sp.IsActive      = 1
+              AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE)
+              AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE))
+            ORDER BY sp.EffectiveFrom DESC
+        ) vp
+        WHERE s.IsActive  = 1
+          AND sc.Code     = @CategoryCode
+          AND (@Capacity  IS NULL OR s.Capacity >= @Capacity)
+          AND NOT EXISTS (
+              SELECT 1 FROM dbo.WN_Bookings bk
+              WHERE bk.SpaceId         = s.Id
+                AND bk.IsDeleted       = 0
+                AND bk.BookingStatusId IN (1, 2, 5, 33)
+                AND @StartOn           < bk.EndOn
+                AND @EndOn             > bk.StartOn
+                AND (
+                    @NormalizedShift = ''24_7''
+                    OR ISNULL(bk.ShiftType, ''24_7'') = ''24_7''
+                    OR @NormalizedShift = ISNULL(bk.ShiftType, ''24_7'')
+                )
+          )
+        ORDER BY s.Capacity ASC, TRY_CAST(s.Code AS INT), s.Code;
+    END');
+    INSERT INTO @Log (Item, Result) VALUES (N'1. WN_Bookings_GetSmartAvailable', N'Done: accepts @ShiftType');
+
+    -- 2. Reassign space accepts @ShiftType --------------------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]
+        @SpaceTypeId      INT,
+        @StartOn          DATETIME2,
+        @EndOn            DATETIME2,
+        @ExcludeBookingId INT,
+        @ShiftType        NVARCHAR(20) = N''24_7''
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        DECLARE @NormalizedShift NVARCHAR(20) = CASE
+            WHEN @ShiftType IS NULL OR @ShiftType = '''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+            WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+            WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+            ELSE LOWER(@ShiftType)
+        END;
+
+        SELECT
+            s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
+            s.LocationId AS LocationId, l.Name AS LocationName,
+            s.Capacity, s.ImageUrl,
+            vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit
+        FROM dbo.WN_Spaces    s  WITH (NOLOCK)
+        JOIN dbo.WN_Locations l  WITH (NOLOCK) ON l.Id = s.LocationId
+        OUTER APPLY (
+            SELECT TOP 1
+                sp.SeatPrice,
+                sp.SeatPrice * s.Capacity AS RoomPrice,
+                sp.SecurityDeposit
+            FROM dbo.WN_SpacePricing sp
+            WHERE sp.SpaceId      = s.Id
+              AND sp.IsActive     = 1
+              AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE)
+              AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE))
+            ORDER BY sp.EffectiveFrom DESC
+        ) vp
+        WHERE s.IsActive       = 1
+          AND s.SpaceTypeId = @SpaceTypeId
+          AND NOT EXISTS (
+              SELECT 1 FROM dbo.WN_Bookings bk
+              WHERE bk.SpaceId         = s.Id
+                AND bk.IsDeleted       = 0
+                AND bk.BookingStatusId IN (1, 2, 5, 33)
+                AND bk.Id             <> @ExcludeBookingId
+                AND @StartOn           < bk.EndOn
+                AND @EndOn             > bk.StartOn
+                AND (
+                    @NormalizedShift = ''24_7''
+                    OR ISNULL(bk.ShiftType, ''24_7'') = ''24_7''
+                    OR @NormalizedShift = ISNULL(bk.ShiftType, ''24_7'')
+                )
+          )
+        ORDER BY TRY_CAST(s.Code AS INT), s.Code;
+    END');
+    INSERT INTO @Log (Item, Result) VALUES (N'2. WN_Bookings_GetAvailableSpacesForReassignment', N'Done: accepts @ShiftType');
+
+    -- 3. Rejecting a booking voids its open challan ------------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_UpdateStatus]
+        @Id              INT,
+        @BookingStatusId TINYINT,
+        @UpdatedById     INT = NULL
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        UPDATE dbo.WN_Bookings SET
+            BookingStatusId = @BookingStatusId,
+            UpdatedOn       = SYSUTCDATETIME(),
+            UpdatedById     = @UpdatedById
+        WHERE Id = @Id AND IsDeleted = 0;
+        DECLARE @Updated INT = @@ROWCOUNT;
+
+        -- Rejected (3): void the open challan, as WN_Bookings_Cancel does, so the customer is no longer asked to pay it.
+        IF @BookingStatusId = 3 AND @Updated > 0
+            UPDATE dbo.WN_Challans SET StatusId = 4
+            WHERE BookingId = @Id AND StatusId = 1;
+    END');
+    INSERT INTO @Log (Item, Result) VALUES (N'3. WN_Bookings_UpdateStatus', N'Done: rejecting a booking voids its open challan');
+
+    -- 4. Payments tab (only when this database has the broken version) ---------------------------
+    IF OBJECT_ID(N'dbo.WN_Payments_GetMyList', N'P') IS NOT NULL
+       AND COL_LENGTH(N'dbo.WN_Payments', N'UserId') IS NULL
+       AND COL_LENGTH(N'dbo.WN_Payments', N'UserIdInt') IS NOT NULL
+       AND COL_LENGTH(N'dbo.WN_Payments', N'BookingIdInt') IS NOT NULL
+       AND OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Payments_GetMyList')) LIKE N'%u.IdGUID = p.UserId%'
+    BEGIN
+        EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Payments_GetMyList]
+            @UserEmail NVARCHAR(256)
+        AS
+        BEGIN
+            SET NOCOUNT ON;
+            DECLARE @sql NVARCHAR(MAX);
+
+            IF EXISTS (
+                SELECT 1 FROM sys.columns
+                WHERE object_id = OBJECT_ID(''dbo.WN_Payments'')
+                  AND name = ''UserId'' AND system_type_id = 56
+            )
+                SET @sql = N''
+                SELECT p.Id, p.IdGUID AS PublicId, bs.BookingId, p.MembershipId,
+                    p.PaymentMethodId, ISNULL(pm.Code, ''''Bank'''') AS PaymentMethodCode, ISNULL(pm.Label, ''''Bank Transfer / Challan'''') AS PaymentMethodLabel,
+                    p.Amount, ISNULL(p.CurrencyCode, ''''PKR'''') AS CurrencyCode, p.TransactionRef, ISNULL(p.StatusId, 1) AS StatusId,
+                    CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN ''''Paid'''' WHEN ISNULL(p.StatusId, 1) = 3 THEN ''''Failed'''' WHEN ISNULL(p.StatusId, 1) = 4 THEN ''''Refunded'''' WHEN ISNULL(p.StatusId, 1) = 5 THEN ''''Cancelled'''' ELSE ''''Pending'''' END AS PaymentStatus,
+                    p.ExpiresOn, p.PaidOn, p.CreatedOn,
+                    b.StartOn, b.EndOn,
+                    s.Name AS SpaceName, s.Code AS SpaceCode,
+                    ch.ChallanNumber, CASE WHEN b.ValidityDate > ch.ValidUntil OR ch.ValidUntil IS NULL THEN b.ValidityDate ELSE ch.ValidUntil END AS ChallanValidUntil,
+                    bs.SpaceNumber,
+                    bs.ContractStartDate,
+                    bs.ContractEndDate,
+                    bs.BillingPeriod,
+                    bs.BillingPeriodMonths,
+                    bs.MonthlyRent,
+                    bs.CurrentCycleAmount,
+                    bs.TotalContractAmount,
+                    bs.TotalPaidAmount,
+                    bs.BalanceLeft,
+                    bs.NextBillDueDate,
+                    bs.NextBillingDate,
+                    bs.SecurityDeposit
+                FROM dbo.WN_Payments p WITH (NOLOCK)
+                JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = p.UserId
+                LEFT JOIN dbo.WN_PaymentMethods pm WITH (NOLOCK) ON pm.Id = p.PaymentMethodId
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON (b.Id = p.BookingIdInt OR b.IdGUID = p.BookingId)
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                LEFT JOIN dbo.WN_vw_BookingSummary bs ON bs.BookingId = b.Id
+                OUTER APPLY (
+                    SELECT TOP 1 ChallanNumber, ValidUntil
+                    FROM dbo.WN_Challans WHERE BookingId = b.Id
+                    ORDER BY CreatedOn DESC
+                ) ch
+                WHERE u.Email = @UserEmail AND ISNULL(p.StatusId, 1) <> 5
+                ORDER BY p.CreatedOn DESC'';
+            ELSE
+                SET @sql = N''
+                SELECT p.Id, p.IdGUID AS PublicId, bs.BookingId, p.MembershipId,
+                    p.PaymentMethodId, ISNULL(pm.Code, ''''Bank'''') AS PaymentMethodCode, ISNULL(pm.Label, ''''Bank Transfer / Challan'''') AS PaymentMethodLabel,
+                    p.Amount, ISNULL(p.CurrencyCode, ''''PKR'''') AS CurrencyCode, p.TransactionRef, ISNULL(p.StatusId, 1) AS StatusId,
+                    CASE WHEN ISNULL(p.StatusId, 1) = 2 THEN ''''Paid'''' WHEN ISNULL(p.StatusId, 1) = 3 THEN ''''Failed'''' WHEN ISNULL(p.StatusId, 1) = 4 THEN ''''Refunded'''' WHEN ISNULL(p.StatusId, 1) = 5 THEN ''''Cancelled'''' ELSE ''''Pending'''' END AS PaymentStatus,
+                    p.ExpiresOn, p.PaidOn, p.CreatedOn,
+                    b.StartOn, b.EndOn,
+                    s.Name AS SpaceName, s.Code AS SpaceCode,
+                    ch.ChallanNumber, CASE WHEN b.ValidityDate > ch.ValidUntil OR ch.ValidUntil IS NULL THEN b.ValidityDate ELSE ch.ValidUntil END AS ChallanValidUntil,
+                    bs.SpaceNumber,
+                    bs.ContractStartDate,
+                    bs.ContractEndDate,
+                    bs.BillingPeriod,
+                    bs.BillingPeriodMonths,
+                    bs.MonthlyRent,
+                    bs.CurrentCycleAmount,
+                    bs.TotalContractAmount,
+                    bs.TotalPaidAmount,
+                    bs.BalanceLeft,
+                    bs.NextBillDueDate,
+                    bs.NextBillingDate,
+                    bs.SecurityDeposit
+                FROM dbo.WN_Payments p WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = p.BookingIdInt
+                JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = COALESCE(p.UserIdInt, b.UserId)
+                LEFT JOIN dbo.WN_PaymentMethods pm WITH (NOLOCK) ON pm.Id = p.PaymentMethodId
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                LEFT JOIN dbo.WN_vw_BookingSummary bs ON bs.BookingId = b.Id
+                OUTER APPLY (
+                    SELECT TOP 1 ChallanNumber, ValidUntil
+                    FROM dbo.WN_Challans WHERE BookingId = b.Id
+                    ORDER BY CreatedOn DESC
+                ) ch
+                WHERE u.Email = @UserEmail AND ISNULL(p.StatusId, 1) <> 5
+                ORDER BY p.CreatedOn DESC'';
+
+            EXEC sp_executesql @sql, N''@UserEmail NVARCHAR(256)'', @UserEmail;
+        END;');
+        INSERT INTO @Log (Item, Result) VALUES (N'4. WN_Payments_GetMyList', N'Done: joins fixed');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'4. WN_Payments_GetMyList',
+            N'Skipped: this database does not have the broken version (already fixed, or different from the test database). Nothing changed.');
+
+    -- 5. OPTIONAL: void open challans of bookings rejected before today ---------------------------
+    SELECT @Count = COUNT(*)
+      FROM dbo.WN_Challans c
+      JOIN dbo.WN_Bookings b ON b.Id = c.BookingId
+     WHERE c.StatusId = 1 AND b.BookingStatusId = 3 AND b.IsDeleted = 0;
+
+    IF @VoidOldRejectedChallans = 1
+    BEGIN
+        -- The challans that are voided (keep a copy of this result).
+        SELECT c.Id AS ChallanId, c.ChallanNumber, c.BookingId, b.UserId, c.StatusId AS ChallanStatusBefore
+          FROM dbo.WN_Challans c
+          JOIN dbo.WN_Bookings b ON b.Id = c.BookingId
+         WHERE c.StatusId = 1 AND b.BookingStatusId = 3 AND b.IsDeleted = 0
+         ORDER BY c.BookingId;
+
+        UPDATE c SET c.StatusId = 4
+          FROM dbo.WN_Challans c
+          JOIN dbo.WN_Bookings b ON b.Id = c.BookingId
+         WHERE c.StatusId = 1 AND b.BookingStatusId = 3 AND b.IsDeleted = 0;
+        SET @Count = @@ROWCOUNT;
+        INSERT INTO @Log (Item, Result) VALUES (N'5. Old rejected bookings',
+            N'Done: ' + CAST(@Count AS NVARCHAR(10)) + N' open challan(s) voided');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'5. Old rejected bookings',
+            N'Skipped (optional): ' + CAST(@Count AS NVARCHAR(10)) + N' open challan(s) of rejected bookings would be voided. Set @VoidOldRejectedChallans = 1 to include it.');
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT INTO @Log (Item, Result) VALUES (N'FAILED - nothing was changed',
+        ERROR_MESSAGE() + N' (line ' + CAST(ERROR_LINE() AS NVARCHAR(10)) + N')');
+END CATCH;
+
+SELECT Step, Item, Result, DB_NAME() AS DatabaseName FROM @Log ORDER BY Step;
