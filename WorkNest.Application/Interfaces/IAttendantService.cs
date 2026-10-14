@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Attendant;
+using WorkNest.Application.DTOs.HikDevice;
 
 namespace WorkNest.Application.Interfaces
 {
@@ -24,6 +25,12 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Rejects or cancels a pending request; false if it was no longer pending.</summary>
         Task<bool> CloseCapacityRequestAsync(int id, string status, string decidedByEmail, string? note);
         Task SoftRemoveAttendantFromBookingAsync(int bookingDetailId, int personId);
+        /// <summary>
+        /// Removes a person from a booked space and cancels their door access: blocks them on the room machine + every
+        /// Entrance machine (queued in WN_HIK_PendingOps for offline machines; Entrance stays open when another active
+        /// booking still allows them), then ends the assignment (AssignedTo) and the access status (WN_AccessStatus).
+        /// </summary>
+        Task<HikAccessSyncResultDto> RemoveAttendantAndRevokeAccessAsync(int bookingDetailId, int personId);
         Task<int> ToggleAccessStatusAsync(ToggleAccessStatusRequest request);
         Task<IEnumerable<AccessStatusExportDto>> GetAccessStatusExportAsync();
         Task<IEnumerable<CustomerActiveSpaceDto>> GetCustomerActiveSpacesAsync(int customerId);

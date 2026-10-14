@@ -1,4 +1,5 @@
 using System;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -27,14 +28,16 @@ namespace WorkNest.API.Controllers
         private readonly IHikEnrollmentService _hikEnrollment;
         private readonly IHikAccessSuspensionService _accessSuspension;
         private readonly IConfiguration _configuration;
+        private readonly IBookingEmployeeService _employees;
 
         public AttendantController(IAttendantService attendants, IHikEnrollmentService hikEnrollment,
-            IHikAccessSuspensionService accessSuspension, IConfiguration configuration)
+            IHikAccessSuspensionService accessSuspension, IConfiguration configuration, IBookingEmployeeService employees)
         {
             _attendants = attendants;
             _hikEnrollment = hikEnrollment;
             _accessSuspension = accessSuspension;
             _configuration = configuration;
+            _employees = employees;
         }
 
         /// <summary>
@@ -144,11 +147,35 @@ namespace WorkNest.API.Controllers
 
             // The check above can race with another assignment; the procedure re-checks under a per-room lock.
             var result = await _attendants.AssignAttendantToBookingAsync(request, allowOverCapacity: !IsSalesExecutiveOnly());
+            // A person the customer asked for on this booking ("Employees") is now on it: their request is done.
+            await _employees.MarkVerifiedIfRequestedAsync(bookingDetailId, request.PersonId, await StaffUserIdAsync());
             return Ok(new
             {
                 message = "Attendant successfully assigned to booking.",
                 data = result
             });
+        }
+
+        /// <summary>
+        /// Sales executive / admin at the branch: find the employee the customer added to this booking ("Employees" on the
+        /// website / app) by CNIC, mark the request verified and add the person to this space (same assignment as above).
+        /// 404 with data.canAddManually when the customer added nobody with this CNIC; 409 when they are already on it.
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpPost("api/bookings/{bookingDetailId}/attendants/by-cnic")]
+        public async Task<IActionResult> VerifyByCnic(int bookingDetailId, [FromBody] VerifyBookingEmployeeRequest? request)
+        {
+            try
+            {
+                var outcome = await _employees.VerifyByCnicAsync(bookingDetailId, request?.IdNumber, await StaffUserIdAsync(),
+                    allowOverCapacity: !IsSalesExecutiveOnly());
+                return CustomerEmployeeController.ToResult(outcome);
+            }
+            catch (BookingEmployeesNotInstalledException)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    WorkNest.Common.Responses.ApiResponse.Fail(BookingEmployeesNotInstalledException.UserMessage));
+            }
         }
 
         /// <summary>
@@ -397,6 +424,10 @@ namespace WorkNest.API.Controllers
             if (string.IsNullOrEmpty(supplied)) return false;
             return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(configuredKey), Encoding.UTF8.GetBytes(supplied));
         }
+
+        /// <summary>The signed-in staff member's WN_Users.Id (null if they can't be matched).</summary>
+        private Task<int?> StaffUserIdAsync() =>
+            _employees.ResolveUserIdAsync(User.GetEmail(), User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
 
         /// <summary>Sales executive without an admin role: may not assign people beyond a room's capacity.</summary>
         private bool IsSalesExecutiveOnly() =>

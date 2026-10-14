@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Attendant;
+using WorkNest.Application.DTOs.HikDevice;
 using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 
@@ -13,20 +14,22 @@ namespace WorkNest.Application.Services
     {
         private readonly IDbRepository _db;
         private readonly IEmailService _email;
+        private readonly IHikEnrollmentService _hikEnrollment;
 
         private readonly ILogger<AttendantService> _logger;
 
-        public AttendantService(IDbRepository db, IEmailService email, ILogger<AttendantService> logger)
+        public AttendantService(IDbRepository db, IEmailService email, IHikEnrollmentService hikEnrollment, ILogger<AttendantService> logger)
         {
             _logger = logger;
             _db = db;
             _email = email;
+            _hikEnrollment = hikEnrollment;
         }
 
-        private static string CleanRawDigitsAndChars(string input) =>
+        internal static string CleanRawDigitsAndChars(string input) =>
             string.IsNullOrWhiteSpace(input) ? string.Empty : System.Text.RegularExpressions.Regex.Replace(input, @"[^a-zA-Z0-9]", "").Trim();
 
-        private static string CleanRawPhone(string input) =>
+        internal static string CleanRawPhone(string input) =>
             string.IsNullOrWhiteSpace(input) ? string.Empty : System.Text.RegularExpressions.Regex.Replace(input, @"[^\d]", "").Trim();
 
         private static string NormalizeName(string input) =>
@@ -381,6 +384,24 @@ namespace WorkNest.Application.Services
         public async Task SoftRemoveAttendantFromBookingAsync(int bookingDetailId, int personId)
         {
             await _db.SoftRemoveAttendantFromBookingDbAsync(bookingDetailId, personId);
+        }
+
+        public async Task<HikAccessSyncResultDto> RemoveAttendantAndRevokeAccessAsync(int bookingDetailId, int personId)
+        {
+            // Machines first: once the assignment has ended the person is no longer found on the booking.
+            HikAccessSyncResultDto machines;
+            try
+            {
+                machines = await _hikEnrollment.SetAccessEnabledAsync(bookingDetailId, personId, false);
+            }
+            catch (Exception ex)
+            {
+                // The removal still goes ahead (access status off, assignment ended); the error is logged for follow-up.
+                _logger.LogError(ex, "Blocking person {PersonId} on the machines of booking detail {BookingDetailId} failed", personId, bookingDetailId);
+                machines = new HikAccessSyncResultDto { Enabled = false, Error = "The door machines could not be updated right away." };
+            }
+            await _db.SoftRemoveAttendantFromBookingDbAsync(bookingDetailId, personId);
+            return machines;
         }
 
         public async Task<int> ToggleAccessStatusAsync(ToggleAccessStatusRequest request)
