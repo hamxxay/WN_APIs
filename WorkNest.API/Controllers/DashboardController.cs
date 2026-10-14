@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.Interfaces;
 using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
 {
@@ -56,8 +57,10 @@ namespace WorkNest.API.Controllers
         /// Revenue &amp; occupancy forecast for the next N months (default 3, at most 12) from current leases: expected
         /// rent, occupancy at month end, leases ending / starting, per month (see ForecastService for the rules).
         /// Same location rules as the overview; per-location rows when more than one location is in scope.
+        /// The CEO may open it too (all locations, like a super admin); it is the only dashboard endpoint outside api/ceo it can use.
         /// </summary>
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive,ceo")]
+        [CeoAllowed]
         [HttpGet("api/dashboard/forecast")]
         public async Task<IActionResult> Forecast([FromQuery] int? locationId, [FromQuery] string? locationIds, [FromQuery] int? months) =>
             Ok(await _forecast.GetAsync(Scope(locationId, locationIds), months ?? 3));
@@ -87,7 +90,7 @@ namespace WorkNest.API.Controllers
         private static readonly HashSet<string> SalesExecutiveRoutes = new(StringComparer.OrdinalIgnoreCase)
         {
             "/admin", "/admin/dashboard", "/admin/kyc", "/admin/quotations", "/admin/agreements", "/admin/lease-templates", "/admin/invoices",
-            "/admin/bookings", "/admin/attendants", "/admin/staff-access", "/admin/biometric-users", "/admin/machine-users",
+            "/admin/bookings", "/admin/attendants", "/admin/biometric-users", "/admin/machine-users",
             "/admin/contacts", "/admin/complaints", "/admin/whatsapp", "/admin/network", "/admin/network/clients", "/admin/network/devices",
             "/admin/network/internet", "/admin/network/wifi"
         };

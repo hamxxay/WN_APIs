@@ -85,7 +85,7 @@ namespace WorkNest.API.Controllers
         }
 
         // ── User management (write) — admin / super admin only ─────────────────────
-        // Only a super admin may create, change or remove a super admin, or grant the super admin role.
+        // Only a super admin may create, change or remove a super admin, an admin or a CEO, or grant those roles.
         private const string ManageRoles = "admin,Admin,super_admin,SuperAdmin";
 
         /// <summary>An admin tied to locations may only hand out those locations (super admins: any).</summary>
@@ -212,29 +212,31 @@ namespace WorkNest.API.Controllers
             User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsSuperAdmin();
 
         /// <summary>
-        /// Only a Super Admin creates, promotes or changes Admins (and Super Admins). An Admin manages Sales Executives
-        /// and customers, giving them one, some or all of the Admin's own locations, and edits their own profile
-        /// (not their own role, locations or status).
+        /// Only a Super Admin creates, promotes or changes Admins, CEOs (and Super Admins). An Admin manages Sales
+        /// Executives and customers, giving them one, some or all of the Admin's own locations, and edits their own
+        /// profile (not their own role, locations or status).
         /// </summary>
         private bool GrantsAdminRole(string? role)
         {
             if (string.IsNullOrWhiteSpace(role) || CallerIsSuperAdmin()) return false;
-            var roleId = Roles.ParseRoleId(role);
-            return Roles.IsSuperAdmin(roleId) || roleId == Roles.AdminId;
+            return IsProtectedRole(Roles.ParseRoleId(role));
         }
 
-        /// <summary>True when a non-super-admin targets an existing Admin or Super Admin account.</summary>
+        /// <summary>True when a non-super-admin targets an existing Admin, CEO or Super Admin account.</summary>
         private async Task<bool> IsProtectedAsync(int id)
         {
             if (CallerIsSuperAdmin()) return false;
             var row = await _db.GetUserByIdAsync(id);
             if (row == null || !row.TryGetValue("RoleId", out var roleId) || roleId == null) return false;
-            var rid = Convert.ToInt32(roleId);
-            return Roles.IsSuperAdmin(rid) || rid == Roles.AdminId;
+            return IsProtectedRole(Convert.ToInt32(roleId));
         }
 
+        /// <summary>Roles only a Super Admin may give, change or take away: Super Admin, Admin, CEO.</summary>
+        private static bool IsProtectedRole(int roleId) =>
+            Roles.IsSuperAdmin(roleId) || roleId == Roles.AdminId || Roles.IsCeo(roleId);
+
         private IActionResult OnlySuperAdmin() =>
-            StatusCode(403, ApiResponse.Fail("Only a Super Admin can create or change Admin accounts."));
+            StatusCode(403, ApiResponse.Fail("Only a Super Admin can create or change Admin and CEO accounts."));
 
         /// <summary>True when the user record is the signed-in user's own account (matched on the JWT email).</summary>
         private async Task<bool> IsSelfAsync(int id)

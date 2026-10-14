@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WorkNest.API.Filters;
 using WorkNest.Application.DTOs.Announcement;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -80,6 +81,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/mobile/device-token")]
+        [CeoAllowed] // the app registers the push token for every signed-in user, the CEO too
         public async Task<IActionResult> RegisterDeviceToken(
             [FromBody] DeviceTokenRequest request)
         {

@@ -384,7 +384,8 @@ namespace WorkNest.Application.Services
             }
         }
 
-        private static Dictionary<int, Dictionary<string, JsonNode>> ParseRosters(IEnumerable<(int DeviceId, string? UsersJson)> snaps)
+        /// <summary>Machine rosters (WN_HIK_DevCache): device id -> employee no -> UserInfo (numOfFP / numOfFace / numOfCard).</summary>
+        internal static Dictionary<int, Dictionary<string, JsonNode>> ParseRosters(IEnumerable<(int DeviceId, string? UsersJson)> snaps)
         {
             var map = new Dictionary<int, Dictionary<string, JsonNode>>();
             foreach (var (deviceId, json) in snaps)
