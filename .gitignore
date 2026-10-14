@@ -2,6 +2,7 @@
 appsettings.Development.json
 appsettings.*.json
 !appsettings.json
+Database/*
 
 
 publish/appsettings.json
@@ -44,3 +45,4 @@ Table.sql
 Sp.sql
 Sp.sql
 Sp.sql
+Database/WN_AuditLog_All_Triggers.sql
