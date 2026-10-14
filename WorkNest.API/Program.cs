@@ -40,7 +40,12 @@ try
 
     // ── Controllers + JSON camelCase ──────────────────────────────────────────
     // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
-    builder.Services.AddControllers(o => o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>())
+    // CeoAccessFilter: a CEO account gets 403 on every endpoint not marked [CeoAllowed] (it only views the CEO dashboard).
+    builder.Services.AddControllers(o =>
+        {
+            o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
+            o.Filters.Add<WorkNest.API.Filters.CeoAccessFilter>();
+        })
         .AddJsonOptions(o =>
         {
             o.JsonSerializerOptions.PropertyNamingPolicy  = System.Text.Json.JsonNamingPolicy.CamelCase;

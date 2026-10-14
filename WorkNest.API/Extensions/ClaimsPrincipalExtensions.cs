@@ -99,6 +99,16 @@ namespace WorkNest.API.Extensions
         }
 
         /// <summary>
+        /// The CEO: read-only, every location (not location-bound, like a super admin), but only the endpoints marked
+        /// [CeoAllowed] (CeoAccessFilter answers 403 everywhere else). Not staff.
+        /// </summary>
+        public static bool IsCeo(this ClaimsPrincipal user)
+        {
+            if (user?.Identity?.IsAuthenticated != true) return false;
+            return user.IsInRole(Roles.Ceo) || Roles.IsCeo(user.GetRole());
+        }
+
+        /// <summary>
         /// Staff = admin, super admin, sales executive, receptionist (same role names as the [Authorize] attributes).
         /// Customers (role "general") are not staff.
         /// </summary>
