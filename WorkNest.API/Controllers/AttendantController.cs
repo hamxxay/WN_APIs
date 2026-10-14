@@ -275,14 +275,16 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// Soft remove an attendant from a booking detail (sets AssignedTo date and revokes access status).
+        /// Soft remove an attendant from a booking detail (sets AssignedTo date and revokes access status) and cancel
+        /// their door access: blocked on the room machine + every Entrance machine (queued for offline machines).
+        /// Same flow as a customer removing an employee from their booking.
         /// </summary>
         [Authorize]
         [HttpDelete("api/bookings/{bookingDetailId}/attendants/{personId}")]
         public async Task<IActionResult> SoftRemoveFromBooking(int bookingDetailId, int personId)
         {
-            await _attendants.SoftRemoveAttendantFromBookingAsync(bookingDetailId, personId);
-            return Ok(new { message = "Attendant soft-removed from booking assignment and access revoked." });
+            var machines = await _attendants.RemoveAttendantAndRevokeAccessAsync(bookingDetailId, personId);
+            return Ok(new { message = "Attendant soft-removed from booking assignment and access revoked.", machines });
         }
 
         /// <summary>
