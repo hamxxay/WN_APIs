@@ -2,8 +2,10 @@ namespace WorkNest.Application.DTOs.Dashboard
 {
     // Sales Manager dashboard (api/sales-manager/*): read-only, the manager's locations (super admins: all, with a
     // location filter). Shapes follow the shared Sales Manager contract used by the CMS and the mobile app; serialized
-    // camelCase. Money in PKR, months "yyyy-MM", dates "yyyy-MM-dd". Level 2 (breakdown) and level 3 (records) reuse
-    // the CEO dashboard shapes (CeoBreakdownDto, CeoRecordsDto, CeoQuotationRecordDto, CeoBookingRecordDto).
+    // camelCase. No money at all: figures are counts and desks (whole numbers), months "yyyy-MM", dates "yyyy-MM-dd".
+    // Desks of a booking / quotation = its Capacity, else the Capacity of its space; meeting rooms count 0 desks.
+    // Level 2 (breakdown) reuses the CEO dashboard shape (CeoBreakdownDto); level 3 (records) the CEO records envelope
+    // (CeoRecordsDto) with the Sales Manager rows below (desks instead of amounts).
 
     /// <summary>GET api/sales-manager/dashboard</summary>
     public class SalesManagerDashboardDto
@@ -31,9 +33,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal ConversionRate { get; set; }
         /// <summary>The same for the previous period (same number of days).</summary>
         public decimal ConversionRatePrev { get; set; }
-        public decimal QuotedValue { get; set; }
-        public decimal BookedValue { get; set; }
-        public decimal BookedValuePrev { get; set; }
+        /// <summary>Desks on the quotations created in the period.</summary>
+        public int QuotedDesks { get; set; }
+        /// <summary>Desks on the bookings created in the period.</summary>
+        public int BookedDesks { get; set; }
+        /// <summary>The same for the previous period.</summary>
+        public int BookedDesksPrev { get; set; }
         /// <summary>Last 12 months, oldest first.</summary>
         public List<SalesManagerFunnelMonthDto> Months { get; set; } = new();
     }
@@ -44,12 +49,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int Quotations { get; set; }
         public int Accepted { get; set; }
         public int Bookings { get; set; }
-        public decimal BookedValue { get; set; }
+        /// <summary>Desks on the bookings created in the month.</summary>
+        public int BookedDesks { get; set; }
     }
 
     public class SalesManagerTeamDto
     {
-        /// <summary>Admins and sales executives of the locations, ranked by converted value.</summary>
+        /// <summary>Admins and sales executives of the locations, ranked by desks sold, converted, quotations, name.</summary>
         public List<SalesManagerPersonDto> People { get; set; } = new();
         public List<SalesManagerTeamLocationDto> PerLocation { get; set; } = new();
     }
@@ -67,7 +73,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int Quotations { get; set; }
         public int Accepted { get; set; }
         public int Converted { get; set; }
-        public decimal ConvertedValue { get; set; }
+        /// <summary>Desks on the person's Converted quotations created in the period.</summary>
+        public int DesksSold { get; set; }
         /// <summary>Converted / quotations, percent (one decimal).</summary>
         public decimal ConversionRate { get; set; }
         /// <summary>Right now: their future prospects whose follow-up date has come (inquiry still open).</summary>
@@ -81,7 +88,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int SalesExecutives { get; set; }
         public int Quotations { get; set; }
         public int Converted { get; set; }
-        public decimal ConvertedValue { get; set; }
+        /// <summary>Desks on the Converted quotations created in the period on the location's spaces.</summary>
+        public int DesksSold { get; set; }
     }
 
     public class SalesManagerInquiriesDto
@@ -125,11 +133,20 @@ namespace WorkNest.Application.DTOs.Dashboard
     {
         /// <summary>Confirmed leases ending in the next 90 days, soonest first (first 50).</summary>
         public List<SalesManagerLeaseDto> Expiring { get; set; } = new();
+        /// <summary>Confirmed leases ending in the next 90 days (all of them).</summary>
         public int ExpiringCount { get; set; }
-        public decimal ExpiringMonthlyValue { get; set; }
-        /// <summary>Invoiced (non-void invoices) on the bookings created in the period.</summary>
-        public decimal NewBookingRevenue { get; set; }
-        public decimal NewBookingRevenuePrev { get; set; }
+        /// <summary>Desks on the leases ending in the next 90 days.</summary>
+        public int ExpiringDesks { get; set; }
+        /// <summary>Confirmed leases ending in the next 30 days.</summary>
+        public int Expiring30Count { get; set; }
+        /// <summary>Desks on the leases ending in the next 30 days.</summary>
+        public int Expiring30Desks { get; set; }
+        /// <summary>Desks on the confirmed leases that ended in the period (end date in the period, before now).</summary>
+        public int EndedDesks { get; set; }
+        /// <summary>funnel.bookedDesks - endedDesks.</summary>
+        public int NetDesks { get; set; }
+        /// <summary>The same for the previous period (desks booked - desks ended).</summary>
+        public int NetDesksPrev { get; set; }
         /// <summary>Last 12 months and the next 3, oldest first.</summary>
         public List<SalesManagerRenewalMonthDto> Months { get; set; } = new();
     }
@@ -142,7 +159,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Space { get; set; }
         public string? Location { get; set; }
         public string? EndOn { get; set; }
-        public decimal MonthlyAmount { get; set; }
+        /// <summary>Desks of the lease (0 for a meeting room).</summary>
+        public int Desks { get; set; }
         /// <summary>Days from today to the end date (negative = already ended).</summary>
         public int DaysLeft { get; set; }
     }
@@ -150,10 +168,41 @@ namespace WorkNest.Application.DTOs.Dashboard
     public class SalesManagerRenewalMonthDto
     {
         public string Month { get; set; } = "";
-        /// <summary>Invoiced on the bookings created in the month.</summary>
-        public decimal NewBookingRevenue { get; set; }
+        /// <summary>Desks on the bookings created in the month (0 for future months).</summary>
+        public int BookedDesks { get; set; }
+        /// <summary>Desks on the confirmed leases ending in the month.</summary>
+        public int EndingDesks { get; set; }
         /// <summary>Confirmed leases ending in the month.</summary>
         public int Expiring { get; set; }
+    }
+
+    /// <summary>records/quotations rows (no money: the desks quoted).</summary>
+    public class SalesManagerQuotationRecordDto
+    {
+        public int QuotationId { get; set; }
+        public string? QuotationNumber { get; set; }
+        public string? Customer { get; set; }
+        public string? Location { get; set; }
+        public string? CreatedBy { get; set; }
+        public string? Status { get; set; }
+        /// <summary>Desks of the quotation (0 for a meeting room).</summary>
+        public int Desks { get; set; }
+        /// <summary>UTC, ISO 8601 with Z.</summary>
+        public string? CreatedOn { get; set; }
+    }
+
+    /// <summary>records/bookings rows (no money: the desks booked).</summary>
+    public class SalesManagerBookingRecordDto
+    {
+        public int BookingId { get; set; }
+        public string? Customer { get; set; }
+        public string? Space { get; set; }
+        public string? Location { get; set; }
+        public string? StartOn { get; set; }
+        public string? EndOn { get; set; }
+        public string? Status { get; set; }
+        /// <summary>Desks of the booking (0 for a meeting room).</summary>
+        public int Desks { get; set; }
     }
 
     /// <summary>records/inquiries rows: the CEO inquiry row plus the follow-up date.</summary>

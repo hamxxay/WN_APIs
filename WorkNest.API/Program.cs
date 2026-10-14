@@ -215,7 +215,8 @@ try
     // CEO dashboard (api/ceo/*): stored procedures dbo.WN_Ceo_* (script CEO_01_dashboard_procedures).
     builder.Services.AddScoped<ICeoDashboardRepository, WorkNest.Infrastructure.Repositories.CeoDashboardRepository>();
     builder.Services.AddScoped<ICeoDashboardService, CeoDashboardService>();
-    // Sales Manager dashboard (api/sales-manager/*): stored procedures dbo.WN_SalesMgr_* (script SM_01_sales_manager).
+    // Sales Manager dashboard (api/sales-manager/*): stored procedures dbo.WN_SalesMgr_* (scripts SM_01_sales_manager and
+    // SM_02_sales_manager_desks: desks, no money).
     builder.Services.AddScoped<ISalesManagerDashboardRepository, WorkNest.Infrastructure.Repositories.SalesManagerDashboardRepository>();
     builder.Services.AddScoped<ISalesManagerDashboardService, SalesManagerDashboardService>();
     // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
