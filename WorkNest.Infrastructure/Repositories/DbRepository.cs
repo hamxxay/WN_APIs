@@ -2485,14 +2485,22 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
 
         // --- Contact ---
 
-        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search)
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_GetList", c);
             cmd.Parameters.AddWithValue("@Page", page);
             cmd.Parameters.AddWithValue("@Limit", limit);
             cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
-            await using var r = await cmd.ExecuteReaderAsync();
+            // Only sent when filtering, so the list keeps working on a database without CT_01 (no @InquiryType there).
+            if (!string.IsNullOrWhiteSpace(inquiryType)) cmd.Parameters.AddWithValue("@InquiryType", inquiryType);
+            SqlDataReader r;
+            try { r = await cmd.ExecuteReaderAsync(); }
+            catch (SqlException ex) when (ex.Number == 8144)
+            {
+                throw new InvalidOperationException("Filtering by Type needs the database update Database/Contact/CT_01_inquiry_type.txt.");
+            }
+            await using var _ = r;
             var rows = await ReadAll(r);
             int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
             return (rows, total);
@@ -2507,7 +2515,23 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return await ReadAll(r);
         }
 
-        public async Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message)
+        public async Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message,
+            string? inquiryType = null, string? referenceName = null)
+        {
+            try
+            {
+                return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, inquiryType, referenceName);
+            }
+            catch (SqlException ex) when (ex.Number == 8144 && inquiryType is not null)
+            {
+                // "Too many arguments": the database does not have CT_01 yet (WN_Contacts_Insert without @InquiryType).
+                // Save the inquiry without its Type rather than lose it (website / WhatsApp forms keep working).
+                return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, null, null);
+            }
+        }
+
+        private async Task<(int? Id, string? PublicId)> InsertContactCoreAsync(string contactType, int? userId, string name, string email, string? phone, string? message,
+            string? inquiryType, string? referenceName)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_Insert", c);
@@ -2517,6 +2541,11 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@Email", email);
             cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Message", (object?)message ?? DBNull.Value);
+            if (inquiryType is not null)
+            {
+                cmd.Parameters.AddWithValue("@InquiryType", inquiryType);
+                cmd.Parameters.AddWithValue("@ReferenceName", (object?)referenceName ?? DBNull.Value);
+            }
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -2525,6 +2554,21 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                 row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
             }
             return (null, null);
+        }
+
+        public async Task<int?> UpdateContactInquiryTypeAsync(Guid publicId, string inquiryType, string? referenceName, int? updatedById)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Contacts_UpdateInquiryType", c);
+                cmd.Parameters.AddWithValue("@PublicId", publicId);
+                cmd.Parameters.AddWithValue("@InquiryType", inquiryType);
+                cmd.Parameters.AddWithValue("@ReferenceName", (object?)referenceName ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
+                return Convert.ToInt32(await cmd.ExecuteScalarAsync() ?? 0);
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: CT_01 not run
         }
 
         public async Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById)

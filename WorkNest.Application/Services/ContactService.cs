@@ -21,9 +21,9 @@ namespace WorkNest.Application.Services
             _clock = clock;
         }
 
-        public async Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search)
+        public async Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null)
         {
-            var (rows, total) = await _db.GetContactsAsync(page, limit, search);
+            var (rows, total) = await _db.GetContactsAsync(page, limit, search, InquiryTypes.Normalize(inquiryType));
             var list = rows.ToList();
             // Each inquiry's latest feedback (outcome, reason, follow-up date, quotation) for the Feedback column.
             var ids = list.Select(r => r.TryGetValue("Id", out var v) && v is not null && v is not DBNull ? Convert.ToInt32(v) : 0);
@@ -60,7 +60,7 @@ namespace WorkNest.Application.Services
             if (message.Length > 1000) message = message[..1000];
 
             // WhatsApp gives no email: stored empty (the Tour Inquiries page shows "-").
-            var (newId, publicId) = await _db.InsertContactAsync("book_tour", null, name, "", phone, message);
+            var (newId, publicId) = await _db.InsertContactAsync("book_tour", null, name, "", phone, message, InquiryTypes.WhatsApp);
             _ = Task.Run(async () =>
             {
                 try { await _email.SendTourNotificationAsync(name, "", phone, message); }
@@ -104,10 +104,23 @@ namespace WorkNest.Application.Services
         public async Task<IEnumerable<object>> GetRecentContactsAsync(int top) =>
             (await _db.GetRecentContactsAsync(top)).Cast<object>();
 
-        public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail)
+        public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail, bool fromStaff = false)
         {
             var phoneError = Phone.Validate(request.Phone);
             if (phoneError != null) return ApiResponse.Fail(phoneError);
+
+            // Type: staff choose Walk-In (default) or Reference; website and app forms are always Website.
+            string inquiryType = InquiryTypes.Website;
+            string? referenceName = null;
+            if (fromStaff)
+            {
+                inquiryType = InquiryTypes.Normalize(request.InquiryType) == InquiryTypes.Reference ? InquiryTypes.Reference : InquiryTypes.WalkIn;
+                if (inquiryType == InquiryTypes.Reference)
+                {
+                    referenceName = Clean(request.ReferenceName) ?? await StaffNameAsync(userEmail);
+                    if (referenceName is { Length: > 200 }) return ApiResponse.Fail("The reference name can be at most 200 characters.");
+                }
+            }
 
             int? userId = null;
             if (!string.IsNullOrWhiteSpace(userEmail))
@@ -117,7 +130,7 @@ namespace WorkNest.Application.Services
             }
 
             var (newId, publicId) = await _db.InsertContactAsync(
-                contactType, userId, request.FullName, request.Email, request.Phone, request.Message);
+                contactType, userId, request.FullName, request.Email, request.Phone, request.Message, inquiryType, referenceName);
 
             _ = Task.Run(async () =>
             {
@@ -126,6 +139,38 @@ namespace WorkNest.Application.Services
             });
 
             return ApiResponse.Ok(new { id = newId, publicId }, "Contact recorded.");
+        }
+
+        public async Task<ApiResponse> UpdateInquiryTypeAsync(Guid publicId, ContactInquiryTypeRequest request, string? actorEmail)
+        {
+            var type = InquiryTypes.Normalize(request.InquiryType);
+            if (type is null) return ApiResponse.Fail("Choose Website, WhatsApp, Walk-In or Reference.");
+
+            string? referenceName = null;
+            if (type == InquiryTypes.Reference)
+            {
+                referenceName = Clean(request.ReferenceName) ?? await StaffNameAsync(actorEmail);
+                if (referenceName is { Length: > 200 }) return ApiResponse.Fail("The reference name can be at most 200 characters.");
+            }
+
+            int? actorId = string.IsNullOrWhiteSpace(actorEmail) ? null : (await _db.GetUserIdByEmailAsync(actorEmail)).Item1;
+            var updated = await _db.UpdateContactInquiryTypeAsync(publicId, type, referenceName, actorId);
+            if (updated is null)
+                return ApiResponse.Fail("Inquiry types are not set up on this database yet (Database/Contact/CT_01_inquiry_type.txt).");
+            if (updated == 0)
+                return ApiResponse.Fail("Inquiry not found. Older website bookings can't be changed.");
+            return ApiResponse.Ok(new { inquiryType = type, referenceName }, "Inquiry type saved.");
+        }
+
+        private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+        /// <summary>The staff member's name for a Reference inquiry they add or edit; their email when the account has no name.</summary>
+        private async Task<string?> StaffNameAsync(string? email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            var user = await _db.GetUserByEmailAsync(email);
+            var name = user is not null && user.TryGetValue("Name", out var n) ? n?.ToString() : null;
+            return Clean(name) ?? email.Trim();
         }
 
         public async Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId)

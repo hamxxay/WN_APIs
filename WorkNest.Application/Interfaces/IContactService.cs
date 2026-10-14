@@ -5,9 +5,12 @@ namespace WorkNest.Application.Interfaces
 {
     public interface IContactService
     {
-        Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search);
+        Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null);
         Task<IEnumerable<object>> GetRecentContactsAsync(int top);
-        Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail);
+        /// <summary>fromStaff: added by staff on the Tour Inquiries page (Type WalkIn or Reference); otherwise a website / app form (Type Website).</summary>
+        Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail, bool fromStaff = false);
+        /// <summary>Changes an inquiry's Type (Website, WhatsApp, WalkIn or Reference) and, for Reference, who referred the customer.</summary>
+        Task<ApiResponse> UpdateInquiryTypeAsync(Guid publicId, ContactInquiryTypeRequest request, string? actorEmail);
         Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId);
         Task<ApiResponse> DeleteContactAsync(int id);
         /// <summary>Records staff feedback on an inquiry and updates its status (not interested / converted close it).</summary>
