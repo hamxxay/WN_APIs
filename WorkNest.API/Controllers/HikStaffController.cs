@@ -10,11 +10,11 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// Staff Access — janitors, office boys, etc. on the Hikvision machines (not linked to a booking).
     /// Every Entrance machine is always included; room machines are chosen per staff member.
-    /// Super admins, admins and sales executives; admins and sales executives work with their locations' machines and
-    /// staff only, and machine-admin users are super-admin only.
+    /// Super admins and admins only (sales executives work with booking attendants, not WorkNest's own staff); admins
+    /// work with their locations' machines and staff only, and machine-admin users are super-admin only.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
     [ValidateLocationScope]
     public class HikStaffController : ControllerBase
     {

@@ -232,6 +232,8 @@ try
     builder.Services.AddScoped<ILeaseTemplateService, LeaseTemplateService>();
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();
     builder.Services.AddScoped<IAttendantService, AttendantService>();
+    builder.Services.AddScoped<IBookingEmployeeRepository, WorkNest.Infrastructure.Repositories.BookingEmployeeRepository>(); // customer "Employees" (EMP_01)
+    builder.Services.AddScoped<IBookingEmployeeService, BookingEmployeeService>();
     builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
     builder.Services.AddScoped<IHikDeviceService, HikDeviceService>();
     builder.Services.AddScoped<IHikEnrollmentService, HikEnrollmentService>();

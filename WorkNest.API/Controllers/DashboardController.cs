@@ -90,7 +90,7 @@ namespace WorkNest.API.Controllers
         private static readonly HashSet<string> SalesExecutiveRoutes = new(StringComparer.OrdinalIgnoreCase)
         {
             "/admin", "/admin/dashboard", "/admin/kyc", "/admin/quotations", "/admin/agreements", "/admin/lease-templates", "/admin/invoices",
-            "/admin/bookings", "/admin/attendants", "/admin/staff-access", "/admin/biometric-users", "/admin/machine-users",
+            "/admin/bookings", "/admin/attendants", "/admin/biometric-users", "/admin/machine-users",
             "/admin/contacts", "/admin/complaints", "/admin/whatsapp", "/admin/network", "/admin/network/clients", "/admin/network/devices",
             "/admin/network/internet", "/admin/network/wifi"
         };
