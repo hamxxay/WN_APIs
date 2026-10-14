@@ -1,0 +1,218 @@
+USE [WorkNestAEO];
+-- For the test database change the first line to USE [SAC400];
+-- ============================================================================================
+-- Tour inquiries: Type (where the inquiry came from), 14/10/2026.
+--
+--   1. dbo.WN_Contacts gets two new columns (existing columns and rows are not changed; old rows stay empty):
+--        InquiryType   NVARCHAR(20)  NULL   Website | WhatsApp | WalkIn | Reference
+--        ReferenceName NVARCHAR(200) NULL   who referred the customer, when InquiryType = Reference
+--      plus a check that InquiryType is one of those four values (or empty).
+--   2. dbo.WN_Contacts_Insert         two new optional parameters @InquiryType / @ReferenceName (old calls still work)
+--   3. dbo.WN_Contacts_GetList        returns InquiryType / ReferenceName; new optional filter @InquiryType
+--   4. dbo.WN_Contacts_GetRecent      returns InquiryType / ReferenceName
+--   5. dbo.WN_Contacts_UpdateInquiryType (NEW) changes the Type / reference of one inquiry, by its public id
+--
+-- Older website bookings kept in dbo.WN_BookTour are listed with Type "Website" (that table is not changed).
+-- Run as ONE statement in DBeaver (select all, execute). All or nothing: if any step fails nothing changes.
+-- Safe to run again. The last result lists every step.
+-- ============================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @Log TABLE (Step INT IDENTITY(1,1), Item NVARCHAR(200), Result NVARCHAR(400));
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 1. Columns and the allowed values ----------------------------------------------------------
+    IF COL_LENGTH(N'dbo.WN_Contacts', N'InquiryType') IS NULL
+    BEGIN
+        ALTER TABLE dbo.WN_Contacts ADD InquiryType NVARCHAR(20) NULL;
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Column WN_Contacts.InquiryType', N'Added');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Column WN_Contacts.InquiryType', N'Already there (not changed)');
+
+    IF COL_LENGTH(N'dbo.WN_Contacts', N'ReferenceName') IS NULL
+    BEGIN
+        ALTER TABLE dbo.WN_Contacts ADD ReferenceName NVARCHAR(200) NULL;
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Column WN_Contacts.ReferenceName', N'Added');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Column WN_Contacts.ReferenceName', N'Already there (not changed)');
+
+    IF OBJECT_ID(N'dbo.CK_WN_Contacts_InquiryType', N'C') IS NULL
+    BEGIN
+        EXEC(N'ALTER TABLE dbo.WN_Contacts WITH CHECK ADD CONSTRAINT CK_WN_Contacts_InquiryType
+              CHECK (InquiryType IS NULL OR InquiryType IN (N''Website'', N''WhatsApp'', N''WalkIn'', N''Reference''));');
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Check CK_WN_Contacts_InquiryType', N'Added');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Check CK_WN_Contacts_InquiryType', N'Already there (not changed)');
+
+    -- 2. Insert: two optional parameters ---------------------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Contacts_Insert]
+    @ContactType   NVARCHAR(20)  = ''Contact'',
+    @UserId        INT           = NULL,
+    @Name          NVARCHAR(200),
+    @Email         NVARCHAR(256),
+    @PhoneNumber   NVARCHAR(50)  = NULL,
+    @Message       NVARCHAR(MAX) = NULL,
+    @InquiryType   NVARCHAR(20)  = NULL,
+    @ReferenceName NVARCHAR(200) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_Contacts
+        (ContactType, UserId, Name, Email, PhoneNumber, Message, StatusId, InquiryType, ReferenceName)
+    VALUES
+        (@ContactType, @UserId, @Name, @Email, @PhoneNumber, @Message, 1,
+         NULLIF(LTRIM(RTRIM(@InquiryType)), N''''),
+         CASE WHEN @InquiryType = N''Reference'' THEN NULLIF(LTRIM(RTRIM(@ReferenceName)), N'''') END);
+    SELECT Id, PublicId FROM dbo.WN_Contacts WHERE Id = SCOPE_IDENTITY();
+END');
+    INSERT INTO @Log (Item, Result) VALUES (N'2. WN_Contacts_Insert', N'Done: accepts @InquiryType / @ReferenceName');
+
+    -- 3. List: Type columns and an optional Type filter -------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Contacts_GetList]
+    @Page        INT           = 1,
+    @Limit       INT           = 20,
+    @Search      NVARCHAR(255) = NULL,
+    @InquiryType NVARCHAR(20)  = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Offset INT = (@Page - 1) * @Limit;
+
+    WITH Combined AS (
+        SELECT
+            bt.Id,
+            bt.IdGUID AS PublicId,
+            CAST(''Book Tour'' AS NVARCHAR(50)) AS ContactType,
+            CAST(NULL AS INT) AS UserId,
+            bt.Name,
+            bt.Email,
+            bt.PhoneNumber,
+            bt.Message,
+            CAST(ISNULL(bt.Status, 1) AS TINYINT) AS StatusId,
+            CAST(bt.CreatedOn AS DATETIME2) AS CreatedOn,
+            CAST(N''Website'' AS NVARCHAR(20)) AS InquiryType,
+            CAST(NULL AS NVARCHAR(200)) AS ReferenceName
+        FROM dbo.WN_BookTour bt WITH (NOLOCK)
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts c WITH (NOLOCK) WHERE c.PublicId = bt.IdGUID)
+
+        UNION ALL
+
+        SELECT
+            c.Id,
+            c.PublicId,
+            ISNULL(c.ContactType, ''Contact'') AS ContactType,
+            c.UserId,
+            c.Name,
+            c.Email,
+            c.PhoneNumber,
+            c.Message,
+            c.StatusId,
+            c.CreatedOn,
+            c.InquiryType,
+            c.ReferenceName
+        FROM dbo.WN_Contacts c WITH (NOLOCK)
+    ),
+    Filtered AS (
+        SELECT
+            Id, PublicId, ContactType, UserId, Name, Email, PhoneNumber, Message, StatusId, CreatedOn,
+            InquiryType, ReferenceName,
+            COUNT(*) OVER () AS TotalCount
+        FROM Combined
+        WHERE (@Search IS NULL OR @Search = ''''
+               OR Name LIKE ''%'' + @Search + ''%''
+               OR Email LIKE ''%'' + @Search + ''%''
+               OR PhoneNumber LIKE ''%'' + @Search + ''%''
+               OR Message LIKE ''%'' + @Search + ''%''
+               OR ReferenceName LIKE ''%'' + @Search + ''%'')
+          AND (@InquiryType IS NULL OR @InquiryType = '''' OR InquiryType = @InquiryType)
+    )
+    SELECT *
+    FROM Filtered
+    ORDER BY CreatedOn DESC
+    OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+END');
+    INSERT INTO @Log (Item, Result) VALUES (N'3. WN_Contacts_GetList', N'Done: returns InquiryType / ReferenceName, filter @InquiryType');
+
+    -- 4. Recent: Type columns ----------------------------------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Contacts_GetRecent]
+    @Top INT = 10
+AS
+BEGIN
+    SET NOCOUNT ON;
+    WITH Combined AS (
+        SELECT
+            bt.Id,
+            bt.IdGUID AS PublicId,
+            CAST(''Book Tour'' AS NVARCHAR(50)) AS ContactType,
+            CAST(NULL AS INT) AS UserId,
+            bt.Name,
+            bt.Email,
+            bt.PhoneNumber,
+            bt.Message,
+            CAST(ISNULL(bt.Status, 1) AS TINYINT) AS StatusId,
+            CAST(bt.CreatedOn AS DATETIME2) AS CreatedOn,
+            CAST(N''Website'' AS NVARCHAR(20)) AS InquiryType,
+            CAST(NULL AS NVARCHAR(200)) AS ReferenceName
+        FROM dbo.WN_BookTour bt WITH (NOLOCK)
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts c WITH (NOLOCK) WHERE c.PublicId = bt.IdGUID)
+
+        UNION ALL
+
+        SELECT
+            c.Id,
+            c.PublicId,
+            ISNULL(c.ContactType, ''Contact'') AS ContactType,
+            c.UserId,
+            c.Name,
+            c.Email,
+            c.PhoneNumber,
+            c.Message,
+            c.StatusId,
+            c.CreatedOn,
+            c.InquiryType,
+            c.ReferenceName
+        FROM dbo.WN_Contacts c WITH (NOLOCK)
+    )
+    SELECT TOP (@Top)
+        Id, PublicId, ContactType, Name, Email, PhoneNumber, Message, StatusId, CreatedOn, InquiryType, ReferenceName
+    FROM Combined
+    ORDER BY CreatedOn DESC;
+END');
+    INSERT INTO @Log (Item, Result) VALUES (N'4. WN_Contacts_GetRecent', N'Done: returns InquiryType / ReferenceName');
+
+    -- 5. NEW: change the Type / reference of one inquiry -------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Contacts_UpdateInquiryType]
+    @PublicId      UNIQUEIDENTIFIER,
+    @InquiryType   NVARCHAR(20),
+    @ReferenceName NVARCHAR(200) = NULL,
+    @UpdatedById   INT           = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_Contacts SET
+        InquiryType   = NULLIF(LTRIM(RTRIM(@InquiryType)), N''''),
+        ReferenceName = CASE WHEN @InquiryType = N''Reference'' THEN NULLIF(LTRIM(RTRIM(@ReferenceName)), N'''') END,
+        UpdatedOn     = SYSUTCDATETIME(),
+        UpdatedById   = @UpdatedById
+    WHERE PublicId = @PublicId;
+
+    -- 0 = not found (older website bookings in WN_BookTour cannot be changed).
+    SELECT @@ROWCOUNT AS Updated;
+END');
+    INSERT INTO @Log (Item, Result) VALUES (N'5. WN_Contacts_UpdateInquiryType', N'Done: created');
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT INTO @Log (Item, Result) VALUES (N'FAILED - nothing was changed',
+        ERROR_MESSAGE() + N' (line ' + CAST(ERROR_LINE() AS NVARCHAR(10)) + N')');
+END CATCH;
+
+SELECT Step, Item, Result, DB_NAME() AS DatabaseName FROM @Log ORDER BY Step;

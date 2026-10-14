@@ -30,23 +30,28 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
-            [FromQuery] string? search = null)
+            [FromQuery] string? search = null,
+            [FromQuery] string? type = null)
         {
-            var (items, total) = await _contacts.GetContactsAsync(page, limit, search);
-            return Ok(new PaginatedResponse<object> { Data = items, Total = total });
+            try
+            {
+                var (items, total) = await _contacts.GetContactsAsync(page, limit, search, type);
+                return Ok(new PaginatedResponse<object> { Data = items, Total = total });
+            }
+            catch (InvalidOperationException ex) { return BadRequest(ApiResponse.Fail(ex.Message)); } // Type filter before CT_01
         }
 
         [EnableRateLimiting("public-forms")]
         [HttpPost("api/contact")]
         [AllowAnonymous] // public contact form; the submitter is recorded only from a real login (JWT), never from a header
         public async Task<IActionResult> CreateContact([FromBody] ContactRequest request) =>
-            StatusCode(201, await _contacts.CreateContactAsync(request, "contact", User.GetEmail()));
+            StatusCode(201, await _contacts.CreateContactAsync(request, "contact", User.GetEmail(), User.IsStaff()));
 
         [EnableRateLimiting("public-forms")]
         [HttpPost("api/book-tour")]
         [AllowAnonymous] // public book-a-tour form; the submitter is recorded only from a real login (JWT), never from a header
         public async Task<IActionResult> BookTour([FromBody] ContactRequest request) =>
-            StatusCode(201, await _contacts.CreateContactAsync(request, "book_tour", User.GetEmail()));
+            StatusCode(201, await _contacts.CreateContactAsync(request, "book_tour", User.GetEmail(), User.IsStaff()));
 
         /// <summary>Feedback on a tour inquiry: not interested (reason, closes it), future prospect (follow-up date,
         /// alerted on that date) or converted into a quotation (quotationId).</summary>
@@ -70,6 +75,15 @@ namespace WorkNest.API.Controllers
             if (match is null) return NotFound(ApiResponse.Fail("Inquiry not found."));
             var id = match.TryGetValue("Id", out var rid) && rid != null ? Convert.ToInt32(rid) : 0;
             return id > 0 ? await Feedback(id, request) : NotFound(ApiResponse.Fail("Inquiry not found."));
+        }
+
+        /// <summary>Change an inquiry's Type: Website, WhatsApp, WalkIn or Reference (+ referenceName; empty = the staff member).</summary>
+        [HttpPatch("api/contact/{publicId:guid}/inquiry-type")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> UpdateInquiryType(Guid publicId, [FromBody] ContactInquiryTypeRequest request)
+        {
+            var result = await _contacts.UpdateInquiryTypeAsync(publicId, request, User.GetEmail());
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
         [HttpPatch("api/contact/{id:int}/status")]

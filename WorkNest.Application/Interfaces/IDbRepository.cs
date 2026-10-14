@@ -211,9 +211,12 @@ namespace WorkNest.Application.Interfaces
         Task DeleteGalleryImageAsync(int id);
 
         // --- Contact ---
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top);
-        Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message);
+        Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message,
+            string? inquiryType = null, string? referenceName = null);
+        /// <summary>Rows changed (0 = not found), or null when the database update CT_01 has not been run.</summary>
+        Task<int?> UpdateContactInquiryTypeAsync(Guid publicId, string inquiryType, string? referenceName, int? updatedById);
         Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById);
         Task DeleteContactAsync(int id);
         /// <summary>Adds a feedback row to dbo.WN_ContactFeedback (false if the table has not been created yet).</summary>
