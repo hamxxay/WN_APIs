@@ -90,6 +90,14 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetCustomerAttendants(int customerId)
         {
             var list = await _attendants.GetCustomerAttendantsAsync(customerId);
+            if (IsSalesExecutiveOnly())
+            {
+                // Customer-added people waiting for the CNIC check stay hidden from sales until they enter the CNIC
+                // ("Add User"), so nobody is picked from this list without being checked.
+                var pendingOnly = await _employees.GetPendingOnlyPersonIdsAsync(customerId);
+                if (pendingOnly.Count > 0)
+                    list = list.Where(r => !(r.TryGetValue("PersonId", out var p) && p is not null && pendingOnly.Contains(Convert.ToInt32(p)))).ToList();
+            }
             return Ok(list);
         }
 
@@ -137,6 +145,9 @@ namespace WorkNest.API.Controllers
         {
             if (request == null) return BadRequest("Invalid request payload.");
             request.BookingDetailId = bookingDetailId;
+
+            if (IsSalesExecutiveOnly() && await _employees.HasPendingRequestAsync(bookingDetailId, request.PersonId))
+                return BadRequest(new { message = "The customer added this person and they still need the CNIC check. Use Add User and enter their CNIC." });
 
             if (IsSalesExecutiveOnly())
             {

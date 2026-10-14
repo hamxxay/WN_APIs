@@ -152,6 +152,19 @@ namespace WorkNest.Infrastructure.Repositories
                 return true;
             });
 
+        public Task<List<(int PersonId, int? BookingDetailId, bool IsActiveSomewhere)>> GetPendingPersonsAsync(int? customerId, int? bookingDetailId) =>
+            Run(async c =>
+            {
+                await using var cmd = SP("dbo.WN_BookingEmployees_PendingPersons", c);
+                cmd.Parameters.Add("@CustomerId", SqlDbType.Int).Value = (object?)customerId ?? DBNull.Value;
+                cmd.Parameters.Add("@BookingDetailId", SqlDbType.Int).Value = (object?)bookingDetailId ?? DBNull.Value;
+                var list = new List<(int, int?, bool)>();
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                    list.Add((Convert.ToInt32(r["PersonId"]), Int(r, "BookingDetailId"), Convert.ToInt32(r["IsActiveSomewhere"]) == 1));
+                return list;
+            });
+
         // ---- helpers ----
 
         private async Task<T> Run<T>(Func<SqlConnection, Task<T>> body)

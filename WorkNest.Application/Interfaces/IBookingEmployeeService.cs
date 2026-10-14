@@ -25,5 +25,12 @@ namespace WorkNest.Application.Interfaces
         /// marked Verified. Best effort (nothing happens before the EMP_01 update is run).
         /// </summary>
         Task MarkVerifiedIfRequestedAsync(int bookingDetailId, int personId, int? staffUserId);
+
+        /// <summary>People a customer added who are still waiting for the CNIC check and are not active on any booking:
+        /// hidden from a sales executive's "someone already on this company" list (empty before EMP_01).</summary>
+        Task<HashSet<int>> GetPendingOnlyPersonIdsAsync(int customerId);
+
+        /// <summary>True when the customer added this person to this booking and the CNIC check has not been done yet.</summary>
+        Task<bool> HasPendingRequestAsync(int bookingDetailId, int personId);
     }
 }

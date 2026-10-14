@@ -304,6 +304,26 @@ namespace WorkNest.Application.Services
             }
         }
 
+        public async Task<HashSet<int>> GetPendingOnlyPersonIdsAsync(int customerId)
+        {
+            try
+            {
+                var rows = await _repo.GetPendingPersonsAsync(customerId, null);
+                return rows.Where(r => !r.IsActiveSomewhere).Select(r => r.PersonId).ToHashSet();
+            }
+            catch (BookingEmployeesNotInstalledException) { return new HashSet<int>(); }
+        }
+
+        public async Task<bool> HasPendingRequestAsync(int bookingDetailId, int personId)
+        {
+            try
+            {
+                var rows = await _repo.GetPendingPersonsAsync(null, bookingDetailId);
+                return rows.Any(r => r.PersonId == personId);
+            }
+            catch (BookingEmployeesNotInstalledException) { return false; }
+        }
+
         // ---- helpers ---------------------------------------------------------------------------------
 
         /// <summary>The booking's people right now: on the room (attendants) + Pending requests of anyone else.</summary>

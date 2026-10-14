@@ -33,6 +33,10 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         Task<int> VerifyAsync(int? requestId, int? bookingDetailId, int? personId, int? verifiedById);
 
+        /// <summary>Pending (not yet CNIC-checked) requests of a customer and/or a booking detail, with whether the person
+        /// is already active on any booking.</summary>
+        Task<List<(int PersonId, int? BookingDetailId, bool IsActiveSomewhere)>> GetPendingPersonsAsync(int? customerId, int? bookingDetailId);
+
         /// <summary>Verified -> Pending again (adding the person to the space failed).</summary>
         Task ReopenAsync(int requestId);
     }
