@@ -11,6 +11,8 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         public UserService(IDbRepository db) => _db = db;
 
+        private const string SalesManagerLocationRequired = "A Sales Manager needs at least one location.";
+
         public async Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null)
         {
             var (rows, total) = await _db.GetUsersAsync(page, limit, search, locationId);
@@ -117,7 +119,9 @@ namespace WorkNest.Application.Services
             {
                 if (!finalLocationId.HasValue || finalLocationId.Value <= 0)
                 {
-                    return ApiResponse.Fail("Location is required for Sales Executives.");
+                    return ApiResponse.Fail(Roles.IsSalesManager(roleId)
+                        ? SalesManagerLocationRequired
+                        : "Location is required for Sales Executives.");
                 }
             }
 
@@ -175,6 +179,11 @@ namespace WorkNest.Application.Services
                         if (existingLoc.HasValue && existingLoc.Value > 0)
                         {
                             finalLocationId = existingLoc.Value;
+                        }
+                        else if (Roles.IsSalesManager(roleId))
+                        {
+                            // A Sales Manager only sees their locations' figures: one is required (nothing is saved).
+                            return ApiResponse.Fail(SalesManagerLocationRequired);
                         }
                     }
                 }
@@ -250,7 +259,9 @@ namespace WorkNest.Application.Services
                     }
                     else
                     {
-                        return ApiResponse.Fail("Location is required when making a user a Sales Executive.");
+                        return ApiResponse.Fail(Roles.IsSalesManager(roleId)
+                            ? SalesManagerLocationRequired
+                            : "Location is required when making a user a Sales Executive.");
                     }
                 }
             }

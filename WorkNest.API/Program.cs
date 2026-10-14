@@ -41,10 +41,12 @@ try
     // ── Controllers + JSON camelCase ──────────────────────────────────────────
     // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
     // CeoAccessFilter: a CEO account gets 403 on every endpoint not marked [CeoAllowed] (it only views the CEO dashboard).
+    // SalesManagerAccessFilter: likewise a Sales Manager gets 403 on every endpoint not marked [SalesManagerAllowed].
     builder.Services.AddControllers(o =>
         {
             o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
             o.Filters.Add<WorkNest.API.Filters.CeoAccessFilter>();
+            o.Filters.Add<WorkNest.API.Filters.SalesManagerAccessFilter>();
         })
         .AddJsonOptions(o =>
         {
@@ -186,6 +188,8 @@ try
 
     // ── Application Services ──────────────────────────────────────────────────
     builder.Services.AddScoped<IAuthService, AuthService>();
+    // Roles from dbo.WN_Roles (api/roles, roleDisplayName on sign-in / api/auth/me): dbo.WN_Roles_GetList (script SM_01).
+    builder.Services.AddScoped<IRoleService, RoleService>();
     builder.Services.AddScoped<IUserService, UserService>();
     builder.Services.AddScoped<ISpaceService, SpaceService>();
     builder.Services.AddScoped<IBookingService, BookingService>();
@@ -211,6 +215,9 @@ try
     // CEO dashboard (api/ceo/*): stored procedures dbo.WN_Ceo_* (script CEO_01_dashboard_procedures).
     builder.Services.AddScoped<ICeoDashboardRepository, WorkNest.Infrastructure.Repositories.CeoDashboardRepository>();
     builder.Services.AddScoped<ICeoDashboardService, CeoDashboardService>();
+    // Sales Manager dashboard (api/sales-manager/*): stored procedures dbo.WN_SalesMgr_* (script SM_01_sales_manager).
+    builder.Services.AddScoped<ISalesManagerDashboardRepository, WorkNest.Infrastructure.Repositories.SalesManagerDashboardRepository>();
+    builder.Services.AddScoped<ISalesManagerDashboardService, SalesManagerDashboardService>();
     // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
     builder.Services.AddScoped<IReportRepository, WorkNest.Infrastructure.Repositories.ReportRepository>();
     builder.Services.AddScoped<IAuditLogRepository, WorkNest.Infrastructure.Repositories.AuditLogRepository>();

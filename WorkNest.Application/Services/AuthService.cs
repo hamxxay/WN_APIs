@@ -13,14 +13,20 @@ namespace WorkNest.Application.Services
         private readonly IJwtService _jwt;
         private readonly ILogger<AuthService> _logger;
         private readonly ILoginHistoryService _loginHistory;
+        private readonly IRoleService _roles;
 
-        public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger, ILoginHistoryService loginHistory)
+        public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger, ILoginHistoryService loginHistory,
+            IRoleService roles)
         {
             _db = db;
             _jwt = jwt;
             _logger = logger;
             _loginHistory = loginHistory;
+            _roles = roles;
         }
+
+        /// <summary>The role's name for people (WN_Roles.DisplayName, e.g. "CEO", "Sales Manager"); null when not readable.</summary>
+        private Task<string?> RoleDisplayNameAsync(string role) => _roles.GetDisplayNameAsync(Roles.ParseRoleId(role));
 
         public async Task<ApiResponse> SyncUserAsync(UserSyncRequest request)
         {
@@ -151,7 +157,8 @@ namespace WorkNest.Application.Services
                 _logger.LogError(ex, "Failed to record successful login for {Email}", request.Email);
             }
 
-            return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Login successful.");
+            return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role },
+                roleDisplayName = await RoleDisplayNameAsync(role), locationId, token }, "Login successful.");
         }
 
         public async Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request)
@@ -204,7 +211,8 @@ namespace WorkNest.Application.Services
                     _logger.LogError(ex, "Failed to record Google login for {Email}", request.Email);
                 }
 
-                return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role }, locationId, token }, "Google login successful.");
+                return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role },
+                    roleDisplayName = await RoleDisplayNameAsync(role), locationId, token }, "Google login successful.");
             }
             catch (Exception ex)
             {
@@ -249,6 +257,7 @@ namespace WorkNest.Application.Services
                 phone      = row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null,
                 role       = role,
                 roles      = new[] { role },
+                roleDisplayName = await RoleDisplayNameAsync(role),
                 locationId = locationId,
                 locationIds = locationIds,
                 customerId = row.TryGetValue("CustomerId",  out var c) ? c?.ToString() : null,
