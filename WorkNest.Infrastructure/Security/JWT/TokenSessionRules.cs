@@ -54,7 +54,7 @@ namespace WorkNest.Infrastructure.Security.JWT
             return null;
         }
 
-        /// <summary>A role claim as Roles.FromRow writes it ("super_admin", "admin", "sales_executive", "general").</summary>
+        /// <summary>A role claim as Roles.FromRow writes it ("super_admin", "admin", "sales_executive", "ceo", "general").</summary>
         public static string CanonicalRole(string? role) => Roles.MapRole(Roles.ParseRoleId(role));
 
         /// <summary>

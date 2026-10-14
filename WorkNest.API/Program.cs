@@ -40,7 +40,12 @@ try
 
     // ── Controllers + JSON camelCase ──────────────────────────────────────────
     // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
-    builder.Services.AddControllers(o => o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>())
+    // CeoAccessFilter: a CEO account gets 403 on every endpoint not marked [CeoAllowed] (it only views the CEO dashboard).
+    builder.Services.AddControllers(o =>
+        {
+            o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
+            o.Filters.Add<WorkNest.API.Filters.CeoAccessFilter>();
+        })
         .AddJsonOptions(o =>
         {
             o.JsonSerializerOptions.PropertyNamingPolicy  = System.Text.Json.JsonNamingPolicy.CamelCase;
@@ -203,6 +208,9 @@ try
     builder.Services.AddScoped<IRoleDashboardRepository, WorkNest.Infrastructure.Repositories.RoleDashboardRepository>();
     builder.Services.AddScoped<IRecordScopeRepository, WorkNest.Infrastructure.Repositories.RecordScopeRepository>(); // location of one record (RecordScopeAttribute)
     builder.Services.AddScoped<IRoleDashboardService, RoleDashboardService>();
+    // CEO dashboard (api/ceo/*): stored procedures dbo.WN_Ceo_* (script CEO_01_dashboard_procedures).
+    builder.Services.AddScoped<ICeoDashboardRepository, WorkNest.Infrastructure.Repositories.CeoDashboardRepository>();
+    builder.Services.AddScoped<ICeoDashboardService, CeoDashboardService>();
     // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
     builder.Services.AddScoped<IReportRepository, WorkNest.Infrastructure.Repositories.ReportRepository>();
     builder.Services.AddScoped<IAuditLogRepository, WorkNest.Infrastructure.Repositories.AuditLogRepository>();

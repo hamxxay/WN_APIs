@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Auth;
 using WorkNest.Application.Interfaces;
 using System.Security.Claims;
+using WorkNest.API.Filters;
 using WorkNest.API.Security;
 using Microsoft.AspNetCore.RateLimiting;
 
@@ -154,6 +155,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/auth/me")]
+        [CeoAllowed] // the CEO's own profile
         public async Task<IActionResult> Me()
         {
             // Only the signed-in user's own profile (it used to accept any email in an x-user-email header, without a login).
@@ -170,6 +172,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPut("api/auth/me")]
+        [CeoAllowed] // own name / phone only (the app's and CMS's profile screen)
         public async Task<IActionResult> UpdateMe([FromBody] UpdateMyProfileRequest request)
         {
             // Only the signed-in user's own profile, identified from the JWT.
