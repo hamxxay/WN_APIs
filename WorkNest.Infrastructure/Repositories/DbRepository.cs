@@ -3655,6 +3655,20 @@ END";
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // ---- Roles (dbo.WN_Roles_GetList, script SM_01). SQL error 2812 = procedure not created yet. ----
+
+        public async Task<List<IDictionary<string, object?>>?> GetRolesAsync()
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Roles_GetList", c);
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await ReadAll(r);
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { return null; }
+        }
+
         // ---- Extra locations per user (WN_UserLocations). SQL error 208 = table not created yet. ----
 
         /// <summary>Locations assigned in WN_UserLocations (empty if none or the table doesn't exist yet).</summary>

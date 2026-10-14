@@ -41,10 +41,12 @@ try
     // ── Controllers + JSON camelCase ──────────────────────────────────────────
     // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
     // CeoAccessFilter: a CEO account gets 403 on every endpoint not marked [CeoAllowed] (it only views the CEO dashboard).
+    // SalesManagerAccessFilter: likewise a Sales Manager gets 403 on every endpoint not marked [SalesManagerAllowed].
     builder.Services.AddControllers(o =>
         {
             o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
             o.Filters.Add<WorkNest.API.Filters.CeoAccessFilter>();
+            o.Filters.Add<WorkNest.API.Filters.SalesManagerAccessFilter>();
         })
         .AddJsonOptions(o =>
         {
@@ -186,6 +188,8 @@ try
 
     // ── Application Services ──────────────────────────────────────────────────
     builder.Services.AddScoped<IAuthService, AuthService>();
+    // Roles from dbo.WN_Roles (api/roles, roleDisplayName on sign-in / api/auth/me): dbo.WN_Roles_GetList (script SM_01).
+    builder.Services.AddScoped<IRoleService, RoleService>();
     builder.Services.AddScoped<IUserService, UserService>();
     builder.Services.AddScoped<ISpaceService, SpaceService>();
     builder.Services.AddScoped<IBookingService, BookingService>();

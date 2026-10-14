@@ -44,7 +44,7 @@ namespace WorkNest.Infrastructure.Security.JWT
             if (!account.IsActive) return "The user is deactivated.";
             if (!string.Equals(CanonicalRole(tokenRole), account.Role, StringComparison.OrdinalIgnoreCase))
                 return "The user's role has changed since this token was issued.";
-            // Admins and Sales Executives work at their location; a move must reach their next request.
+            // Admins, Sales Executives and Sales Managers work at their location; a move must reach their next request.
             if (Roles.IsLocationBoundRole(account.Role))
             {
                 int? tokenLocation = int.TryParse(tokenLocationId?.Trim(), out var l) ? l : null;
@@ -54,7 +54,7 @@ namespace WorkNest.Infrastructure.Security.JWT
             return null;
         }
 
-        /// <summary>A role claim as Roles.FromRow writes it ("super_admin", "admin", "sales_executive", "ceo", "general").</summary>
+        /// <summary>A role claim as Roles.FromRow writes it ("super_admin", "admin", "sales_executive", "ceo", "sales_manager", "general").</summary>
         public static string CanonicalRole(string? role) => Roles.MapRole(Roles.ParseRoleId(role));
 
         /// <summary>

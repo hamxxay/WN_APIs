@@ -282,6 +282,11 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerAttendantsDbAsync(int customerId);
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingAttendantsDbAsync(int bookingDetailId);
         Task<List<int>> GetUserLocationIdsAsync(int userId);
+        /// <summary>
+        /// Active roles (Id, RoleName, DisplayName) ordered by Id, from dbo.WN_Roles_GetList (script SM_01); null when
+        /// that procedure is not on the database yet.
+        /// </summary>
+        Task<List<IDictionary<string, object?>>?> GetRolesAsync();
         Task<bool> GetQuotationSendWhtInvoiceAsync(int quotationId);
         /// <summary>The booking's WHT choice: SendWhtInvoice and the WN_WHTaxRate Id (null when not a WHT booking).</summary>
         Task<(bool SendWht, decimal? WhTaxId)> GetBookingWhtAsync(int bookingId);
