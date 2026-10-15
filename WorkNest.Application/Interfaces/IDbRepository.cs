@@ -24,6 +24,11 @@ namespace WorkNest.Application.Interfaces
         Task SetUserRoleAsync(int id, int roleId);
         Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId);
         Task<(int? Id, bool IsActive)?> CheckUserEmailStatusAsync(string email);
+        /// <summary>
+        /// The WN_Users row with this email whether it is active or not (an active one first): Id, IsActive and the stored
+        /// password, for the sign-in checks (WN_Users_GetByEmail only returns active rows). Null when there is none.
+        /// </summary>
+        Task<WorkNest.Application.DTOs.Auth.UserSignInStatus?> GetUserSignInStatusAsync(string email);
 
         // --- Space ---
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpacesAsync(int page, int limit, string? search);

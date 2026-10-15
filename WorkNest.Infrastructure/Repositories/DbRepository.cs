@@ -855,6 +855,21 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return null;
         }
 
+        public async Task<WorkNest.Application.DTOs.Auth.UserSignInStatus?> GetUserSignInStatusAsync(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(
+                "SELECT TOP 1 Id, IsActive, PasswordHash FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @Email ORDER BY IsActive DESC, Id DESC", c);
+            cmd.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 256) { Value = email.Trim() });
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return null;
+            return new WorkNest.Application.DTOs.Auth.UserSignInStatus(
+                r.GetInt32(0),
+                !r.IsDBNull(1) && Convert.ToBoolean(r.GetValue(1)),
+                r.IsDBNull(2) ? null : Convert.ToString(r.GetValue(2)));
+        }
+
         public async Task<IDictionary<string, object?>?> GetUserByIdAsync(int id)
         {
             await using var c = await Open();
