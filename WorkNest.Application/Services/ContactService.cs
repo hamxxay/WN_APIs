@@ -26,14 +26,24 @@ namespace WorkNest.Application.Services
         {
             var (rows, total) = await _db.GetContactsAsync(page, limit, search, InquiryTypes.Normalize(inquiryType), branch);
             var list = rows.ToList();
+            // Source / Key / CanChangeBranch / IsNew: the old website bookings (WN_BookTour) and WN_Contacts number their
+            // rows separately, so an Id can be on two rows; the key and the writes tell them apart.
+            foreach (var row in list) InquiryRows.Annotate(row);
             // Each inquiry's latest feedback (outcome, reason, follow-up date, quotation) for the Feedback column.
-            var ids = list.Select(r => r.TryGetValue("Id", out var v) && v is not null && v is not DBNull ? Convert.ToInt32(v) : 0);
-            var feedback = await _db.GetLatestContactFeedbackAsync(ids);
+            var feedback = await _db.GetLatestContactFeedbackAsync(list.Select(InquiryRows.IdOf));
+            // Feedback is stored by Id. An old website booking whose Id a WN_Contacts inquiry also has (before QA_05
+            // copies the bookings) can't be told apart: it belongs to the WN_Contacts inquiry, whose status it changed.
+            HashSet<int>? contactIds = null;
             var today = _clock.Today.Date;
             foreach (var row in list)
             {
-                if (!(row.TryGetValue("Id", out var idObj) && idObj is not null && idObj is not DBNull)) continue;
-                if (!feedback.TryGetValue(Convert.ToInt32(idObj), out var f)) continue;
+                var id = InquiryRows.IdOf(row);
+                if (id <= 0 || !feedback.TryGetValue(id, out var f)) continue;
+                if (InquiryRows.SourceOf(row) == InquiryRows.BookTour)
+                {
+                    contactIds ??= await ContactIdsAsync();
+                    if (contactIds.Contains(id)) continue;
+                }
                 DateTime? followUp = f["FollowUpOn"] is DateTime d ? d.Date : null;
                 string outcome = f["Outcome"]?.ToString() ?? "";
                 row["FeedbackOutcome"] = outcome;
@@ -43,6 +53,19 @@ namespace WorkNest.Application.Services
                 row["QuotationId"] = f["QuotationId"] is DBNull ? null : f["QuotationId"];
             }
             return (list.Cast<object>(), total);
+        }
+
+        /// <summary>Ids of every inquiry in dbo.WN_Contacts (all branches), to spot an old website booking with the same Id.</summary>
+        private async Task<HashSet<int>> ContactIdsAsync()
+        {
+            var (rows, _) = await _db.GetContactsAsync(1, 100000, null, null, null);
+            return (rows ?? Enumerable.Empty<IDictionary<string, object?>>()).Where(r => InquiryRows.SourceOf(r) == InquiryRows.Contact).Select(InquiryRows.IdOf).ToHashSet();
+        }
+
+        public async Task<InquiryMatch> FindVisibleAsync(BranchFilter? branch, Guid? publicId, int? id = null, string? source = null)
+        {
+            var (rows, _) = await _db.GetContactsAsync(1, 100000, null, null, branch);
+            return InquiryRows.Find(rows ?? Enumerable.Empty<IDictionary<string, object?>>(), publicId, id, source);
         }
 
         public async Task<ApiResponse> CreateChatbotTourInquiryAsync(WorkNest.Application.DTOs.Complaint.ChatbotTourInquiryRequest request)
@@ -93,7 +116,7 @@ namespace WorkNest.Application.Services
             return change ? scope.ForChange(requested, active) : scope.ForNew(requested, active);
         }
 
-        public async Task<ApiResponse> SaveFeedbackAsync(int id, ContactFeedbackRequest request, int? actorId)
+        public async Task<ApiResponse> SaveFeedbackAsync(int id, ContactFeedbackRequest request, int? actorId, string? source = null)
         {
             var outcome = (request.Outcome ?? "").Trim().ToLowerInvariant();
             var reason = string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim();
@@ -119,14 +142,22 @@ namespace WorkNest.Application.Services
                     return ApiResponse.Fail("Choose Not interested, Future prospect or Conversion into quotation.");
             }
 
+            // Feedback rows are kept by Id (dbo.WN_ContactFeedback.ContactId). An old website booking (WN_BookTour) whose Id a
+            // WN_Contacts inquiry also has would share it, so it waits for QA_05 (which copies the bookings into WN_Contacts).
+            if (InquiryRows.NormalizeSource(source) == InquiryRows.BookTour && (await ContactIdsAsync()).Contains(id))
+                return ApiResponse.Fail(InquiryMessages.BookTourNeedsUpdate);
             if (!await _db.InsertContactFeedbackAsync(id, outcome, reason, followUp, request.QuotationId, actorId))
                 return ApiResponse.Fail("Feedback can't be saved yet: the feedback table has not been set up on this database.");
-            await _db.UpdateContactStatusAsync(id, status, actorId);
+            await SetStatusAsync(id, status, actorId, source);
             return ApiResponse.Ok(new { outcome, followUpOn = followUp?.ToString("yyyy-MM-dd") }, "Feedback saved.");
         }
 
-        public async Task<IEnumerable<object>> GetRecentContactsAsync(int top, BranchFilter? branch = null) =>
-            (await _db.GetRecentContactsAsync(top, branch)).Cast<object>();
+        public async Task<IEnumerable<object>> GetRecentContactsAsync(int top, BranchFilter? branch = null)
+        {
+            var rows = (await _db.GetRecentContactsAsync(top, branch) ?? Enumerable.Empty<IDictionary<string, object?>>()).ToList();
+            foreach (var row in rows) InquiryRows.Annotate(row);   // Source / Key / IsNew, as the list
+            return rows.Cast<object>();
+        }
 
         public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail, bool fromStaff = false,
             int? locationId = null)
@@ -172,7 +203,7 @@ namespace WorkNest.Application.Services
             var scopeCsv = scope.Locations is null ? null : (scope.Locations.Count == 0 ? "-1" : string.Join(",", scope.Locations));
             var updated = await _db.UpdateContactLocationAsync(publicId, location?.Id, actorId, scopeCsv);
             if (updated is null) return ApiResponse.Fail(BranchMessages.ContactsUpdateMissing);
-            if (updated == 0) return ApiResponse.Fail("Inquiry not found. Older website bookings can't be changed.");
+            if (updated == 0) return ApiResponse.Fail(OldBookingNotChangeable);
             return ApiResponse.Ok(new { locationId = location?.Id, locationName = location?.Name }, "Branch saved.");
         }
 
@@ -193,9 +224,13 @@ namespace WorkNest.Application.Services
             if (updated is null)
                 return ApiResponse.Fail("Inquiry types are not set up on this database yet (Database/Contact/CT_01_inquiry_type.txt).");
             if (updated == 0)
-                return ApiResponse.Fail("Inquiry not found. Older website bookings can't be changed.");
+                return ApiResponse.Fail(OldBookingNotChangeable);
             return ApiResponse.Ok(new { inquiryType = type, referenceName }, "Inquiry type saved.");
         }
+
+        /// <summary>No WN_Contacts row changed: not found / not theirs, or an old website booking (WN_BookTour) before QA_05.</summary>
+        private const string OldBookingNotChangeable =
+            "Inquiry not found. Older website bookings can be changed once the database update QA_05_staff_sales has been run.";
 
         private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
@@ -208,15 +243,36 @@ namespace WorkNest.Application.Services
             return Clean(name) ?? email.Trim();
         }
 
-        public async Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId)
+        public async Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId, string? source = null)
         {
-            await _db.UpdateContactStatusAsync(id, statusId, actorId);
+            if (!await SetStatusAsync(id, statusId, actorId, source)) return ApiResponse.Fail(InquiryMessages.BookTourNeedsUpdate);
             return ApiResponse.Ok("Contact status updated.");
         }
 
-        public async Task<ApiResponse> DeleteContactAsync(int id)
+        /// <summary>
+        /// The status of the row of that table (source). Before QA_05 the procedure has no @Source and updates the
+        /// WN_Contacts row with the Id first: fine for a WN_Contacts inquiry, or an old website booking whose Id no WN_Contacts
+        /// inquiry has; false (nothing changed) for an old booking that shares its Id.
+        /// </summary>
+        private async Task<bool> SetStatusAsync(int id, byte statusId, int? actorId, string? source)
         {
-            await _db.DeleteContactAsync(id);
+            var src = InquiryRows.NormalizeSource(source);
+            if (src is not null && await _db.UpdateContactStatusAsync(id, statusId, actorId, src)) return true;   // QA_05: that table's row
+            // No source, or no QA_05 yet: the procedure changes the WN_Contacts row with this Id, else the WN_BookTour one.
+            if (src == InquiryRows.BookTour && (await ContactIdsAsync()).Contains(id)) return false;
+            await _db.UpdateContactStatusAsync(id, statusId, actorId);
+            return true;
+        }
+
+        public async Task<ApiResponse> DeleteContactAsync(int id, string? source = null)
+        {
+            var src = InquiryRows.NormalizeSource(source);
+            if (src is null || !await _db.DeleteContactAsync(id, src))
+            {
+                // No source, or no QA_05 yet: WN_Contacts first, then WN_BookTour (as before), unless that would hit the wrong row.
+                if (src == InquiryRows.BookTour && (await ContactIdsAsync()).Contains(id)) return ApiResponse.Fail(InquiryMessages.BookTourNeedsUpdate);
+                await _db.DeleteContactAsync(id);
+            }
             return ApiResponse.Ok("Contact deleted.");
         }
     }

@@ -2650,22 +2650,29 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: CT_01 not run
         }
 
-        public async Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById)
+        public async Task<bool> UpdateContactStatusAsync(int id, byte statusId, int? updatedById, string? source = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_UpdateStatus", c);
             cmd.Parameters.AddWithValue("@Id", id);
             cmd.Parameters.AddWithValue("@StatusId", statusId);
             cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
-            await cmd.ExecuteNonQueryAsync();
+            // @Source (QA_05): only the row of that table. Only sent when given, so the call works before QA_05.
+            if (source is not null) cmd.Parameters.Add("@Source", SqlDbType.NVarChar, 20).Value = source;
+            try { await cmd.ExecuteNonQueryAsync(); }
+            catch (SqlException ex) when (ex.Number == 8144 && source is not null) { return false; } // no QA_05 yet: nothing changed
+            return true;
         }
 
-        public async Task DeleteContactAsync(int id)
+        public async Task<bool> DeleteContactAsync(int id, string? source = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_Delete", c);
             cmd.Parameters.AddWithValue("@Id", id);
-            await cmd.ExecuteNonQueryAsync();
+            if (source is not null) cmd.Parameters.Add("@Source", SqlDbType.NVarChar, 20).Value = source;
+            try { await cmd.ExecuteNonQueryAsync(); }
+            catch (SqlException ex) when (ex.Number == 8144 && source is not null) { return false; } // no QA_05 yet: nothing deleted
+            return true;
         }
 
         // ---- Tour inquiry feedback (dbo.WN_ContactFeedback). SQL error 208 = table not created yet. ----
@@ -2945,7 +2952,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         /// agreements 'EmailFailed' / signed copy on file (WN_Agreements.SignedPdfPath), contacts StatusId 1 = New,
         /// bookings 1 / 5 = old / new Pending, quotations 'Accepted' / 'Declined', KYC document Status 0 = Pending.
         /// </summary>
-        public async Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
+        public async Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(IReadOnlyCollection<int>? locationIds, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
             IReadOnlyCollection<int>? branchLocationIds = null)
         {
             // One row per item waiting on staff: K = badge, ItemKey = what "read" remembers. The key includes the
@@ -2953,9 +2960,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             // Status IDs are ints from code (OrderStatus lookups), never user input.
             var open = openInvoiceStatusIds.Distinct().ToList();
             var openList = open.Count == 0 ? "-1" : string.Join(",", open);
+            // Location-bound staff: every location they are assigned to (ints from claims, never user text); null = all.
+            var locList = locationIds is null ? null : (locationIds.Distinct().ToList() is { Count: > 0 } ll ? string.Join(",", ll) : "-1");
+            string InLoc(string column) => locList is null ? "1 = 1" : $"{column} IN ({locList})";
+            string SpaceIn(string spaceIdColumn) => locList is null ? "1 = 1"
+                : $"EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = {spaceIdColumn} AND s.LocationId IN ({locList}))";
             await using var c = await Open();
-            // Offline machines of the caller's location (and unassigned ones) once machines have a location.
-            var machinesLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationId is int l ? new[] { l } : null);
+            // Offline machines of the caller's locations (and unassigned ones) once machines have a location.
+            var machinesLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationIds);
             // Tour inquiries of the caller's locations and those without a branch (once BR_01 has added WN_Contacts.LocationId).
             var contactsLoc = BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), "ct", branchLocationIds);
             var sql = $@"
@@ -2967,17 +2979,17 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     SELECT 'Kyc', CONCAT(d.CustomerId, ':', COUNT(*))
                       FROM dbo.WN_CustomerKYCDocuments d WITH (NOLOCK)
                      WHERE d.IsActive = 1 AND d.Status = 0   -- KycDocumentStatus.Pending
-                       AND (@Loc IS NULL OR EXISTS (
+                       AND ({(locList is null ? "1 = 1" : $@"EXISTS (
                             SELECT 1
                               FROM dbo.WN_Customers cu WITH (NOLOCK)
                               LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId
                              WHERE cu.Id = d.CustomerId
-                               AND (u.LocationId = @Loc OR EXISTS (
+                               AND ({InLoc("u.LocationId")} OR EXISTS (
                                     SELECT 1
                                       FROM dbo.WN_Bookings kb WITH (NOLOCK)
                                       JOIN dbo.WN_Spaces ks WITH (NOLOCK) ON ks.Id = kb.SpaceId
-                                     WHERE ks.LocationId = @Loc
-                                       AND (kb.CustomerCode = cu.Code OR (cu.UserId IS NOT NULL AND kb.UserId = cu.UserId))))))
+                                     WHERE {InLoc("ks.LocationId")}
+                                       AND (kb.CustomerCode = cu.Code OR (cu.UserId IS NOT NULL AND kb.UserId = cu.UserId)))))")})
                      GROUP BY d.CustomerId;
 
                 INSERT INTO @Items (K, ItemKey)
@@ -2990,16 +3002,20 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                    AND ISNULL(q.Status, '') NOT IN ('Declined', 'Rejected', 'Cancelled', 'Expired')
                    AND NOT EXISTS (SELECT 1 FROM dbo.WN_Agreements a2 WITH (NOLOCK)
                                     WHERE a2.QuotationId = a.QuotationId AND a2.Id > a.Id)
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = q.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("q.SpaceId")}
                 UNION ALL
-                -- contact + book-tour messages still New (WN_Contacts_Insert writes StatusId 1)
+                -- contact + book-tour messages still New (WN_Contacts_Insert writes StatusId 1), plus the old website bookings
+                -- still only in WN_BookTour (no branch; status 0 / 1 / empty = New, as the list shows them): the same
+                -- inquiries as the Tour Inquiries New filter and the dashboard figure. Their keys start with bt.
                 SELECT 'Contacts', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{contactsLoc}
+                UNION ALL
+                SELECT 'Contacts', CONCAT('bt', bt.Id) FROM dbo.WN_BookTour bt WITH (NOLOCK) WHERE {BranchSql.OldWebsiteNewWhere}
                 UNION ALL
                 -- bookings waiting for confirmation (same rule as the dashboard's PendingConfirmations)
                 SELECT 'Bookings', CAST(b.Id AS NVARCHAR(20))
                   FROM dbo.WN_Bookings b WITH (NOLOCK)
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 5) AND b.EndOn >= @Now
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("b.SpaceId")}
                 UNION ALL
                 -- accepted by the customer (agreement not sent yet) + declined in the last 7 days
                 SELECT 'Quotations', CONCAT(q.Id, ':', q.Status)
@@ -3009,14 +3025,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                SELECT 1 FROM dbo.WN_QuotationResponses qr WITH (NOLOCK)
                                 WHERE qr.QuotationId = q.Id AND qr.ResponseType = 'Declined'
                                   AND qr.RespondedDate >= DATEADD(DAY, -7, GETUTCDATE()))))   -- RespondedDate is written with GETUTCDATE()
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = q.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("q.SpaceId")}
                 UNION ALL
                 -- overdue: still owed (Unpaid / Partial / Challan Expire, legacy + OrderStatus) and past the due date
                 SELECT 'Invoices', CAST(i.Id AS NVARCHAR(20))
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                  WHERE i.StatusId IN ({openList}) AND i.DueOn < @Today
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("b.SpaceId")}
                 UNION ALL
                 -- door access suspended right now: open suspension, no override running, booking still running
                 -- (same conditions as GetHikAccessOverviewDbAsync)
@@ -3030,7 +3046,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                    AND EXISTS (SELECT 1 FROM dbo.WN_BookingDetails d WITH (NOLOCK)
                                 WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0
                                   AND d.EndDateTime >= @Today)   -- = MAX(EndDateTime) >= @Today
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("b.SpaceId")}
                 UNION ALL
                 -- offline door machines; Last_seen makes a machine that drops off again count as new
                 SELECT 'MachinesOffline', CONCAT(hd.Id, ':', CONVERT(VARCHAR(19), hd.Last_seen, 126))
@@ -3038,7 +3054,6 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
 
                 SELECT K, ItemKey FROM @Items;";
             await using var cmd = new SqlCommand(sql, c);
-            cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
             cmd.Parameters.Add("@Today", SqlDbType.Date).Value = businessToday.Date;
             cmd.Parameters.Add("@Now", SqlDbType.DateTime2).Value = businessNow;
             var list = new List<(string, string)>();

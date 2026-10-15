@@ -90,34 +90,49 @@ namespace WorkNest.API.Controllers
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
-        /// <summary>The inquiry with this public id among those the user can see (their branches + those without one).</summary>
-        private async Task<IDictionary<string, object?>?> FindVisibleAsync(Guid publicId)
+        /// <summary>
+        /// The inquiry the user can see (their branches + those without one) with this public id, or this Id (+ source:
+        /// "contact" / "booktour"; the old website bookings and the newer inquiries number their rows separately).
+        /// Error result: 404 not found / not theirs, 409 an Id that two inquiries have (send the public id or the source).
+        /// </summary>
+        private async Task<(InquiryMatch? Match, IActionResult? Error)> VisibleAsync(Guid? publicId, int? id = null, string? source = null)
         {
-            var (rows, _) = await _db.GetContactsAsync(1, 10000, null, null, User.GetBranchScope().ForList(null));
-            return rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = await _contacts.FindVisibleAsync(User.GetBranchScope().ForList(null), publicId, id, source);
+            if (match.Ambiguous) return (null, Conflict(ApiResponse.Fail(InquiryMessages.Ambiguous)));
+            if (match.Row is null || match.Id <= 0) return (null, NotFound(ApiResponse.Fail(InquiryMessages.NotFound)));
+            return (match, null);
         }
 
-        /// <summary>Feedback on a tour inquiry: not interested (reason, closes it), future prospect (follow-up date,
-        /// alerted on that date) or converted into a quotation (quotationId).</summary>
-        [HttpPost("api/contact/{id:int}/feedback")]
-        [Authorize(Roles = StaffRoles)]
-        public async Task<IActionResult> Feedback(int id, [FromBody] ContactFeedbackRequest request)
+        private async Task<IActionResult> SaveFeedbackAsync(InquiryMatch match, ContactFeedbackRequest request)
         {
-            var email = User.GetEmail();
-            int? actorId = string.IsNullOrWhiteSpace(email) ? null : (await _db.GetUserIdByEmailAsync(email)).Item1;
-            var result = await _contacts.SaveFeedbackAsync(id, request, actorId);
+            var result = await _contacts.SaveFeedbackAsync(match.Id, request, await ActorIdAsync(), match.Source);
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
-        /// <summary>Same as above, by the inquiry's public id (lists that return only PublicId).</summary>
+        private async Task<int?> ActorIdAsync()
+        {
+            var email = User.GetEmail();
+            return string.IsNullOrWhiteSpace(email) ? null : (await _db.GetUserIdByEmailAsync(email)).Item1;
+        }
+
+        /// <summary>Feedback on a tour inquiry: not interested (reason, closes it), future prospect (follow-up date,
+        /// alerted on that date) or converted into a quotation (quotationId). By Id: only an inquiry the user can see;
+        /// ?source=contact|booktour picks the row when an old website booking has the same Id (else 409).</summary>
+        [HttpPost("api/contact/{id:int}/feedback")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> Feedback(int id, [FromBody] ContactFeedbackRequest request, [FromQuery] string? source = null)
+        {
+            var (match, error) = await VisibleAsync(null, id, source);
+            return error ?? await SaveFeedbackAsync(match!, request);
+        }
+
+        /// <summary>Same as above, by the inquiry's public id (the way the CMS and the app address an inquiry).</summary>
         [HttpPost("api/contact/{publicId:guid}/feedback")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> FeedbackByGuid(Guid publicId, [FromBody] ContactFeedbackRequest request)
         {
-            var match = await FindVisibleAsync(publicId);
-            if (match is null) return NotFound(ApiResponse.Fail("Inquiry not found."));
-            var id = match.TryGetValue("Id", out var rid) && rid != null ? Convert.ToInt32(rid) : 0;
-            return id > 0 ? await Feedback(id, request) : NotFound(ApiResponse.Fail("Inquiry not found."));
+            var (match, error) = await VisibleAsync(publicId);
+            return error ?? await SaveFeedbackAsync(match!, request);
         }
 
         /// <summary>Change an inquiry's Type: Website, WhatsApp, WalkIn or Reference (+ referenceName; empty = the staff member).</summary>
@@ -129,34 +144,39 @@ namespace WorkNest.API.Controllers
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
+        /// <summary>Status by Id: only an inquiry the user can see; ?source=contact|booktour as for feedback.</summary>
         [HttpPatch("api/contact/{id:int}/status")]
         [Authorize(Roles = StaffRoles)]
-        public async Task<IActionResult> UpdateStatus(int id, [FromBody] ContactStatusUpdateRequest request) =>
-            Ok(await _contacts.UpdateContactStatusAsync(id, request.StatusId, null));
+        public async Task<IActionResult> UpdateStatus(int id, [FromBody] ContactStatusUpdateRequest request, [FromQuery] string? source = null)
+        {
+            var (match, error) = await VisibleAsync(null, id, source);
+            return error ?? StatusResult(await _contacts.UpdateContactStatusAsync(match!.Id, request.StatusId, await ActorIdAsync(), match.Source));
+        }
 
         [HttpPatch("api/contact/{publicId:guid}/status")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatusByGuid(Guid publicId, [FromBody] ContactStatusUpdateRequest request)
         {
-            var match = await FindVisibleAsync(publicId);
-            if (match is null) return NotFound(ApiResponse.Fail("Contact not found"));
-            var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
-            return Ok(await _contacts.UpdateContactStatusAsync(id, request.StatusId, null));
+            var (match, error) = await VisibleAsync(publicId);
+            return error ?? StatusResult(await _contacts.UpdateContactStatusAsync(match!.Id, request.StatusId, await ActorIdAsync(), match.Source));
         }
+
+        private IActionResult StatusResult(ApiResponse result) => result.IsSuccessful ? Ok(result) : BadRequest(result);
 
         [HttpDelete("api/contact/{id:int}")]
         [Authorize(Roles = AdminRoles)]
-        public async Task<IActionResult> Delete(int id) =>
-            Ok(await _contacts.DeleteContactAsync(id));
+        public async Task<IActionResult> Delete(int id, [FromQuery] string? source = null)
+        {
+            var (match, error) = await VisibleAsync(null, id, source);
+            return error ?? StatusResult(await _contacts.DeleteContactAsync(match!.Id, match.Source));
+        }
 
         [HttpDelete("api/contact/{publicId:guid}")]
         [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
-            var match = await FindVisibleAsync(publicId);
-            if (match is null) return NotFound(ApiResponse.Fail("Contact not found"));
-            var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
-            return Ok(await _contacts.DeleteContactAsync(id));
+            var (match, error) = await VisibleAsync(publicId);
+            return error ?? StatusResult(await _contacts.DeleteContactAsync(match!.Id, match.Source));
         }
     }
 }

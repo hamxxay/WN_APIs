@@ -99,7 +99,7 @@ namespace WorkNest.API.Controllers
         /// Admin sidebar badges: counts of items waiting on staff right now, keyed by sidebar route
         /// (e.g. { "/admin/bookings": 2 }). Polled every 60 s by every open admin tab, so it is one cheap query.
         /// Only routes the caller's role can open are returned; machines offline is admin / super admin only.
-        /// Super admins see every location; other roles only their own location where the data has one.
+        /// Super admins see every location; location-bound roles every location they are assigned to where the data has one.
         /// </summary>
         [HttpGet("api/admin/nav-badges")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
@@ -111,7 +111,8 @@ namespace WorkNest.API.Controllers
             if (!isAdmin && !isSalesExecutive)
                 return Ok(new Dictionary<string, int>()); // e.g. receptionist: no admin sidebar routes
 
-            var scope = User.IsLocationBoundRole() ? User.GetLocationId() : null;
+            // Every location the user is assigned to (as their lists show), not only the main one; null = all locations.
+            var scope = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
             // Tour inquiries and complaints: every branch the user is assigned to, plus the ones without a branch.
             var branches = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
             var badges = await _dashboard.GetNavBadgesAsync(scope, includeMachines: isAdmin, User.GetEmail(), branches);
@@ -156,7 +157,7 @@ namespace WorkNest.API.Controllers
                 ? r.Where(x => allowed.Contains(x, StringComparer.OrdinalIgnoreCase)).ToList()
                 : allowed.ToList();
 
-            var scope = User.IsLocationBoundRole() ? User.GetLocationId() : null;
+            var scope = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
             var branches = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
             if (!await _dashboard.MarkNavBadgesReadAsync(scope, email, routes, branches))
                 return StatusCode(503, new { isSuccessful = false, message = "Mark as read is not set up yet: the WN_NAV_BadgeReads table is missing." });
