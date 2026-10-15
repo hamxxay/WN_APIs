@@ -580,6 +580,52 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        // Record Payment on Invoices & Billing (cash, cheque, bank transfer; part or full). dbo.WN_RecordInvoicePayment
+        // (INV_FIX_A) updates PaidTotal + status, re-activates the booking's access cards and writes the WN_Payments row.
+        // [RecordScope] on the class keeps location-bound staff to invoices of their locations ("id").
+        [HttpPost("api/invoice/{id:int}/record-payment")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> RecordPayment(int id, [FromBody] RecordPaymentDto req)
+        {
+            if (req == null || req.PaidAmount <= 0)
+                return BadRequest(new { isSuccessful = false, message = "Payment amount must be greater than 0." });
+
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                using var cmd = new SqlCommand("dbo.WN_RecordInvoicePayment", conn) { CommandType = CommandType.StoredProcedure };
+                cmd.Parameters.AddWithValue("@InvoiceId", id);
+                cmd.Parameters.Add("@PaidAmount", SqlDbType.Decimal).Value = req.PaidAmount;
+                cmd.Parameters["@PaidAmount"].Precision = 18;
+                cmd.Parameters["@PaidAmount"].Scale = 4;
+                cmd.Parameters.AddWithValue("@PaymentMethod", string.IsNullOrWhiteSpace(req.PaymentMethod) ? "Cash" : req.PaymentMethod.Trim());
+                cmd.Parameters.AddWithValue("@TransactionRef", string.IsNullOrWhiteSpace(req.TransactionRef) ? DBNull.Value : req.TransactionRef.Trim());
+                cmd.Parameters.AddWithValue("@Notes", string.IsNullOrWhiteSpace(req.Notes) ? DBNull.Value : req.Notes.Trim());
+
+                decimal paidTotal = 0;
+                int statusId = 0;
+                using (var reader = await cmd.ExecuteReaderAsync())
+                {
+                    if (await reader.ReadAsync())
+                    {
+                        paidTotal = Convert.ToDecimal(reader["PaidTotal"]);
+                        statusId = Convert.ToInt32(reader["StatusId"]);
+                    }
+                }
+                return Ok(new { isSuccessful = true, message = "Payment recorded successfully", data = new { paidTotal, statusId } });
+            }
+            catch (SqlException ex) when (ex.Number == 50000)   // RAISERROR in the procedure: not found / bad amount
+            {
+                return ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase)
+                    ? NotFound(new { isSuccessful = false, message = "Invoice not found." })
+                    : BadRequest(new { isSuccessful = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
         [HttpPost("api/invoice/advance")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> CreateAdvance([FromBody] AdvanceInvoiceRequest request)
