@@ -8,6 +8,8 @@
     <!-- Generate XML documentation file for Swagger and external consumers -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
+    <!-- Memory Optimization: Workstation GC reduces memory footprint significantly compared to Server GC -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
 
   <ItemGroup>

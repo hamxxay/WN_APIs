@@ -13,11 +13,49 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         private static readonly SemaphoreSlim _browserLock = new SemaphoreSlim(1, 1);
         private static IBrowser? _browserInstance;
         private static bool _isBrowserDownloaded = false;
+        private static readonly TimeSpan _idleTimeout = TimeSpan.FromMinutes(10);
+        private static Timer? _idleTimer;
+
+        private static void ResetIdleTimer()
+        {
+            if (_idleTimer == null)
+            {
+                _idleTimer = new Timer(async _ => await CloseBrowserIfIdleAsync(), null, _idleTimeout, Timeout.InfiniteTimeSpan);
+            }
+            else
+            {
+                _idleTimer.Change(_idleTimeout, Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        private static async Task CloseBrowserIfIdleAsync()
+        {
+            if (_browserInstance == null) return;
+            await _browserLock.WaitAsync();
+            try
+            {
+                if (_browserInstance != null)
+                {
+                    if (!_browserInstance.IsClosed)
+                    {
+                        await _browserInstance.CloseAsync();
+                    }
+                    _browserInstance.Dispose();
+                    _browserInstance = null;
+                }
+            }
+            catch { }
+            finally
+            {
+                _browserLock.Release();
+            }
+        }
 
         private async Task<IBrowser> GetOrLaunchBrowserAsync()
         {
             if (_browserInstance != null && !_browserInstance.IsClosed && _browserInstance.IsConnected)
             {
+                ResetIdleTimer();
                 return _browserInstance;
             }
 
@@ -26,6 +64,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             {
                 if (_browserInstance != null && !_browserInstance.IsClosed && _browserInstance.IsConnected)
                 {
+                    ResetIdleTimer();
                     return _browserInstance;
                 }
 
@@ -47,11 +86,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         "--disable-gpu",
                         "--disable-extensions",
                         "--no-first-run",
-                        "--no-zygote"
+                        "--no-zygote",
+                        "--renderer-process-limit=1"
                     }
                 };
 
                 _browserInstance = await Puppeteer.LaunchAsync(launchOptions);
+                ResetIdleTimer();
                 return _browserInstance;
             }
             finally
@@ -180,12 +221,19 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
         public async ValueTask DisposeAsync()
         {
+            if (_idleTimer != null)
+            {
+                await _idleTimer.DisposeAsync();
+                _idleTimer = null;
+            }
+
             if (_browserInstance != null && !_browserInstance.IsClosed)
             {
                 try
                 {
                     await _browserInstance.CloseAsync();
                     _browserInstance.Dispose();
+                    _browserInstance = null;
                 }
                 catch { }
             }
