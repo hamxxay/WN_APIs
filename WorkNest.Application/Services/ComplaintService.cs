@@ -95,6 +95,7 @@ namespace WorkNest.Application.Services
                 Source = "whatsapp",
                 CustomerName = Clean(request.Name),
                 PhoneNumber = phone,
+                Branch = Clean(request.Branch),
                 Category = request.Category.Trim(),
                 Description = request.Description.Trim()
             }, null);
