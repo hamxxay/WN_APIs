@@ -200,6 +200,10 @@ try
     builder.Services.AddScoped<ISpaceTypeService, SpaceTypeService>();
     builder.Services.AddScoped<IPricingPlanService, PricingPlanService>();
     builder.Services.AddScoped<IContactService, ContactService>();
+    // Message templates (api/message-templates/*, api/contact/{publicId}/whatsapp-message): dbo.WN_MessageTemplates_Get /
+    // _Save (script WT_01_whatsapp_template); before WT_01 the default wording from code is used.
+    builder.Services.AddScoped<IMessageTemplateRepository, WorkNest.Infrastructure.Repositories.MessageTemplateRepository>();
+    builder.Services.AddScoped<IMessageTemplateService, MessageTemplateService>();
     // Complaints (WhatsApp bot + staff) and the WhatsApp bot / Inbox (WhatsApp:* settings, webhook api/whatsapp/webhook).
     builder.Services.AddScoped<IComplaintRepository, WorkNest.Infrastructure.Repositories.ComplaintRepository>();
     builder.Services.AddScoped<IComplaintService, ComplaintService>();
