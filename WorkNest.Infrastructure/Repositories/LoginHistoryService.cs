@@ -75,18 +75,23 @@ namespace WorkNest.Infrastructure.Repositories
             }
         }
 
-        public async Task<bool> HasSignedInBeforeAsync(int userId, string? email)
+        public async Task<bool> HasSignedInBeforeAsync(int userId, string? email, DateTime beforeUtc)
         {
             try
             {
                 await using var conn = new SqlConnection(_connectionString);
                 await conn.OpenAsync();
                 // UserId uses IX_WN_LoginHistory_UserId_LoginId; the email match only covers a first sign-in that created the user row.
+                // EventAt is UTC (WN_LoginHistory_Insert uses SYSUTCDATETIME()).
                 await using var cmd = new SqlCommand(
-                    "SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_LoginHistory WITH (NOLOCK) WHERE UserId = @UserId AND EventType = 'LOGIN') " +
-                    "OR EXISTS (SELECT 1 FROM dbo.WN_LoginHistory WITH (NOLOCK) WHERE UserId IS NULL AND @Email IS NOT NULL AND Email = @Email AND EventType = 'LOGIN') " +
+                    "SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_LoginHistory WITH (NOLOCK) WHERE UserId = @UserId AND EventType = 'LOGIN' AND EventAt < @BeforeUtc) " +
+                    "OR EXISTS (SELECT 1 FROM dbo.WN_LoginHistory WITH (NOLOCK) WHERE UserId IS NULL AND @Email IS NOT NULL AND Email = @Email AND EventType = 'LOGIN' AND EventAt < @BeforeUtc) " +
                     "THEN 1 ELSE 0 END", conn);
                 cmd.Parameters.Add(new SqlParameter("@UserId", SqlDbType.Int) { Value = userId });
+                cmd.Parameters.Add(new SqlParameter("@BeforeUtc", SqlDbType.DateTime2) 
+                {
+                    Value = DateTime.SpecifyKind(beforeUtc.Kind == DateTimeKind.Local ? beforeUtc.ToUniversalTime() : beforeUtc, DateTimeKind.Unspecified)
+                });
                 cmd.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 256)
                 {
                     Value = string.IsNullOrWhiteSpace(email) ? DBNull.Value : email.Trim()

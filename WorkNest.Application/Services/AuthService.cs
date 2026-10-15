@@ -1,4 +1,6 @@
+using System.Globalization;
 using WorkNest.Application.Helpers;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Auth;
 using WorkNest.Application.Interfaces;
@@ -14,15 +16,33 @@ namespace WorkNest.Application.Services
         private readonly ILogger<AuthService> _logger;
         private readonly ILoginHistoryService _loginHistory;
         private readonly IRoleService _roles;
+        private readonly DateTime _grandfatherBeforeUtc;
+
+        /// <summary>Config key: only sign-ins recorded before this UTC instant let an unverified Firebase email through.</summary>
+        public const string GrandfatherCutoffKey = "Security:UnverifiedSignInGrandfatherBeforeUtc";
+        /// <summary>Default cutoff (QA_01 deployment): 2026-10-16T00:00:00Z.</summary>
+        public static readonly DateTime DefaultGrandfatherCutoffUtc = new(2026, 10, 16, 0, 0, 0, DateTimeKind.Utc);
 
         public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger, ILoginHistoryService loginHistory,
-            IRoleService roles)
+            IRoleService roles, IConfiguration? configuration = null)
         {
             _db = db;
             _jwt = jwt;
             _logger = logger;
             _loginHistory = loginHistory;
             _roles = roles;
+            _grandfatherBeforeUtc = GrandfatherCutoff(configuration?[GrandfatherCutoffKey], logger);
+        }
+
+        /// <summary>The configured cutoff as UTC (a value without an offset is read as UTC); the default when missing or unreadable.</summary>
+        public static DateTime GrandfatherCutoff(string? configured, ILogger? logger = null)
+        {
+            if (string.IsNullOrWhiteSpace(configured)) return DefaultGrandfatherCutoffUtc;
+            if (DateTimeOffset.TryParse(configured.Trim(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
+                return parsed.UtcDateTime;
+            logger?.LogWarning("{Key} = '{Value}' is not a date; using {Default:o}", GrandfatherCutoffKey, configured, DefaultGrandfatherCutoffUtc);
+            return DefaultGrandfatherCutoffUtc;
         }
 
         /// <summary>The role's name for people (WN_Roles.DisplayName, e.g. "CEO", "Sales Manager"); null when not readable.</summary>
@@ -158,7 +178,7 @@ namespace WorkNest.Application.Services
                 ? Convert.ToInt32(rUid) 
                 : newUserId;
 
-            // Always recorded (also for the CMS's password sign-in): a recorded sign-in is what lets this account's later
+            // Always recorded (also for the CMS's password sign-in). Only sign-ins before the grandfather cutoff let later
             // unverified Firebase sign-ins through (CheckFirebaseSignInAsync).
             await RecordQuietly("LOGIN", resolvedUserId, request.Email, null);
 
@@ -172,9 +192,12 @@ namespace WorkNest.Application.Services
         ///   row is turned off (ACCOUNT_DISABLED).
         /// - not verified: anyone can create a Firebase email / password account for an address that has none yet (e.g.
         ///   staff added in the CMS who never signed in, or a customer without a user row), so only an existing active
-        ///   account that has signed in before (WN_LoginHistory) may continue: it already has its Firebase account, and
-        ///   Firebase refuses a second one for the same email. Everything else, brand-new emails included, gets
-        ///   EMAIL_NOT_VERIFIED and nothing is created until the email is verified.
+        ///   account that signed in BEFORE the cutoff (Security:UnverifiedSignInGrandfatherBeforeUtc, default
+        ///   2026-10-16T00:00:00Z; WN_LoginHistory) may continue: it already had its Firebase account then, and Firebase
+        ///   refuses a second one for the same email. Later sign-ins don't count: a password sign-in to the CMS
+        ///   (api/auth/login) proves nothing about who owns the Firebase account, which an attacker may have created
+        ///   first. Everything else, brand-new emails included, gets EMAIL_NOT_VERIFIED and nothing is created until the
+        ///   email is verified (the CMS keeps working through its password fallback).
         /// </summary>
         public async Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified)
         {
@@ -213,7 +236,7 @@ namespace WorkNest.Application.Services
         {
             try
             {
-                return await _loginHistory.HasSignedInBeforeAsync(userId, email);
+                return await _loginHistory.HasSignedInBeforeAsync(userId, email, _grandfatherBeforeUtc);
             }
             catch (Exception ex)
             {
