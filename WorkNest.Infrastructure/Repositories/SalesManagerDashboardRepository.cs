@@ -7,10 +7,12 @@ namespace WorkNest.Infrastructure.Repositories
 {
     /// <summary>
     /// Sales Manager dashboard data: calls the read-only stored procedures dbo.WN_SalesMgr_* (script SM_01_sales_manager,
-    /// replaced in desks by SM_02_sales_manager_desks; the complaints ones from SM_03_sales_manager_complaints). Until
-    /// SM_01 (complaints: SM_03) has run the procedures are missing (SQL error 2812); until SM_02 has run they answer
-    /// without their desk columns. Either way the call throws <see cref="SalesManagerDatabaseUpdateMissingException"/>,
-    /// which the API answers with 503.
+    /// replaced in desks by SM_02_sales_manager_desks; the complaints ones from SM_03_sales_manager_complaints; tour
+    /// inquiries by branch from BR_02_sm_inquiries_branch). Until SM_01 (complaints: SM_03) has run the procedures are
+    /// missing (SQL error 2812); until SM_02 has run they answer without their desk columns. Either way the call throws
+    /// <see cref="SalesManagerDatabaseUpdateMissingException"/>, which the API answers with 503. Until BR_02 has run the
+    /// procedures do not know the inquiry branch parameters (SQL error 8144, too many arguments): the call is repeated
+    /// without them and the tour inquiries of every branch are counted, as before.
     /// </summary>
     public class SalesManagerDashboardRepository : ISalesManagerDashboardRepository
     {
@@ -76,22 +78,40 @@ namespace WorkNest.Infrastructure.Repositories
             return sets;
         }
 
+        /// <summary>
+        /// Runs a procedure with the BR_02 tour inquiry branch parameters (<paramref name="branch"/>). A database without
+        /// BR_02 answers 8144 (too many arguments): run it again without them (every branch's inquiries, as before).
+        /// </summary>
+        private async Task<List<List<IDictionary<string, object?>>>> RunWithInquiryBranchAsync(string procedure,
+            Action<SqlParameterCollection> bind, Action<SqlParameterCollection> branch, int deskSet = 0, string? deskColumn = null)
+        {
+            try
+            {
+                return await RunAsync(procedure, p => { bind(p); branch(p); }, deskSet, deskColumn);
+            }
+            catch (SqlException ex) when (ex.Number is 8144 or 8145) // BR_02 not run yet: no inquiry branch parameters
+            {
+                return await RunAsync(procedure, bind, deskSet, deskColumn);
+            }
+        }
+
         // SM_02 marks: the funnel's BookedDesks, the breakdown head's InDesks, the records' Desks.
+        // BR_02 marks: the inquiries row's ByBranch, the breakdown head's InqByBranch, the inquiry records' ByBranch.
 
         public Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(string? locationIds, string? pickerLocationIds,
-            int periodMonths, DateTime businessNow, int expiringDays) =>
-            RunAsync("dbo.WN_SalesMgr_Dashboard", p =>
+            bool inquiriesNoBranch, int periodMonths, DateTime businessNow, int expiringDays) =>
+            RunWithInquiryBranchAsync("dbo.WN_SalesMgr_Dashboard", p =>
             {
                 p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
                 p.Add("@PickerLocationIds", SqlDbType.NVarChar, -1).Value = Db(pickerLocationIds);
                 p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
-            }, 1, "BookedDesks");
+            }, p => p.Add("@InquiriesNoBranch", SqlDbType.Bit).Value = inquiriesNoBranch, 1, "BookedDesks");
 
-        public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, string? locationIds, DateTime? monthStart,
-            string? inquiryType, int? userId, DateTime businessNow) =>
-            RunAsync("dbo.WN_SalesMgr_Breakdown", p =>
+        public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, string? locationIds, bool inquiriesNoBranch,
+            DateTime? monthStart, string? inquiryType, int? userId, DateTime businessNow) =>
+            RunWithInquiryBranchAsync("dbo.WN_SalesMgr_Breakdown", p =>
             {
                 p.Add("@Metric", SqlDbType.NVarChar, 30).Value = metric;
                 p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
@@ -99,7 +119,7 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@InquiryType", SqlDbType.NVarChar, 20).Value = Db(inquiryType);
                 p.Add("@UserId", SqlDbType.Int).Value = Db(userId);
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-            }, 0, "InDesks");
+            }, p => p.Add("@InquiriesNoBranch", SqlDbType.Bit).Value = inquiriesNoBranch, 0, "InDesks");
 
         public Task<List<List<IDictionary<string, object?>>>> GetQuotationRecordsAsync(string? locationIds, DateTime? from, DateTime? to,
             int? userId, string? stage, int top) =>
@@ -127,9 +147,9 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Top", SqlDbType.Int).Value = top;
             }, 1, "Desks");
 
-        public Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(DateTime? from, DateTime? to, string? inquiryType,
-            string? outcome, string? reason, DateTime businessNow, int top) =>
-            RunAsync("dbo.WN_SalesMgr_Records_Inquiries", p =>
+        public Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(string? locationIds, bool includeNoBranch, DateTime? from,
+            DateTime? to, string? inquiryType, string? outcome, string? reason, DateTime businessNow, int top) =>
+            RunWithInquiryBranchAsync("dbo.WN_SalesMgr_Records_Inquiries", p =>
             {
                 p.Add("@From", SqlDbType.DateTime2).Value = Db(from);
                 p.Add("@To", SqlDbType.DateTime2).Value = Db(to);
@@ -138,6 +158,10 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Reason", SqlDbType.NVarChar, 1000).Value = Db(reason);
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@Top", SqlDbType.Int).Value = top;
+            }, p =>
+            {
+                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
+                p.Add("@IncludeNoLocation", SqlDbType.Bit).Value = includeNoBranch;
             });
 
         public Task<List<List<IDictionary<string, object?>>>> GetLeaseRecordsAsync(string? locationIds, bool noLocation, DateTime? from,
