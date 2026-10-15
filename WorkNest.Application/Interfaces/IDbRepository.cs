@@ -56,6 +56,16 @@ namespace WorkNest.Application.Interfaces
         /// <summary>True when the invoice / booking belongs to the user with this email (customer self-service checks).</summary>
         Task<bool> IsInvoiceOwnedByDbAsync(int invoiceId, string email);
         Task<bool> IsBookingOwnedByDbAsync(int bookingId, string email);
+        /// <summary>
+        /// The signed-in customer's invoices (GET api/invoice/my): every WN_Invoices row whose user (the invoice's, else
+        /// its booking's) has this email — the same owner rule as IsInvoiceOwnedByDbAsync, so each one's PDF opens.
+        /// </summary>
+        Task<List<IDictionary<string, object?>>> GetMyInvoicesDbAsync(string email);
+        /// <summary>
+        /// Open door-access suspensions in force on <paramref name="today"/> (WN_HIK_BookingAccessSuspensions: not
+        /// resolved, no temporary access running) for these bookings. Empty when the table is not installed.
+        /// </summary>
+        Task<IDictionary<int, BookingAccessSuspensionInfo>> GetOpenAccessSuspensionsDbAsync(IEnumerable<int> bookingIds, DateTime today);
         /// <summary>For a customer's own cancel: the booking's status id and whether any payment is recorded on it. Null when it is not this user's booking.</summary>
         Task<(int StatusId, bool HasPayment)?> GetBookingCancelCheckDbAsync(int bookingId, string email);
         /// <summary>Amount recorded as paid per booking (same rule as the cancel check). Key = booking id.</summary>

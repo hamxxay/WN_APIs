@@ -8,6 +8,11 @@ namespace WorkNest.Application.Interfaces
         Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null);
         Task<ApiResponse> GetBookingByIdAsync(Guid publicId, string? userEmail);
         Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail);
+        /// <summary>
+        /// The customer's Payments tab (GET api/invoice/my): their invoices plus the booking challans that have no
+        /// invoice, each with paid / unpaid / overdue status, and the totals.
+        /// </summary>
+        Task<WorkNest.Application.DTOs.Payment.MyBillsDto> GetMyBillsAsync(string userEmail);
         Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10);
         /// <summary>Booked dates of a space in a month; <paramref name="includeBookings"/> adds the bookings (staff only).</summary>
         Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month, bool includeBookings = false);

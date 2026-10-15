@@ -36,7 +36,22 @@ namespace WorkNest.Application.Services
             return (rows.Cast<object>(), total);
         }
 
-        public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail)
+        public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail) =>
+            (await GetMyBookingRowsAsync(userEmail)).Rows.Cast<object>();
+
+        /// <summary>Open door-access suspensions of these bookings; none when they can't be read (a notice must never break the list).</summary>
+        private async Task<IDictionary<int, BookingAccessSuspensionInfo>> SuspensionsOfAsync(IEnumerable<int> bookingIds)
+        {
+            try { return await _db.GetOpenAccessSuspensionsDbAsync(bookingIds, _clock.Today); }
+            catch (Exception) { return new Dictionary<int, BookingAccessSuspensionInfo>(); }
+        }
+
+        /// <summary>
+        /// GET booking/my rows with TotalPayable / TotalPaidAmount and the door-access notice: AccessSuspended,
+        /// AccessSuspendedReason (plain text for the customer), AccessSuspendedInvoiceId / AccessSuspendedInvoiceNumber
+        /// (the unpaid invoice to open). Rejected / cancelled bookings never carry the notice.
+        /// </summary>
+        private async Task<(List<IDictionary<string, object?>> Rows, IDictionary<int, BookingAccessSuspensionInfo> Suspensions)> GetMyBookingRowsAsync(string userEmail)
         {
             var rows = (await _db.GetMyBookingsAsync(userEmail)).ToList();
 
@@ -57,7 +72,142 @@ namespace WorkNest.Application.Services
                 }
                 rows[i]["TotalPayable"] = totalPayable;
             }
-            return rows.Cast<object>();
+
+            var suspensions = await SuspensionsOfAsync(ids);
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                bool closed = CustomerBills.IsClosedBooking(RowText(row, "BookingStatusCode"), RowText(row, "BookingStatusLabel"));
+                var s = !closed && suspensions.TryGetValue(ids[i], out var found) ? found : null;
+                row["AccessSuspended"] = s != null;
+                row["AccessSuspendedReason"] = s != null ? CustomerBills.SuspensionMessage(s.InvoiceNumber, s.InvoiceDueOn, RowText(row, "ChallanNumber")) : null;
+                row["AccessSuspendedInvoiceId"] = s?.InvoiceId;
+                row["AccessSuspendedInvoiceNumber"] = s?.InvoiceNumber;
+            }
+            return (rows, suspensions);
+        }
+
+        private static string? RowText(IDictionary<string, object?> row, string key) =>
+            row.TryGetValue(key, out var v) && v is not null && v is not DBNull && !string.IsNullOrWhiteSpace(v.ToString()) ? v.ToString()!.Trim() : null;
+
+        private static decimal RowDecimal(IDictionary<string, object?> row, string key) =>
+            row.TryGetValue(key, out var v) && v is not null && v is not DBNull ? Convert.ToDecimal(v) : 0m;
+
+        private static int? RowInt(IDictionary<string, object?> row, string key) =>
+            row.TryGetValue(key, out var v) && v is not null && v is not DBNull ? Convert.ToInt32(v) : null;
+
+        private static DateTime? RowDate(IDictionary<string, object?> row, string key) =>
+            row.TryGetValue(key, out var v) ? ParseDateSafely(v is DBNull ? null : v) : null;
+
+        public async Task<MyBillsDto> GetMyBillsAsync(string userEmail)
+        {
+            var today = _clock.Today;
+            var now = _clock.Now;
+            var invoiceRows = await _db.GetMyInvoicesDbAsync(userEmail);
+            var (bookingRows, suspensions) = await GetMyBookingRowsAsync(userEmail);
+            var bills = new List<MyBillDto>();
+
+            foreach (var r in invoiceRows)
+            {
+                int statusId = RowInt(r, "StatusId") ?? 0;
+                var statusDescription = RowText(r, "StatusDescription");
+                decimal total = Math.Round(RowDecimal(r, "GrandTotal"), 2), withheld = Math.Round(RowDecimal(r, "WHTAmount"), 2), paid = Math.Round(RowDecimal(r, "PaidTotal"), 2);
+                var dueOn = RowDate(r, "DueOn")?.Date;
+                var state = CustomerBills.ClassifyInvoice(statusId, statusDescription, total, withheld, paid, dueOn, today);
+                if (state.IsVoid && paid < 1m) continue; // a voided invoice with nothing paid on it is not a bill any more
+
+                int? bookingId = RowInt(r, "BookingId");
+                bool closed = CustomerBills.IsClosedBooking(RowText(r, "BookingStatusCode"), RowText(r, "BookingStatusLabel"));
+                int invoiceId = RowInt(r, "Id") ?? 0;
+                var s = bookingId.HasValue && !closed && suspensions.TryGetValue(bookingId.Value, out var found) ? found : null;
+                bool suspendedNow = s != null && s.InvoiceId == invoiceId;
+                DateTime? suspendsOn = null;
+                if (!closed && !suspendedNow && bookingId.HasValue && dueOn.HasValue && state.Balance >= 1m
+                    && CustomerBills.CountsForSuspension(statusId, statusDescription))
+                {
+                    var on = CustomerBills.AccessSuspendsOn(dueOn.Value);
+                    if (on > today) suspendsOn = on;
+                }
+
+                bills.Add(new MyBillDto
+                {
+                    Kind = "invoice",
+                    InvoiceId = invoiceId,
+                    InvoicePublicId = r.TryGetValue("PublicId", out var pid) && pid is Guid g ? g : null,
+                    Number = RowText(r, "InvoiceNumber") ?? $"Invoice #{invoiceId}",
+                    Title = CustomerBills.InvoiceTitle(RowInt(r, "InvoiceTypeId")),
+                    BookingId = bookingId,
+                    BookingStatus = RowText(r, "BookingStatusLabel") ?? RowText(r, "BookingStatusCode"),
+                    BookingClosed = closed,
+                    SpaceName = RowText(r, "SpaceName"),
+                    SpaceCode = RowText(r, "SpaceCode"),
+                    LocationName = RowText(r, "LocationName"),
+                    IssuedOn = RowDate(r, "IssuedOn")?.Date,
+                    DueOn = dueOn,
+                    PeriodStart = RowDate(r, "PeriodStart"),
+                    PeriodEnd = RowDate(r, "PeriodEnd"),
+                    CurrencyCode = RowText(r, "CurrencyCode") ?? "PKR",
+                    Total = total,
+                    TaxWithheld = withheld,
+                    // Marked paid in the database (bank / fee receipt) counts as paid in full.
+                    Paid = state.Status == CustomerBills.Paid ? Math.Max(paid, total - withheld) : paid,
+                    Balance = state.Balance,
+                    Status = state.Status,
+                    IsOverdue = state.IsOverdue,
+                    DaysOverdue = state.DaysOverdue,
+                    AccessSuspendsOn = suspendsOn,
+                    AccessSuspended = suspendedNow,
+                    HasPdf = invoiceId > 0
+                });
+            }
+
+            // Booking challans with no invoice at all (older bookings): the challan is the bill.
+            var invoicedBookings = new HashSet<int>(invoiceRows.Select(r => RowInt(r, "BookingId") ?? 0).Where(id => id > 0));
+            foreach (var row in bookingRows)
+            {
+                int bookingId = RowInt(row, "BookingId") ?? 0;
+                var challanNumber = RowText(row, "ChallanNumber");
+                if (bookingId <= 0 || challanNumber == null || invoicedBookings.Contains(bookingId)) continue;
+                if (!row.TryGetValue("TotalPayable", out var tp) || tp is null) continue; // amount unknown: not shown as a bill
+                decimal total = Math.Round(Convert.ToDecimal(tp), 2), paid = Math.Round(RowDecimal(row, "TotalPaidAmount"), 2);
+                var code = RowText(row, "BookingStatusCode");
+                var label = RowText(row, "BookingStatusLabel");
+                bool closed = CustomerBills.IsClosedBooking(code, label);
+                bool pending = CustomerBills.IsPendingBooking(code, label);
+                var validUntil = RowDate(row, "ChallanValidUntil");
+                var state = CustomerBills.ClassifyChallan(pending, closed, total, paid, validUntil, now);
+                if (state.IsVoid) continue; // rejected / cancelled with nothing paid: nothing to show
+                var bookedOn = RowDate(row, "BookedOn");
+                bool suspendedNow = !closed && suspensions.TryGetValue(bookingId, out var s) && s.InvoiceId == null;
+
+                bills.Add(new MyBillDto
+                {
+                    Kind = "challan",
+                    Number = challanNumber,
+                    Title = "Booking challan",
+                    BookingId = bookingId,
+                    BookingStatus = label ?? code,
+                    BookingClosed = closed,
+                    SpaceName = RowText(row, "SpaceName"),
+                    SpaceCode = RowText(row, "SpaceCode"),
+                    LocationName = RowText(row, "LocationName"),
+                    // WN_Bookings.CreatedOn is UTC; shown as the Pakistan date.
+                    IssuedOn = bookedOn.HasValue ? _clock.FromUtc(bookedOn.Value).Date : null,
+                    DueOn = validUntil,
+                    PeriodStart = RowDate(row, "StartOn"),
+                    PeriodEnd = RowDate(row, "EndOn"),
+                    Total = total,
+                    // A booking is confirmed once its challan is paid.
+                    Paid = state.Status == CustomerBills.Paid && !closed ? Math.Max(paid, total) : paid,
+                    Balance = state.Balance,
+                    Status = state.Status,
+                    AccessSuspended = suspendedNow,
+                    HasPdf = false
+                });
+            }
+
+            var sorted = CustomerBills.Sort(bills);
+            return new MyBillsDto { Items = sorted, Summary = CustomerBills.Summarize(sorted) };
         }
 
         public async Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10) =>
@@ -527,7 +677,9 @@ namespace WorkNest.Application.Services
                 BillingPeriodLabel = header["BillingPeriodLabel"]?.ToString(),
                 BillingPeriodMonths = billingPeriodMonths,
                 CurrentCycleAmount = currentCycleAmount,
-                FirstCycleRent = currentCycleAmount,
+                // The advance rent on the booking's challan (same calculation as GET booking/{id}/challan: a booking
+                // that starts after the 1st also pays the rest of its first month), so the two screens agree.
+                FirstCycleRent = calcResult.FirstCycleRent > 0m ? calcResult.FirstCycleRent : currentCycleAmount,
                 TotalContractAmount = totalContractAmount,
                 NextBillDueDate = nextBillDueDate,
                 NextBillingDate = nextBillingDate ?? nextBillDueDate,
@@ -548,8 +700,32 @@ namespace WorkNest.Application.Services
                 result.ChallanNumber = summary.TryGetValue("ChallanNumber", out var chn) && chn is not null ? chn.ToString() : null;
                 result.ChallanValidUntil = ParseDateSafely(summary.TryGetValue("ChallanValidUntil", out var chv) ? chv : null);
             }
+            result.BillingFiguresReliable = BillingFiguresReliable(summary);
+
+            // Door access suspended for an unpaid bill (not shown on rejected / cancelled bookings).
+            if (!CustomerBills.IsClosedBooking(result.BookingStatusCode, result.BookingStatusLabel)
+                && (await SuspensionsOfAsync(new[] { result.BookingId })).TryGetValue(result.BookingId, out var suspension))
+            {
+                result.AccessSuspended = true;
+                result.AccessSuspendedReason = CustomerBills.SuspensionMessage(suspension.InvoiceNumber, suspension.InvoiceDueOn, result.ChallanNumber);
+                result.AccessSuspendedInvoiceId = suspension.InvoiceId;
+                result.AccessSuspendedInvoiceNumber = suspension.InvoiceNumber;
+            }
 
             return ApiResponse.Ok(result);
+        }
+
+        /// <summary>
+        /// Next bill due / balance left / total contract are trustworthy only once WN_vw_BookingSummary has the
+        /// QA_02 billing rules (it then returns BillingRulesVersion >= 2) and the booking's bills are known
+        /// (BillingFiguresKnown: false for a confirmed booking that has no invoice to bill from).
+        /// </summary>
+        public static bool BillingFiguresReliable(IDictionary<string, object?>? summaryRow)
+        {
+            if (summaryRow is null) return false;
+            if (!summaryRow.TryGetValue("BillingRulesVersion", out var version) || version is null || version is DBNull) return false;
+            if (Convert.ToInt32(version) < 2) return false;
+            return !summaryRow.TryGetValue("BillingFiguresKnown", out var known) || known is null || known is DBNull || Convert.ToBoolean(known);
         }
 
         private static DateTime? ParseDateSafely(object? value)
@@ -560,6 +736,14 @@ namespace WorkNest.Application.Services
             if (DateTime.TryParse(value.ToString(), out var parsed)) return parsed;
             return null;
         }
+
+        /// <summary>
+        /// WN_Challans.IssuedOn defaults to SYSUTCDATETIME() (UTC), while ValidUntil is a Pakistan date: the issue time is
+        /// shown in Pakistan time so both dates agree (a challan made after 7 PM was showing the day before). A value with
+        /// no time of day is a date set on purpose (e.g. the signed agreement's date) and is kept.
+        /// </summary>
+        private DateTime? ChallanIssuedOnPakistan(DateTime? issuedOn) =>
+            issuedOn is DateTime d && d.TimeOfDay != TimeSpan.Zero ? _clock.FromUtc(d) : issuedOn;
 
         public async Task<ApiResponse> GetChallanAsync(int bookingId)
         {
@@ -602,7 +786,7 @@ namespace WorkNest.Application.Services
                 ChallanId = Convert.ToInt32(header["ChallanId"]),
                 ChallanPublicId = header["ChallanPublicId"]?.ToString(),
                 ChallanNumber = header["ChallanNumber"]?.ToString() ?? "",
-                IssuedOn = ParseDateSafely(header["IssuedOn"]),
+                IssuedOn = ChallanIssuedOnPakistan(ParseDateSafely(header["IssuedOn"])),
                 ValidUntil = ParseDateSafely(header["ValidUntil"]),
                 ChallanStatusId = Convert.ToInt32(header["ChallanStatusId"]),
                 ChallanNotes = header["ChallanNotes"]?.ToString(),

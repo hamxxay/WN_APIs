@@ -133,6 +133,27 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        /// <summary>
+        /// The signed-in customer's bills (app Payments tab): their invoices (paid, unpaid, overdue, with the
+        /// door-access suspension date) plus the booking challans that have no invoice, and the totals. Only the
+        /// caller's own records (owner rule of GET api/invoice/{id}/pdf, so every invoice listed can be downloaded).
+        /// </summary>
+        [HttpGet("api/invoice/my")]
+        public async Task<IActionResult> MyInvoices()
+        {
+            var email = ResolveUserEmail();
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "Sign in required." });
+            try
+            {
+                return Ok(WorkNest.Common.Responses.ApiResponse.Ok(await _bookings.GetMyBillsAsync(email)));
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = "Your bills could not be loaded. Please try again." });
+            }
+        }
+
         [HttpGet("api/customer/{customerId:int}/invoices")]
         [Authorize(Roles = StaffRoles)]
         [HttpGet("api/customers/{customerId:int}/invoices")]

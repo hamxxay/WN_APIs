@@ -51,6 +51,19 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime? BookedOn { get; set; }
         public string? ChallanNumber { get; set; }
         public DateTime? ChallanValidUntil { get; set; }
+        /// <summary>
+        /// False until the database has the corrected billing rules (QA_02 script) or when the booking has no invoice
+        /// to bill from: NextBillDueDate, NextBillingDate, BalanceLeft and TotalContractAmount should then not be shown
+        /// to customers.
+        /// </summary>
+        public bool BillingFiguresReliable { get; set; }
+        /// <summary>Door access to the space is suspended right now because a bill is unpaid (WN_HIK_BookingAccessSuspensions).</summary>
+        public bool AccessSuspended { get; set; }
+        /// <summary>Plain-language reason for the customer (which bill, since when).</summary>
+        public string? AccessSuspendedReason { get; set; }
+        /// <summary>The unpaid invoice behind the suspension (null when it is the booking challan).</summary>
+        public int? AccessSuspendedInvoiceId { get; set; }
+        public string? AccessSuspendedInvoiceNumber { get; set; }
         public ContractDetailsDto Contract { get; set; } = new();
         public List<object> Details { get; set; } = new();
     }
