@@ -10,8 +10,9 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// CEO dashboard: read-only, every location. The CEO (role ceo) sees only these endpoints (and the forecast);
     /// super admins may open them too. Common query parameters: period = month (default) | quarter | year (to date,
-    /// against the previous period, as api/dashboard/overview) and locationId (narrow to one location).
-    /// Bad parameters answer 400; before the database update CEO_01 has run, 503.
+    /// against the previous period, as api/dashboard/overview) and locationId (narrow to one location; tour inquiries by
+    /// their branch once the database update QA_07 has run, before it they count every location and say so).
+    /// Bad parameters answer 400; before the database update CEO_01 has run, 503 (records/leases: before QA_07).
     /// </summary>
     [ApiController]
     [Authorize(Roles = "ceo,super_admin,SuperAdmin")]
@@ -41,8 +42,9 @@ namespace WorkNest.API.Controllers
             Run(() => _ceo.GetBreakdownAsync(query));
 
         /// <summary>
-        /// Level 3: records behind a breakdown row, newest first, at most 200 (total = all that match).
-        /// kind = invoices | spaces | bookings | inquiries | quotations.
+        /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
+        /// match). kind = invoices | spaces | bookings | inquiries | quotations | leases (QA_07: confirmed leases ending in
+        /// the next 90 days, or month / from / to).
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>
@@ -57,8 +59,8 @@ namespace WorkNest.API.Controllers
             }
             catch (CeoDatabaseUpdateMissingException ex)
             {
-                _logger.LogWarning("CEO dashboard called before the database update CEO_01: {Error}", ex.InnerException?.Message);
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(CeoDatabaseUpdateMissingException.UserMessage));
+                _logger.LogWarning("CEO dashboard called before the database update {Update}: {Error}", ex.Update, ex.InnerException?.Message);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
             }
         }
     }

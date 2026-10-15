@@ -11,6 +11,9 @@ namespace WorkNest.Application.Services
     /// use the same rules as the admin overview (api/dashboard/overview) and the super admin role dashboard
     /// (api/dashboard/role), with the same invoice statuses (OrderStatusService) and the same business clock, so they
     /// match the rest of the system. Level 1 = dashboard, level 2 = breakdown of one chart element, level 3 = records.
+    /// Tour inquiries follow the location filter by their branch (WN_Contacts.LocationId) once QA_07 has run, as on the
+    /// Sales Manager dashboard: one location = only its inquiries, all locations = every inquiry. Before QA_07 they count
+    /// every location's inquiries and say so (inquiriesAllLocations, "all locations").
     /// </summary>
     public class CeoDashboardService : ICeoDashboardService
     {
@@ -56,6 +59,8 @@ namespace WorkNest.Application.Services
             var occ = Set(s, 5).FirstOrDefault();
             var sales = Set(s, 9).FirstOrDefault();
             var totalSpaces = Int(occ, "TotalSpaces");
+            // [13] all leases expiring (QA_07); before it only the list of the first 50 is known.
+            var leaseTotals = Set(s, 13).FirstOrDefault();
 
             var dto = new CeoDashboardDto
             {
@@ -102,7 +107,9 @@ namespace WorkNest.Application.Services
                     {
                         BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"),
                         Location = Str(r, "Location"), EndOn = Day(r, "EndOn"), MonthlyAmount = Dec(r, "MonthlyAmount")
-                    }).ToList()
+                    }).ToList(),
+                    LeasesExpiringCount = leaseTotals != null ? Int(leaseTotals, "ExpiringCount") : null,
+                    LeasesExpiringMonthly = leaseTotals != null ? Dec(leaseTotals, "ExpiringMonthly") : null
                 }
             };
             dto.Money.CollectionRate = dto.Money.Invoiced > 0 ? Math.Round(dto.Money.Collected * 100m / dto.Money.Invoiced, 1) : 0m;
@@ -126,7 +133,9 @@ namespace WorkNest.Application.Services
                         .Select(kv => new CeoInquiryTypeCountDto { Type = kv.Key, Label = kv.Key, Count = kv.Value }))
                     .ToList(),
                 QuotationValue = Dec(sales, "QuotationValue"),
-                BookingValue = Dec(sales, "BookingValue")
+                BookingValue = Dec(sales, "BookingValue"),
+                // A location chosen, but the procedure counted every location's inquiries (QA_07 not run).
+                InquiriesAllLocations = Location(locationId) != null && !Flag(sales, "InqByLocation")
             };
             dto.Team = new CeoTeamDto
             {
@@ -182,7 +191,8 @@ namespace WorkNest.Application.Services
 
             var s = await _repo.GetBreakdownAsync(metric, month, bucket, metric == "occupancy-type" ? q.SpaceTypeId : null,
                 Location(q.LocationId), type, metric == "staff" ? q.UserId : null, _clock.Now, await StatusesAsync());
-            var subject = Str(Set(s, 0).FirstOrDefault(), "Subject");
+            var head = Set(s, 0).FirstOrDefault();
+            var subject = Str(head, "Subject");
             var monthRows = metric is "inquiries-type" or "staff";
             var dto = new CeoBreakdownDto
             {
@@ -224,7 +234,9 @@ namespace WorkNest.Application.Services
                     break;
                 case "inquiries-type":
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ($"Tour inquiries: {InquiryTypeLabels.First(t => t.Type == type).Label}", "Last 6 months", "Inquiries", null);
+                        ($"Tour inquiries: {InquiryTypeLabels.First(t => t.Type == type).Label}",
+                            Location(q.LocationId) != null && !Flag(head, "InqByLocation") ? "Last 6 months, all locations" : "Last 6 months",
+                            "Inquiries", null);
                     break;
                 default: // staff
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
@@ -248,11 +260,14 @@ namespace WorkNest.Application.Services
                 "invoices" => await InvoicesAsync(q, locationId, noLocation),
                 "spaces" => await SpacesAsync(q, locationId, noLocation),
                 "bookings" => await BookingsAsync(q, locationId, noLocation),
-                "inquiries" => await InquiriesAsync(q),
+                "inquiries" => noLocation
+                    ? ApiResponse.Fail("locationId=none is not available for inquiries.")
+                    : await InquiriesAsync(q, locationId),
                 "quotations" => noLocation
                     ? ApiResponse.Fail("locationId=none is not available for quotations.")
                     : await QuotationsAsync(q, locationId),
-                _ => ApiResponse.Fail($"Unknown records list '{kind}'. Use invoices, spaces, bookings, inquiries or quotations.")
+                "leases" => await LeasesAsync(q, locationId, noLocation),
+                _ => ApiResponse.Fail($"Unknown records list '{kind}'. Use invoices, spaces, bookings, inquiries, quotations or leases.")
             };
         }
 
@@ -353,7 +368,11 @@ namespace WorkNest.Application.Services
             return Records(status.Length == 0 ? "New bookings" : "Bookings", parts, Total(s), rows);
         }
 
-        private async Task<ApiResponse> InquiriesAsync(CeoRecordsQuery q)
+        /// <summary>
+        /// Tour inquiry records: of one branch when a location is chosen (QA_07; before it every location's, "all
+        /// locations" in the title), else every inquiry.
+        /// </summary>
+        private async Task<ApiResponse> InquiriesAsync(CeoRecordsQuery q, int? locationId)
         {
             string? type = null;
             if (!string.IsNullOrWhiteSpace(q.Type))
@@ -363,7 +382,7 @@ namespace WorkNest.Application.Services
             }
             if (!TryWindow(q, out var from, out var to, out var window, out var error)) return ApiResponse.Fail(error!);
 
-            var s = await _repo.GetInquiryRecordsAsync(from, to, type, MaxRows);
+            var s = await _repo.GetInquiryRecordsAsync(from, to, type, locationId, MaxRows);
             var rows = Set(s, 1).Select(r => new CeoInquiryRecordDto
             {
                 InquiryId = Int(r, "InquiryId"), Name = Str(r, "Name"), Phone = Str(r, "Phone"), Type = Str(r, "InquiryType"),
@@ -374,7 +393,42 @@ namespace WorkNest.Application.Services
             var parts = new List<string>();
             if (type != null) parts.Add(InquiryTypeLabels.First(t => t.Type == type).Label);
             parts.Add($"received {window}");
+            if (locationId != null && !Flag(Set(s, 0).FirstOrDefault(), "ByLocation")) parts.Add("all locations");   // QA_07 not run yet
             return Records("Tour inquiries", parts, Total(s), rows);
+        }
+
+        /// <summary>
+        /// Confirmed leases ending in a window, soonest first (QA_07): month (ending that month), else from / to
+        /// (yyyy-MM-dd, both days included), else the next 90 days (the dashboard's "Leases expiring").
+        /// </summary>
+        private async Task<ApiResponse> LeasesAsync(CeoRecordsQuery q, int? locationId, bool noLocation)
+        {
+            DateTime? from = null, to = null;
+            string window;
+            if (!string.IsNullOrWhiteSpace(q.Month))
+            {
+                if (!TryMonth(q.Month, out var m)) return ApiResponse.Fail(MonthError);
+                from = m; to = m.AddMonths(1); window = $"ending in {m.ToString("MMMM yyyy", En)}";
+            }
+            else if (!string.IsNullOrWhiteSpace(q.From) || !string.IsNullOrWhiteSpace(q.To))
+            {
+                if (!TryDays(q.From, q.To, out from, out to, out var label, out var error)) return ApiResponse.Fail(error!);
+                window = $"ending {label}";
+            }
+            else window = $"ending in the next {ExpiringDays} days";
+
+            var s = await _repo.GetLeaseRecordsAsync(locationId, noLocation, from, to, ExpiringDays, _clock.Now, MaxRows);
+            var rows = Set(s, 1).Select(r => new CeoLeaseRecordDto
+            {
+                BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"), Location = Str(r, "Location"),
+                EndOn = Day(r, "EndOn"), MonthlyAmount = Dec(r, "MonthlyAmount"),
+                DaysLeft = Val(r, "DaysLeft") is { } d ? Convert.ToInt32(d, En) : null
+            }).ToList();
+
+            var parts = new List<string> { window };
+            if (noLocation) parts.Add("no location");
+            else if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
+            return Records("Leases", parts, Total(s), rows);
         }
 
         private async Task<ApiResponse> QuotationsAsync(CeoRecordsQuery q, int? locationId)
@@ -476,23 +530,7 @@ namespace WorkNest.Application.Services
                 return true;
             }
             if (!string.IsNullOrWhiteSpace(q.From) || !string.IsNullOrWhiteSpace(q.To))
-            {
-                DateTime f = default, t = default;
-                if (!string.IsNullOrWhiteSpace(q.From) && !DateTime.TryParseExact(q.From.Trim(), "yyyy-MM-dd", En, DateTimeStyles.None, out f))
-                { error = "from must be yyyy-MM-dd."; return false; }
-                if (!string.IsNullOrWhiteSpace(q.To) && !DateTime.TryParseExact(q.To.Trim(), "yyyy-MM-dd", En, DateTimeStyles.None, out t))
-                { error = "to must be yyyy-MM-dd."; return false; }
-                if (!string.IsNullOrWhiteSpace(q.From)) from = f;
-                if (!string.IsNullOrWhiteSpace(q.To)) to = t.AddDays(1);
-                if (from != null && to != null && from >= to) { error = "from must be on or before to."; return false; }
-                label = (from, to) switch
-                {
-                    ({ } a, { } b) => $"from {a:yyyy-MM-dd} to {b.AddDays(-1):yyyy-MM-dd}",
-                    ({ } a, null) => $"from {a:yyyy-MM-dd}",
-                    _ => $"up to {to!.Value.AddDays(-1):yyyy-MM-dd}"
-                };
-                return true;
-            }
+                return TryDays(q.From, q.To, out from, out to, out label, out error);
             TryPeriod(q.Period, out var period, out _);
             from = PeriodStart(period);
             label = period switch
@@ -500,6 +538,30 @@ namespace WorkNest.Application.Services
                 "year" => $"in {from.Value.Year}",
                 "quarter" => $"in Q{(from.Value.Month - 1) / 3 + 1} {from.Value.Year}",
                 _ => $"in {from.Value.ToString("MMMM yyyy", En)}"
+            };
+            return true;
+        }
+
+        /// <summary>
+        /// from / to (yyyy-MM-dd, both days included; to is returned exclusive, the next day). <paramref name="label"/>
+        /// describes the window ("from 2026-10-01 to 2026-10-31").
+        /// </summary>
+        private static bool TryDays(string? fromText, string? toText, out DateTime? from, out DateTime? to, out string label, out string? error)
+        {
+            from = null; to = null; label = ""; error = null;
+            DateTime f = default, t = default;
+            if (!string.IsNullOrWhiteSpace(fromText) && !DateTime.TryParseExact(fromText.Trim(), "yyyy-MM-dd", En, DateTimeStyles.None, out f))
+            { error = "from must be yyyy-MM-dd."; return false; }
+            if (!string.IsNullOrWhiteSpace(toText) && !DateTime.TryParseExact(toText.Trim(), "yyyy-MM-dd", En, DateTimeStyles.None, out t))
+            { error = "to must be yyyy-MM-dd."; return false; }
+            if (!string.IsNullOrWhiteSpace(fromText)) from = f;
+            if (!string.IsNullOrWhiteSpace(toText)) to = t.AddDays(1);
+            if (from != null && to != null && from >= to) { error = "from must be on or before to."; return false; }
+            label = (from, to) switch
+            {
+                ({ } a, { } b) => $"from {a:yyyy-MM-dd} to {b.AddDays(-1):yyyy-MM-dd}",
+                ({ } a, null) => $"from {a:yyyy-MM-dd}",
+                _ => $"up to {to!.Value.AddDays(-1):yyyy-MM-dd}"
             };
             return true;
         }
@@ -543,6 +605,8 @@ namespace WorkNest.Application.Services
         private static int Int(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : 0;
         private static decimal Dec(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Math.Round(Convert.ToDecimal(v), 2) : 0m;
         private static string? Str(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToString(v, En) : null;
+        /// <summary>A bit column; false when it is missing (e.g. a procedure from before QA_07).</summary>
+        private static bool Flag(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v && Convert.ToBoolean(v, En);
         private static string? Day(IDictionary<string, object?>? r, string key) => Val(r, key) is DateTime d ? d.ToString("yyyy-MM-dd", En) : null;
         /// <summary>CreatedOn / CreatedDate columns are written in UTC (SYSUTCDATETIME), so they get a Z.</summary>
         private static string? Utc(IDictionary<string, object?>? r, string key) => Val(r, key) is DateTime d ? d.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En) : null;
