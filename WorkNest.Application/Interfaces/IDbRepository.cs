@@ -327,7 +327,11 @@ namespace WorkNest.Application.Interfaces
         Task<int> InsertAgreementDbAsync(int quotationId, int customerId, string entityType, int refundDays, decimal feeAmount, decimal securityDeposit, string? opHours, string? custName, string? custCnic, string? custPhone, string? custAddress, string? compName, string? ntn, string? secp, int? userId, int? templateVersionId = null);
         Task<IDictionary<string, object?>?> GetAgreementByIdDbAsync(int agreementId);
         Task<IDictionary<string, object?>?> GetQuotationLocationAndCompanyDetailsDbAsync(int quotationId);
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status);
+        /// <summary>
+        /// WN_Agreements_GetList. <paramref name="locationIds"/>: only agreements of these locations (plus any without a location);
+        /// null = every agreement. Before QA_06 (no @LocationIds yet) the rows are filtered here instead.
+        /// </summary>
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status, IReadOnlyCollection<int>? locationIds = null);
         Task MarkAgreementSignedDbAsync(int agreementId, int? userId);
         Task SetAgreementBookingIdAsync(int agreementId, int bookingId);
         Task UpdateAgreementSignedPdfDbAsync(int agreementId, string signedPdfPath, DateTime uploadedAt);

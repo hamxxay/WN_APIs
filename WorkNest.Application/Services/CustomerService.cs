@@ -87,7 +87,7 @@ namespace WorkNest.Application.Services
                 return ApiResponse.Fail("A customer with this email already exists.");
 
             var (userId, _) = await _db.SyncUserAsync(request.Email,
-                $"{request.FirstName} {request.LastName}".Trim(),
+                PersonName.Join(request.FirstName, request.LastName),
                 request.PhoneNumber);
 
             string? companyValue = ResolveCompany(request.CustomerType, request.Company);

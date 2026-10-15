@@ -9,7 +9,8 @@ namespace WorkNest.Application.Interfaces
         Task<AgreementResponseDto> SendAgreementAsync(SendAgreementRequest request, int? userId);
         Task<(byte[] PdfBytes, AgreementResponseDto Agreement)> GenerateLeaseAgreementAsync(GenerateLeaseAgreementRequest request, int? userId);
         Task<byte[]> GetAgreementPdfAsync(int agreementId);
-        Task<(IEnumerable<AgreementResponseDto> Rows, int Total)> GetAgreementsListAsync(int page, int limit, string? search, string? status);
+        /// <summary>Paged agreements; <paramref name="locationIds"/> (location-bound staff) keeps those locations' agreements only (null = all).</summary>
+        Task<(IEnumerable<AgreementResponseDto> Rows, int Total)> GetAgreementsListAsync(int page, int limit, string? search, string? status, IReadOnlyCollection<int>? locationIds = null);
         Task<AgreementResponseDto> MarkAgreementSignedAsync(int agreementId, int? userId, string? note, DateTime? signedDate = null);
         /// <summary>Customer portal: the logged-in customer's agreements (empty when the user has no customer record).</summary>
         Task<IEnumerable<IDictionary<string, object?>>> GetMyAgreementsAsync(string email);

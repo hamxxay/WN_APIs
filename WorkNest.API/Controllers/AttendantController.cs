@@ -324,6 +324,18 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
+        /// The booked room's capture machine (online or not) before an enrolment: the staff app disables fingerprint /
+        /// face / card with the reason while the room machine is offline or missing.
+        /// </summary>
+        [Authorize]
+        [HttpGet("api/bookings/{bookingDetailId}/room-machine")]
+        public async Task<IActionResult> GetRoomMachine(int bookingDetailId)
+        {
+            var status = await _hikEnrollment.GetRoomMachineAsync(bookingDetailId);
+            return Ok(status);
+        }
+
+        /// <summary>
         /// Enroll a fingerprint for a booking attendant. The terminal prompts for the finger,
         /// then the template is copied to the other selected machines.
         /// </summary>
