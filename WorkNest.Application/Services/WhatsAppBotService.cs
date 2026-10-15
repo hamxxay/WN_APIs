@@ -11,7 +11,7 @@ namespace WorkNest.Application.Services
     /// <summary>
     /// The WorkNest WhatsApp bot (port of the former Python chatbot). Main menu:
     /// 1. Book a Tour (branch -> workspace type -> seats -> name -> phone, saved as a Tour Inquiry),
-    /// 2. Complaints / Support (category -> description, saved as a complaint),
+    /// 2. Complaints / Support (branch -> category -> description, saved as a complaint with its branch),
     /// 3. Location & Directions (map pin + address). "0" / "menu" returns to the menu from anywhere.
     /// Branches come from dbo.WN_Locations (active, by Id); map pins / phones from WhatsApp:Branches.
     /// </summary>
@@ -256,6 +256,15 @@ namespace WorkNest.Application.Services
                     await FinishTourAsync(t, phone, profileName);
                     return;
                 }
+                case "complaint_branch":
+                {
+                    var b = MatchBranch(branches, lower);
+                    if (b == null) { t.Texts.Add("Please select a valid branch:\n\n" + BranchList(branches) + "\nType 0 for the main menu.\n\nReply with a number."); return; }
+                    t.Data.Branch = b.Name;
+                    t.State = "complaint_category";
+                    t.Texts.Add($"Branch: {b.Name}\n\nPlease select a category:\n\n{NumberedList(ComplaintCategories)}\nType 0 for the main menu.\n\nReply with a number.");
+                    return;
+                }
                 case "complaint_category":
                 {
                     if (!int.TryParse(message, out var i) || i < 1 || i > ComplaintCategories.Length)
@@ -265,16 +274,18 @@ namespace WorkNest.Application.Services
                     }
                     t.Data.ComplaintCategory = ComplaintCategories[i - 1];
                     t.State = "complaint_description";
-                    t.Texts.Add($"Category: {t.Data.ComplaintCategory}\n\nPlease describe your issue.");
+                    t.Texts.Add($"{BranchLine(t.Data.Branch)}Category: {t.Data.ComplaintCategory}\n\nPlease describe your issue.");
                     return;
                 }
                 case "complaint_description":
                 {
                     var category = t.Data.ComplaintCategory ?? "Other";
+                    var branch = t.Data.Branch;
                     var result = await _complaints.CreateFromChatbotAsync(new ChatbotComplaintRequest
                     {
                         Phone = phone,
                         Name = profileName,
+                        Branch = branch,
                         Category = category,
                         Description = message
                     });
@@ -288,7 +299,7 @@ namespace WorkNest.Application.Services
                     }
                     t.Reset();
                     t.Texts.Add("Your complaint has been submitted.\n\n" +
-                                $"Complaint ID: {no}\nCategory: {category}\nStatus: Open\n\n" +
+                                $"Complaint ID: {no}\n{BranchLine(branch)}Category: {category}\nStatus: Open\n\n" +
                                 "Our team will review your complaint and contact you if further information is required.\n\n" +
                                 "Type 0 to return to the main menu.");
                     return;
@@ -316,8 +327,19 @@ namespace WorkNest.Application.Services
             }
             else if (message == "2" || lower is "complaint" or "complaints" or "support")
             {
-                t.State = "complaint_category";
-                t.Texts.Add($"Complaints / Support\n\nPlease select a category:\n\n{NumberedList(ComplaintCategories)}\nType 0 for the main menu.\n\nReply with a number.");
+                if (branches.Count > 1)
+                {
+                    // Which branch first (1. I-8, 2. F-7 from dbo.WN_Locations), then the category.
+                    t.State = "complaint_branch";
+                    t.Texts.Add("Complaints / Support\n\nPlease select your branch:\n\n" + BranchList(branches) + "\nType 0 for the main menu.\n\nReply with a number.");
+                }
+                else
+                {
+                    // A single branch: nothing to ask.
+                    t.Data.Branch = branches.FirstOrDefault()?.Name;
+                    t.State = "complaint_category";
+                    t.Texts.Add($"Complaints / Support\n\n{BranchLine(t.Data.Branch)}Please select a category:\n\n{NumberedList(ComplaintCategories)}\nType 0 for the main menu.\n\nReply with a number.");
+                }
             }
             else if (message == "3")
             {
@@ -425,6 +447,8 @@ namespace WorkNest.Application.Services
 
         private static string NumberedList(IEnumerable<string> items) => string.Concat(items.Select((x, i) => $"{i + 1}. {x}\n"));
         private static string BranchList(List<Branch> branches) => NumberedList(branches.Select(b => b.Name));
+        /// <summary>"Branch: I-8" + newline, or nothing for conversations started before the branch question.</summary>
+        private static string BranchLine(string? branch) => string.IsNullOrWhiteSpace(branch) ? "" : $"Branch: {branch}\n";
 
         // ---- branches ---------------------------------------------------------------------------
 

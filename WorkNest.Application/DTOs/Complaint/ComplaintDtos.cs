@@ -69,6 +69,8 @@ namespace WorkNest.Application.DTOs.Complaint
     {
         public string Phone { get; set; } = string.Empty;
         public string? Name { get; set; }
+        /// <summary>The branch the customer picked in the bot (a dbo.WN_Locations name), saved as WN_Complaints.Branch.</summary>
+        public string? Branch { get; set; }
         public string Category { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
     }
