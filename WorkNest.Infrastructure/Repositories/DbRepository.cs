@@ -4547,7 +4547,48 @@ END";
             return null;
         }
 
-        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status)
+        /// <summary>Rows read when the procedure can't filter by location yet (QA_06 not run): every agreement.</summary>
+        private const int AgreementScopeFallbackLimit = 100000;
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status,
+            IReadOnlyCollection<int>? locationIds = null)
+        {
+            if (locationIds == null) return await ReadAgreementsPageDbAsync(page, limit, search, status, null);
+            try
+            {
+                return await ReadAgreementsPageDbAsync(page, limit, search, status, AgreementScope.LocationCsv(locationIds));
+            }
+            catch (SqlException ex) when (ex.Number == 8144)
+            {
+                // QA_06 not run yet: WN_Agreements_GetList has no @LocationIds. Read every match and keep the caller's
+                // locations here, so other branches' customers (CNIC, phone, address) are never listed.
+                var (all, _) = await ReadAgreementsPageDbAsync(1, AgreementScopeFallbackLimit, search, status, null);
+                var locations = await GetAgreementLocationsDbAsync();
+                var (rows, total) = AgreementScope.FilterAndPage(all, locations, locationIds, page, limit);
+                return (rows, total);
+            }
+        }
+
+        /// <summary>Each agreement's location: the booked space's, else the quoted space's (null = none). Same rule as RecordScope.</summary>
+        private async Task<Dictionary<int, int?>> GetAgreementLocationsDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(@"
+                SELECT a.Id, COALESCE(sb.LocationId, sq.LocationId) AS LocationId
+                  FROM dbo.WN_Agreements a WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+                  LEFT JOIN dbo.WN_Spaces sq WITH (NOLOCK) ON sq.Id = q.SpaceId
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = a.BookingId
+                  LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId;", c);
+            var map = new Dictionary<int, int?>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                map[r.GetInt32(0)] = r.IsDBNull(1) ? null : Convert.ToInt32(r.GetValue(1));
+            return map;
+        }
+
+        private async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> ReadAgreementsPageDbAsync(int page, int limit, string? search, string? status,
+            string? locationCsv)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Agreements_GetList", c);
@@ -4555,6 +4596,8 @@ END";
             cmd.Parameters.AddWithValue("@Limit", limit);
             cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+            // Sent only for location-bound staff, so super admins never depend on QA_06.
+            if (locationCsv != null) cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, 4000).Value = locationCsv;
 
             int total = 0;
             var list = new List<IDictionary<string, object?>>();

@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WorkNest.Application.DTOs.Agreement;
 using WorkNest.Application.Interfaces;
+using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
 using WorkNest.Common.Configurations;
 using Microsoft.AspNetCore.RateLimiting;
@@ -83,6 +84,12 @@ namespace WorkNest.API.Controllers
                     message = "Lease agreement generated and sent successfully."
                 });
             }
+            catch (InvalidOperationException ex)
+            {
+                // A detail the agreement needs is missing or wrong (fee, address, dates, quotation): the staff member
+                // can fix it, so it is a 400 with the reason, not a server error.
+                return BadRequest(new { isSuccessful = false, message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new { isSuccessful = false, message = ex.Message });
@@ -99,7 +106,10 @@ namespace WorkNest.API.Controllers
         {
             try
             {
-                var (rows, total) = await _agreement.GetAgreementsListAsync(page, limit, search, status);
+                // Admins / sales executives see the agreements of their own locations only (like invoices and
+                // bookings); super admins see every agreement.
+                var locations = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
+                var (rows, total) = await _agreement.GetAgreementsListAsync(page, limit, search, status, locations);
                 return Ok(new
                 {
                     isSuccessful = true,

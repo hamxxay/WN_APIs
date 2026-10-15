@@ -1022,6 +1022,41 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        /// <summary>
+        /// Whether the booking's first invoice exists yet (dbo.WN_GetInvoiceByBookingId, the same check the send below
+        /// makes): the staff app shows "Send initial invoice" on a booking until it has been sent.
+        /// </summary>
+        [HttpGet("api/booking/{bookingId:int}/initial-invoice")]
+        [Authorize(Roles = StaffRoles)]
+        [RecordScope(RecordKind.Booking, "bookingId")]
+        public async Task<IActionResult> GetInitialInvoiceStatus(int bookingId)
+        {
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                using var cmd = new SqlCommand("dbo.WN_GetInvoiceByBookingId", conn) { CommandType = CommandType.StoredProcedure };
+                cmd.Parameters.AddWithValue("@BookingId", bookingId);
+                using var r = await cmd.ExecuteReaderAsync();
+                if (!await r.ReadAsync())
+                    return Ok(new { isSuccessful = true, data = new { bookingId, sent = false, invoiceId = (int?)null, invoiceNumber = (string?)null } });
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    data = new
+                    {
+                        bookingId,
+                        sent = true,
+                        invoiceId = (int?)r.GetInt32(r.GetOrdinal("Id")),
+                        invoiceNumber = r.IsDBNull(r.GetOrdinal("InvoiceNumber")) ? null : r.GetString(r.GetOrdinal("InvoiceNumber"))
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
         [EnableRateLimiting("pdf")]
         [HttpPost("api/invoice/send-initial/{bookingId:int}")]
         [Authorize(Roles = StaffRoles)]
