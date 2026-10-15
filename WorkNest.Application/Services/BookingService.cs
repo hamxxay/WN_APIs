@@ -217,6 +217,15 @@ namespace WorkNest.Application.Services
         {
             var data = await _db.GetBookingByPublicIdAsync(publicId, userEmail);
             if (data is null) return ApiResponse.Fail("Booking not found");
+            // Same flag and door-access notice as GET booking/{id}: the row is WN_vw_BookingSummary (v.*).
+            data["BillingFiguresReliable"] = BillingFiguresReliable(data);
+            int bookingId = RowInt(data, "BookingId") ?? 0;
+            var s = bookingId > 0 && !CustomerBills.IsClosedBooking(RowText(data, "BookingStatusCode"), RowText(data, "BookingStatusLabel"))
+                    && (await SuspensionsOfAsync(new[] { bookingId })).TryGetValue(bookingId, out var found) ? found : null;
+            data["AccessSuspended"] = s != null;
+            data["AccessSuspendedReason"] = s != null ? CustomerBills.SuspensionMessage(s.InvoiceNumber, s.InvoiceDueOn, RowText(data, "ChallanNumber")) : null;
+            data["AccessSuspendedInvoiceId"] = s?.InvoiceId;
+            data["AccessSuspendedInvoiceNumber"] = s?.InvoiceNumber;
             return ApiResponse.Ok(data);
         }
 
