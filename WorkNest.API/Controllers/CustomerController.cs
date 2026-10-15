@@ -31,7 +31,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/customer/{id}")]
         public async Task<IActionResult> GetById(string id) =>
             Ok(await _customers.GetCustomerByIdAsync(id));
-        [AllowAnonymous]
+        
         [HttpPost("api/customer")]
         public async Task<IActionResult> Create([FromBody] CustomerRequest request) =>
             StatusCode(201, await _customers.CreateCustomerAsync(request, User.GetEmail()));

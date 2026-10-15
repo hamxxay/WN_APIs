@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Mail;
 using System.Text;
 using Microsoft.Extensions.Configuration;
@@ -146,7 +146,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendChallanEmailAsync(
             string toEmail, string customerName, string challanNumber, string spaceName, string billingPeriod,
-            decimal totalPayable, DateTime? startOn, DateTime? endOn, decimal totalContractAmount = 0,
+            decimal totalPayable = 0, DateTime? startOn = null, DateTime? endOn = null, decimal totalContractAmount = 0,
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, decimal currentCycleAmount = 0,
             decimal securityDeposit = 0, decimal taxAmount = 0, decimal discountAmount = 0, byte[]? pdfBytes = null)
         {
@@ -163,8 +163,6 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             {
                 bool isContract = nextBillDueDate.HasValue;
                 string periodLabel = isContract ? "Billing Period" : "Billing Basis";
-                string rentLabel   = isContract ? "Advance Rent" : "Rent Amount";
-                string totalLabel  = isContract ? "Total Payable (Current)" : "Total Payable";
 
                 var sb = new StringBuilder();
                 sb.AppendLine($"Dear {customerName},");
@@ -178,26 +176,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     sb.AppendLine($"Start Date              : {startOn:dd MMM yyyy}");
                 if (endOn.HasValue)
                     sb.AppendLine($"End Date                : {endOn:dd MMM yyyy}");
-                sb.AppendLine();
-                sb.AppendLine("FINANCIAL BREAKDOWN:");
-                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N0}");
-                if (securityDeposit > 0)
-                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N0}");
-                if (taxAmount > 0)
-                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N0}");
-                if (discountAmount > 0)
-                    sb.AppendLine($"Discount                : - PKR {discountAmount:N0}");
-                sb.AppendLine("--------------------------------------------------");
-                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N0}");
-
-                if (isContract && nextBillDueDate.HasValue)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N0}");
+                if (nextBillDueDate.HasValue)
                     sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
-                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N0}");
-                }
-
+                sb.AppendLine();
+                sb.AppendLine("Please find the attachment below.");
                 sb.AppendLine();
                 sb.AppendLine("Please present this challan at the front desk or use it as a reference for your payment.");
                 sb.AppendLine();
@@ -242,7 +224,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendBookingConfirmationAsync(
             string toEmail, string customerName, string bookingNumber, string spaceName,
-            DateTime? startOn, DateTime? endOn, string? billingPeriod = null,
+            DateTime? startOn = null, DateTime? endOn = null, string? billingPeriod = null,
             decimal totalPayable = 0, decimal currentCycleAmount = 0, decimal securityDeposit = 0,
             decimal taxAmount = 0, decimal discountAmount = 0, decimal totalContractAmount = 0,
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, byte[]? pdfBytes = null)
@@ -259,8 +241,6 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             {
                 bool isContract = nextBillDueDate.HasValue;
                 string cycleLabel = isContract ? "Billing Cycle" : "Billing Basis";
-                string rentLabel  = isContract ? "Advance Rent" : "Rent Amount";
-                string totalLabel = isContract ? "Total Initial Payable" : "Total Payable";
 
                 var sb = new StringBuilder();
                 sb.AppendLine($"Dear {customerName},");
@@ -273,30 +253,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     sb.AppendLine($"{(isContract ? "Contract Start Date    " : "Start Date             ")}: {startOn:dd MMM yyyy}");
                 if (endOn.HasValue)
                     sb.AppendLine($"{(isContract ? "Contract End Date      " : "End Date               ")}: {endOn:dd MMM yyyy}");
+                if (nextBillDueDate.HasValue)
+                    sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
                 sb.AppendLine($"{cycleLabel.PadRight(24)}: {billingPeriod ?? "N/A"}");
                 sb.AppendLine();
-                sb.AppendLine("FINANCIAL SUMMARY:");
-                sb.AppendLine($"{rentLabel.PadRight(24)}: PKR {currentCycleAmount:N0}");
-                if (securityDeposit > 0)
-                    sb.AppendLine($"Security Deposit        : PKR {securityDeposit:N0}");
-                if (taxAmount > 0)
-                    sb.AppendLine($"Sales Tax / PST (16% on Support) : PKR {taxAmount:N0}");
-                if (discountAmount > 0)
-                    sb.AppendLine($"Discount                : - PKR {discountAmount:N0}");
-                sb.AppendLine("--------------------------------------------------");
-                sb.AppendLine($"{totalLabel.PadRight(24)}: PKR {totalPayable:N0}");
-
-                if (isContract && nextBillDueDate.HasValue)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("CONTRACT METRICS:");
-                    sb.AppendLine($"Total Contract Amount   : PKR {totalContractAmount:N0}");
-                    sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
-                    sb.AppendLine($"Balance Left            : PKR {balanceLeft:N0}");
-                }
-
-                sb.AppendLine();
-                sb.AppendLine("Please find the booking confirmation PDF attached.");
+                sb.AppendLine("Please find the attachment below.");
                 sb.AppendLine();
                 sb.AppendLine("Thank you for choosing WorkNest.");
                 sb.AppendLine();
@@ -409,20 +370,16 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 <div style=""font-family: Arial, sans-serif; color: #1e293b; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;"">
                     <h2 style=""color: #0ea5e9; margin-top: 0;"">WorkNest Custom Invoice</h2>
                     <p>Dear <strong>{encCustomerName}</strong>,</p>
-                    <p>An over-capacity attendant assignment has been recorded for your booking space at WorkNest. Below are the custom invoice details for the capacity overage surcharge (taxable like Room Rent: 16% PST on 10% support charges):</p>
+                    <p>An over-capacity attendant assignment has been recorded for your booking space at WorkNest. Below are the custom invoice details:</p>
                     
                     <table style=""width: 100%; border-collapse: collapse; margin: 20px 0; background: #f8fafc; border-radius: 8px;"">
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Invoice Number:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{encInvoiceNumber}</td></tr>
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Space Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{encSpaceName}</td></tr>
                         <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Attendant Name:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{encAttendantName} (ID: {encAttendantIdNumber})</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Excess Seat Count:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">{excessSeatCount} seat(s) over capacity</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Room Rent Surcharge SubTotal:</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {surchargeAmount:N0}</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>Support Services Component (10%):</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;"">PKR {supportCharge:N0}</td></tr>
-                        <tr><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0;""><strong>PST (16% Sales Tax on Support):</strong></td><td style=""padding: 10px; border-bottom: 1px solid #e2e8f0; color: #d97706;"">PKR {taxAmount:N0}</td></tr>
-                        <tr><td style=""padding: 10px;""><strong>Grand Total Payable:</strong></td><td style=""padding: 10px; color: #0284c7; font-size: 1.1em; font-weight bold;"">PKR {grandTotal:N0}</td></tr>
+                        <tr><td style=""padding: 10px;""><strong>Excess Seat Count:</strong></td><td style=""padding: 10px;"">{excessSeatCount} seat(s) over capacity</td></tr>
                     </table>
 
-                    <p style=""font-size: 0.9em; color: #64748b;"">Formula applied: <code>0.5 Ã— Seat Price Ã— Excess Seat Count</code> + 16% PST on 10% Support Services. Statement PDF generated via QuestPDF is attached.</p>
+                    <p>Please find the attachment below.</p>
                     <p>Thank you for choosing WorkNest.</p>
                     <hr style=""border: none; border-top: 1px solid #e2e8f0; margin-top: 30px;"" />
                     <p style=""font-size: 0.8em; color: #94a3b8; text-align: center;"">WorkNest Co-working & Office Spaces | Automated Billing System</p>

@@ -17,7 +17,7 @@ namespace WorkNest.API.Services
         private readonly IUnifiService _unifi;
         private readonly bool _enabled;
         private readonly TimeSpan _ispInterval = TimeSpan.FromSeconds(300); // EA endpoints are rate limited to 100 req/min
-        private readonly TimeSpan _logsInterval = TimeSpan.FromSeconds(50);
+        private readonly TimeSpan _logsInterval = TimeSpan.FromSeconds(300);
         private readonly TimeSpan _startupDelay = TimeSpan.FromSeconds(5);
 
         public UnifiPollingService(ILogger<UnifiPollingService> logger, IUnifiService unifi, IConfiguration configuration)

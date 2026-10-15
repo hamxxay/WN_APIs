@@ -322,27 +322,7 @@ try
     app.UseRateLimitingWithConfig(); // after routing + auth (per-user partitions), before endpoints
     app.MapControllers();
 
-    using (var scope = app.Services.CreateScope())
-    {
-        // Schema (WN_LeaseTemplates, WN_Agreements columns) is no longer altered at startup —
-        // see WN_Invoice_Procedures.txt for the DDL to run deliberately on a database that lacks it.
-
-        // Pre-warm Chromium browser in background to eliminate cold start penalty on first request
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                using var bgScope = app.Services.CreateScope();
-                var htmlPdf = bgScope.ServiceProvider.GetRequiredService<IHtmlToPdfService>();
-                await htmlPdf.ConvertHtmlToPdfAsync("<p>warmup</p>");
-                Log.Information("[HtmlToPdf] Headless browser pre-warmed successfully.");
-            }
-            catch (Exception bgEx)
-            {
-                Log.Warning(bgEx, "[HtmlToPdf] Background browser pre-warming encountered an issue; will initialize on first use.");
-            }
-        });
-    }
+    // Browser for PDF rendering is lazily initialized on first use in HtmlToPdfService to avoid consuming ~200MB+ RAM at startup.
 
     Log.Information("WorkNest API starting on {Env}", app.Environment.EnvironmentName);
     await app.RunAsync();
