@@ -242,6 +242,146 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Reason { get; set; }
     }
 
+    // ---- Complaints section (SM_03): GET api/sales-manager/complaints and api/sales-manager/records/complaints ----
+    // dbo.WN_Complaints has no location: a complaint belongs to the location whose name is its Branch (case and spaces
+    // ignored). Complaints without a branch (WhatsApp) count under "All my locations" only (and for super admins);
+    // with a location chosen only that branch's complaints count. Status: open (new), in_progress, resolved (fixed,
+    // waiting for the customer's reply), closed. Times are business wall-clock (Pakistan) times, without an offset.
+
+    /// <summary>GET api/sales-manager/complaints</summary>
+    public class SalesManagerComplaintsDto
+    {
+        /// <summary>month | quarter | year</summary>
+        public string Period { get; set; } = "month";
+        /// <summary>e.g. "October 2026", "Q4 2026", "2026".</summary>
+        public string PeriodLabel { get; set; } = "";
+        /// <summary>Right now: every complaint in scope by status (not bound to the period).</summary>
+        public SalesManagerComplaintStatusDto Status { get; set; } = new();
+        /// <summary>status.open + status.inProgress.</summary>
+        public int ActiveTotal { get; set; }
+        /// <summary>Complaints created in the period.</summary>
+        public int NewInPeriod { get; set; }
+        /// <summary>The same for the previous period (same number of days, as the rest of the dashboard).</summary>
+        public int NewInPeriodPrev { get; set; }
+        /// <summary>Resolved or closed complaints whose last update (UpdatedOn) is in the period.</summary>
+        public int ResolvedInPeriod { get; set; }
+        /// <summary>Follow-up complaints (the customer said the problem persists) created in the period.</summary>
+        public int ReopenedInPeriod { get; set; }
+        /// <summary>Average days from created to resolved of the resolvedInPeriod complaints, one decimal; null when none.</summary>
+        public decimal? AvgResolutionDays { get; set; }
+        /// <summary>Categories with complaints (no category = "Other"), most open + in progress first, then total.</summary>
+        public List<SalesManagerComplaintGroupDto> ByCategory { get; set; } = new();
+        /// <summary>Branches with complaints ("" = no branch, label "No branch"), most open + in progress first, then total.</summary>
+        public List<SalesManagerComplaintBranchDto> ByBranch { get; set; } = new();
+        /// <summary>Last 12 months, oldest first.</summary>
+        public List<SalesManagerComplaintMonthDto> Months { get; set; } = new();
+        /// <summary>The 8 oldest open / in progress complaints, oldest first.</summary>
+        public List<SalesManagerComplaintDto> OldestActive { get; set; } = new();
+    }
+
+    public class SalesManagerComplaintStatusDto
+    {
+        /// <summary>New, waiting for action.</summary>
+        public int Open { get; set; }
+        public int InProgress { get; set; }
+        /// <summary>Fixed, waiting for the customer's reply.</summary>
+        public int Resolved { get; set; }
+        public int Closed { get; set; }
+    }
+
+    /// <summary>A byCategory row.</summary>
+    public class SalesManagerComplaintGroupDto
+    {
+        public string Category { get; set; } = "";
+        /// <summary>Open right now.</summary>
+        public int Open { get; set; }
+        /// <summary>In progress right now.</summary>
+        public int InProgress { get; set; }
+        /// <summary>Created in the period.</summary>
+        public int Total { get; set; }
+    }
+
+    /// <summary>A byBranch row.</summary>
+    public class SalesManagerComplaintBranchDto
+    {
+        /// <summary>The branch (the location name); "" = no branch (records: branch=none).</summary>
+        public string Branch { get; set; } = "";
+        /// <summary>The branch, or "No branch".</summary>
+        public string Label { get; set; } = "";
+        public int Open { get; set; }
+        public int InProgress { get; set; }
+        /// <summary>Created in the period.</summary>
+        public int Total { get; set; }
+    }
+
+    public class SalesManagerComplaintMonthDto
+    {
+        public string Month { get; set; } = "";
+        /// <summary>Complaints created in the month.</summary>
+        public int Created { get; set; }
+        /// <summary>Resolved or closed complaints last updated in the month.</summary>
+        public int Resolved { get; set; }
+    }
+
+    /// <summary>An oldestActive row (open / in progress complaint).</summary>
+    public class SalesManagerComplaintDto
+    {
+        public int ComplaintId { get; set; }
+        public string? ComplaintNo { get; set; }
+        public string? CustomerName { get; set; }
+        public string? Category { get; set; }
+        /// <summary>The branch (location name); null = no branch.</summary>
+        public string? Branch { get; set; }
+        /// <summary>open | in_progress</summary>
+        public string? Status { get; set; }
+        /// <summary>Business (Pakistan) time, yyyy-MM-ddTHH:mm:ss without an offset.</summary>
+        public string? CreatedOn { get; set; }
+        /// <summary>Days since the complaint came in.</summary>
+        public int AgeDays { get; set; }
+    }
+
+    /// <summary>records/complaints rows (no money).</summary>
+    public class SalesManagerComplaintRecordDto
+    {
+        public int ComplaintId { get; set; }
+        public string? ComplaintNo { get; set; }
+        public string? CustomerName { get; set; }
+        public string? Phone { get; set; }
+        public string? Category { get; set; }
+        /// <summary>The branch (location name); null = no branch.</summary>
+        public string? Branch { get; set; }
+        /// <summary>open | in_progress | resolved | closed</summary>
+        public string? Status { get; set; }
+        /// <summary>whatsapp | manual (entered by staff)</summary>
+        public string? Source { get; set; }
+        /// <summary>Reopened: a follow-up of a complaint the customer said was not fixed.</summary>
+        public bool IsFollowUp { get; set; }
+        /// <summary>Business (Pakistan) time, yyyy-MM-ddTHH:mm:ss without an offset.</summary>
+        public string? CreatedOn { get; set; }
+        public string? UpdatedOn { get; set; }
+        /// <summary>Resolved / closed: days from created to resolved; otherwise days since it came in.</summary>
+        public int AgeDays { get; set; }
+        /// <summary>The first 200 characters.</summary>
+        public string? Description { get; set; }
+    }
+
+    /// <summary>Query of GET api/sales-manager/records/complaints.</summary>
+    public class SalesManagerComplaintRecordsQuery
+    {
+        /// <summary>Period of the *_period statuses: month (default) | quarter | year.</summary>
+        public string? Period { get; set; }
+        /// <summary>One of the caller's location ids (omitted = all of them, with the complaints without a branch).</summary>
+        public string? LocationId { get; set; }
+        /// <summary>open | in_progress | resolved | closed | active | resolved_period | new_period | reopened_period</summary>
+        public string? Status { get; set; }
+        /// <summary>One category ("Other" also matches complaints without one).</summary>
+        public string? Category { get; set; }
+        /// <summary>One branch; "none" = complaints without a branch.</summary>
+        public string? Branch { get; set; }
+        /// <summary>yyyy-MM: created in that month.</summary>
+        public string? Month { get; set; }
+    }
+
     /// <summary>
     /// What the caller may see: <see cref="MyLocations"/> = the manager's locations (null = all, super admin);
     /// <see cref="LocationId"/> = the one chosen (already checked to be one of them); <see cref="NoLocation"/> = only

@@ -7,9 +7,10 @@ namespace WorkNest.Infrastructure.Repositories
 {
     /// <summary>
     /// Sales Manager dashboard data: calls the read-only stored procedures dbo.WN_SalesMgr_* (script SM_01_sales_manager,
-    /// replaced in desks by SM_02_sales_manager_desks). Until SM_01 has run the procedures are missing (SQL error 2812);
-    /// until SM_02 has run they answer without their desk columns. Either way the call throws
-    /// <see cref="SalesManagerDatabaseUpdateMissingException"/>, which the API answers with 503.
+    /// replaced in desks by SM_02_sales_manager_desks; the complaints ones from SM_03_sales_manager_complaints). Until
+    /// SM_01 (complaints: SM_03) has run the procedures are missing (SQL error 2812); until SM_02 has run they answer
+    /// without their desk columns. Either way the call throws <see cref="SalesManagerDatabaseUpdateMissingException"/>,
+    /// which the API answers with 503.
     /// </summary>
     public class SalesManagerDashboardRepository : ISalesManagerDashboardRepository
     {
@@ -151,5 +152,45 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@Top", SqlDbType.Int).Value = top;
             }, 1, "Desks");
+
+        // Complaints section (SM_03): a missing procedure means SM_03 has not run (whatever SM_01 / SM_02 did).
+
+        public Task<List<List<IDictionary<string, object?>>>> GetComplaintsAsync(string? locationIds, bool includeNoBranch, int periodMonths,
+            DateTime businessNow, int oldestTop) =>
+            RunComplaintsAsync("dbo.WN_SalesMgr_Complaints", p =>
+            {
+                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
+                p.Add("@NoBranch", SqlDbType.Bit).Value = includeNoBranch;
+                p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
+                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                p.Add("@OldestTop", SqlDbType.Int).Value = oldestTop;
+            });
+
+        public Task<List<List<IDictionary<string, object?>>>> GetComplaintRecordsAsync(string? locationIds, bool includeNoBranch,
+            string? status, string? category, string? branch, DateTime? month, int periodMonths, DateTime businessNow, int top) =>
+            RunComplaintsAsync("dbo.WN_SalesMgr_Records_Complaints", p =>
+            {
+                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
+                p.Add("@NoBranch", SqlDbType.Bit).Value = includeNoBranch;
+                p.Add("@Status", SqlDbType.NVarChar, 30).Value = Db(status);
+                p.Add("@Category", SqlDbType.NVarChar, 100).Value = Db(category);
+                p.Add("@Branch", SqlDbType.NVarChar, 100).Value = Db(branch);
+                p.Add("@Month", SqlDbType.Date).Value = Db(month?.Date);
+                p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
+                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                p.Add("@Top", SqlDbType.Int).Value = top;
+            });
+
+        private async Task<List<List<IDictionary<string, object?>>>> RunComplaintsAsync(string procedure, Action<SqlParameterCollection> bind)
+        {
+            try
+            {
+                return await RunAsync(procedure, bind);
+            }
+            catch (SalesManagerDatabaseUpdateMissingException ex) when (ex.Update == "SM_01") // procedure missing (2812)
+            {
+                throw SalesManagerDatabaseUpdateMissingException.ComplaintsMissing(procedure, ex.Detail);
+            }
+        }
     }
 }

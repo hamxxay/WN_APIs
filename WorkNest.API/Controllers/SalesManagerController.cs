@@ -15,7 +15,8 @@ namespace WorkNest.API.Controllers
     /// and are always all of them. Super admins may open them too (all locations). Common query parameters:
     /// period = month (default) | quarter | year (to date, against the previous period, as the CEO dashboard) and
     /// locationId (one of the caller's locations; another location answers 403). No money: counts and desks only.
-    /// Bad parameters answer 400; before the database update SM_01 (procedures) or SM_02 (desks) has run, 503.
+    /// Bad parameters answer 400; before the database update SM_01 (procedures) or SM_02 (desks) has run, 503; the
+    /// complaints endpoints answer 503 until SM_03 has run (the rest keeps working).
     /// </summary>
     [ApiController]
     [Authorize(Roles = "sales_manager,super_admin,SuperAdmin")]
@@ -58,6 +59,30 @@ namespace WorkNest.API.Controllers
                 return Task.FromResult<IActionResult>(BadRequest(ApiResponse.Fail("locationId must be a location id.")));
             int? locationId = text.Length == 0 ? null : int.Parse(text, CultureInfo.InvariantCulture);
             return Run(locationId, false, scope => _sales.GetRecordsAsync(kind, query, scope));
+        }
+
+        /// <summary>
+        /// Complaints section: complaints by status right now, new / resolved / reopened in the period, by category and
+        /// branch, the last 12 months and the oldest open ones. Complaints have no location: a complaint belongs to the
+        /// location named in its branch; the ones without a branch (WhatsApp) count only when no locationId is chosen.
+        /// </summary>
+        [HttpGet("api/sales-manager/complaints")]
+        public Task<IActionResult> Complaints([FromQuery] string? period, [FromQuery] int? locationId) =>
+            Run(locationId, false, scope => _sales.GetComplaintsAsync(period, scope));
+
+        /// <summary>
+        /// Complaint records, newest first, at most 200 (total = all that match). status = open | in_progress | resolved
+        /// | closed | active | resolved_period | new_period | reopened_period; category ("Other" also = none); branch
+        /// ("none" = no branch); month (yyyy-MM, created in it); period (for the *_period statuses); locationId.
+        /// </summary>
+        [HttpGet("api/sales-manager/records/complaints")]
+        public Task<IActionResult> ComplaintRecords([FromQuery] SalesManagerComplaintRecordsQuery query)
+        {
+            var text = (query.LocationId ?? "").Trim();
+            if (text.Length > 0 && !int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                return Task.FromResult<IActionResult>(BadRequest(ApiResponse.Fail("locationId must be a location id.")));
+            int? locationId = text.Length == 0 ? null : int.Parse(text, CultureInfo.InvariantCulture);
+            return Run(locationId, false, scope => _sales.GetComplaintRecordsAsync(query, scope));
         }
 
         /// <summary>

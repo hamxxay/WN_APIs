@@ -12,7 +12,8 @@ namespace WorkNest.Application.Services
     /// rooms count 0). The numbers come from the dbo.WN_SalesMgr_* procedures (SM_01, desks from SM_02), which count
     /// with the same rules and business clock as the CEO dashboard (dbo.WN_Ceo_*), so the counts match it for the same
     /// location and period. Tour inquiries have no location: always all of them. Level 1 = dashboard, level 2 =
-    /// breakdown, level 3 = records.
+    /// breakdown, level 3 = records. The Complaints section (SM_03) is a separate call, so the rest of the dashboard
+    /// keeps working without it: complaints have no location either, they are matched to a location by their branch.
     /// </summary>
     public class SalesManagerDashboardService : ISalesManagerDashboardService
     {
@@ -351,6 +352,153 @@ namespace WorkNest.Application.Services
             return Records("Leases", parts, Total(s), rows);
         }
 
+        // ------------------------------------------------------------------ complaints section (SM_03)
+
+        private const int OldestComplaints = 8;
+        private const string NoBranchLabel = "No branch";
+
+        private static readonly string[] ComplaintRecordStatuses =
+            { "open", "in_progress", "resolved", "closed", "active", "resolved_period", "new_period", "reopened_period" };
+
+        /// <summary>
+        /// Complaints in scope: the manager's locations matched by branch name, plus the complaints without a branch
+        /// (WhatsApp) when no single location is chosen; super admins: all (or the chosen location's branch).
+        /// </summary>
+        public async Task<ApiResponse> GetComplaintsAsync(string? period, SalesManagerScope scope)
+        {
+            if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            var now = _clock.Now;
+            var s = await _repo.GetComplaintsAsync(scope.LocationIdsCsv, scope.LocationId == null, months, now, OldestComplaints);
+
+            var sum = Set(s, 0).FirstOrDefault();
+            var open = Int(sum, "OpenCount");
+            var inProgress = Int(sum, "InProgressCount");
+            var dto = new SalesManagerComplaintsDto
+            {
+                Period = p,
+                PeriodLabel = PeriodLabel(p, now),
+                Status = new SalesManagerComplaintStatusDto
+                {
+                    Open = open, InProgress = inProgress, Resolved = Int(sum, "ResolvedCount"), Closed = Int(sum, "ClosedCount")
+                },
+                ActiveTotal = open + inProgress,
+                NewInPeriod = Int(sum, "NewInPeriod"),
+                NewInPeriodPrev = Int(sum, "NewInPeriodPrev"),
+                ResolvedInPeriod = Int(sum, "ResolvedInPeriod"),
+                ReopenedInPeriod = Int(sum, "ReopenedInPeriod"),
+                AvgResolutionDays = Val(sum, "AvgResolutionDays") is { } avg ? Math.Round(Convert.ToDecimal(avg, En), 1) : null,
+                ByCategory = Set(s, 1).Select(r => new SalesManagerComplaintGroupDto
+                {
+                    Category = Str(r, "Category") ?? "Other", Open = Int(r, "OpenCount"), InProgress = Int(r, "InProgressCount"),
+                    Total = Int(r, "Total")
+                }).ToList(),
+                ByBranch = Set(s, 2).Select(r =>
+                {
+                    var branch = Str(r, "Branch")?.Trim() ?? "";
+                    return new SalesManagerComplaintBranchDto
+                    {
+                        Branch = branch, Label = branch.Length == 0 ? NoBranchLabel : branch, Open = Int(r, "OpenCount"),
+                        InProgress = Int(r, "InProgressCount"), Total = Int(r, "Total")
+                    };
+                }).ToList(),
+                Months = Set(s, 3).Select(r => new SalesManagerComplaintMonthDto
+                {
+                    Month = Str(r, "Month") ?? "", Created = Int(r, "Created"), Resolved = Int(r, "Resolved")
+                }).ToList(),
+                OldestActive = Set(s, 4).Select(r => new SalesManagerComplaintDto
+                {
+                    ComplaintId = Int(r, "ComplaintId"), ComplaintNo = Str(r, "ComplaintNo"), CustomerName = Str(r, "CustomerName"),
+                    Category = Str(r, "Category"), Branch = Str(r, "Branch"), Status = Str(r, "Status"),
+                    CreatedOn = Local(r, "CreatedOn"), AgeDays = Int(r, "AgeDays")
+                }).ToList()
+            };
+            return ApiResponse.Ok(dto);
+        }
+
+        /// <summary>
+        /// Complaint records, newest first, at most 200 (total = all that match). Filters: status (also active and the
+        /// period ones), category ("Other" also = none), branch ("none" = no branch), month (created in it).
+        /// </summary>
+        public async Task<ApiResponse> GetComplaintRecordsAsync(SalesManagerComplaintRecordsQuery q, SalesManagerScope scope)
+        {
+            if (!TryPeriod(q.Period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            string? status = null;
+            if (!string.IsNullOrWhiteSpace(q.Status))
+            {
+                status = ComplaintRecordStatus(q.Status);
+                if (status == null)
+                    return ApiResponse.Fail("status must be open, in_progress, resolved, closed, active, resolved_period, new_period or reopened_period.");
+            }
+            var category = string.IsNullOrWhiteSpace(q.Category) ? null : q.Category.Trim();
+            if (category is { Length: > 100 }) return ApiResponse.Fail("category can be at most 100 characters.");
+            string? branch = null;
+            if (!string.IsNullOrWhiteSpace(q.Branch))
+            {
+                branch = q.Branch.Trim();
+                if (IsNoBranch(branch)) branch = "";
+                else if (branch.Length > 100) return ApiResponse.Fail("branch can be at most 100 characters.");
+            }
+            DateTime? month = null;
+            if (!string.IsNullOrWhiteSpace(q.Month))
+            {
+                if (!TryMonth(q.Month, out var m)) return ApiResponse.Fail(MonthError);
+                month = m;
+            }
+
+            var s = await _repo.GetComplaintRecordsAsync(scope.LocationIdsCsv, scope.LocationId == null, status, category, branch, month,
+                months, _clock.Now, MaxRows);
+            var rows = Set(s, 1).Select(r => new SalesManagerComplaintRecordDto
+            {
+                ComplaintId = Int(r, "ComplaintId"), ComplaintNo = Str(r, "ComplaintNo"), CustomerName = Str(r, "CustomerName"),
+                Phone = Str(r, "Phone"), Category = Str(r, "Category"), Branch = Str(r, "Branch"), Status = Str(r, "Status"),
+                Source = Str(r, "Source"), IsFollowUp = Val(r, "IsFollowUp") is { } f && Convert.ToBoolean(f, En),
+                CreatedOn = Local(r, "CreatedOn"), UpdatedOn = Local(r, "UpdatedOn"), AgeDays = Int(r, "AgeDays"),
+                Description = Str(r, "Description")
+            }).ToList();
+
+            var window = PeriodWords(p);
+            var parts = new List<string>();
+            if (status != null)
+                parts.Add(status switch
+                {
+                    "in_progress" => "in progress",
+                    "resolved" => "resolved, awaiting the customer",
+                    "active" => "open or in progress",
+                    "resolved_period" => $"resolved {window}",
+                    "new_period" => $"received {window}",
+                    "reopened_period" => $"reopened {window}",
+                    _ => status
+                });
+            if (category != null) parts.Add(category);
+            if (branch != null) parts.Add(branch.Length == 0 ? "no branch" : branch);
+            else if (scope.LocationId != null && rows.FirstOrDefault()?.Branch is { } loc) parts.Add(loc);
+            if (month != null) parts.Add($"received in {month.Value.ToString("MMMM yyyy", En)}");
+            return Records("Complaints", parts, Total(s), rows);
+        }
+
+        /// <summary>A records/complaints status (spaces, dashes and case ignored; new = open), null when unknown.</summary>
+        private static string? ComplaintRecordStatus(string value)
+        {
+            var s = value.Trim().ToLowerInvariant().Replace(' ', '_').Replace('-', '_');
+            s = s switch { "new" => "open", "inprogress" => "in_progress", _ => s };
+            return ComplaintRecordStatuses.Contains(s) ? s : null;
+        }
+
+        private static bool IsNoBranch(string value) =>
+            new string(value.Where(char.IsLetter).ToArray()).ToLowerInvariant() is "none" or "nobranch";
+
+        /// <summary>"in October 2026" / "in Q4 2026" / "in 2026": the current period, as the records titles say it.</summary>
+        private string PeriodWords(string period)
+        {
+            var from = PeriodStart(period);
+            return period switch
+            {
+                "year" => $"in {from.Year}",
+                "quarter" => $"in Q{(from.Month - 1) / 3 + 1} {from.Year}",
+                _ => $"in {from.ToString("MMMM yyyy", En)}"
+            };
+        }
+
         // ------------------------------------------------------------------ helpers
 
         private const string PeriodError = "period must be month, quarter or year.";
@@ -485,6 +633,8 @@ namespace WorkNest.Application.Services
         };
         /// <summary>CreatedOn / CreatedDate columns are written in UTC (SYSUTCDATETIME), so they get a Z (as the CEO dashboard).</summary>
         private static string? Utc(IDictionary<string, object?>? r, string key) => Val(r, key) is DateTime d ? d.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En) : null;
+        /// <summary>Business wall-clock times (complaints: SYSDATETIME, Pakistan time): no offset, as the API writes them elsewhere.</summary>
+        private static string? Local(IDictionary<string, object?>? r, string key) => Val(r, key) is DateTime d ? d.ToString("yyyy-MM-ddTHH:mm:ss", En) : null;
         private static decimal Pct(int part, int total) => total > 0 ? Math.Round(part * 100m / total, 1) : 0m;
     }
 }
