@@ -211,10 +211,25 @@ namespace WorkNest.Application.Interfaces
         Task DeleteGalleryImageAsync(int id);
 
         // --- Contact ---
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null);
-        Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top);
+        /// <summary>
+        /// Tour inquiries, newest first. Every row has LocationId / LocationName (null = no branch, or BR_01 not run yet).
+        /// <paramref name="branch"/>: the branch filter (null / none = every inquiry). Before BR_01 the staff member's own
+        /// scope is ignored (everyone sees every inquiry, as before); an asked-for branch filter throws
+        /// <see cref="InvalidOperationException"/> (plain-language message), as the Type filter does before CT_01.
+        /// </summary>
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
+            WorkNest.Application.Helpers.BranchFilter? branch = null);
+        /// <summary>Newest inquiries (with LocationId / LocationName); <paramref name="branch"/> as in <see cref="GetContactsAsync"/>.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top, WorkNest.Application.Helpers.BranchFilter? branch = null);
+        /// <summary><paramref name="locationId"/>: the branch (BR_01); saved without it on a database without BR_01.</summary>
         Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message,
-            string? inquiryType = null, string? referenceName = null);
+            string? inquiryType = null, string? referenceName = null, int? locationId = null);
+        /// <summary>
+        /// Sets an inquiry's branch (null = none). <paramref name="scopeLocationIds"/> (CSV): location-bound staff's
+        /// locations, only inquiries without a branch or of those are changed; null = any. Rows changed (0 = not found /
+        /// not theirs), or null when the database update BR_01 has not been run.
+        /// </summary>
+        Task<int?> UpdateContactLocationAsync(Guid publicId, int? locationId, int? updatedById, string? scopeLocationIds);
         /// <summary>Rows changed (0 = not found), or null when the database update CT_01 has not been run.</summary>
         Task<int?> UpdateContactInquiryTypeAsync(Guid publicId, string inquiryType, string? referenceName, int? updatedById);
         Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById);
@@ -224,14 +239,17 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Newest feedback row per inquiry for the given inquiries (empty if the table does not exist).</summary>
         Task<Dictionary<int, IDictionary<string, object?>>> GetLatestContactFeedbackAsync(IEnumerable<int> contactIds);
         /// <summary>Inquiries whose newest feedback is "future prospect" with a follow-up date on or before today.</summary>
-        Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today);
+        /// <paramref name="locationIds"/>: location-bound staff's locations (their inquiries + those without a branch); null = all.
+        Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today, IReadOnlyCollection<int>? locationIds = null);
 
         // --- Dashboard ---
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
-        Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow);
+        /// <paramref name="branchLocationIds"/>: tour inquiries of these locations + those without a branch (location-bound staff); null = all.
+        Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
+            IReadOnlyCollection<int>? branchLocationIds = null);
         Task<Dictionary<string, HashSet<string>>> GetNavBadgeReadsDbAsync(string userEmail);
         /// <summary>False when the WN_NAV_BadgeReads table has not been created yet.</summary>
         Task<bool> SaveNavBadgeReadsDbAsync(string userEmail, IDictionary<string, List<string>> itemsByRoute);

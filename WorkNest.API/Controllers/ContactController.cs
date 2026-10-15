@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Contact;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
@@ -20,38 +21,81 @@ namespace WorkNest.API.Controllers
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
         private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
 
+        /// <summary>Newest tour inquiries (with locationId / locationName). Location-bound staff: their branches + those without one.</summary>
         [HttpGet("api/contact/recent")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> Recent([FromQuery] int top = 10) =>
-            Ok(ApiResponse.Ok(await _contacts.GetRecentContactsAsync(top)));
+            Ok(ApiResponse.Ok(await _contacts.GetRecentContactsAsync(top, User.GetBranchScope().ForList(null))));
 
+        /// <summary>
+        /// Tour inquiries; every row has locationId / locationName (null = no branch). Location-bound staff (admin, sales
+        /// executive) see their branches plus the inquiries without a branch; others see all. locationId: only that branch
+        /// (403 when it is not one of the user's), 0 = only the inquiries without a branch.
+        /// </summary>
         [HttpGet("api/contact")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null,
-            [FromQuery] string? type = null)
+            [FromQuery] string? type = null,
+            [FromQuery] int? locationId = null)
         {
+            var branch = User.GetBranchScope().ForList(locationId);
+            if (branch is null) return StatusCode(403, ApiResponse.Fail(BranchMessages.ListForbidden));
             try
             {
-                var (items, total) = await _contacts.GetContactsAsync(page, limit, search, type);
+                var (items, total) = await _contacts.GetContactsAsync(page, limit, search, type, branch);
                 return Ok(new PaginatedResponse<object> { Data = items, Total = total });
             }
-            catch (InvalidOperationException ex) { return BadRequest(ApiResponse.Fail(ex.Message)); } // Type filter before CT_01
+            catch (InvalidOperationException ex) { return BadRequest(ApiResponse.Fail(ex.Message)); } // Type / branch filter before CT_01 / BR_01
         }
 
         [EnableRateLimiting("public-forms")]
         [HttpPost("api/contact")]
         [AllowAnonymous] // public contact form; the submitter is recorded only from a real login (JWT), never from a header
-        public async Task<IActionResult> CreateContact([FromBody] ContactRequest request) =>
-            StatusCode(201, await _contacts.CreateContactAsync(request, "contact", User.GetEmail(), User.IsStaff()));
+        public Task<IActionResult> CreateContact([FromBody] ContactRequest request) => CreateAsync(request, "contact");
 
         [EnableRateLimiting("public-forms")]
         [HttpPost("api/book-tour")]
         [AllowAnonymous] // public book-a-tour form; the submitter is recorded only from a real login (JWT), never from a header
-        public async Task<IActionResult> BookTour([FromBody] ContactRequest request) =>
-            StatusCode(201, await _contacts.CreateContactAsync(request, "book_tour", User.GetEmail(), User.IsStaff()));
+        public Task<IActionResult> BookTour([FromBody] ContactRequest request) => CreateAsync(request, "book_tour");
+
+        /// <summary>
+        /// Both forms (website, app, customer, staff "Add inquiry"). locationId = the branch: staff signed in with a
+        /// location-bound role get only their own branches (one branch: always that one); everyone else may give any
+        /// active location (or none).
+        /// </summary>
+        private async Task<IActionResult> CreateAsync(ContactRequest request, string contactType)
+        {
+            var fromStaff = User.IsStaff();
+            var scope = fromStaff ? User.GetBranchScope() : BranchScope.Everything;
+            var branch = await _contacts.ChooseBranchAsync(request.LocationId, scope);
+            if (branch.IsError) return StatusCode(branch.ErrorStatus, ApiResponse.Fail(branch.Error!));
+            return StatusCode(201, await _contacts.CreateContactAsync(request, contactType, User.GetEmail(), fromStaff, branch.LocationId));
+        }
+
+        /// <summary>
+        /// Set / change an inquiry's branch: { "locationId": 2 }. Location-bound staff: only to one of their own branches
+        /// (403) and only inquiries they can see; others: any active location, or null = no branch.
+        /// </summary>
+        [HttpPatch("api/contact/{publicId:guid}/location")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> UpdateLocation(Guid publicId, [FromBody] ContactLocationRequest request)
+        {
+            var scope = User.GetBranchScope();
+            var branch = await _contacts.ChooseBranchAsync(request?.LocationId, scope, change: true);
+            if (branch.IsError) return StatusCode(branch.ErrorStatus, ApiResponse.Fail(branch.Error!));
+            var result = await _contacts.UpdateLocationAsync(publicId, branch.Location, scope, User.GetEmail());
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
+
+        /// <summary>The inquiry with this public id among those the user can see (their branches + those without one).</summary>
+        private async Task<IDictionary<string, object?>?> FindVisibleAsync(Guid publicId)
+        {
+            var (rows, _) = await _db.GetContactsAsync(1, 10000, null, null, User.GetBranchScope().ForList(null));
+            return rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+        }
 
         /// <summary>Feedback on a tour inquiry: not interested (reason, closes it), future prospect (follow-up date,
         /// alerted on that date) or converted into a quotation (quotationId).</summary>
@@ -70,8 +114,7 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> FeedbackByGuid(Guid publicId, [FromBody] ContactFeedbackRequest request)
         {
-            var (rows, _) = await _db.GetContactsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = await FindVisibleAsync(publicId);
             if (match is null) return NotFound(ApiResponse.Fail("Inquiry not found."));
             var id = match.TryGetValue("Id", out var rid) && rid != null ? Convert.ToInt32(rid) : 0;
             return id > 0 ? await Feedback(id, request) : NotFound(ApiResponse.Fail("Inquiry not found."));
@@ -95,8 +138,7 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatusByGuid(Guid publicId, [FromBody] ContactStatusUpdateRequest request)
         {
-            var (rows, _) = await _db.GetContactsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = await FindVisibleAsync(publicId);
             if (match is null) return NotFound(ApiResponse.Fail("Contact not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
             return Ok(await _contacts.UpdateContactStatusAsync(id, request.StatusId, null));
@@ -111,8 +153,7 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> DeleteByGuid(Guid publicId)
         {
-            var (rows, _) = await _db.GetContactsAsync(1, 10000, null);
-            var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
+            var match = await FindVisibleAsync(publicId);
             if (match is null) return NotFound(ApiResponse.Fail("Contact not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
             return Ok(await _contacts.DeleteContactAsync(id));

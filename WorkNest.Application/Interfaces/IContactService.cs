@@ -1,14 +1,26 @@
 using WorkNest.Application.DTOs.Contact;
+using WorkNest.Application.Helpers;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Interfaces
 {
     public interface IContactService
     {
-        Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null);
-        Task<IEnumerable<object>> GetRecentContactsAsync(int top);
-        /// <summary>fromStaff: added by staff on the Tour Inquiries page (Type WalkIn or Reference); otherwise a website / app form (Type Website).</summary>
-        Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail, bool fromStaff = false);
+        /// <summary>Tour inquiries; <paramref name="branch"/> = the branch filter (null = every inquiry). Rows have locationId / locationName.</summary>
+        Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
+            BranchFilter? branch = null);
+        Task<IEnumerable<object>> GetRecentContactsAsync(int top, BranchFilter? branch = null);
+        /// <summary>
+        /// The branch of a new inquiry (<paramref name="change"/> false) or of an existing one being changed, by the
+        /// branch rules of <paramref name="scope"/> (see <see cref="BranchScope.ForNew"/> / <see cref="BranchScope.ForChange"/>).
+        /// </summary>
+        Task<BranchChoice> ChooseBranchAsync(int? requested, BranchScope scope, bool change = false);
+        /// <summary>fromStaff: added by staff on the Tour Inquiries page (Type WalkIn or Reference); otherwise a website / app form (Type Website).
+        /// <paramref name="locationId"/>: the branch already checked by <see cref="ChooseBranchAsync"/>.</summary>
+        Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail, bool fromStaff = false,
+            int? locationId = null);
+        /// <summary>Sets / changes an inquiry's branch (checked by <see cref="ChooseBranchAsync"/>); only inquiries the scope can see.</summary>
+        Task<ApiResponse> UpdateLocationAsync(Guid publicId, BranchOption? location, BranchScope scope, string? actorEmail);
         /// <summary>Changes an inquiry's Type (Website, WhatsApp, WalkIn or Reference) and, for Reference, who referred the customer.</summary>
         Task<ApiResponse> UpdateInquiryTypeAsync(Guid publicId, ContactInquiryTypeRequest request, string? actorEmail);
         Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId);

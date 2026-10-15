@@ -11,8 +11,9 @@ namespace WorkNest.API.Controllers
 {
     /// <summary>
     /// Sales Manager dashboard: read-only. A Sales Manager (role sales_manager) sees only these endpoints, limited to the
-    /// locations a Super Admin assigned (JWT location_id + location_ids, like an admin); tour inquiries have no location
-    /// and are always all of them. Super admins may open them too (all locations). Common query parameters:
+    /// locations a Super Admin assigned (JWT location_id + location_ids, like an admin); tour inquiries by their branch
+    /// (BR_02), plus the ones without a branch when no locationId is chosen (as complaints). Super admins may open them
+    /// too (all locations). Common query parameters:
     /// period = month (default) | quarter | year (to date, against the previous period, as the CEO dashboard) and
     /// locationId (one of the caller's locations; another location answers 403). No money: counts and desks only.
     /// Bad parameters answer 400; before the database update SM_01 (procedures) or SM_02 (desks) has run, 503; the
@@ -47,7 +48,8 @@ namespace WorkNest.API.Controllers
 
         /// <summary>
         /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
-        /// match). kind = quotations | bookings | inquiries | leases.
+        /// match). kind = quotations | bookings | inquiries | leases. Inquiries: the chosen location's; without locationId
+        /// the caller's locations' plus those without a branch; locationId=none (super admins): only those without one.
         /// </summary>
         [HttpGet("api/sales-manager/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] SalesManagerRecordsQuery query)

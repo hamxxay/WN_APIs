@@ -10,6 +10,17 @@ namespace WorkNest.Application.DTOs.Contact
         public string? InquiryType { get; set; }
         /// <summary>Type Reference: who referred the customer. Empty = the staff member adding it.</summary>
         public string? ReferenceName { get; set; }
+        /// <summary>
+        /// The branch (dbo.WN_Locations.Id) the inquiry is for. Website / app / customer: optional, must be an active
+        /// location. Location-bound staff: one of their own locations (one location: always that one, even when empty).
+        /// </summary>
+        public int? LocationId { get; set; }
+    }
+
+    /// <summary>Set / change an inquiry's branch (Tour Inquiries page, staff). Null = no branch (not for location-bound staff).</summary>
+    public class ContactLocationRequest
+    {
+        public int? LocationId { get; set; }
     }
 
     /// <summary>Change an inquiry's Type (Tour Inquiries page, staff).</summary>

@@ -37,12 +37,15 @@ namespace WorkNest.Application.Services
         };
 
         /// <summary>Items waiting on staff right now, grouped by sidebar route.</summary>
-        private async Task<Dictionary<string, List<string>>> GetNavBadgeItemsAsync(int? locationId, bool includeMachines)
+        /// <param name="branchLocationIds">Location-bound staff's locations: tour inquiries and complaints of those branches plus
+        /// the ones without a branch (BR_01 branch routing); null = all.</param>
+        private async Task<Dictionary<string, List<string>>> GetNavBadgeItemsAsync(int? locationId, bool includeMachines,
+            IReadOnlyCollection<int>? branchLocationIds)
         {
             var st = await _orderStatus.GetInvoiceStatusesAsync();
             // Still owed = Unpaid / Partial / Challan Expire (legacy 1, 3, 4 + OrderStatus IDs looked up by description).
             var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue);
-            var rows = await _db.GetNavBadgeItemsDbAsync(locationId, open, _clock.Today, _clock.Now);
+            var rows = await _db.GetNavBadgeItemsDbAsync(locationId, open, _clock.Today, _clock.Now, branchLocationIds);
 
             var result = new Dictionary<string, List<string>>();
             foreach (var (route, key) in NavBadgeRoutes)
@@ -54,18 +57,19 @@ namespace WorkNest.Application.Services
             // Tour inquiries marked "future prospect" whose follow-up date has come: alert on Tour Inquiries
             // (one item per inquiry + date, so a new follow-up date alerts again even after "mark as read").
             if (result.TryGetValue("/admin/contacts", out var contactItems))
-                foreach (var (contactId, followUpOn) in await _db.GetDueContactFollowUpsAsync(_clock.Today))
+                foreach (var (contactId, followUpOn) in await _db.GetDueContactFollowUpsAsync(_clock.Today, branchLocationIds))
                     contactItems.Add($"followup:{contactId}:{followUpOn:yyyyMMdd}");
             // New (open) complaints waiting on staff.
-            result["/admin/complaints"] = (await _complaints.GetOpenIdsAsync()).Select(id => $"complaint:{id}").ToList();
+            result["/admin/complaints"] = (await _complaints.GetOpenIdsAsync(branchLocationIds)).Select(id => $"complaint:{id}").ToList();
             // WhatsApp conversations with unread customer messages (a new message alerts again).
             result["/admin/whatsapp"] = (await _whatsApp.GetUnreadConversationsAsync()).Select(x => $"wa:{x.ConversationId}:{x.LastMessageAt:yyyyMMddHHmmss}").ToList();
             return result;
         }
 
-        public async Task<Dictionary<string, int>> GetNavBadgesAsync(int? locationId, bool includeMachines, string? userEmail)
+        public async Task<Dictionary<string, int>> GetNavBadgesAsync(int? locationId, bool includeMachines, string? userEmail,
+            IReadOnlyCollection<int>? branchLocationIds = null)
         {
-            var items = await GetNavBadgeItemsAsync(locationId, includeMachines);
+            var items = await GetNavBadgeItemsAsync(locationId, includeMachines, branchLocationIds);
             var reads = string.IsNullOrWhiteSpace(userEmail)
                 ? new Dictionary<string, HashSet<string>>()
                 : await _db.GetNavBadgeReadsDbAsync(userEmail);
@@ -74,10 +78,11 @@ namespace WorkNest.Application.Services
                 kv => reads.TryGetValue(kv.Key, out var read) ? kv.Value.Count(i => !read.Contains(i)) : kv.Value.Count);
         }
 
-        public async Task<bool> MarkNavBadgesReadAsync(int? locationId, string userEmail, IEnumerable<string> routes)
+        public async Task<bool> MarkNavBadgesReadAsync(int? locationId, string userEmail, IEnumerable<string> routes,
+            IReadOnlyCollection<int>? branchLocationIds = null)
         {
             var wanted = new HashSet<string>(routes, StringComparer.OrdinalIgnoreCase);
-            var items = await GetNavBadgeItemsAsync(locationId, includeMachines: true);
+            var items = await GetNavBadgeItemsAsync(locationId, includeMachines: true, branchLocationIds);
             // Only what is waiting right now is stored, so the list never grows beyond the open items.
             var toSave = items.Where(kv => wanted.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
             return toSave.Count == 0 || await _db.SaveNavBadgeReadsDbAsync(userEmail, toSave);

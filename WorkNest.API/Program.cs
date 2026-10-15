@@ -208,6 +208,8 @@ try
     builder.Services.AddScoped<IWhatsAppClient, WorkNest.Infrastructure.ExternalServices.WhatsApp.WhatsAppCloudClient>();
     builder.Services.AddScoped<IWhatsAppInboxService, WhatsAppInboxService>();
     builder.Services.AddScoped<IWhatsAppBotService, WhatsAppBotService>();
+    // The bot's branch list (active WN_Locations), shared by all requests: re-read every 10 minutes, 3 s time limit.
+    builder.Services.AddSingleton<WhatsAppBranchCache>();
     builder.Services.AddScoped<IGalleryService, GalleryService>();
     builder.Services.AddScoped<ISpaceConfigService, SpaceConfigService>();
     builder.Services.AddScoped<IDashboardService, DashboardService>();

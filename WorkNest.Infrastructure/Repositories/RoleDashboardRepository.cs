@@ -58,9 +58,20 @@ namespace WorkNest.Infrastructure.Repositories
 
         private const string CustomerName = @"COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, NULLIF(u.Name, ''), NULLIF(u.UserName, ''), 'Customer')";
 
-        public Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds,
-            DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays) =>
-            QueryAsync($@"
+        /// <summary>Tour inquiries in scope (BR_01): of these locations + those without a branch; "" before BR_01 or for all locations.</summary>
+        private async Task<string> ContactsInScopeAsync(string alias, IReadOnlyCollection<int>? locationIds)
+        {
+            if (locationIds is null) return "";
+            await using var c = new SqlConnection(_connectionString);
+            await c.OpenAsync();
+            return BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), alias, locationIds);
+        }
+
+        public async Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds,
+            DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays)
+        {
+            var ct = await ContactsInScopeAsync("ct", locationIds);
+            return await QueryAsync($@"
                 {SpacesSql(locationIds)}
                 DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) time from the app clock
 
@@ -103,18 +114,20 @@ namespace WorkNest.Infrastructure.Repositories
                    WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 5) AND b.EndOn >= @Now
                    ORDER BY b.StartOn;
 
-                -- [3] tour inquiries (not tied to a location)
-                DECLARE @NewInquiries INT = (SELECT COUNT(*) FROM dbo.WN_Contacts WITH (NOLOCK) WHERE StatusId = 1);
-                DECLARE @InquiriesInPeriod INT = (SELECT COUNT(*) FROM dbo.WN_Contacts WITH (NOLOCK) WHERE CreatedOn >= @PStart);
+                -- [3] tour inquiries: the branches in scope + those without a branch (BR_01; before it, all of them)
+                DECLARE @NewInquiries INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct});
+                DECLARE @InquiriesInPeriod INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.CreatedOn >= @PStart{ct});
                 DECLARE @FollowUpsDue INT = 0, @ConvertedInquiries INT = 0;
                 IF OBJECT_ID(N'dbo.WN_ContactFeedback', N'U') IS NOT NULL
                 BEGIN
                     SELECT @FollowUpsDue = COUNT(*) FROM (
                         SELECT ContactId, Outcome, FollowUpOn, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) rn
                           FROM dbo.WN_ContactFeedback WITH (NOLOCK)) f
-                     WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today;
-                    SELECT @ConvertedInquiries = COUNT(DISTINCT ContactId) FROM dbo.WN_ContactFeedback WITH (NOLOCK)
-                     WHERE Outcome = N'converted' AND CreatedOn >= @PStart;
+                     WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today{(ct.Length == 0 ? "" : $@"
+                       AND EXISTS (SELECT 1 FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.Id = f.ContactId{ct})")};
+                    SELECT @ConvertedInquiries = COUNT(DISTINCT cf.ContactId) FROM dbo.WN_ContactFeedback cf WITH (NOLOCK)
+                     WHERE cf.Outcome = N'converted' AND cf.CreatedOn >= @PStart{(ct.Length == 0 ? "" : $@"
+                       AND EXISTS (SELECT 1 FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.Id = cf.ContactId{ct})")};
                 END
                 SELECT @NewInquiries AS NewInquiries, @InquiriesInPeriod AS InquiriesInPeriod,
                        @FollowUpsDue AS FollowUpsDue, @ConvertedInquiries AS ConvertedInquiries;
@@ -125,7 +138,7 @@ namespace WorkNest.Infrastructure.Repositories
                       FROM (SELECT ContactId, Outcome, FollowUpOn, Reason, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) rn
                               FROM dbo.WN_ContactFeedback WITH (NOLOCK)) f
                       JOIN dbo.WN_Contacts ct WITH (NOLOCK) ON ct.Id = f.ContactId
-                     WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today
+                     WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today{ct}
                      ORDER BY f.FollowUpOn;
                 ELSE
                     SELECT TOP 0 CAST(NULL AS INT) AS Id, CAST(NULL AS NVARCHAR(200)) AS Customer, CAST(NULL AS NVARCHAR(50)) AS Phone,
@@ -179,17 +192,21 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = now;
                     p.Add("@RenewalDays", SqlDbType.Int).Value = renewalDays;
                 });
+        }
 
         public async Task<List<List<IDictionary<string, object?>>>> GetTeamAsync(IReadOnlyCollection<int>? locationIds, DateTime now)
         {
             bool hasLoc;
             await using (var c = new SqlConnection(_connectionString)) { await c.OpenAsync(); hasLoc = await DeviceLocationSql.HasColumnAsync(c); }
             var devLoc = DeviceLocationSql.Filter(hasLoc, "hd", locationIds);
+            var ct = await ContactsInScopeAsync("ct", locationIds);
+            // Complaints in scope: the branches' names + those without a branch (or with a branch that is no location).
+            var cmp = BranchSql.Complaints("cmp.Branch", locationIds);
             return await QueryAsync($@"
                 {SpacesSql(locationIds)}
                 DECLARE @OpenComplaints INT = 0, @UnreadWhatsApp INT = 0, @KycPending INT = 0, @AccessSuspended INT = 0;
                 IF OBJECT_ID(N'dbo.WN_Complaints', N'U') IS NOT NULL
-                    SELECT @OpenComplaints = COUNT(*) FROM dbo.WN_Complaints WITH (NOLOCK) WHERE Status IN (N'open', N'in_progress');
+                    SELECT @OpenComplaints = COUNT(*) FROM dbo.WN_Complaints cmp WITH (NOLOCK) WHERE cmp.Status IN (N'open', N'in_progress'){cmp};
                 IF OBJECT_ID(N'dbo.WN_WhatsApp_Conversations', N'U') IS NOT NULL
                     SELECT @UnreadWhatsApp = COUNT(*) FROM dbo.WN_WhatsApp_Conversations WITH (NOLOCK) WHERE UnreadCount > 0;
                 IF OBJECT_ID(N'dbo.WN_CustomerKYCDocuments', N'U') IS NOT NULL
@@ -207,7 +224,7 @@ namespace WorkNest.Infrastructure.Repositories
                                     WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0
                                       AND d.EndDateTime >= @Today);
                 SELECT @OpenComplaints AS OpenComplaints, @UnreadWhatsApp AS UnreadWhatsApp,
-                       (SELECT COUNT(*) FROM dbo.WN_Contacts WITH (NOLOCK) WHERE StatusId = 1) AS NewInquiries,
+                       (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct}) AS NewInquiries,
                        @KycPending AS KycPending, @AccessSuspended AS AccessSuspended,
                        (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 0{devLoc}) AS MachinesOffline,
                        (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE 1 = 1{devLoc}) AS Machines;
