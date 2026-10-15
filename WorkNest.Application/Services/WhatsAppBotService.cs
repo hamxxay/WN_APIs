@@ -40,8 +40,13 @@ namespace WorkNest.Application.Services
 
         private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-        /// <summary>A message after this many quiet minutes starts a new conversation (welcome menu, no "invalid option").</summary>
+        /// <summary>A message after this many quiet minutes starts a new conversation: a half-finished menu (tour, complaint,
+        /// directions) is forgotten and the customer gets the welcome menu, never "invalid option".</summary>
         private const int NewSessionAfterMinutes = 30;
+
+        /// <summary>Steps where the customer types free text (a name, a complaint): a "Salam, ..." there is the answer.</summary>
+        private static readonly HashSet<string> FreeTextStates = new(StringComparer.Ordinal)
+            { "main_menu", "booking_name", "booking_phone", "complaint_description" };
 
         private static readonly HashSet<string> Greetings = new(StringComparer.Ordinal)
         {
@@ -116,6 +121,8 @@ namespace WorkNest.Application.Services
             {
                 try { turn.Data = JsonSerializer.Deserialize<BotData>(saved.Value.Data!, Json) ?? new BotData(); } catch { turn.Data = new BotData(); }
             }
+            // The conversation expired: start again from the main menu instead of resuming the old step.
+            if (turn.NewSession) turn.Reset();
 
             if (messageType != "text")
                 turn.Texts.Add("Currently, I can process text messages only.\n\nPlease send a text message.\n\n" + MainMenu());
@@ -152,6 +159,14 @@ namespace WorkNest.Application.Services
             {
                 t.Reset();
                 t.Texts.Add(MainMenu());
+                return;
+            }
+
+            // "Hi" while the bot waits for a menu number starts over, instead of "Please select a valid category".
+            if (!FreeTextStates.Contains(t.State) && IsGreeting(lower))
+            {
+                t.Reset();
+                t.Texts.Add("Hello!\n\n" + MainMenu());
                 return;
             }
 
