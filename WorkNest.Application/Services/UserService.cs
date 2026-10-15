@@ -12,6 +12,17 @@ namespace WorkNest.Application.Services
         public UserService(IDbRepository db) => _db = db;
 
         private const string SalesManagerLocationRequired = "A Sales Manager needs at least one location.";
+        private const string AccessOfficerLocationRequired = "An Access Officer needs at least one location.";
+
+        /// <summary>
+        /// Roles that only work at their locations and must be given one (nothing is saved without it): a Sales Manager
+        /// sees only their locations' figures, an Access Officer only finds people on their locations' bookings. Null for
+        /// the other roles (their older rules stay as they were).
+        /// </summary>
+        private static string? LocationRequiredFor(int roleId) =>
+            Roles.IsSalesManager(roleId) ? SalesManagerLocationRequired
+            : Roles.IsAccessOfficer(roleId) ? AccessOfficerLocationRequired
+            : null;
 
         public async Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null)
         {
@@ -119,9 +130,7 @@ namespace WorkNest.Application.Services
             {
                 if (!finalLocationId.HasValue || finalLocationId.Value <= 0)
                 {
-                    return ApiResponse.Fail(Roles.IsSalesManager(roleId)
-                        ? SalesManagerLocationRequired
-                        : "Location is required for Sales Executives.");
+                    return ApiResponse.Fail(LocationRequiredFor(roleId) ?? "Location is required for Sales Executives.");
                 }
             }
 
@@ -180,10 +189,10 @@ namespace WorkNest.Application.Services
                         {
                             finalLocationId = existingLoc.Value;
                         }
-                        else if (Roles.IsSalesManager(roleId))
+                        else if (LocationRequiredFor(roleId) is { } locationRequired)
                         {
-                            // A Sales Manager only sees their locations' figures: one is required (nothing is saved).
-                            return ApiResponse.Fail(SalesManagerLocationRequired);
+                            // A Sales Manager / Access Officer works only at their locations: one is required (nothing is saved).
+                            return ApiResponse.Fail(locationRequired);
                         }
                     }
                 }
@@ -259,9 +268,7 @@ namespace WorkNest.Application.Services
                     }
                     else
                     {
-                        return ApiResponse.Fail(Roles.IsSalesManager(roleId)
-                            ? SalesManagerLocationRequired
-                            : "Location is required when making a user a Sales Executive.");
+                        return ApiResponse.Fail(LocationRequiredFor(roleId) ?? "Location is required when making a user a Sales Executive.");
                     }
                 }
             }

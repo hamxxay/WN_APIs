@@ -17,6 +17,12 @@ namespace WorkNest.Common.Constants
         /// (api/sales-manager/*). Only a Super Admin gives this role.
         /// </summary>
         public const string SalesManager   = "sales_manager";
+        /// <summary>
+        /// Door access only, tied to the locations a Super Admin assigns (like a Sales Manager): finds a person by CNIC on
+        /// a confirmed booking of those locations, adds them to the room, enrols face / fingerprint, removes or restores
+        /// their door access (api/access-officer/*). Only a Super Admin gives this role.
+        /// </summary>
+        public const string AccessOfficer  = "access_officer";
 
         public const int SuperAdminId     = 1;
         public const int AdminId          = 2;
@@ -24,6 +30,7 @@ namespace WorkNest.Common.Constants
         public const int SalesExecutiveId = 16;
         public const int CeoId            = 17;
         public const int SalesManagerId   = 18;
+        public const int AccessOfficerId  = 19;
 
         public static readonly Dictionary<int, string> RoleMap = new()
         {
@@ -33,6 +40,7 @@ namespace WorkNest.Common.Constants
             { SalesExecutiveId, SalesExecutive },
             { CeoId,            Ceo            },
             { SalesManagerId,   SalesManager   },
+            { AccessOfficerId,  AccessOfficer  },
         };
 
         public static readonly Dictionary<string, int> ReverseMap = new(System.StringComparer.OrdinalIgnoreCase)
@@ -52,6 +60,9 @@ namespace WorkNest.Common.Constants
             { SalesManager,             SalesManagerId   },
             { "salesmanager",           SalesManagerId   },
             { "sales manager",          SalesManagerId   },
+            { AccessOfficer,            AccessOfficerId  },
+            { "accessofficer",          AccessOfficerId  },
+            { "access officer",         AccessOfficerId  },
         };
 
         /// <summary>Maps a role string (or integer string) to RoleId integer.</summary>
@@ -99,17 +110,21 @@ namespace WorkNest.Common.Constants
             role == Admin || role == SuperAdmin;
 
         /// <summary>
-        /// Admins, Sales Executives and Sales Managers are limited to their assigned location(s) (WN_Users.LocationId
-        /// plus WN_UserLocations); Super Admins and the CEO cover every location.
+        /// Admins, Sales Executives, Sales Managers and Access Officers are limited to their assigned location(s)
+        /// (WN_Users.LocationId plus WN_UserLocations); Super Admins and the CEO cover every location.
         /// </summary>
         public static bool IsLocationBoundRole(int? roleId) =>
-            roleId == SalesExecutiveId || roleId == AdminId || roleId == SalesManagerId;
+            roleId == SalesExecutiveId || roleId == AdminId || roleId == SalesManagerId || roleId == AccessOfficerId;
 
-        /// <summary>admin, sales_executive and sales_manager are limited to their assigned location(s); super_admin and ceo are not.</summary>
+        /// <summary>
+        /// admin, sales_executive, sales_manager and access_officer are limited to their assigned location(s); super_admin
+        /// and ceo are not.
+        /// </summary>
         public static bool IsLocationBoundRole(string? role) =>
             string.Equals(role, SalesExecutive, System.StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, Admin, System.StringComparison.OrdinalIgnoreCase)
-            || string.Equals(role, SalesManager, System.StringComparison.OrdinalIgnoreCase);
+            || string.Equals(role, SalesManager, System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, AccessOfficer, System.StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Returns true if the role is SuperAdmin.</summary>
         public static bool IsSuperAdmin(int? roleId) =>
@@ -134,5 +149,13 @@ namespace WorkNest.Common.Constants
         /// <summary>Returns true if the role string is sales_manager.</summary>
         public static bool IsSalesManager(string? role) =>
             string.Equals(role, SalesManager, System.StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Returns true if the role is Access Officer (door access by CNIC only, own locations).</summary>
+        public static bool IsAccessOfficer(int? roleId) =>
+            roleId == AccessOfficerId;
+
+        /// <summary>Returns true if the role string is access_officer.</summary>
+        public static bool IsAccessOfficer(string? role) =>
+            string.Equals(role, AccessOfficer, System.StringComparison.OrdinalIgnoreCase);
     }
 }

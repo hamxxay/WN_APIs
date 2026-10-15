@@ -17,8 +17,12 @@ namespace WorkNest.Application.Interfaces
         Task<BookingEmployeeOutcome> AddAsync(int bookingId, int userId, AddBookingEmployeeRequest? body);
         Task<BookingEmployeeOutcome> RemoveAsync(int bookingId, int userId, int personId);
 
-        /// <summary>Sales: verify a customer-added employee by CNIC and add them to the booked space.</summary>
-        Task<BookingEmployeeOutcome> VerifyByCnicAsync(int bookingDetailId, string? idNumber, int? staffUserId, bool allowOverCapacity);
+        /// <summary>
+        /// Sales: verify a customer-added employee by CNIC and add them to the booked space. <paramref name="acceptOtherIds"/>
+        /// (Access Officer): a passport / other ID number is accepted too (letters and digits), not only a 13-digit CNIC.
+        /// </summary>
+        Task<BookingEmployeeOutcome> VerifyByCnicAsync(int bookingDetailId, string? idNumber, int? staffUserId, bool allowOverCapacity,
+            bool acceptOtherIds = false);
 
         /// <summary>
         /// Staff added a person to a booked space directly: a Pending request of that person on the booking is
