@@ -3192,7 +3192,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return row;
         }
 
-        public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? ntn = null, string? secp = null)
+        public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? CustomerTypeId = null,int CountryId = 0,string? IdentificationDocumentTypeId = null, string? ntn = null, string? secp = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_Insert", c);
@@ -3207,6 +3207,9 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@CreatedBy", (object?)createdBy ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Company", (object?)company ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerTypeId", (object?)CustomerTypeId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CountryId", CountryId);
+            cmd.Parameters.AddWithValue("@IdentificationDocumentTypeId", (object?)IdentificationDocumentTypeId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@NTN", (object?)ntn ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SecpRegistrationNo", (object?)secp ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
