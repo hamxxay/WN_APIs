@@ -6,9 +6,11 @@ using WorkNest.Application.Interfaces;
 namespace WorkNest.Infrastructure.Repositories
 {
     /// <summary>
-    /// CEO dashboard data: calls the read-only stored procedures dbo.WN_Ceo_* (script CEO_01_dashboard_procedures).
-    /// Until that script has run the procedures are missing (SQL error 2812) and every call throws
-    /// <see cref="CeoDatabaseUpdateMissingException"/>, which the API answers with 503.
+    /// CEO dashboard data: calls the read-only stored procedures dbo.WN_Ceo_* (script CEO_01_dashboard_procedures,
+    /// changed by QA_07_dashboards). Until CEO_01 has run the procedures are missing (SQL error 2812) and every call
+    /// throws <see cref="CeoDatabaseUpdateMissingException"/>, which the API answers with 503 (the full leases list:
+    /// naming QA_07). Until QA_07 has run the procedures do not know the tour inquiry location parameters (SQL error
+    /// 8144 / 8145, too many arguments): the call is repeated without them and every location's inquiries count, as before.
     /// </summary>
     public class CeoDashboardRepository : ICeoDashboardRepository
     {
@@ -61,20 +63,40 @@ namespace WorkNest.Infrastructure.Repositories
             }
         }
 
+        /// <summary>
+        /// Runs a procedure with the QA_07 tour inquiry location parameters (<paramref name="extra"/>). A database without
+        /// QA_07 answers 8144 / 8145 (too many arguments / not a parameter): run it again without them (as before).
+        /// </summary>
+        private async Task<List<List<IDictionary<string, object?>>>> RunWithInquiryLocationAsync(string procedure,
+            Action<SqlParameterCollection> bind, Action<SqlParameterCollection> extra)
+        {
+            try
+            {
+                return await RunAsync(procedure, p => { bind(p); extra(p); });
+            }
+            catch (SqlException ex) when (ex.Number is 8144 or 8145) // QA_07 not run yet: no inquiry location parameters
+            {
+                return await RunAsync(procedure, bind);
+            }
+        }
+
+        // QA_07 marks: the sales funnel's InqByLocation, the breakdown head's InqByLocation, the inquiry records' ByLocation
+        // and the dashboard's result set [13] (all leases expiring).
+
         public Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
             CeoInvoiceStatusIds statuses, int expiringDays) =>
-            RunAsync("dbo.WN_Ceo_Dashboard", p =>
+            RunWithInquiryLocationAsync("dbo.WN_Ceo_Dashboard", p =>
             {
                 p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
                 p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 AddStatuses(p, statuses);
                 p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
-            });
+            }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true);
 
         public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, DateTime? monthStart, string? bucket,
             int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses) =>
-            RunAsync("dbo.WN_Ceo_Breakdown", p =>
+            RunWithInquiryLocationAsync("dbo.WN_Ceo_Breakdown", p =>
             {
                 p.Add("@Metric", SqlDbType.NVarChar, 30).Value = metric;
                 p.Add("@MonthStart", SqlDbType.Date).Value = Db(monthStart?.Date);
@@ -85,7 +107,7 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@UserId", SqlDbType.Int).Value = Db(userId);
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 AddStatuses(p, statuses);
-            });
+            }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true);
 
         public Task<List<List<IDictionary<string, object?>>>> GetInvoiceRecordsAsync(DateTime? monthStart, int? locationId, bool noLocation,
             string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top) =>
@@ -128,14 +150,21 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Top", SqlDbType.Int).Value = top;
             });
 
-        public Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(DateTime? from, DateTime? to, string? inquiryType, int top) =>
-            RunAsync("dbo.WN_Ceo_Records_Inquiries", p =>
+        public Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(DateTime? from, DateTime? to, string? inquiryType,
+            int? locationId, int top)
+        {
+            void Bind(SqlParameterCollection p)
             {
                 p.Add("@From", SqlDbType.DateTime2).Value = Db(from);
                 p.Add("@To", SqlDbType.DateTime2).Value = Db(to);
                 p.Add("@InquiryType", SqlDbType.NVarChar, 20).Value = Db(inquiryType);
                 p.Add("@Top", SqlDbType.Int).Value = top;
-            });
+            }
+            // Every location: no branch filter to ask for (every inquiry, before and after QA_07).
+            return locationId is > 0
+                ? RunWithInquiryLocationAsync("dbo.WN_Ceo_Records_Inquiries", Bind, p => p.Add("@LocationId", SqlDbType.Int).Value = locationId.Value)
+                : RunAsync("dbo.WN_Ceo_Records_Inquiries", Bind);
+        }
 
         public Task<List<List<IDictionary<string, object?>>>> GetQuotationRecordsAsync(DateTime? from, DateTime? to, int? userId, string? stage,
             int? locationId, int top) =>
@@ -148,5 +177,27 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
                 p.Add("@Top", SqlDbType.Int).Value = top;
             });
+
+        public async Task<List<List<IDictionary<string, object?>>>> GetLeaseRecordsAsync(int? locationId, bool noLocation, DateTime? from,
+            DateTime? to, int expiringDays, DateTime businessNow, int top)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Records_Leases", p =>
+                {
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@NoLocation", SqlDbType.Bit).Value = noLocation;
+                    p.Add("@From", SqlDbType.DateTime2).Value = Db(from);
+                    p.Add("@To", SqlDbType.DateTime2).Value = Db(to);
+                    p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                    p.Add("@Top", SqlDbType.Int).Value = top;
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException ex) // this procedure comes with QA_07, not CEO_01
+            {
+                throw CeoDatabaseUpdateMissingException.LeasesMissing(ex.InnerException);
+            }
+        }
     }
 }
