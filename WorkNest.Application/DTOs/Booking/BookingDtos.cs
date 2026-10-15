@@ -130,6 +130,11 @@ namespace WorkNest.Application.DTOs.Booking
         public string? ShiftType { get; set; } = "24_7";
         public int? OfferingTypeId { get; set; }
         public string? OfferingType { get; set; } = "24/7";
+        /// <summary>
+        /// The location the customer chose (WN_Locations.Id): the booking gets a space of this location only.
+        /// Null = any location (the old behaviour). Location-bound staff get their own location ([ValidateLocationScope]).
+        /// </summary>
+        public int? LocationId { get; set; }
     }
 
     public class ReassignBookingRequest

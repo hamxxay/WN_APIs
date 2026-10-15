@@ -98,9 +98,9 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(result);
         }
 
-        public async Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7")
+        public async Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7", int? locationId = null)
         {
-            var result = await _db.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType);
+            var result = await _db.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType, locationId);
             return ApiResponse.Ok(result);
         }
 
@@ -386,10 +386,16 @@ namespace WorkNest.Application.Services
                 request.FirstName, request.LastName, request.PhoneNumber,
                 request.CnicOrPassport, request.Address, request.CityId,
                 "Created during self-booking",
-                smartShiftType);
+                smartShiftType,
+                request.LocationId is > 0 ? request.LocationId : null);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 return ApiResponse.Fail(err.ToString() ?? "An error occurred");
+
+            // Sent again within 2 minutes (e.g. the app timed out and the customer retried): the booking made a moment
+            // ago comes back instead of a second one (WN_Bookings_InsertSmart, QA_03).
+            if (SmartBookingRules.IsDuplicate(result))
+                return ApiResponse.Ok(result, SmartBookingRules.DuplicateMessage);
 
             return ApiResponse.Ok(result, "Smart booking created.");
         }

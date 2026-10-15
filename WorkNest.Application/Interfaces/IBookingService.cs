@@ -22,7 +22,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> ReassignBookingAsync(int id, ReassignBookingRequest request, string userEmail);
         Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7");
         Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7");
-        Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7");
+        Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7", int? locationId = null);
         Task<ApiResponse> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail);
         Task<ApiResponse> GetChallanAsync(int bookingId);
         Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null);
