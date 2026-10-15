@@ -91,6 +91,10 @@ namespace WorkNest.Application.Services
         public decimal WhtRatePercent { get; set; }
         public bool IsProrated { get; set; }
         public decimal ProratedCurrentMonthAmount { get; set; }
+        /// <summary>Prorated first-month days in the advance rent (0 when not prorated).</summary>
+        public int ProratedDays { get; set; }
+        /// <summary>Whole months in the advance rent besides the prorated days (= BillingPeriodMonths when not prorated).</summary>
+        public int AdvanceWholeMonths { get; set; }
         public List<ChallanFieldDto> Fields { get; set; } = new();
     }
 
@@ -174,7 +178,9 @@ namespace WorkNest.Application.Services
                 IsWhtInvoice = isWht,
                 WhtRatePercent = isWht ? input.WhtRatePercent : 0m,
                 IsProrated = engineResult.IsProrated,
-                ProratedCurrentMonthAmount = engineResult.ProratedCurrentMonthAmount
+                ProratedCurrentMonthAmount = engineResult.ProratedCurrentMonthAmount,
+                ProratedDays = engineResult.IsProrated ? engineResult.ProratedDays : 0,
+                AdvanceWholeMonths = AdvanceWholeMonthsOf(engineResult.IsProrated, engineResult.BillingPeriodMonths, input.StartOn)
             };
 
             BuildFields(res, input);
@@ -268,10 +274,12 @@ namespace WorkNest.Application.Services
                 }
 
                 string bPeriodLabel = $"{res.BillingPeriodMonths} Month{(res.BillingPeriodMonths > 1 ? "s" : "")}";
+                // A booking that starts after the 1st also pays the rest of its first month in advance (e.g. "15 days + 3 Months").
+                string advanceLabel = AdvancePeriodLabel(res);
                 fields.Add(new ChallanFieldDto { Key = "billingPeriod", Label = "Billing Period", Value = bPeriodLabel });
-                fields.Add(new ChallanFieldDto { Key = "advanceRentPeriod", Label = "Advance Rent Period", Value = bPeriodLabel });
+                fields.Add(new ChallanFieldDto { Key = "advanceRentPeriod", Label = "Advance Rent Period", Value = advanceLabel });
 
-                fields.Add(new ChallanFieldDto { Key = "advanceRent", Label = $"Advance Rent ({bPeriodLabel})", Value = FormatCurrency(res.FirstCycleRent) });
+                fields.Add(new ChallanFieldDto { Key = "advanceRent", Label = $"Advance Rent ({advanceLabel})", Value = FormatCurrency(res.FirstCycleRent) });
                 fields.Add(new ChallanFieldDto { Key = "monthlyRent", Label = "Monthly Rent", Value = FormatCurrency(res.MonthlyRent) });
 
                 if (res.SpaceType == "PrivateRoom" && res.SecurityDeposit > 0)
@@ -505,6 +513,25 @@ namespace WorkNest.Application.Services
             c.DiscountAmount = calc.DiscountAmount;
             c.TotalPayable = calc.TotalPayable;
             c.Fields = calc.Fields;
+        }
+
+        /// <summary>
+        /// Whole months in a prorated advance (InvoiceCalculationEngine): from the 15th the prorated days come on top of
+        /// the full billing period, before the 15th they replace its first month.
+        /// </summary>
+        public static int AdvanceWholeMonthsOf(bool prorated, int billingPeriodMonths, DateTime? startOn)
+        {
+            if (!prorated || !startOn.HasValue) return billingPeriodMonths;
+            return startOn.Value.Day >= 15 ? billingPeriodMonths : Math.Max(0, billingPeriodMonths - 1);
+        }
+
+        /// <summary>"3 Months", or with a prorated first month "15 days + 3 Months" (same wording as the invoice line).</summary>
+        public static string AdvancePeriodLabel(ChallanCalculationResult res)
+        {
+            static string Months(int m) => $"{m} Month{(m > 1 ? "s" : "")}";
+            if (!res.IsProrated || res.ProratedDays <= 0) return Months(res.BillingPeriodMonths);
+            string days = $"{res.ProratedDays} day{(res.ProratedDays > 1 ? "s" : "")}";
+            return res.AdvanceWholeMonths > 0 ? $"{days} + {Months(res.AdvanceWholeMonths)}" : days;
         }
 
         private static string FormatCurrency(decimal amount)

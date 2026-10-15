@@ -1729,6 +1729,78 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
         }
 
+        public async Task<List<IDictionary<string, object?>>> GetMyInvoicesDbAsync(string email)
+        {
+            await using var c = await Open();
+            // Owner rule = IsInvoiceOwnedByDbAsync (invoice user, else its booking's user), so every row's PDF opens.
+            const string sql = @"
+                SELECT i.Id, i.PublicId, i.InvoiceNumber, i.BookingId, i.InvoiceTypeId,
+                       i.IssuedOn, i.DueOn,
+                       COALESCE(i.BillingPeriodStart, b.StartOn) AS PeriodStart,
+                       COALESCE(i.BillingPeriodEnd, b.EndOn) AS PeriodEnd,
+                       ISNULL(i.GrandTotal, 0) AS GrandTotal, ISNULL(i.WHTAmount, 0) AS WHTAmount, ISNULL(i.PaidTotal, 0) AS PaidTotal,
+                       ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
+                       CAST(ISNULL(i.StatusId, 0) AS INT) AS StatusId, LTRIM(RTRIM(os.Description)) AS StatusDescription,
+                       CAST(b.BookingStatusId AS INT) AS BookingStatusId, bs.Code AS BookingStatusCode, bs.Label AS BookingStatusLabel,
+                       COALESCE(NULLIF(s.Name, ''), s.Code) AS SpaceName, s.Code AS SpaceCode, l.Name AS LocationName
+                  FROM dbo.WN_Invoices i WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                  JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(i.UserId, b.UserId)
+                  LEFT JOIN dbo.OrderStatus os WITH (NOLOCK) ON os.Id = i.StatusId
+                  LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
+                  LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                  LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
+                 WHERE u.Email = @Email
+                   AND (b.Id IS NULL OR ISNULL(b.IsDeleted, 0) = 0)
+                 ORDER BY i.Id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IDictionary<int, BookingAccessSuspensionInfo>> GetOpenAccessSuspensionsDbAsync(IEnumerable<int> bookingIds, DateTime today)
+        {
+            var result = new Dictionary<int, BookingAccessSuspensionInfo>();
+            var ids = bookingIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            await using var c = await Open();
+            // Same "in force" rule as WN_HIK_AccessSuspension_Run step 3: not resolved and no temporary access running today.
+            // Booking ids are ints read from the database, never user text.
+            var sql = $@"
+                SELECT s.BookingId, s.InvoiceId, i.InvoiceNumber, i.DueOn, s.SuspendedAt
+                  FROM dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = s.InvoiceId
+                 WHERE s.ResolvedAt IS NULL
+                   AND (s.OverrideUntil IS NULL OR s.OverrideUntil < @Today)
+                   AND s.BookingId IN ({string.Join(",", ids)})
+                 ORDER BY s.Id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Today", SqlDbType.Date).Value = today.Date;
+            try
+            {
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    int bookingId = r.GetInt32(0);
+                    if (result.ContainsKey(bookingId)) continue; // newest open suspension per booking
+                    result[bookingId] = new BookingAccessSuspensionInfo
+                    {
+                        BookingId = bookingId,
+                        InvoiceId = r.IsDBNull(1) ? null : r.GetInt32(1),
+                        InvoiceNumber = r.IsDBNull(2) ? null : r.GetString(2),
+                        InvoiceDueOn = r.IsDBNull(3) ? null : r.GetDateTime(3),
+                        SuspendedAt = r.IsDBNull(4) ? null : r.GetDateTime(4) // SYSDATETIME(): the server's (Pakistan) clock
+                    };
+                }
+            }
+            catch (SqlException ex) when (ex.Number == 208)
+            {
+                // WN_HIK_BookingAccessSuspensions not installed on this database: nothing is suspended.
+            }
+            return result;
+        }
+
         // Amount recorded as paid on a booking (alias b): the larger of its invoices' PaidTotal (fee receipts and
         // WN_RecordInvoicePayment set it) and its paid (StatusId 2) WN_Payments rows, by booking or by one of its
         // invoices. Larger, not sum: WN_RecordInvoicePayment writes both for the same money. Used by the customer
@@ -4919,6 +4991,8 @@ END";
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
+                // WN_Announcements_* write these with SYSUTCDATETIME(): marked UTC so the JSON carries "Z" and the app
+                // shows the right local time (it reads a time without "Z" as Pakistan time).
                 list.Add(new UserAnnouncementDto
                 {
                     Id = r.GetGuid(r.GetOrdinal("Id")),
@@ -4926,11 +5000,11 @@ END";
                     Body = r.GetString(r.GetOrdinal("Body")),
                     Type = r.GetString(r.GetOrdinal("Type")),
                     TargetScope = r.GetString(r.GetOrdinal("TargetScope")),
-                    ScheduledAt = r.IsDBNull(r.GetOrdinal("ScheduledAt")) ? null : r.GetDateTime(r.GetOrdinal("ScheduledAt")),
-                    SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : r.GetDateTime(r.GetOrdinal("SentAt")),
-                    CreatedAt = r.GetDateTime(r.GetOrdinal("CreatedAt")),
+                    ScheduledAt = r.IsDBNull(r.GetOrdinal("ScheduledAt")) ? null : AsUtc(r.GetDateTime(r.GetOrdinal("ScheduledAt"))),
+                    SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : AsUtc(r.GetDateTime(r.GetOrdinal("SentAt"))),
+                    CreatedAt = AsUtc(r.GetDateTime(r.GetOrdinal("CreatedAt"))),
                     IsRead = !r.IsDBNull(r.GetOrdinal("IsRead")) && Convert.ToBoolean(r["IsRead"]),
-                    ReadAt = r.IsDBNull(r.GetOrdinal("ReadAt")) ? null : r.GetDateTime(r.GetOrdinal("ReadAt"))
+                    ReadAt = r.IsDBNull(r.GetOrdinal("ReadAt")) ? null : AsUtc(r.GetDateTime(r.GetOrdinal("ReadAt")))
                 });
 
                 if (total == 0 && !r.IsDBNull(r.GetOrdinal("TotalRecords")))
@@ -4941,6 +5015,10 @@ END";
 
             return (list, total > 0 ? total : list.Count);
         }
+
+        /// <summary>A value the database wrote with SYSUTCDATETIME(): Kind = Utc (serialised with "Z").</summary>
+        public static DateTime AsUtc(DateTime value) =>
+            value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
         public async Task<bool> MarkAnnouncementReadAsync(Guid announcementId, int userId)
         {
