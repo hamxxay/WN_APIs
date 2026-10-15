@@ -1047,11 +1047,30 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return rows.FirstOrDefault(row => row.TryGetValue("Id", out var rid) && Convert.ToInt32(rid) == id);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7")
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7", bool includeOccupied = false)
+        {
+            if (includeOccupied)
+            {
+                try
+                {
+                    return await ReadAvailableSpacesAsync(shiftType, true);
+                }
+                catch (SqlException ex) when (ex.Number == 8144)
+                {
+                    // "Too many arguments": the database does not have QA_03_customer_booking yet (no @IncludeOccupied).
+                    // The spaces free right now, as before (rows without OccupiedNow = free now).
+                }
+            }
+            return await ReadAvailableSpacesAsync(shiftType, false);
+        }
+
+        private async Task<List<IDictionary<string, object?>>> ReadAvailableSpacesAsync(string? shiftType, bool includeOccupied)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Spaces_GetAvailable", c);
             cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            // Only sent when asked for, so the list keeps working on a database without QA_03.
+            if (includeOccupied) cmd.Parameters.AddWithValue("@IncludeOccupied", true);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -1219,7 +1238,25 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7")
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7", int? locationId = null)
+        {
+            if (locationId is not null)
+            {
+                try
+                {
+                    return await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, locationId);
+                }
+                catch (SqlException ex) when (ex.Number == 8144)
+                {
+                    // "Too many arguments": no QA_03_customer_booking yet (no @LocationId). Every location's free
+                    // spaces, kept to the asked location here (the rows carry their LocationId).
+                    return SmartBookingRules.AtLocation(await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, null), locationId);
+                }
+            }
+            return await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, null);
+        }
+
+        private async Task<List<IDictionary<string, object?>>> ReadSmartAvailableAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType, int? locationId)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_GetSmartAvailable", c);
@@ -1228,6 +1265,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@EndOn", endOn);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            // Only sent for a location, so availability keeps working on a database without QA_03.
+            if (locationId is not null) cmd.Parameters.AddWithValue("@LocationId", locationId.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -1478,7 +1517,26 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById,
             string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null,
             string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
-            string? shiftType = "24_7")
+            string? shiftType = "24_7", int? locationId = null)
+        {
+            try
+            {
+                return await ExecInsertSmartAsync(userEmail, categoryCode, startOn, endOn, capacity, notes, createdById, customerEmail,
+                    customerFirstName, customerLastName, customerPhone, customerCnic, customerAddress, customerCityId, customerNotes, shiftType, locationId);
+            }
+            catch (SqlException ex) when (ex.Number == 8144 && locationId is not null)
+            {
+                // "Too many arguments": no QA_03_customer_booking yet (WN_Bookings_InsertSmart without @LocationId). Pick the
+                // space here, as the procedure would, but only at the chosen location, and book it with WN_Bookings_Insert.
+                return await InsertSmartAtLocationAsync(userEmail, categoryCode, startOn, endOn, capacity, notes, createdById, customerEmail,
+                    customerFirstName, customerLastName, customerPhone, customerCnic, customerAddress, customerCityId, customerNotes, shiftType, locationId.Value);
+            }
+        }
+
+        private async Task<IDictionary<string, object?>> ExecInsertSmartAsync(
+            string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById,
+            string? customerEmail, string? customerFirstName, string? customerLastName, string? customerPhone,
+            string? customerCnic, string? customerAddress, int? customerCityId, string? customerNotes, string? shiftType, int? locationId)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_InsertSmart", c);
@@ -1498,6 +1556,63 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@CustomerCityId", (object?)customerCityId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CustomerNotes", (object?)customerNotes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            // Only sent for a location, so booking keeps working on a database without QA_03.
+            if (locationId is not null) cmd.Parameters.AddWithValue("@LocationId", locationId.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync()) return ToDict(r);
+            return new Dictionary<string, object?>();
+        }
+
+        /// <summary>
+        /// WN_Bookings_InsertSmart's steps for one location, for a database without QA_03: the first free space there with
+        /// a price for the booking period (smallest first, WN_Bookings_GetSmartAvailable's order), then WN_Bookings_Insert
+        /// with the same values the procedure passes (a private office is charged for its seats, as after QA_03).
+        /// WN_Bookings_Insert checks again, under lock, that the space is still free.
+        /// </summary>
+        private async Task<IDictionary<string, object?>> InsertSmartAtLocationAsync(
+            string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById,
+            string? customerEmail, string? customerFirstName, string? customerLastName, string? customerPhone,
+            string? customerCnic, string? customerAddress, int? customerCityId, string? customerNotes, string? shiftType, int locationId)
+        {
+            static IDictionary<string, object?> Failed(string message) => new Dictionary<string, object?>
+            {
+                ["BookingId"] = null, ["BookingPublicId"] = null, ["ChallanNumber"] = null, ["ChallanValidUntil"] = null, ["ErrorMessage"] = message
+            };
+
+            var user = await GetUserByEmailAsync(userEmail);
+            int? userId = user is not null ? SmartBookingRules.IntOf(user, "Id") : null;
+            if (userId is null) return Failed("User not found or inactive.");
+
+            var rows = await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, null);
+            var space = SmartBookingRules.PickSpace(rows, categoryCode, locationId);
+            if (space is null) return Failed(SmartBookingRules.NoSpaceMessage);
+            if (!SmartBookingRules.IsBookable(space, categoryCode))
+                return Failed($"No active {SmartBookingRules.BookingPeriodCode(categoryCode)} pricing found for selected space.");
+
+            int spaceId = SmartBookingRules.IntOf(space, "Id") ?? 0;
+            var pricing = await GetActivePricingForSpaceAsync(spaceId);
+            int pricingId = pricing is not null ? SmartBookingRules.IntOf(pricing, "PricingId") ?? SmartBookingRules.IntOf(pricing, "Id") ?? 0 : 0;
+
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Bookings_Insert", c);
+            cmd.Parameters.AddWithValue("@UserId", userId.Value);
+            cmd.Parameters.AddWithValue("@SpaceId", spaceId);
+            cmd.Parameters.AddWithValue("@PricingId", pricingId);
+            cmd.Parameters.AddWithValue("@StartOn", startOn);
+            cmd.Parameters.AddWithValue("@EndOn", endOn);
+            cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UserEmail", userEmail);
+            cmd.Parameters.AddWithValue("@CustomerEmail", (object?)customerEmail ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerFirstName", (object?)customerFirstName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerLastName", (object?)customerLastName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerPhone", (object?)customerPhone ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerCnic", (object?)customerCnic ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerAddress", (object?)customerAddress ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerCityId", (object?)customerCityId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerNotes", (object?)customerNotes ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            if (SmartBookingRules.ChargedSeats(categoryCode, space) is int seats) cmd.Parameters.AddWithValue("@Capacity", seats);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return ToDict(r);
             return new Dictionary<string, object?>();

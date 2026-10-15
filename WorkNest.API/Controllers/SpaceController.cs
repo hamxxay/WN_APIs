@@ -30,11 +30,14 @@ namespace WorkNest.API.Controllers
             return Ok(ApiResponse.Ok(periods));
         }
 
+        // includeOccupied=true (customer app cards): every active, priced space, with OccupiedNow (booked at this moment)
+        // and Amenities, so a space type stays listed while all its spaces are taken now (the chosen period decides
+        // availability: GET booking/smart/available). Needs QA_03_customer_booking; before it: spaces free now, as before.
         [HttpGet("api/space/available")]
         [AllowAnonymous]
-        public async Task<IActionResult> Available([FromQuery] string? shiftType = "24_7")
+        public async Task<IActionResult> Available([FromQuery] string? shiftType = "24_7", [FromQuery] bool includeOccupied = false)
         {
-            var items = await _spaces.GetAvailableSpacesAsync(shiftType);
+            var items = await _spaces.GetAvailableSpacesAsync(shiftType, includeOccupied);
             return Ok(ApiResponse.Ok(items));
         }
 

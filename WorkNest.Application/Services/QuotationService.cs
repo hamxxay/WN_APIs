@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Quotation;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Application.Services
@@ -468,7 +469,10 @@ namespace WorkNest.Application.Services
 
             ChallanCalculationService.ApplyToQuotation(dto);
 
-            dto.CanRespond = string.Equals(dto.Status, "Sent", StringComparison.OrdinalIgnoreCase);
+            // Sent and still valid (ValidUntil is the last valid day, a Pakistan date): an expired quotation can no longer
+            // be accepted or declined; IsExpired tells the customer why.
+            dto.CanRespond = QuotationValidity.CanRespond(dto.Status, dto.ValidUntil, _clock.Today);
+            dto.IsExpired = QuotationValidity.IsExpired(dto.Status, dto.ValidUntil, _clock.Today);
 
             int qMonths = 1;
             if (dto.EndDateTime > dto.StartDateTime)
@@ -674,6 +678,7 @@ namespace WorkNest.Application.Services
 
         public async Task<QuotationResponse> AcceptQuotationAsync(int quotationId, int version, int customerId, string? note, int? userId)
         {
+            await EnsureNotExpiredAsync(quotationId);
             await _db.AcceptQuotationAsync(quotationId, version, customerId, note, userId);
             var res = await GetQuotationByIdAsync(quotationId);
             return res ?? throw new InvalidOperationException("Failed to load accepted quotation.");
@@ -684,9 +689,23 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(note))
                 throw new ArgumentException("Decline reason note is mandatory.");
 
+            await EnsureNotExpiredAsync(quotationId);
             await _db.DeclineQuotationAsync(quotationId, version, customerId, note, userId);
             var res = await GetQuotationByIdAsync(quotationId);
             return res ?? throw new InvalidOperationException("Failed to load declined quotation.");
+        }
+
+        /// <summary>
+        /// Refuses to accept or decline a quotation whose last valid day (ValidUntil, Pakistan date) has passed; the
+        /// controllers answer 400 with this message.
+        /// </summary>
+        private async Task EnsureNotExpiredAsync(int quotationId)
+        {
+            var header = await _db.GetQuotationByIdAsync(quotationId);
+            if (header is null || !header.TryGetValue("ValidUntil", out var vu) || vu is null || vu is DBNull) return;
+            var validUntil = Convert.ToDateTime(vu);
+            if (QuotationValidity.IsPast(validUntil, _clock.Today))
+                throw new InvalidOperationException(QuotationValidity.ExpiredMessage(validUntil));
         }
 
         public async Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById)

@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
@@ -56,6 +57,7 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? shiftType = "24_7") =>
             Ok(await _bookings.GetAvailableSpacesForReassignmentAsync(spaceTypeId, startOn, endOn, excludeBookingId, shiftType));
 
+        // locationId: only that location's spaces (the customer app's card); none = every location, as before.
         [HttpGet("api/booking/smart/available")]
         [AllowAnonymous]
         public async Task<IActionResult> SmartAvailable(
@@ -63,8 +65,9 @@ namespace WorkNest.API.Controllers
             [FromQuery] DateTime startOn,
             [FromQuery] DateTime endOn,
             [FromQuery] int? capacity,
-            [FromQuery] string? shiftType = "24_7") =>
-            Ok(await _bookings.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType));
+            [FromQuery] string? shiftType = "24_7",
+            [FromQuery] int? locationId = null) =>
+            Ok(await _bookings.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType, locationId is > 0 ? locationId : null));
 
         [HttpGet("api/booking/my")]
         public async Task<IActionResult> MyBookings()
@@ -226,6 +229,9 @@ namespace WorkNest.API.Controllers
             {
                 return BadRequest(result);
             }
+            // The same booking sent again (e.g. after a time-out): the booking made a moment ago, nothing new created.
+            if (result.IsSuccessful && result.Data is IDictionary<string, object?> made && SmartBookingRules.IsDuplicate(made))
+                return Ok(result);
             return StatusCode(201, result);
         }
 
