@@ -141,8 +141,7 @@ BEGIN
        AND EXISTS (SELECT 1 FROM dbo.AccountsCOA a WITH (NOLOCK)
                     WHERE a.CompanyId = @CompanyId
                       AND (
-            a.Id = 101
-            OR a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+            a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
             OR a.AccountsCategoryId = 21
             OR a.Description LIKE ''%Cash%''
             OR a.Description LIKE ''%Bank%''
@@ -152,28 +151,26 @@ BEGIN
         SET @HasCompanyAccounts = 1;
 
     SELECT
-        a.Id                                  AS AccountId,
-        LTRIM(RTRIM(a.Description))           AS Description,
+        a.Id                                    AS AccountId,
+        LTRIM(RTRIM(a.Description))             AS Description,
         LTRIM(RTRIM(ISNULL(a.ShortDesc, ''''))) AS ShortDesc,
         ISNULL(a.AccountNature, '''')           AS AccountNature,
         a.CompanyId,
-        -- Cash in hand flag, lets the form preselect it without a hard-coded id
+        -- Cash in hand flag, lets the form preselect it dynamically without a hard-coded id
         CASE
-            WHEN a.Id = 101 THEN CAST(1 AS BIT)
-            WHEN a.Description = ''CASH'' THEN CAST(1 AS BIT)
-            WHEN a.Description = ''CASH IN HAND'' AND a.Id = 21 THEN CAST(1 AS BIT)
             WHEN a.AccountNature = ''Cash in Hand'' THEN CAST(1 AS BIT)
+            WHEN a.Description = ''CASH IN HAND''   THEN CAST(1 AS BIT)
+            WHEN a.Description = ''CASH''           THEN CAST(1 AS BIT)
+            WHEN a.AccountNature = ''Petty Cash''   THEN CAST(1 AS BIT)
             ELSE CAST(0 AS BIT)
         END AS IsCashInHand
     FROM dbo.AccountsCOA a WITH (NOLOCK)
     WHERE (
             (@HasCompanyAccounts = 1 AND a.CompanyId = @CompanyId)
             OR (@HasCompanyAccounts = 0 AND (a.CompanyId = 1 OR a.IsForAllCompanies = 1 OR a.CompanyId IS NULL))
-            OR a.Id = 101
           )
       AND (
-            a.Id = 101
-            OR a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+            a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
             OR a.AccountsCategoryId = 21
             OR a.Description LIKE ''%Cash%''
             OR a.Description LIKE ''%Bank%''
@@ -182,12 +179,11 @@ BEGIN
         AND a.Description NOT LIKE ''%DONATION%''
     ORDER BY
         CASE
-            WHEN a.Id = 101 THEN 0
-            WHEN a.Id = 21 THEN 1
-            WHEN a.Description = ''CASH'' THEN 2
-            WHEN a.Description = ''CASH IN HAND'' THEN 3
-            WHEN a.AccountNature = ''Cash in Hand'' THEN 4
-            ELSE 5
+            WHEN a.AccountNature = ''Cash in Hand'' THEN 0
+            WHEN a.Description = ''CASH IN HAND''   THEN 1
+            WHEN a.Description = ''CASH''           THEN 2
+            WHEN a.AccountNature = ''Petty Cash''   THEN 3
+            ELSE 4
         END,
         a.Description ASC;
 END');
@@ -393,7 +389,7 @@ END');
 -- Returns the new receipt (same columns as WN_FeeReceipts_GetById).
 EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_Insert
     @InvoiceIdGUID       UNIQUEIDENTIFIER,
-    @CashInHandAccountId INT,
+    @CashInHandAccountId INT           = NULL,
     @PaymentType         VARCHAR(50)   = ''Cash'',
     @ReceiptDate         DATE,
     @Remarks             NVARCHAR(500) = NULL,
@@ -522,22 +518,74 @@ BEGIN
             FROM dbo.WN_Locations l WITH (NOLOCK)
             WHERE l.Id = @LocationId;
 
-        -- 7. The account must be one WN_FeeReceipts_GetAccounts offers for this company.
-        IF NOT EXISTS (
-            SELECT 1 FROM dbo.AccountsCOA a WITH (NOLOCK)
-            WHERE a.Id = @CashInHandAccountId
-              AND (a.Id = 101 OR @CompanyId IS NULL OR a.CompanyId = @CompanyId OR a.CompanyId = 1
-                   OR a.CompanyId IS NULL OR a.IsForAllCompanies = 1)
+        -- 7. Cash / Bank Account: dynamically resolved from dbo.AccountsCOA if not provided,
+        --    or validated from dbo.AccountsCOA (no hardcoded IDs like 101).
+        IF @CashInHandAccountId IS NULL OR @CashInHandAccountId <= 0
+        BEGIN
+            DECLARE @IsBankPayment BIT = CASE WHEN @PaymentType IN (''Bank'', ''Cheque'', ''Online'', ''Pay Order'', ''Credit Card'') THEN 1 ELSE 0 END;
+
+            SELECT TOP 1 @CashInHandAccountId = a.Id
+            FROM dbo.AccountsCOA a WITH (NOLOCK)
+            WHERE (
+                    (@CompanyId IS NOT NULL AND a.CompanyId = @CompanyId)
+                    OR a.CompanyId = 1
+                    OR a.IsForAllCompanies = 1
+                    OR a.CompanyId IS NULL
+                  )
+              AND ISNULL(a.ActiveStatus, 1) = 1
+              AND a.Description NOT LIKE ''%DONATION%''
               AND (
-            a.Id = 101
-            OR a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
-            OR a.AccountsCategoryId = 21
-            OR a.Description LIKE ''%Cash%''
-            OR a.Description LIKE ''%Bank%''
-        )
-        AND ISNULL(a.ActiveStatus, 1) = 1
-        AND a.Description NOT LIKE ''%DONATION%'')
-            RAISERROR(''Selected account is invalid or not an allowed cash/bank account for this invoice.'', 16, 1);
+                  (@IsBankPayment = 1 AND (a.AccountNature IN (''Bank Account'', ''Bank Credit Card Account'') OR a.Description LIKE ''%Bank%''))
+                  OR
+                  (@IsBankPayment = 0 AND (a.AccountNature IN (''Cash in Hand'', ''Petty Cash'', ''POS Cash'') OR a.AccountsCategoryId = 21 OR a.Description LIKE ''%Cash%''))
+                  OR
+                  a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+                  OR a.AccountsCategoryId = 21
+                  OR a.Description LIKE ''%Cash%''
+                  OR a.Description LIKE ''%Bank%''
+              )
+            ORDER BY
+                CASE 
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 1 AND a.AccountNature = ''Bank Account'' THEN 1
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 0 AND a.AccountNature = ''Cash in Hand'' THEN 1
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 0 AND a.Description = ''CASH IN HAND'' THEN 2
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 0 AND a.Description LIKE ''%Cash%'' THEN 3
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId THEN 4
+                    WHEN @IsBankPayment = 1 AND a.AccountNature = ''Bank Account'' THEN 5
+                    WHEN @IsBankPayment = 0 AND a.AccountNature = ''Cash in Hand'' THEN 5
+                    WHEN @IsBankPayment = 0 AND a.Description = ''CASH IN HAND'' THEN 6
+                    WHEN @IsBankPayment = 0 AND a.AccountNature = ''Petty Cash'' THEN 7
+                    WHEN a.Description LIKE ''%Cash%'' THEN 8
+                    WHEN a.Description LIKE ''%Bank%'' THEN 9
+                    ELSE 10
+                END,
+                a.Id ASC;
+
+            IF @CashInHandAccountId IS NULL OR @CashInHandAccountId <= 0
+                RAISERROR(''Could not resolve an eligible Cash/Bank account from AccountsCOA for this invoice.'', 16, 1);
+        END
+        ELSE
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM dbo.AccountsCOA a WITH (NOLOCK)
+                WHERE a.Id = @CashInHandAccountId
+                  AND (
+                        @CompanyId IS NULL 
+                        OR a.CompanyId = @CompanyId 
+                        OR a.CompanyId = 1 
+                        OR a.CompanyId IS NULL 
+                        OR a.IsForAllCompanies = 1
+                      )
+                  AND (
+                    a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+                    OR a.AccountsCategoryId = 21
+                    OR a.Description LIKE ''%Cash%''
+                    OR a.Description LIKE ''%Bank%''
+                  )
+                  AND ISNULL(a.ActiveStatus, 1) = 1
+                  AND a.Description NOT LIKE ''%DONATION%'')
+                RAISERROR(''Selected account is invalid or not an allowed cash/bank account for this invoice.'', 16, 1);
+        END;
 
         -- 8. Customer of the invoice user.
         SELECT TOP 1 @CustomerIdGUID = c.IdGUID

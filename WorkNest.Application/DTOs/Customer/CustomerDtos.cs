@@ -15,5 +15,8 @@ namespace WorkNest.Application.DTOs.Customer
         public bool? IsActive { get; set; }
         public string? Ntn { get; set; }
         public string? SecpRegistrationNo { get; set; }
+        public string? CustomerTypeId { get; set; }
+        public int CountryId { get; set; }
+        public string? IdentificationDocumentTypeId { get; set; }
     }
 }

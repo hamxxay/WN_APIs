@@ -960,7 +960,7 @@ BEGIN
                 @LedgerDate          = @IssuedOn,
                 @CustomerVendorId    = @CustomerVendorId,
                 @AccountId           = @ARAccountId,
-                @Status              = @StatusId,
+                @Status              = 1,
                 @CreatedById         = @CreatedById,
                 @ShortGUID           = @CustLedgerShortGUID,
                 @CompanyId           = @CompanyId,

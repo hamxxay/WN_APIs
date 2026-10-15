@@ -99,6 +99,7 @@ namespace WorkNest.Application.Services
                     request.FirstName, request.LastName, request.Email,
                     request.PhoneNumber, request.CnicOrPassport, request.Address,
                     request.CityId, request.Notes, createdBy, userId, companyValue,
+                    request.CustomerTypeId, request.CountryId, request.IdentificationDocumentTypeId,
                     request.Ntn, request.SecpRegistrationNo);
             }
             catch (Exception ex) when (ex.Message.Contains("UQ_WN_Customers") || ex.Message.Contains("duplicate key"))
