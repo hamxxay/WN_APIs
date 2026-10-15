@@ -11,9 +11,12 @@ namespace WorkNest.Application.Services
     /// counts and desks only (desks of a booking / quotation = its Capacity, else the Capacity of its space; meeting
     /// rooms count 0). The numbers come from the dbo.WN_SalesMgr_* procedures (SM_01, desks from SM_02), which count
     /// with the same rules and business clock as the CEO dashboard (dbo.WN_Ceo_*), so the counts match it for the same
-    /// location and period. Tour inquiries have no location: always all of them. Level 1 = dashboard, level 2 =
-    /// breakdown, level 3 = records. The Complaints section (SM_03) is a separate call, so the rest of the dashboard
-    /// keeps working without it: complaints have no location either, they are matched to a location by their branch.
+    /// location and period. Tour inquiries belong to their branch (WN_Contacts.LocationId, BR_01) and follow the same
+    /// scope as complaints (BR_02): the chosen location's inquiries, or with no single location chosen the locations'
+    /// inquiries plus those without a branch (super admins: every inquiry). Before BR_02 has run the procedures count
+    /// every branch's inquiries (inquiriesAllBranches = true). Level 1 = dashboard, level 2 = breakdown, level 3 =
+    /// records. The Complaints section (SM_03) is a separate call, so the rest of the dashboard keeps working without it:
+    /// complaints have no location column, they are matched to a location by their branch.
     /// </summary>
     public class SalesManagerDashboardService : ISalesManagerDashboardService
     {
@@ -47,7 +50,7 @@ namespace WorkNest.Application.Services
         {
             if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
             var now = _clock.Now;
-            var s = await _repo.GetDashboardAsync(scope.LocationIdsCsv, scope.PickerCsv, months, now, ExpiringDays);
+            var s = await _repo.GetDashboardAsync(scope.LocationIdsCsv, scope.PickerCsv, scope.IncludeNoBranch, months, now, ExpiringDays);
 
             var funnel = Set(s, 1).FirstOrDefault();
             var inq = Set(s, 5).FirstOrDefault();
@@ -64,6 +67,7 @@ namespace WorkNest.Application.Services
                 Period = p,
                 PeriodLabel = PeriodLabel(p, now),
                 GeneratedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En),
+                InquiriesAllBranches = !Flag(inq, "ByBranch"),
                 Locations = Set(s, 0).Select(r => new CeoLocationDto { LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "" }).ToList(),
                 Funnel = new SalesManagerFunnelDto
                 {
@@ -163,8 +167,8 @@ namespace WorkNest.Application.Services
             }
             if (metric == "staff" && q.UserId is null or <= 0) return ApiResponse.Fail("userId is required for metric staff.");
 
-            var s = await _repo.GetBreakdownAsync(metric, scope.LocationIdsCsv, month, type, metric == "staff" ? q.UserId : null,
-                _clock.Now);
+            var s = await _repo.GetBreakdownAsync(metric, scope.LocationIdsCsv, scope.IncludeNoBranch, month, type,
+                metric == "staff" ? q.UserId : null, _clock.Now);
             var head = Set(s, 0).FirstOrDefault();
             if (metric == "staff" && Val(head, "InScope") is { } inScope && !Convert.ToBoolean(inScope))
                 throw new SalesManagerForbiddenException("That person does not work at your locations.");
@@ -191,7 +195,7 @@ namespace WorkNest.Application.Services
                 "funnel-month" => ("Desks booked by location", $"Bookings made in {monthName}", "Desks booked", "Bookings"),
                 "staff" => ($"Quotations: {subject ?? $"User #{q.UserId}"}", "Last 6 months", "Quotations", "Desks sold"),
                 "inquiries-type" => ($"Tour inquiries: {InquiryTypeLabels.First(t => t.Type == type).Label}",
-                    "Last 6 months, all branches", "Inquiries", null),
+                    Flag(head, "InqByBranch") ? "Last 6 months" : "Last 6 months, all branches", "Inquiries", null),
                 "renewals-month" => ("Leases ending by location", $"Confirmed leases ending in {monthName}", "Leases ending", "Desks"),
                 _ => ("Desks booked and ending by location", $"Desks booked and desks on leases ending in {monthName}", "Desks booked",
                     (string?)"Desks ending")
@@ -211,7 +215,7 @@ namespace WorkNest.Application.Services
                     ? ApiResponse.Fail("locationId=none is not available for quotations.")
                     : await QuotationsAsync(q, scope),
                 "bookings" => await BookingsAsync(q, scope),
-                "inquiries" => await InquiriesAsync(q),
+                "inquiries" => await InquiriesAsync(q, scope),
                 "leases" => await LeasesAsync(q, scope),
                 _ => ApiResponse.Fail($"Unknown records list '{kind}'. Use quotations, bookings, inquiries or leases.")
             };
@@ -275,7 +279,11 @@ namespace WorkNest.Application.Services
             return Records(status.Length == 0 ? "New bookings" : "Bookings", parts, Total(s), rows);
         }
 
-        private async Task<ApiResponse> InquiriesAsync(SalesManagerRecordsQuery q)
+        /// <summary>
+        /// Tour inquiry records in scope (BR_02): the chosen location's; with no single location chosen the locations'
+        /// plus those without a branch; locationId=none (super admins): only those without a branch.
+        /// </summary>
+        private async Task<ApiResponse> InquiriesAsync(SalesManagerRecordsQuery q, SalesManagerScope scope)
         {
             string? type = null;
             if (!string.IsNullOrWhiteSpace(q.Type))
@@ -303,7 +311,8 @@ namespace WorkNest.Application.Services
                 window = w;
             }
 
-            var s = await _repo.GetInquiryRecordsAsync(from, to, type, outcome, reason, _clock.Now, MaxRows);
+            var s = await _repo.GetInquiryRecordsAsync(scope.NoLocation ? "0" : scope.LocationIdsCsv, scope.NoLocation || scope.IncludeNoBranch,
+                from, to, type, outcome, reason, _clock.Now, MaxRows);
             var rows = Set(s, 1).Select(r => new SalesManagerInquiryRecordDto
             {
                 InquiryId = Int(r, "InquiryId"), Name = Str(r, "Name"), Phone = Str(r, "Phone"), Type = Str(r, "InquiryType"),
@@ -324,6 +333,8 @@ namespace WorkNest.Application.Services
                 });
             else if (reason != null) parts.Add($"reason: {reason}");
             if (window != null) parts.Add($"received {window}");
+            if (!Flag(Set(s, 0).FirstOrDefault(), "ByBranch")) parts.Add("all branches");   // BR_02 not run yet
+            else if (scope.NoLocation) parts.Add("no branch");
             return Records("Tour inquiries", parts, Total(s), rows);
         }
 
@@ -368,7 +379,7 @@ namespace WorkNest.Application.Services
         {
             if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
             var now = _clock.Now;
-            var s = await _repo.GetComplaintsAsync(scope.LocationIdsCsv, scope.LocationId == null, months, now, OldestComplaints);
+            var s = await _repo.GetComplaintsAsync(scope.LocationIdsCsv, scope.IncludeNoBranch, months, now, OldestComplaints);
 
             var sum = Set(s, 0).FirstOrDefault();
             var open = Int(sum, "OpenCount");
@@ -445,7 +456,7 @@ namespace WorkNest.Application.Services
                 month = m;
             }
 
-            var s = await _repo.GetComplaintRecordsAsync(scope.LocationIdsCsv, scope.LocationId == null, status, category, branch, month,
+            var s = await _repo.GetComplaintRecordsAsync(scope.LocationIdsCsv, scope.IncludeNoBranch, status, category, branch, month,
                 months, _clock.Now, MaxRows);
             var rows = Set(s, 1).Select(r => new SalesManagerComplaintRecordDto
             {
@@ -624,6 +635,8 @@ namespace WorkNest.Application.Services
         private static List<IDictionary<string, object?>> Set(List<List<IDictionary<string, object?>>> s, int i) => i < s.Count ? s[i] : new();
         private static object? Val(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) ? v : null;
         private static int Int(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : 0;
+        /// <summary>A bit column; false when it is missing (e.g. a procedure from before BR_02).</summary>
+        private static bool Flag(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v && Convert.ToBoolean(v, En);
         private static string? Str(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToString(v, En) : null;
         private static string? Day(IDictionary<string, object?>? r, string key) => Val(r, key) switch
         {

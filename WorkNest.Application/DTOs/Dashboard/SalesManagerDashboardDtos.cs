@@ -16,11 +16,18 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string PeriodLabel { get; set; } = "";
         /// <summary>UTC, ISO 8601 with Z.</summary>
         public string GeneratedAt { get; set; } = "";
+        /// <summary>
+        /// False: the tour inquiry figures (funnel stage, inquiries section, team inquiries handled / follow-ups due, the
+        /// inquiries-type breakdown and records/inquiries) follow the locations like the rest of the dashboard: the chosen
+        /// location's inquiries, or with no location chosen the locations' inquiries plus those without a branch (super
+        /// admins: every inquiry). True: the database update BR_02 has not run yet, every branch's inquiries count.
+        /// </summary>
+        public bool InquiriesAllBranches { get; set; }
         /// <summary>The manager's locations (for the location picker; super admins: all).</summary>
         public List<CeoLocationDto> Locations { get; set; } = new();
         public SalesManagerFunnelDto Funnel { get; set; } = new();
         public SalesManagerTeamDto Team { get; set; } = new();
-        /// <summary>All tour inquiries (they have no location).</summary>
+        /// <summary>Tour inquiries of the locations (by branch, see <see cref="InquiriesAllBranches"/>).</summary>
         public SalesManagerInquiriesDto Inquiries { get; set; } = new();
         public SalesManagerRenewalsDto Renewals { get; set; } = new();
     }
@@ -392,6 +399,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// <summary>The locations to cover, CSV; null = all. A manager without locations gets "0" (matches nothing).</summary>
         public string? LocationIdsCsv =>
             LocationId is > 0 ? LocationId.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : PickerCsv;
+
+        /// <summary>
+        /// Tour inquiries / complaints without a branch count too: no single location chosen ("All my locations"; super
+        /// admins: all). With a location chosen only that branch's ones count.
+        /// </summary>
+        public bool IncludeNoBranch => LocationId == null;
 
         /// <summary>The location picker list, CSV; null = all. A manager without locations gets "0" (matches nothing).</summary>
         public string? PickerCsv
