@@ -5,6 +5,7 @@ using WorkNest.Application.Interfaces;
 using System.Security.Claims;
 using WorkNest.API.Filters;
 using WorkNest.API.Security;
+using WorkNest.API.Configurations;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace WorkNest.API.Controllers
@@ -20,6 +21,7 @@ namespace WorkNest.API.Controllers
         private readonly TokenSessionValidator _sessions;
         private readonly ILoginHistoryService _loginHistory;
         private readonly IDbRepository _db;
+        private readonly SignInAccountLimiter _accountLimiter;
 
         public AuthController(
             IAuthService auth,
@@ -28,7 +30,8 @@ namespace WorkNest.API.Controllers
             ILogger<AuthController> logger,
             TokenSessionValidator sessions,
             ILoginHistoryService loginHistory,
-            IDbRepository db)
+            IDbRepository db,
+            SignInAccountLimiter accountLimiter)
         {
             _auth = auth;
             _firebase = firebase;
@@ -37,6 +40,7 @@ namespace WorkNest.API.Controllers
             _sessions = sessions;
             _loginHistory = loginHistory;
             _db = db;
+            _accountLimiter = accountLimiter;
         }
 
         /// <summary>
@@ -46,36 +50,61 @@ namespace WorkNest.API.Controllers
         /// claimed email comes back UNVERIFIED (Verified = false) and only a password sign-in, checked against the
         /// stored password, may use it. Before, an unverifiable or made-up token was ignored and the claimed email
         /// was trusted, so anyone could sign in as any account (including super admin) by knowing its email.
+        /// A verified token says who signed in, not that they own the email: every caller then runs
+        /// CheckAccountAsync before using it.
         /// </summary>
-        private async Task<(string? Email, IActionResult? Reject, bool Verified)> VerifySignInAsync(string? idToken, string? claimedEmail, string endpoint)
+        private async Task<(string? Email, IActionResult? Reject, FirebaseIdentity? Identity)> VerifySignInAsync(string? idToken, string? claimedEmail, string endpoint)
         {
             if (!string.IsNullOrWhiteSpace(idToken))
             {
-                string? email = null, error = null;
+                FirebaseIdentity? identity = null;
+                string? error = null;
                 try
                 {
-                    (email, error) = await _firebase.VerifyAsync(idToken, HttpContext.RequestAborted);
+                    (identity, error) = await _firebase.VerifyAsync(idToken, HttpContext.RequestAborted);
                 }
                 catch (Exception ex)
                 {
                     error = ex.Message;
                 }
 
-                if (!string.IsNullOrWhiteSpace(email))
+                if (identity != null)
                 {
-                    if (!string.IsNullOrWhiteSpace(claimedEmail) && !string.Equals(claimedEmail.Trim(), email, StringComparison.OrdinalIgnoreCase))
-                        return (null, Unauthorized(new { isSuccessful = false, message = "The sign-in token does not match this email." }), false);
-                    return (email, null, true);
+                    if (!string.IsNullOrWhiteSpace(claimedEmail) && !string.Equals(claimedEmail.Trim(), identity.Email, StringComparison.OrdinalIgnoreCase))
+                        return (null, Unauthorized(new { isSuccessful = false, message = "The sign-in token does not match this email." }), null);
+                    return (identity.Email, null, identity);
                 }
 
                 _logger.LogWarning("Rejected {Endpoint} with an invalid Firebase token for {Email}: {Error}", endpoint, claimedEmail, error);
-                return (null, Unauthorized(new { isSuccessful = false, message = "Sign-in could not be verified. Please sign in again." }), false);
+                return (null, Unauthorized(new { isSuccessful = false, message = "Sign-in could not be verified. Please sign in again." }), null);
             }
 
             if (_config.GetValue<bool>("Firebase:RequireIdToken"))
-                return (null, FirebaseTokenRequired(endpoint, claimedEmail), false);
+                return (null, FirebaseTokenRequired(endpoint, claimedEmail), null);
 
-            return (claimedEmail, null, false);
+            return (claimedEmail, null, null);
+        }
+
+        /// <summary>
+        /// May this verified Firebase sign-in use its email (AuthService.CheckFirebaseSignInAsync)? Null = yes, else a 403
+        /// { isSuccessful: false, message, data: { code: "EMAIL_NOT_VERIFIED" | "ACCOUNT_DISABLED" } }. Without this an
+        /// email / password Firebase account created by anyone for an address with no Firebase account yet (staff added
+        /// in the CMS who never signed in, customers without a user row) got that account's role and data.
+        /// </summary>
+        private async Task<IActionResult?> CheckAccountAsync(FirebaseIdentity identity, string endpoint)
+        {
+            var refusal = await _auth.CheckFirebaseSignInAsync(identity.Email, identity.EmailVerified);
+            if (refusal is null) return null;
+            _logger.LogWarning("Refused {Endpoint} for {Email} (provider {Provider}, email verified {Verified}): {Code}",
+                endpoint, identity.Email, identity.SignInProvider, identity.EmailVerified, refusal.Code);
+            return StatusCode(StatusCodes.Status403Forbidden, refusal.ToBody());
+        }
+
+        /// <summary>An AuthService result refused with data.code (e.g. a turned-off account) becomes the same 403 body.</summary>
+        private IActionResult? RefusedResult(WorkNest.Common.Responses.ApiResponse result)
+        {
+            var code = SignInRefusal.CodeOf(result);
+            return code is null ? null : StatusCode(StatusCodes.Status403Forbidden, new SignInRefusal(code, result.Message).ToBody());
         }
 
         /// <summary>Refusal for a sign-in that needs a verified Firebase token (Google sign-in, sync, register).</summary>
@@ -91,9 +120,10 @@ namespace WorkNest.API.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> Sync([FromBody] UserSyncRequest request)
         {
-            var (email, reject, verified) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "sync");
+            var (email, reject, identity) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "sync");
             if (reject != null) return reject;
-            if (!verified) return FirebaseTokenRequired("sync", request.Email);
+            if (identity is null) return FirebaseTokenRequired("sync", request.Email);
+            if (await CheckAccountAsync(identity, "sync") is { } refused) return refused;
             request.Email = email!;
             request.RoleId = null;        // a sign-in can never choose its own role (was: anyone could create a super admin)
             request.CompanyId = null;
@@ -106,9 +136,11 @@ namespace WorkNest.API.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> Register([FromBody] UserRegisterRequest request)
         {
-            var (email, reject, verified) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "register");
+            var (email, reject, identity) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "register");
             if (reject != null) return reject;
-            if (!verified) return FirebaseTokenRequired("register", request.Email);
+            if (identity is null) return FirebaseTokenRequired("register", request.Email);
+            // A new email / password account is refused until its email is verified: no WN_Users row is created before.
+            if (await CheckAccountAsync(identity, "register") is { } refused) return refused;
             request.Email = email!;
             request.Password = null;      // Firebase owns passwords; this used to be saved in plain text
             request.RoleId = null;        // self-registration is always a customer (anyone could register as super admin)
@@ -121,7 +153,7 @@ namespace WorkNest.API.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> Login([FromBody] UserLoginRequest request)
         {
-            var (email, reject, verified) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "login");
+            var (email, reject, identity) = await VerifySignInAsync(request.FirebaseIdToken, request.Email, "login");
             if (reject != null)
             {
                 try
@@ -131,27 +163,45 @@ namespace WorkNest.API.Controllers
                 catch { }
                 return reject;
             }
+            // A Firebase token skips the password check, so it must pass the same email-verified / turned-off check as
+            // google-login. The CMS answers a 403 here by signing in with the WorkNest password instead (no token), which
+            // is recorded below, so its next Firebase sign-ins pass as "signed in before".
+            if (identity != null && await CheckAccountAsync(identity, "login") is { } refused) return refused;
             request.Email = email!;
             request.CompanyId = null;     // a sign-in can never move the user to another company
             // Retain request.Password for credential verification
-            var authResult = await _auth.LoginAsync(request, firebaseVerified: verified);
-            if (!authResult.IsSuccessful) return Unauthorized(authResult);
+            var authResult = await _auth.LoginAsync(request, firebaseVerified: identity != null);
+            if (!authResult.IsSuccessful) return RefusedResult(authResult) ?? Unauthorized(authResult);
             return Ok(authResult);
         }
 
-        [EnableRateLimiting("auth")]
+        /// <summary>
+        /// Exchanges a Firebase sign-in (Google or email / password, website / CMS / app) for the API's JWT.
+        /// 403 { isSuccessful: false, message, data: { code } } when the email isn't verified (EMAIL_NOT_VERIFIED) or the
+        /// account is turned off (ACCOUNT_DISABLED); 429 after RateLimiting:GoogleLogin:PerAccountPermitLimit exchanges
+        /// per account and window. interactive: false (silent refresh) returns the token without a login-history row.
+        /// </summary>
+        [EnableRateLimiting(RateLimitingConfig.GoogleLoginPolicy)]
         [HttpPost("api/auth/google-login")]
         [AllowAnonymous]
         public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest request)
         {
             // App versions before October 2026 send the Firebase ID token as `idToken`; it is verified the same way.
             var idToken = !string.IsNullOrWhiteSpace(request.FirebaseIdToken) ? request.FirebaseIdToken : request.IdToken;
-            var (email, reject, verified) = await VerifySignInAsync(idToken, request.Email, "google-login");
+            var (email, reject, identity) = await VerifySignInAsync(idToken, request.Email, "google-login");
             if (reject != null) return reject;
-            if (!verified) return FirebaseTokenRequired("google-login", request.Email);
+            if (identity is null) return FirebaseTokenRequired("google-login", request.Email);
+            // Per account, not per IP: a whole coworking Wi-Fi shares one IP and the app exchanges on every start / refresh.
+            if (!_accountLimiter.TryAcquire(identity.Uid ?? identity.Email, out var retryAfter))
+            {
+                _logger.LogWarning("google-login rate limited for {Email}", identity.Email);
+                return StatusCode(StatusCodes.Status429TooManyRequests, RateLimitingConfig.TooManyRequestsBody(Response, retryAfter));
+            }
+            if (await CheckAccountAsync(identity, "google-login") is { } refused) return refused;
             request.Email = email!;
             request.CompanyId = null;     // a sign-in can never move the user to another company
-            return Ok(await _auth.GoogleLoginAsync(request));
+            var result = await _auth.GoogleLoginAsync(request);
+            return RefusedResult(result) ?? Ok(result);
         }
 
         [HttpGet("api/auth/me")]

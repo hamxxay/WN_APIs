@@ -8,5 +8,7 @@ namespace WorkNest.Application.Interfaces
         Task<HikEnrollResultDto> EnrollCardAsync(int bookingDetailId, int personId, HikEnrollRequest request);
         Task<HikEnrollResultDto> EnrollFaceAsync(int bookingDetailId, int personId, HikEnrollRequest request);
         Task<HikAccessSyncResultDto> SetAccessEnabledAsync(int bookingDetailId, int? personId, bool isEnabled);
+        /// <summary>The booked room's capture machine and whether enrolment can start (online).</summary>
+        Task<HikRoomMachineStatusDto> GetRoomMachineAsync(int bookingDetailId);
     }
 }

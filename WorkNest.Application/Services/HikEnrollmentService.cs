@@ -202,6 +202,39 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>
+        /// The machine an enrolment for this booked room would capture on (the first online room machine, else the first
+        /// one), with the same "no machine" / "offline" reasons the enrolment itself answers. Not checked when nobody is
+        /// assigned to the room yet (the room's space code comes with its people).
+        /// </summary>
+        public async Task<HikRoomMachineStatusDto> GetRoomMachineAsync(int bookingDetailId)
+        {
+            var ctx = (await _db.GetHikAttendantContextsDbAsync(bookingDetailId, null)).FirstOrDefault();
+            if (ctx == null) return new HikRoomMachineStatusDto { Checked = false };
+            var (_, roomDevices) = await ResolveBookingMachinesAsync(ctx);
+            return RoomMachineStatus(roomDevices, ctx.SpaceName);
+        }
+
+        /// <summary>Status of the capture machine among the room's machines (pure; unit-tested).</summary>
+        public static HikRoomMachineStatusDto RoomMachineStatus(IReadOnlyCollection<HikDeviceConnection> roomDevices, string? spaceName)
+        {
+            var capture = roomDevices.FirstOrDefault(d => d.Online) ?? roomDevices.FirstOrDefault();
+            if (capture == null)
+                return new HikRoomMachineStatusDto
+                {
+                    Checked = true,
+                    Reason = $"No machine is linked to {(string.IsNullOrWhiteSpace(spaceName) ? "the booked room" : spaceName)}. Set the room machine's Code to the room number."
+                };
+            return new HikRoomMachineStatusDto
+            {
+                Checked = true,
+                Name = capture.Name,
+                Online = capture.Online,
+                CanEnrol = capture.Online,
+                Reason = capture.Online ? null : $"{capture.Name} (the booked room's machine) is offline. Enrolment can start when it is back online."
+            };
+        }
+
+        /// <summary>
         /// Pushes block / unblock to the booked room's machine + every Entrance machine for each enrolled
         /// person (per-person target state). Offline machines get a queued 'block' / 'unblock'.
         /// </summary>

@@ -23,11 +23,20 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> UpdateLocationAsync(Guid publicId, BranchOption? location, BranchScope scope, string? actorEmail);
         /// <summary>Changes an inquiry's Type (Website, WhatsApp, WalkIn or Reference) and, for Reference, who referred the customer.</summary>
         Task<ApiResponse> UpdateInquiryTypeAsync(Guid publicId, ContactInquiryTypeRequest request, string? actorEmail);
-        Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId);
-        Task<ApiResponse> DeleteContactAsync(int id);
-        /// <summary>Records staff feedback on an inquiry and updates its status (not interested / converted close it).</summary>
+        /// <summary>
+        /// <paramref name="source"/>: the table of the row ("contact" / "booktour", <see cref="InquiryRows"/>); both number
+        /// their rows, so an Id alone can mean two inquiries. Null = as before (WN_Contacts first).
+        /// </summary>
+        Task<ApiResponse> UpdateContactStatusAsync(int id, byte statusId, int? actorId, string? source = null);
+        Task<ApiResponse> DeleteContactAsync(int id, string? source = null);
+        /// <summary>
+        /// The inquiry the user can see (list rows of <paramref name="branch"/>) with this public id, or with this Id (and
+        /// source); Ambiguous when an Id without a source matches two rows.
+        /// </summary>
+        Task<InquiryMatch> FindVisibleAsync(BranchFilter? branch, Guid? publicId, int? id = null, string? source = null);
         /// <summary>Book a Tour finished on the WhatsApp chatbot: recorded as a Tour Inquiry (no email).</summary>
         Task<ApiResponse> CreateChatbotTourInquiryAsync(WorkNest.Application.DTOs.Complaint.ChatbotTourInquiryRequest request);
-        Task<ApiResponse> SaveFeedbackAsync(int id, ContactFeedbackRequest request, int? actorId);
+        /// <summary>Records staff feedback on an inquiry and updates its status (not interested / converted close it).</summary>
+        Task<ApiResponse> SaveFeedbackAsync(int id, ContactFeedbackRequest request, int? actorId, string? source = null);
     }
 }

@@ -855,6 +855,21 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return null;
         }
 
+        public async Task<WorkNest.Application.DTOs.Auth.UserSignInStatus?> GetUserSignInStatusAsync(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(
+                "SELECT TOP 1 Id, IsActive, PasswordHash FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @Email ORDER BY IsActive DESC, Id DESC", c);
+            cmd.Parameters.Add(new SqlParameter("@Email", SqlDbType.NVarChar, 256) { Value = email.Trim() });
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return null;
+            return new WorkNest.Application.DTOs.Auth.UserSignInStatus(
+                r.GetInt32(0),
+                !r.IsDBNull(1) && Convert.ToBoolean(r.GetValue(1)),
+                r.IsDBNull(2) ? null : Convert.ToString(r.GetValue(2)));
+        }
+
         public async Task<IDictionary<string, object?>?> GetUserByIdAsync(int id)
         {
             await using var c = await Open();
@@ -1047,11 +1062,30 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return rows.FirstOrDefault(row => row.TryGetValue("Id", out var rid) && Convert.ToInt32(rid) == id);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7")
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7", bool includeOccupied = false)
+        {
+            if (includeOccupied)
+            {
+                try
+                {
+                    return await ReadAvailableSpacesAsync(shiftType, true);
+                }
+                catch (SqlException ex) when (ex.Number == 8144)
+                {
+                    // "Too many arguments": the database does not have QA_03_customer_booking yet (no @IncludeOccupied).
+                    // The spaces free right now, as before (rows without OccupiedNow = free now).
+                }
+            }
+            return await ReadAvailableSpacesAsync(shiftType, false);
+        }
+
+        private async Task<List<IDictionary<string, object?>>> ReadAvailableSpacesAsync(string? shiftType, bool includeOccupied)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Spaces_GetAvailable", c);
             cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            // Only sent when asked for, so the list keeps working on a database without QA_03.
+            if (includeOccupied) cmd.Parameters.AddWithValue("@IncludeOccupied", true);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -1219,7 +1253,25 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7")
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7", int? locationId = null)
+        {
+            if (locationId is not null)
+            {
+                try
+                {
+                    return await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, locationId);
+                }
+                catch (SqlException ex) when (ex.Number == 8144)
+                {
+                    // "Too many arguments": no QA_03_customer_booking yet (no @LocationId). Every location's free
+                    // spaces, kept to the asked location here (the rows carry their LocationId).
+                    return SmartBookingRules.AtLocation(await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, null), locationId);
+                }
+            }
+            return await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, null);
+        }
+
+        private async Task<List<IDictionary<string, object?>>> ReadSmartAvailableAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType, int? locationId)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_GetSmartAvailable", c);
@@ -1228,6 +1280,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@EndOn", endOn);
             cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            // Only sent for a location, so availability keeps working on a database without QA_03.
+            if (locationId is not null) cmd.Parameters.AddWithValue("@LocationId", locationId.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -1478,7 +1532,26 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById,
             string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null,
             string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
-            string? shiftType = "24_7")
+            string? shiftType = "24_7", int? locationId = null)
+        {
+            try
+            {
+                return await ExecInsertSmartAsync(userEmail, categoryCode, startOn, endOn, capacity, notes, createdById, customerEmail,
+                    customerFirstName, customerLastName, customerPhone, customerCnic, customerAddress, customerCityId, customerNotes, shiftType, locationId);
+            }
+            catch (SqlException ex) when (ex.Number == 8144 && locationId is not null)
+            {
+                // "Too many arguments": no QA_03_customer_booking yet (WN_Bookings_InsertSmart without @LocationId). Pick the
+                // space here, as the procedure would, but only at the chosen location, and book it with WN_Bookings_Insert.
+                return await InsertSmartAtLocationAsync(userEmail, categoryCode, startOn, endOn, capacity, notes, createdById, customerEmail,
+                    customerFirstName, customerLastName, customerPhone, customerCnic, customerAddress, customerCityId, customerNotes, shiftType, locationId.Value);
+            }
+        }
+
+        private async Task<IDictionary<string, object?>> ExecInsertSmartAsync(
+            string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById,
+            string? customerEmail, string? customerFirstName, string? customerLastName, string? customerPhone,
+            string? customerCnic, string? customerAddress, int? customerCityId, string? customerNotes, string? shiftType, int? locationId)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_InsertSmart", c);
@@ -1498,6 +1571,63 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@CustomerCityId", (object?)customerCityId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CustomerNotes", (object?)customerNotes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            // Only sent for a location, so booking keeps working on a database without QA_03.
+            if (locationId is not null) cmd.Parameters.AddWithValue("@LocationId", locationId.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync()) return ToDict(r);
+            return new Dictionary<string, object?>();
+        }
+
+        /// <summary>
+        /// WN_Bookings_InsertSmart's steps for one location, for a database without QA_03: the first free space there with
+        /// a price for the booking period (smallest first, WN_Bookings_GetSmartAvailable's order), then WN_Bookings_Insert
+        /// with the same values the procedure passes (a private office is charged for its seats, as after QA_03).
+        /// WN_Bookings_Insert checks again, under lock, that the space is still free.
+        /// </summary>
+        private async Task<IDictionary<string, object?>> InsertSmartAtLocationAsync(
+            string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById,
+            string? customerEmail, string? customerFirstName, string? customerLastName, string? customerPhone,
+            string? customerCnic, string? customerAddress, int? customerCityId, string? customerNotes, string? shiftType, int locationId)
+        {
+            static IDictionary<string, object?> Failed(string message) => new Dictionary<string, object?>
+            {
+                ["BookingId"] = null, ["BookingPublicId"] = null, ["ChallanNumber"] = null, ["ChallanValidUntil"] = null, ["ErrorMessage"] = message
+            };
+
+            var user = await GetUserByEmailAsync(userEmail);
+            int? userId = user is not null ? SmartBookingRules.IntOf(user, "Id") : null;
+            if (userId is null) return Failed("User not found or inactive.");
+
+            var rows = await ReadSmartAvailableAsync(categoryCode, startOn, endOn, capacity, shiftType, null);
+            var space = SmartBookingRules.PickSpace(rows, categoryCode, locationId);
+            if (space is null) return Failed(SmartBookingRules.NoSpaceMessage);
+            if (!SmartBookingRules.IsBookable(space, categoryCode))
+                return Failed($"No active {SmartBookingRules.BookingPeriodCode(categoryCode)} pricing found for selected space.");
+
+            int spaceId = SmartBookingRules.IntOf(space, "Id") ?? 0;
+            var pricing = await GetActivePricingForSpaceAsync(spaceId);
+            int pricingId = pricing is not null ? SmartBookingRules.IntOf(pricing, "PricingId") ?? SmartBookingRules.IntOf(pricing, "Id") ?? 0 : 0;
+
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Bookings_Insert", c);
+            cmd.Parameters.AddWithValue("@UserId", userId.Value);
+            cmd.Parameters.AddWithValue("@SpaceId", spaceId);
+            cmd.Parameters.AddWithValue("@PricingId", pricingId);
+            cmd.Parameters.AddWithValue("@StartOn", startOn);
+            cmd.Parameters.AddWithValue("@EndOn", endOn);
+            cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@UserEmail", userEmail);
+            cmd.Parameters.AddWithValue("@CustomerEmail", (object?)customerEmail ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerFirstName", (object?)customerFirstName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerLastName", (object?)customerLastName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerPhone", (object?)customerPhone ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerCnic", (object?)customerCnic ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerAddress", (object?)customerAddress ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerCityId", (object?)customerCityId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@CustomerNotes", (object?)customerNotes ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ShiftType", (object?)shiftType ?? "24_7");
+            if (SmartBookingRules.ChargedSeats(categoryCode, space) is int seats) cmd.Parameters.AddWithValue("@Capacity", seats);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return ToDict(r);
             return new Dictionary<string, object?>();
@@ -1597,6 +1727,78 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.Add("@Id", SqlDbType.Int).Value = bookingId;
             cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
             return Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+        }
+
+        public async Task<List<IDictionary<string, object?>>> GetMyInvoicesDbAsync(string email)
+        {
+            await using var c = await Open();
+            // Owner rule = IsInvoiceOwnedByDbAsync (invoice user, else its booking's user), so every row's PDF opens.
+            const string sql = @"
+                SELECT i.Id, i.PublicId, i.InvoiceNumber, i.BookingId, i.InvoiceTypeId,
+                       i.IssuedOn, i.DueOn,
+                       COALESCE(i.BillingPeriodStart, b.StartOn) AS PeriodStart,
+                       COALESCE(i.BillingPeriodEnd, b.EndOn) AS PeriodEnd,
+                       ISNULL(i.GrandTotal, 0) AS GrandTotal, ISNULL(i.WHTAmount, 0) AS WHTAmount, ISNULL(i.PaidTotal, 0) AS PaidTotal,
+                       ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
+                       CAST(ISNULL(i.StatusId, 0) AS INT) AS StatusId, LTRIM(RTRIM(os.Description)) AS StatusDescription,
+                       CAST(b.BookingStatusId AS INT) AS BookingStatusId, bs.Code AS BookingStatusCode, bs.Label AS BookingStatusLabel,
+                       COALESCE(NULLIF(s.Name, ''), s.Code) AS SpaceName, s.Code AS SpaceCode, l.Name AS LocationName
+                  FROM dbo.WN_Invoices i WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                  JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(i.UserId, b.UserId)
+                  LEFT JOIN dbo.OrderStatus os WITH (NOLOCK) ON os.Id = i.StatusId
+                  LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
+                  LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                  LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
+                 WHERE u.Email = @Email
+                   AND (b.Id IS NULL OR ISNULL(b.IsDeleted, 0) = 0)
+                 ORDER BY i.Id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IDictionary<int, BookingAccessSuspensionInfo>> GetOpenAccessSuspensionsDbAsync(IEnumerable<int> bookingIds, DateTime today)
+        {
+            var result = new Dictionary<int, BookingAccessSuspensionInfo>();
+            var ids = bookingIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0) return result;
+            await using var c = await Open();
+            // Same "in force" rule as WN_HIK_AccessSuspension_Run step 3: not resolved and no temporary access running today.
+            // Booking ids are ints read from the database, never user text.
+            var sql = $@"
+                SELECT s.BookingId, s.InvoiceId, i.InvoiceNumber, i.DueOn, s.SuspendedAt
+                  FROM dbo.WN_HIK_BookingAccessSuspensions s WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = s.InvoiceId
+                 WHERE s.ResolvedAt IS NULL
+                   AND (s.OverrideUntil IS NULL OR s.OverrideUntil < @Today)
+                   AND s.BookingId IN ({string.Join(",", ids)})
+                 ORDER BY s.Id DESC;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Today", SqlDbType.Date).Value = today.Date;
+            try
+            {
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    int bookingId = r.GetInt32(0);
+                    if (result.ContainsKey(bookingId)) continue; // newest open suspension per booking
+                    result[bookingId] = new BookingAccessSuspensionInfo
+                    {
+                        BookingId = bookingId,
+                        InvoiceId = r.IsDBNull(1) ? null : r.GetInt32(1),
+                        InvoiceNumber = r.IsDBNull(2) ? null : r.GetString(2),
+                        InvoiceDueOn = r.IsDBNull(3) ? null : r.GetDateTime(3),
+                        SuspendedAt = r.IsDBNull(4) ? null : r.GetDateTime(4) // SYSDATETIME(): the server's (Pakistan) clock
+                    };
+                }
+            }
+            catch (SqlException ex) when (ex.Number == 208)
+            {
+                // WN_HIK_BookingAccessSuspensions not installed on this database: nothing is suspended.
+            }
+            return result;
         }
 
         // Amount recorded as paid on a booking (alias b): the larger of its invoices' PaidTotal (fee receipts and
@@ -2650,22 +2852,29 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: CT_01 not run
         }
 
-        public async Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById)
+        public async Task<bool> UpdateContactStatusAsync(int id, byte statusId, int? updatedById, string? source = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_UpdateStatus", c);
             cmd.Parameters.AddWithValue("@Id", id);
             cmd.Parameters.AddWithValue("@StatusId", statusId);
             cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
-            await cmd.ExecuteNonQueryAsync();
+            // @Source (QA_05): only the row of that table. Only sent when given, so the call works before QA_05.
+            if (source is not null) cmd.Parameters.Add("@Source", SqlDbType.NVarChar, 20).Value = source;
+            try { await cmd.ExecuteNonQueryAsync(); }
+            catch (SqlException ex) when (ex.Number == 8144 && source is not null) { return false; } // no QA_05 yet: nothing changed
+            return true;
         }
 
-        public async Task DeleteContactAsync(int id)
+        public async Task<bool> DeleteContactAsync(int id, string? source = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_Delete", c);
             cmd.Parameters.AddWithValue("@Id", id);
-            await cmd.ExecuteNonQueryAsync();
+            if (source is not null) cmd.Parameters.Add("@Source", SqlDbType.NVarChar, 20).Value = source;
+            try { await cmd.ExecuteNonQueryAsync(); }
+            catch (SqlException ex) when (ex.Number == 8144 && source is not null) { return false; } // no QA_05 yet: nothing deleted
+            return true;
         }
 
         // ---- Tour inquiry feedback (dbo.WN_ContactFeedback). SQL error 208 = table not created yet. ----
@@ -2945,7 +3154,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         /// agreements 'EmailFailed' / signed copy on file (WN_Agreements.SignedPdfPath), contacts StatusId 1 = New,
         /// bookings 1 / 5 = old / new Pending, quotations 'Accepted' / 'Declined', KYC document Status 0 = Pending.
         /// </summary>
-        public async Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
+        public async Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(IReadOnlyCollection<int>? locationIds, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
             IReadOnlyCollection<int>? branchLocationIds = null)
         {
             // One row per item waiting on staff: K = badge, ItemKey = what "read" remembers. The key includes the
@@ -2953,9 +3162,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             // Status IDs are ints from code (OrderStatus lookups), never user input.
             var open = openInvoiceStatusIds.Distinct().ToList();
             var openList = open.Count == 0 ? "-1" : string.Join(",", open);
+            // Location-bound staff: every location they are assigned to (ints from claims, never user text); null = all.
+            var locList = locationIds is null ? null : (locationIds.Distinct().ToList() is { Count: > 0 } ll ? string.Join(",", ll) : "-1");
+            string InLoc(string column) => locList is null ? "1 = 1" : $"{column} IN ({locList})";
+            string SpaceIn(string spaceIdColumn) => locList is null ? "1 = 1"
+                : $"EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = {spaceIdColumn} AND s.LocationId IN ({locList}))";
             await using var c = await Open();
-            // Offline machines of the caller's location (and unassigned ones) once machines have a location.
-            var machinesLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationId is int l ? new[] { l } : null);
+            // Offline machines of the caller's locations (and unassigned ones) once machines have a location.
+            var machinesLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationIds);
             // Tour inquiries of the caller's locations and those without a branch (once BR_01 has added WN_Contacts.LocationId).
             var contactsLoc = BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), "ct", branchLocationIds);
             var sql = $@"
@@ -2967,17 +3181,17 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     SELECT 'Kyc', CONCAT(d.CustomerId, ':', COUNT(*))
                       FROM dbo.WN_CustomerKYCDocuments d WITH (NOLOCK)
                      WHERE d.IsActive = 1 AND d.Status = 0   -- KycDocumentStatus.Pending
-                       AND (@Loc IS NULL OR EXISTS (
+                       AND ({(locList is null ? "1 = 1" : $@"EXISTS (
                             SELECT 1
                               FROM dbo.WN_Customers cu WITH (NOLOCK)
                               LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId
                              WHERE cu.Id = d.CustomerId
-                               AND (u.LocationId = @Loc OR EXISTS (
+                               AND ({InLoc("u.LocationId")} OR EXISTS (
                                     SELECT 1
                                       FROM dbo.WN_Bookings kb WITH (NOLOCK)
                                       JOIN dbo.WN_Spaces ks WITH (NOLOCK) ON ks.Id = kb.SpaceId
-                                     WHERE ks.LocationId = @Loc
-                                       AND (kb.CustomerCode = cu.Code OR (cu.UserId IS NOT NULL AND kb.UserId = cu.UserId))))))
+                                     WHERE {InLoc("ks.LocationId")}
+                                       AND (kb.CustomerCode = cu.Code OR (cu.UserId IS NOT NULL AND kb.UserId = cu.UserId)))))")})
                      GROUP BY d.CustomerId;
 
                 INSERT INTO @Items (K, ItemKey)
@@ -2990,16 +3204,20 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                    AND ISNULL(q.Status, '') NOT IN ('Declined', 'Rejected', 'Cancelled', 'Expired')
                    AND NOT EXISTS (SELECT 1 FROM dbo.WN_Agreements a2 WITH (NOLOCK)
                                     WHERE a2.QuotationId = a.QuotationId AND a2.Id > a.Id)
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = q.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("q.SpaceId")}
                 UNION ALL
-                -- contact + book-tour messages still New (WN_Contacts_Insert writes StatusId 1)
+                -- contact + book-tour messages still New (WN_Contacts_Insert writes StatusId 1), plus the old website bookings
+                -- still only in WN_BookTour (no branch; status 0 / 1 / empty = New, as the list shows them): the same
+                -- inquiries as the Tour Inquiries New filter and the dashboard figure. Their keys start with bt.
                 SELECT 'Contacts', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{contactsLoc}
+                UNION ALL
+                SELECT 'Contacts', CONCAT('bt', bt.Id) FROM dbo.WN_BookTour bt WITH (NOLOCK) WHERE {BranchSql.OldWebsiteNewWhere}
                 UNION ALL
                 -- bookings waiting for confirmation (same rule as the dashboard's PendingConfirmations)
                 SELECT 'Bookings', CAST(b.Id AS NVARCHAR(20))
                   FROM dbo.WN_Bookings b WITH (NOLOCK)
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 5) AND b.EndOn >= @Now
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("b.SpaceId")}
                 UNION ALL
                 -- accepted by the customer (agreement not sent yet) + declined in the last 7 days
                 SELECT 'Quotations', CONCAT(q.Id, ':', q.Status)
@@ -3009,14 +3227,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                SELECT 1 FROM dbo.WN_QuotationResponses qr WITH (NOLOCK)
                                 WHERE qr.QuotationId = q.Id AND qr.ResponseType = 'Declined'
                                   AND qr.RespondedDate >= DATEADD(DAY, -7, GETUTCDATE()))))   -- RespondedDate is written with GETUTCDATE()
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = q.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("q.SpaceId")}
                 UNION ALL
                 -- overdue: still owed (Unpaid / Partial / Challan Expire, legacy + OrderStatus) and past the due date
                 SELECT 'Invoices', CAST(i.Id AS NVARCHAR(20))
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                  WHERE i.StatusId IN ({openList}) AND i.DueOn < @Today
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("b.SpaceId")}
                 UNION ALL
                 -- door access suspended right now: open suspension, no override running, booking still running
                 -- (same conditions as GetHikAccessOverviewDbAsync)
@@ -3030,7 +3248,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                    AND EXISTS (SELECT 1 FROM dbo.WN_BookingDetails d WITH (NOLOCK)
                                 WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0
                                   AND d.EndDateTime >= @Today)   -- = MAX(EndDateTime) >= @Today
-                   AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = b.SpaceId AND s.LocationId = @Loc))
+                   AND {SpaceIn("b.SpaceId")}
                 UNION ALL
                 -- offline door machines; Last_seen makes a machine that drops off again count as new
                 SELECT 'MachinesOffline', CONCAT(hd.Id, ':', CONVERT(VARCHAR(19), hd.Last_seen, 126))
@@ -3038,7 +3256,6 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
 
                 SELECT K, ItemKey FROM @Items;";
             await using var cmd = new SqlCommand(sql, c);
-            cmd.Parameters.Add("@Loc", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
             cmd.Parameters.Add("@Today", SqlDbType.Date).Value = businessToday.Date;
             cmd.Parameters.Add("@Now", SqlDbType.DateTime2).Value = businessNow;
             var list = new List<(string, string)>();
@@ -4330,7 +4547,48 @@ END";
             return null;
         }
 
-        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status)
+        /// <summary>Rows read when the procedure can't filter by location yet (QA_06 not run): every agreement.</summary>
+        private const int AgreementScopeFallbackLimit = 100000;
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status,
+            IReadOnlyCollection<int>? locationIds = null)
+        {
+            if (locationIds == null) return await ReadAgreementsPageDbAsync(page, limit, search, status, null);
+            try
+            {
+                return await ReadAgreementsPageDbAsync(page, limit, search, status, AgreementScope.LocationCsv(locationIds));
+            }
+            catch (SqlException ex) when (ex.Number == 8144)
+            {
+                // QA_06 not run yet: WN_Agreements_GetList has no @LocationIds. Read every match and keep the caller's
+                // locations here, so other branches' customers (CNIC, phone, address) are never listed.
+                var (all, _) = await ReadAgreementsPageDbAsync(1, AgreementScopeFallbackLimit, search, status, null);
+                var locations = await GetAgreementLocationsDbAsync();
+                var (rows, total) = AgreementScope.FilterAndPage(all, locations, locationIds, page, limit);
+                return (rows, total);
+            }
+        }
+
+        /// <summary>Each agreement's location: the booked space's, else the quoted space's (null = none). Same rule as RecordScope.</summary>
+        private async Task<Dictionary<int, int?>> GetAgreementLocationsDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(@"
+                SELECT a.Id, COALESCE(sb.LocationId, sq.LocationId) AS LocationId
+                  FROM dbo.WN_Agreements a WITH (NOLOCK)
+                  LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+                  LEFT JOIN dbo.WN_Spaces sq WITH (NOLOCK) ON sq.Id = q.SpaceId
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = a.BookingId
+                  LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId;", c);
+            var map = new Dictionary<int, int?>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                map[r.GetInt32(0)] = r.IsDBNull(1) ? null : Convert.ToInt32(r.GetValue(1));
+            return map;
+        }
+
+        private async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> ReadAgreementsPageDbAsync(int page, int limit, string? search, string? status,
+            string? locationCsv)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Agreements_GetList", c);
@@ -4338,6 +4596,8 @@ END";
             cmd.Parameters.AddWithValue("@Limit", limit);
             cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Status", (object?)status ?? DBNull.Value);
+            // Sent only for location-bound staff, so super admins never depend on QA_06.
+            if (locationCsv != null) cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, 4000).Value = locationCsv;
 
             int total = 0;
             var list = new List<IDictionary<string, object?>>();
@@ -4789,6 +5049,8 @@ END";
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
             {
+                // WN_Announcements_* write these with SYSUTCDATETIME(): marked UTC so the JSON carries "Z" and the app
+                // shows the right local time (it reads a time without "Z" as Pakistan time).
                 list.Add(new UserAnnouncementDto
                 {
                     Id = r.GetGuid(r.GetOrdinal("Id")),
@@ -4796,11 +5058,11 @@ END";
                     Body = r.GetString(r.GetOrdinal("Body")),
                     Type = r.GetString(r.GetOrdinal("Type")),
                     TargetScope = r.GetString(r.GetOrdinal("TargetScope")),
-                    ScheduledAt = r.IsDBNull(r.GetOrdinal("ScheduledAt")) ? null : r.GetDateTime(r.GetOrdinal("ScheduledAt")),
-                    SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : r.GetDateTime(r.GetOrdinal("SentAt")),
-                    CreatedAt = r.GetDateTime(r.GetOrdinal("CreatedAt")),
+                    ScheduledAt = r.IsDBNull(r.GetOrdinal("ScheduledAt")) ? null : AsUtc(r.GetDateTime(r.GetOrdinal("ScheduledAt"))),
+                    SentAt = r.IsDBNull(r.GetOrdinal("SentAt")) ? null : AsUtc(r.GetDateTime(r.GetOrdinal("SentAt"))),
+                    CreatedAt = AsUtc(r.GetDateTime(r.GetOrdinal("CreatedAt"))),
                     IsRead = !r.IsDBNull(r.GetOrdinal("IsRead")) && Convert.ToBoolean(r["IsRead"]),
-                    ReadAt = r.IsDBNull(r.GetOrdinal("ReadAt")) ? null : r.GetDateTime(r.GetOrdinal("ReadAt"))
+                    ReadAt = r.IsDBNull(r.GetOrdinal("ReadAt")) ? null : AsUtc(r.GetDateTime(r.GetOrdinal("ReadAt")))
                 });
 
                 if (total == 0 && !r.IsDBNull(r.GetOrdinal("TotalRecords")))
@@ -4811,6 +5073,10 @@ END";
 
             return (list, total > 0 ? total : list.Count);
         }
+
+        /// <summary>A value the database wrote with SYSUTCDATETIME(): Kind = Utc (serialised with "Z").</summary>
+        public static DateTime AsUtc(DateTime value) =>
+            value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
         public async Task<bool> MarkAnnouncementReadAsync(Guid announcementId, int userId)
         {

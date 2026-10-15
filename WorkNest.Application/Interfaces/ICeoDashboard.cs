@@ -7,14 +7,19 @@ namespace WorkNest.Application.Interfaces
     public sealed record CeoInvoiceStatusIds(IReadOnlyCollection<int> Open, IReadOnlyCollection<int> Paid, IReadOnlyCollection<int> Void);
 
     /// <summary>
-    /// Raw result sets of the CEO dashboard stored procedures (dbo.WN_Ceo_*, script CEO_01_dashboard_procedures).
-    /// Throws <see cref="CeoDatabaseUpdateMissingException"/> when the procedures are not on the database yet.
+    /// Raw result sets of the CEO dashboard stored procedures (dbo.WN_Ceo_*, script CEO_01_dashboard_procedures, changed
+    /// by QA_07_dashboards). Throws <see cref="CeoDatabaseUpdateMissingException"/> when the procedures are not on the
+    /// database yet. Tour inquiries follow the location filter once QA_07 has run (by their branch,
+    /// WN_Contacts.LocationId); before that the procedures count every location's inquiries (the results then have no
+    /// InqByLocation / ByLocation column).
     /// </summary>
     public interface ICeoDashboardRepository
     {
+        /// <summary>Tour inquiries narrowed to <paramref name="locationId"/> when the procedure knows how (QA_07).</summary>
         Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
             CeoInvoiceStatusIds statuses, int expiringDays);
 
+        /// <summary>Metric inquiries-type: narrowed to <paramref name="locationId"/> when the procedure knows how (QA_07).</summary>
         Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, DateTime? monthStart, string? bucket,
             int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses);
 
@@ -27,10 +32,22 @@ namespace WorkNest.Application.Interfaces
         Task<List<List<IDictionary<string, object?>>>> GetBookingRecordsAsync(DateTime? from, DateTime? to, int? locationId, bool noLocation,
             string? statusIds, bool runningOnly, DateTime businessNow, int top);
 
-        Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(DateTime? from, DateTime? to, string? inquiryType, int top);
+        /// <summary>
+        /// Tour inquiries of one branch (<paramref name="locationId"/>, QA_07; null = every inquiry). Before QA_07 every
+        /// inquiry (the first result then has no ByLocation column).
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(DateTime? from, DateTime? to, string? inquiryType,
+            int? locationId, int top);
 
         Task<List<List<IDictionary<string, object?>>>> GetQuotationRecordsAsync(DateTime? from, DateTime? to, int? userId, string? stage,
             int? locationId, int top);
+
+        /// <summary>
+        /// Confirmed leases ending in the window (default: the next <paramref name="expiringDays"/> days), soonest first
+        /// (dbo.WN_Ceo_Records_Leases, QA_07; before it: <see cref="CeoDatabaseUpdateMissingException"/> naming QA_07).
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>> GetLeaseRecordsAsync(int? locationId, bool noLocation, DateTime? from, DateTime? to,
+            int expiringDays, DateTime businessNow, int top);
     }
 
     /// <summary>
@@ -44,13 +61,28 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetRecordsAsync(string kind, CeoRecordsQuery query);
     }
 
-    /// <summary>The CEO dashboard procedures (script CEO_01) are not on this database yet.</summary>
+    /// <summary>
+    /// A CEO dashboard procedure is not on this database yet: the dashboard ones (script CEO_01), or the full list of
+    /// leases expiring (QA_07). <see cref="Update"/> names the script; the message says it in plain words.
+    /// </summary>
     public sealed class CeoDatabaseUpdateMissingException : Exception
     {
         public const string UserMessage = "The CEO dashboard needs the database update CEO_01.";
+        public const string LeasesMessage = "The full list of leases expiring needs the database update QA_07.";
 
-        public CeoDatabaseUpdateMissingException(Exception inner) : base(UserMessage, inner)
+        /// <summary>The database update (script) that is missing, e.g. CEO_01 or QA_07.</summary>
+        public string Update { get; }
+
+        public CeoDatabaseUpdateMissingException(Exception inner) : this(inner, "CEO_01", UserMessage)
         {
         }
+
+        private CeoDatabaseUpdateMissingException(Exception? inner, string update, string message) : base(message, inner)
+        {
+            Update = update;
+        }
+
+        /// <summary>dbo.WN_Ceo_Records_Leases is missing: QA_07 has not run.</summary>
+        public static CeoDatabaseUpdateMissingException LeasesMissing(Exception? inner) => new(inner, "QA_07", LeasesMessage);
     }
 }

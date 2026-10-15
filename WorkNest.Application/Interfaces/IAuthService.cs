@@ -11,6 +11,11 @@ namespace WorkNest.Application.Interfaces
         /// <param name="firebaseVerified">True only when the caller verified the request's Firebase ID token.</param>
         Task<ApiResponse> LoginAsync(UserLoginRequest request, bool firebaseVerified = false);
         Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request);
+        /// <summary>
+        /// Whether a verified Firebase token may sign in as its email: null = yes, else the refusal to send as a 403
+        /// (EMAIL_NOT_VERIFIED / ACCOUNT_DISABLED). Called for every endpoint that takes a Firebase token.
+        /// </summary>
+        Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified);
         Task<ApiResponse> GetMeAsync(string email);
         Task<ApiResponse> UpdateMeAsync(string email, UpdateMyProfileRequest request);
         ApiResponse Logout();

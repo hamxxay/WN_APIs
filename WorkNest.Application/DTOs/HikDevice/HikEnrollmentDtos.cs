@@ -127,6 +127,23 @@ namespace WorkNest.Application.DTOs.HikDevice
     }
 
     /// <summary>
+    /// GET api/bookings/{bookingDetailId}/room-machine: the machine a fingerprint / face / card of this booked room is
+    /// captured on (same choice as the enrolment itself), so the staff app can disable enrolment with the reason.
+    /// </summary>
+    public class HikRoomMachineStatusDto
+    {
+        /// <summary>False when it could not be worked out (nobody is assigned to the room yet): enrolment then reports it.</summary>
+        public bool Checked { get; set; }
+        /// <summary>The capture machine's name (null: no machine is linked to the room).</summary>
+        public string? Name { get; set; }
+        public bool Online { get; set; }
+        /// <summary>Enrolment can start now (a room machine exists and is online).</summary>
+        public bool CanEnrol { get; set; }
+        /// <summary>Why enrolment can't start (null when it can, or when not checked).</summary>
+        public string? Reason { get; set; }
+    }
+
+    /// <summary>
     /// Result of pushing an Access Status tick/untick to the machines (block / unblock).
     /// </summary>
     public class HikAccessSyncResultDto

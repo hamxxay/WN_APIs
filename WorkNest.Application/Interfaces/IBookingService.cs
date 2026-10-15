@@ -8,6 +8,11 @@ namespace WorkNest.Application.Interfaces
         Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null);
         Task<ApiResponse> GetBookingByIdAsync(Guid publicId, string? userEmail);
         Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail);
+        /// <summary>
+        /// The customer's Payments tab (GET api/invoice/my): their invoices plus the booking challans that have no
+        /// invoice, each with paid / unpaid / overdue status, and the totals.
+        /// </summary>
+        Task<WorkNest.Application.DTOs.Payment.MyBillsDto> GetMyBillsAsync(string userEmail);
         Task<IEnumerable<object>> GetRecentBookingsAsync(int top = 10);
         /// <summary>Booked dates of a space in a month; <paramref name="includeBookings"/> adds the bookings (staff only).</summary>
         Task<ApiResponse> GetBookingCalendarAsync(int spaceId, int year, int month, bool includeBookings = false);
@@ -22,7 +27,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> ReassignBookingAsync(int id, ReassignBookingRequest request, string userEmail);
         Task<ApiResponse> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7");
         Task<ApiResponse> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7");
-        Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7");
+        Task<ApiResponse> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? shiftType = "24_7", int? locationId = null);
         Task<ApiResponse> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail);
         Task<ApiResponse> GetChallanAsync(int bookingId);
         Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null);

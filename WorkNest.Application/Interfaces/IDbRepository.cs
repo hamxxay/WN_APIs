@@ -24,11 +24,17 @@ namespace WorkNest.Application.Interfaces
         Task SetUserRoleAsync(int id, int roleId);
         Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId);
         Task<(int? Id, bool IsActive)?> CheckUserEmailStatusAsync(string email);
+        /// <summary>
+        /// The WN_Users row with this email whether it is active or not (an active one first): Id, IsActive and the stored
+        /// password, for the sign-in checks (WN_Users_GetByEmail only returns active rows). Null when there is none.
+        /// </summary>
+        Task<WorkNest.Application.DTOs.Auth.UserSignInStatus?> GetUserSignInStatusAsync(string email);
 
         // --- Space ---
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpacesAsync(int page, int limit, string? search);
         Task<IDictionary<string, object?>?> GetSpaceSummaryAsync(int id);
-        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7");
+        /// <summary>includeOccupied (QA_03): every active, priced space with OccupiedNow; false = spaces free right now (as before).</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesAsync(string? shiftType = "24_7", bool includeOccupied = false);
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesByTypeAsync(int spaceTypeId, DateTime startOn, DateTime endOn, string? shiftType = "24_7");
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailabilityCountsAsync(string? shiftType = "24_7");
         Task<(int? Id, string? PublicId)> InsertSpaceAsync(string name, int locationId, int spaceTypeId, string? code, string? description, int? floorId, string? imageUrl, int capacity, int? createdById, decimal? price = null, byte? billingPeriodId = null);
@@ -44,9 +50,9 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetBookingCalendarAsync(int spaceId, int year, int month);
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7");
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7");
-        Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7");
+        Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7", int? locationId = null);
         Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null, string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null);
-        Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, string? shiftType = "24_7");
+        Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, string? shiftType = "24_7", int? locationId = null);
         Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
         /// <summary>Signed agreement: agreement SignedDate, booking date and challan dates follow the agreement's date.</summary>
@@ -56,6 +62,16 @@ namespace WorkNest.Application.Interfaces
         /// <summary>True when the invoice / booking belongs to the user with this email (customer self-service checks).</summary>
         Task<bool> IsInvoiceOwnedByDbAsync(int invoiceId, string email);
         Task<bool> IsBookingOwnedByDbAsync(int bookingId, string email);
+        /// <summary>
+        /// The signed-in customer's invoices (GET api/invoice/my): every WN_Invoices row whose user (the invoice's, else
+        /// its booking's) has this email — the same owner rule as IsInvoiceOwnedByDbAsync, so each one's PDF opens.
+        /// </summary>
+        Task<List<IDictionary<string, object?>>> GetMyInvoicesDbAsync(string email);
+        /// <summary>
+        /// Open door-access suspensions in force on <paramref name="today"/> (WN_HIK_BookingAccessSuspensions: not
+        /// resolved, no temporary access running) for these bookings. Empty when the table is not installed.
+        /// </summary>
+        Task<IDictionary<int, BookingAccessSuspensionInfo>> GetOpenAccessSuspensionsDbAsync(IEnumerable<int> bookingIds, DateTime today);
         /// <summary>For a customer's own cancel: the booking's status id and whether any payment is recorded on it. Null when it is not this user's booking.</summary>
         Task<(int StatusId, bool HasPayment)?> GetBookingCancelCheckDbAsync(int bookingId, string email);
         /// <summary>Amount recorded as paid per booking (same rule as the cancel check). Key = booking id.</summary>
@@ -232,8 +248,14 @@ namespace WorkNest.Application.Interfaces
         Task<int?> UpdateContactLocationAsync(Guid publicId, int? locationId, int? updatedById, string? scopeLocationIds);
         /// <summary>Rows changed (0 = not found), or null when the database update CT_01 has not been run.</summary>
         Task<int?> UpdateContactInquiryTypeAsync(Guid publicId, string inquiryType, string? referenceName, int? updatedById);
-        Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById);
-        Task DeleteContactAsync(int id);
+        /// <summary>
+        /// Sets an inquiry's status. <paramref name="source"/> "contact" / "booktour" (WorkNest.Application.Helpers.InquiryRows):
+        /// only that table's row (QA_05); null = the WN_Contacts row with this Id, else the WN_BookTour one (as before).
+        /// False (nothing changed) when a source was given but the database does not have QA_05 yet.
+        /// </summary>
+        Task<bool> UpdateContactStatusAsync(int id, byte statusId, int? updatedById, string? source = null);
+        /// <summary>As <see cref="UpdateContactStatusAsync"/>: false (nothing deleted) when a source was given before QA_05.</summary>
+        Task<bool> DeleteContactAsync(int id, string? source = null);
         /// <summary>Adds a feedback row to dbo.WN_ContactFeedback (false if the table has not been created yet).</summary>
         Task<bool> InsertContactFeedbackAsync(int contactId, string outcome, string? reason, DateTime? followUpOn, int? quotationId, int? createdById);
         /// <summary>Newest feedback row per inquiry for the given inquiries (empty if the table does not exist).</summary>
@@ -247,8 +269,10 @@ namespace WorkNest.Application.Interfaces
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
+        /// <paramref name="locationIds"/>: location-bound staff's locations (every one they are assigned to) for the items that
+        /// have a location (via the space); null = all locations.
         /// <paramref name="branchLocationIds"/>: tour inquiries of these locations + those without a branch (location-bound staff); null = all.
-        Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
+        Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(IReadOnlyCollection<int>? locationIds, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
             IReadOnlyCollection<int>? branchLocationIds = null);
         Task<Dictionary<string, HashSet<string>>> GetNavBadgeReadsDbAsync(string userEmail);
         /// <summary>False when the WN_NAV_BadgeReads table has not been created yet.</summary>
@@ -327,7 +351,11 @@ namespace WorkNest.Application.Interfaces
         Task<int> InsertAgreementDbAsync(int quotationId, int customerId, string entityType, int refundDays, decimal feeAmount, decimal securityDeposit, string? opHours, string? custName, string? custCnic, string? custPhone, string? custAddress, string? compName, string? ntn, string? secp, int? userId, int? templateVersionId = null);
         Task<IDictionary<string, object?>?> GetAgreementByIdDbAsync(int agreementId);
         Task<IDictionary<string, object?>?> GetQuotationLocationAndCompanyDetailsDbAsync(int quotationId);
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status);
+        /// <summary>
+        /// WN_Agreements_GetList. <paramref name="locationIds"/>: only agreements of these locations (plus any without a location);
+        /// null = every agreement. Before QA_06 (no @LocationIds yet) the rows are filtered here instead.
+        /// </summary>
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAgreementsListDbAsync(int page, int limit, string? search, string? status, IReadOnlyCollection<int>? locationIds = null);
         Task MarkAgreementSignedDbAsync(int agreementId, int? userId);
         Task SetAgreementBookingIdAsync(int agreementId, int bookingId);
         Task UpdateAgreementSignedPdfDbAsync(int agreementId, string signedPdfPath, DateTime uploadedAt);

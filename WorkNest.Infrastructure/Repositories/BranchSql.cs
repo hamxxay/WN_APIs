@@ -34,6 +34,18 @@ namespace WorkNest.Infrastructure.Repositories
         public static string Contacts(bool hasColumn, string alias, IReadOnlyCollection<int>? locationIds) =>
             !hasColumn || locationIds is null ? "" : $" AND ({alias}.LocationId IS NULL OR {alias}.LocationId IN ({IdList(locationIds)}))";
 
+        /// <summary>
+        /// WHERE condition (alias bt) for the old website bookings still only in dbo.WN_BookTour that are New: status 0, 1 or
+        /// empty, as the Tour Inquiries list shows them (ISNULL(Status, 1)); rows already copied into WN_Contacts (same
+        /// PublicId, QA_05_staff_sales) are left out. They have no branch, so every staff member counts them. With
+        /// "WN_Contacts.StatusId = 1" this is the one definition of a new inquiry (dashboard figure, badge, list filter).
+        /// </summary>
+        public const string OldWebsiteNewWhere =
+            "ISNULL(bt.Status, 1) IN (0, 1) AND NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts cbt WITH (NOLOCK) WHERE cbt.PublicId = bt.IdGUID)";
+
+        /// <summary>Number of new old website bookings (see <see cref="OldWebsiteNewWhere"/>), as a scalar subquery.</summary>
+        public const string OldWebsiteNewCount = "(SELECT COUNT(*) FROM dbo.WN_BookTour bt WITH (NOLOCK) WHERE " + OldWebsiteNewWhere + ")";
+
         /// <summary>The location key of a branch / location name: trimmed, lower case.</summary>
         private static string Key(string expression) => $"LOWER(LTRIM(RTRIM(CAST({expression} AS NVARCHAR(100)))))";
 

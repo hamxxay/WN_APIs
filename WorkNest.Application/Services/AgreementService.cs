@@ -394,9 +394,10 @@ namespace WorkNest.Application.Services
             };
         }
 
-        public async Task<(IEnumerable<AgreementResponseDto> Rows, int Total)> GetAgreementsListAsync(int page, int limit, string? search, string? status)
+        public async Task<(IEnumerable<AgreementResponseDto> Rows, int Total)> GetAgreementsListAsync(int page, int limit, string? search, string? status,
+            IReadOnlyCollection<int>? locationIds = null)
         {
-            var (rows, total) = await _db.GetAgreementsListDbAsync(page, limit, search, status);
+            var (rows, total) = await _db.GetAgreementsListDbAsync(page, limit, search, status, locationIds);
             var list = new List<AgreementResponseDto>();
 
             foreach (var r in rows)

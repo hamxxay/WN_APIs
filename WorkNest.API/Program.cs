@@ -200,6 +200,10 @@ try
     builder.Services.AddScoped<ISpaceTypeService, SpaceTypeService>();
     builder.Services.AddScoped<IPricingPlanService, PricingPlanService>();
     builder.Services.AddScoped<IContactService, ContactService>();
+    // Message templates (api/message-templates/*, api/contact/{publicId}/whatsapp-message): dbo.WN_MessageTemplates_Get /
+    // _Save (script WT_01_whatsapp_template); before WT_01 the default wording from code is used.
+    builder.Services.AddScoped<IMessageTemplateRepository, WorkNest.Infrastructure.Repositories.MessageTemplateRepository>();
+    builder.Services.AddScoped<IMessageTemplateService, MessageTemplateService>();
     // Complaints (WhatsApp bot + staff) and the WhatsApp bot / Inbox (WhatsApp:* settings, webhook api/whatsapp/webhook).
     builder.Services.AddScoped<IComplaintRepository, WorkNest.Infrastructure.Repositories.ComplaintRepository>();
     builder.Services.AddScoped<IComplaintService, ComplaintService>();
@@ -227,6 +231,10 @@ try
     // access itself reuses the attendants, customer-employees and Hikvision enrolment services below.
     builder.Services.AddScoped<IAccessOfficerRepository, WorkNest.Infrastructure.Repositories.AccessOfficerRepository>();
     builder.Services.AddScoped<IAccessOfficerService, AccessOfficerService>();
+    // Delete your own account (api/account/delete-check, api/account/delete; Google Play rule): customers only, through
+    // dbo.WN_Account_Delete (script QA_04_account_delete); before QA_04 the check answers "not available yet".
+    builder.Services.AddScoped<IAccountDeletionRepository, WorkNest.Infrastructure.Repositories.AccountDeletionRepository>();
+    builder.Services.AddScoped<IAccountDeletionService, AccountDeletionService>();
     // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
     builder.Services.AddScoped<IReportRepository, WorkNest.Infrastructure.Repositories.ReportRepository>();
     builder.Services.AddScoped<IAuditLogRepository, WorkNest.Infrastructure.Repositories.AuditLogRepository>();

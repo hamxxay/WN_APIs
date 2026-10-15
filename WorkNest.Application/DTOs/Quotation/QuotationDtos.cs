@@ -109,6 +109,8 @@ namespace WorkNest.Application.DTOs.Quotation
         public ContractDetailsDto? Contract { get; set; }
 
         public bool CanRespond { get; set; }
+        /// <summary>Waiting for the customer's answer (Sent / Active) but its last valid day (ValidUntil, Pakistan date) has passed.</summary>
+        public bool IsExpired { get; set; }
         public string? CustomerNote { get; set; }
         public DateTime? ResponseDate { get; set; }
         public List<QuotationActivityDto> Activities { get; set; } = new List<QuotationActivityDto>();

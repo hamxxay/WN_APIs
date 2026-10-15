@@ -9,7 +9,12 @@ namespace WorkNest.Application.Services
     public class UserService : IUserService
     {
         private readonly IDbRepository _db;
-        public UserService(IDbRepository db) => _db = db;
+        private readonly IRoleService? _roles;
+        public UserService(IDbRepository db, IRoleService? roles = null)
+        {
+            _db = db;
+            _roles = roles;
+        }
 
         private const string SalesManagerLocationRequired = "A Sales Manager needs at least one location.";
         private const string AccessOfficerLocationRequired = "An Access Officer needs at least one location.";
@@ -30,6 +35,10 @@ namespace WorkNest.Application.Services
             var rowList = rows.ToList();
             var extra = await _db.GetUserLocationsMapAsync(rowList
                 .Where(r => r.TryGetValue("Id", out var v) && v is not null).Select(r => Convert.ToInt32(r["Id"])));
+            // Role names shown to people come from dbo.WN_Roles.DisplayName (cached), never from code.
+            var roleNames = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var role in rowList.Select(Roles.FromRow).Distinct(StringComparer.OrdinalIgnoreCase))
+                roleNames[role] = _roles is null ? null : await _roles.GetDisplayNameAsync(Roles.ParseRoleId(role));
             var items = rowList.Select(r => (object)new
             {
                 id           = r.TryGetValue("Id",           out var i)  ? i  : null,
@@ -41,6 +50,7 @@ namespace WorkNest.Application.Services
                 createdOn    = r.TryGetValue("CreatedOn",    out var c)  ? c  : null,
                 createdAt    = r.TryGetValue("CreatedOn",    out var ca) ? ca : null,
                 role         = Roles.FromRow(r),
+                roleDisplayName = roleNames.GetValueOrDefault(Roles.FromRow(r)),
                 locationId   = r.TryGetValue("LocationId",   out var loc)&& loc is not null ? Convert.ToInt32(loc) : (int?)null,
                 locationIds  = AllLocations(r, extra).Select(x => x.Id).ToList(),
                 locationName = string.Join(", ", AllLocations(r, extra).Select(x => x.Name).Where(x => x.Length > 0)),

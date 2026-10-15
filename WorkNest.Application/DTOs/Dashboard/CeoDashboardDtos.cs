@@ -82,8 +82,14 @@ namespace WorkNest.Application.DTOs.Dashboard
         public List<CeoOccupancyMonthDto> Months { get; set; } = new();
         public List<CeoSpaceTypeOccupancyDto> ByType { get; set; } = new();
         public List<CeoLocationOccupancyDto> ByLocation { get; set; } = new();
-        /// <summary>Confirmed leases ending in the next 90 days.</summary>
+        /// <summary>Confirmed leases ending in the next 90 days, soonest first (the first 50).</summary>
         public List<CeoLeaseExpiringDto> LeasesExpiring { get; set; } = new();
+        /// <summary>
+        /// All confirmed leases ending in the next 90 days (the list holds the first 50) and their monthly rent; null
+        /// before the database update QA_07 (then only the list is known, and records/leases is not available).
+        /// </summary>
+        public int? LeasesExpiringCount { get; set; }
+        public decimal? LeasesExpiringMonthly { get; set; }
     }
 
     public class CeoOccupancyMonthDto
@@ -127,6 +133,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal ConversionRate { get; set; }
         /// <summary>Website, WhatsApp, WalkIn, Reference, NotSet (always all five).</summary>
         public List<CeoInquiryTypeCountDto> InquiriesByType { get; set; } = new();
+        /// <summary>
+        /// Tour inquiries (the funnel's first stage and by type) follow the location filter by their branch
+        /// (WN_Contacts.LocationId): one location = only its inquiries, all locations = every inquiry. True when a
+        /// location is chosen but the figures still count every location's inquiries (database update QA_07 not run).
+        /// </summary>
+        public bool InquiriesAllLocations { get; set; }
         public decimal QuotationValue { get; set; }
         public decimal BookingValue { get; set; }
     }
@@ -285,6 +297,20 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? CreatedOn { get; set; }
         /// <summary>Latest staff feedback, e.g. "Not interested: price".</summary>
         public string? Feedback { get; set; }
+    }
+
+    /// <summary>records/leases (QA_07): a confirmed lease ending in the window, soonest first.</summary>
+    public class CeoLeaseRecordDto
+    {
+        public int BookingId { get; set; }
+        public string? Customer { get; set; }
+        public string? Space { get; set; }
+        public string? Location { get; set; }
+        /// <summary>yyyy-MM-dd</summary>
+        public string? EndOn { get; set; }
+        public decimal MonthlyAmount { get; set; }
+        /// <summary>Days from today to the end date (negative = already ended).</summary>
+        public int? DaysLeft { get; set; }
     }
 
     public class CeoQuotationRecordDto

@@ -133,6 +133,27 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        /// <summary>
+        /// The signed-in customer's bills (app Payments tab): their invoices (paid, unpaid, overdue, with the
+        /// door-access suspension date) plus the booking challans that have no invoice, and the totals. Only the
+        /// caller's own records (owner rule of GET api/invoice/{id}/pdf, so every invoice listed can be downloaded).
+        /// </summary>
+        [HttpGet("api/invoice/my")]
+        public async Task<IActionResult> MyInvoices()
+        {
+            var email = ResolveUserEmail();
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "Sign in required." });
+            try
+            {
+                return Ok(WorkNest.Common.Responses.ApiResponse.Ok(await _bookings.GetMyBillsAsync(email)));
+            }
+            catch (Exception)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = "Your bills could not be loaded. Please try again." });
+            }
+        }
+
         [HttpGet("api/customer/{customerId:int}/invoices")]
         [Authorize(Roles = StaffRoles)]
         [HttpGet("api/customers/{customerId:int}/invoices")]
@@ -994,6 +1015,41 @@ namespace WorkNest.API.Controllers
                     await QueueInvoiceDeliveryFailureAsync(id, null, targetEmail, emailEx.Message, conn);
                     return Ok(new { isSuccessful = false, message = $"Invoice email delivery failed ({emailEx.Message}). Queued for background retry." });
                 }
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Whether the booking's first invoice exists yet (dbo.WN_GetInvoiceByBookingId, the same check the send below
+        /// makes): the staff app shows "Send initial invoice" on a booking until it has been sent.
+        /// </summary>
+        [HttpGet("api/booking/{bookingId:int}/initial-invoice")]
+        [Authorize(Roles = StaffRoles)]
+        [RecordScope(RecordKind.Booking, "bookingId")]
+        public async Task<IActionResult> GetInitialInvoiceStatus(int bookingId)
+        {
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                using var cmd = new SqlCommand("dbo.WN_GetInvoiceByBookingId", conn) { CommandType = CommandType.StoredProcedure };
+                cmd.Parameters.AddWithValue("@BookingId", bookingId);
+                using var r = await cmd.ExecuteReaderAsync();
+                if (!await r.ReadAsync())
+                    return Ok(new { isSuccessful = true, data = new { bookingId, sent = false, invoiceId = (int?)null, invoiceNumber = (string?)null } });
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    data = new
+                    {
+                        bookingId,
+                        sent = true,
+                        invoiceId = (int?)r.GetInt32(r.GetOrdinal("Id")),
+                        invoiceNumber = r.IsDBNull(r.GetOrdinal("InvoiceNumber")) ? null : r.GetString(r.GetOrdinal("InvoiceNumber"))
+                    }
+                });
             }
             catch (Exception ex)
             {

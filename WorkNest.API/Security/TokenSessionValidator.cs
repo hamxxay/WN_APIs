@@ -103,6 +103,16 @@ namespace WorkNest.API.Security
             return true;
         }
 
+        /// <summary>
+        /// Drops the cached account state of this email, so its other tokens are checked against WN_Users on their next
+        /// request (e.g. right after the account was deleted / switched off) instead of up to 60 seconds later.
+        /// </summary>
+        public void ForgetAccount(string email)
+        {
+            if (string.IsNullOrWhiteSpace(email)) return;
+            _cache.Remove("auth-account:" + email.Trim().ToLowerInvariant());
+        }
+
         private async Task<AccountState> GetAccountAsync(string email, IServiceProvider services)
         {
             var cacheKey = "auth-account:" + email.Trim().ToLowerInvariant();
