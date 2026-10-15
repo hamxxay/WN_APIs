@@ -13,7 +13,8 @@ namespace WorkNest.API.Security
     /// Second check of every bearer token, after its signature and expiry (JwtBearer OnTokenValidated):
     /// - a token signed out through POST api/auth/logout is refused until it expires;
     /// - the account must still exist and be active, with the role (and, for Admins / Sales Executives / Sales
-    ///   Managers, the location) the token was issued with (TokenSessionRules) — a token used to keep its role for 24 hours.
+    ///   Managers / Access Officers, the location) the token was issued with (TokenSessionRules) — a token used to keep
+    ///   its role for 24 hours.
     /// A refused token is a 401, which the app answers by exchanging its Firebase sign-in at api/auth/google-login
     /// (anonymous, so not affected) and the website by sending the user to sign in.
     /// The WN_Users lookup is cached 60 seconds per email. When it fails (database unreachable) the token is

@@ -42,11 +42,13 @@ try
     // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
     // CeoAccessFilter: a CEO account gets 403 on every endpoint not marked [CeoAllowed] (it only views the CEO dashboard).
     // SalesManagerAccessFilter: likewise a Sales Manager gets 403 on every endpoint not marked [SalesManagerAllowed].
+    // AccessOfficerAccessFilter: and an Access Officer on every endpoint not marked [AccessOfficerAllowed].
     builder.Services.AddControllers(o =>
         {
             o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
             o.Filters.Add<WorkNest.API.Filters.CeoAccessFilter>();
             o.Filters.Add<WorkNest.API.Filters.SalesManagerAccessFilter>();
+            o.Filters.Add<WorkNest.API.Filters.AccessOfficerAccessFilter>();
         })
         .AddJsonOptions(o =>
         {
@@ -219,6 +221,10 @@ try
     // SM_02_sales_manager_desks: desks, no money, and SM_03_sales_manager_complaints: the Complaints section).
     builder.Services.AddScoped<ISalesManagerDashboardRepository, WorkNest.Infrastructure.Repositories.SalesManagerDashboardRepository>();
     builder.Services.AddScoped<ISalesManagerDashboardService, SalesManagerDashboardService>();
+    // Access Officer page (api/access-officer/*): dbo.WN_AccessOfficer_Lookup (script AO_01_access_officer); the door
+    // access itself reuses the attendants, customer-employees and Hikvision enrolment services below.
+    builder.Services.AddScoped<IAccessOfficerRepository, WorkNest.Infrastructure.Repositories.AccessOfficerRepository>();
+    builder.Services.AddScoped<IAccessOfficerService, AccessOfficerService>();
     // 3-month forecast (api/dashboard/forecast) and the weekly super admin report (api/reports/weekly, WeeklyReportService).
     builder.Services.AddScoped<IReportRepository, WorkNest.Infrastructure.Repositories.ReportRepository>();
     builder.Services.AddScoped<IAuditLogRepository, WorkNest.Infrastructure.Repositories.AuditLogRepository>();

@@ -302,15 +302,10 @@ namespace WorkNest.Application.Services
             // Only machines of the booking's location (machines without a location yet count everywhere), so a
             // tenant of one branch is never put on another branch's room or entrance machines.
             var bookingLocations = await _scope.GetLocationIdsAsync(RecordKind.BookingDetail, ctx.BookingDetailId.ToString());
-            bool AtBookingLocation(HikDeviceDto d) =>
-                d.LocationId == null || bookingLocations == null || bookingLocations.Count == 0 || bookingLocations.Contains(d.LocationId.Value);
-            var roomIds = allDevices
-                .Where(AtBookingLocation)
-                .Where(d => !(d.Grp ?? "").StartsWith("Entrance", StringComparison.OrdinalIgnoreCase))
-                .Where(d => RoomMatches(d.Code, ctx.SpaceCode, ctx.SpaceName))
+            var roomIds = RoomMachines(allDevices, bookingLocations, ctx.SpaceCode, ctx.SpaceName)
                 .Select(d => d.Id)
                 .ToList();
-            var atLocation = allDevices.Where(AtBookingLocation).Select(d => d.Id).ToHashSet();
+            var atLocation = allDevices.Where(d => AtBookingLocation(d, bookingLocations)).Select(d => d.Id).ToHashSet();
             var entranceIds = (await _db.GetHikEntranceDeviceIdsDbAsync()).Where(atLocation.Contains).ToList();
             var devices = (await _db.GetHikDeviceConnectionsDbAsync(roomIds.Concat(entranceIds))).ToList();
             return (devices, devices.Where(d => roomIds.Contains(d.Id)).ToList());
@@ -541,6 +536,35 @@ namespace WorkNest.Application.Services
             var prints = (JsonArray)grant["prints"]!;
             foreach (var old in prints.Where(p => p?["fingerPrintID"]?.ToString() == fingerNo.ToString()).ToList()) prints.Remove(old);
             prints.Add(new JsonObject { ["fingerData"] = fingerData, ["fingerPrintID"] = fingerNo });
+        }
+
+        /// <summary>
+        /// A machine of the booking's location; machines without a location yet (and bookings without one) count
+        /// everywhere.
+        /// </summary>
+        internal static bool AtBookingLocation(HikDeviceDto d, IReadOnlyCollection<int>? bookingLocations) =>
+            d.LocationId == null || bookingLocations == null || bookingLocations.Count == 0 || bookingLocations.Contains(d.LocationId.Value);
+
+        /// <summary>
+        /// The booked room's machine(s): at the booking's location, not an Entrance machine, Code matching the room
+        /// (<see cref="RoomMatches"/>). The enrolment captures on the first online one of these.
+        /// </summary>
+        internal static IEnumerable<HikDeviceDto> RoomMachines(IEnumerable<HikDeviceDto> devices, IReadOnlyCollection<int>? bookingLocations,
+            string? spaceCode, string? spaceName) =>
+            devices
+                .Where(d => AtBookingLocation(d, bookingLocations))
+                .Where(d => !(d.Grp ?? "").StartsWith("Entrance", StringComparison.OrdinalIgnoreCase))
+                .Where(d => RoomMatches(d.Code, spaceCode, spaceName));
+
+        /// <summary>
+        /// The room machine an enrolment would capture on: the first online room machine, else the first one (offline);
+        /// null when the room has no machine. Same choice as the enrolment itself (PrepareAsync).
+        /// </summary>
+        public static HikDeviceDto? PickRoomMachine(IEnumerable<HikDeviceDto> devices, IReadOnlyCollection<int>? bookingLocations,
+            string? spaceCode, string? spaceName)
+        {
+            var room = RoomMachines(devices, bookingLocations, spaceCode, spaceName).ToList();
+            return room.FirstOrDefault(d => d.Online == 1) ?? room.FirstOrDefault();
         }
 
         /// <summary>

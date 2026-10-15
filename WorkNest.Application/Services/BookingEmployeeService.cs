@@ -223,14 +223,19 @@ namespace WorkNest.Application.Services
 
         // ---- Sales: CNIC check at the branch -------------------------------------------------------
 
-        public async Task<BookingEmployeeOutcome> VerifyByCnicAsync(int bookingDetailId, string? idNumber, int? staffUserId, bool allowOverCapacity)
+        public async Task<BookingEmployeeOutcome> VerifyByCnicAsync(int bookingDetailId, string? idNumber, int? staffUserId, bool allowOverCapacity,
+            bool acceptOtherIds = false)
         {
-            if (!Cnic.IsValid(idNumber)) return Bad(Cnic.ErrorMessage);
-            var digits = Cnic.Digits(idNumber!);
+            // A CNIC is its 13 digits; with acceptOtherIds (Access Officer) a passport / other ID number is its letters and
+            // digits, upper case, as typed.
+            string digits;
+            if (Cnic.IsValid(idNumber)) digits = Cnic.Digits(idNumber!);
+            else if (acceptOtherIds && IdKey(idNumber) is { Length: >= MinOtherIdLength and <= MaxOtherIdLength } key) digits = key;
+            else return Bad(acceptOtherIds ? OtherIdErrorMessage : Cnic.ErrorMessage);
 
             var match = await _repo.FindPendingByIdNumberAsync(bookingDetailId, digits);
             var active = (await _attendants.GetBookingAttendantsAsync(bookingDetailId))
-                .FirstOrDefault(a => AttendantService.CleanRawDigitsAndChars(a.IdNumber) == digits);
+                .FirstOrDefault(a => string.Equals(AttendantService.CleanRawDigitsAndChars(a.IdNumber), digits, StringComparison.OrdinalIgnoreCase));
             if (active != null)
             {
                 // Already on the space (e.g. added manually): their open request is done.
@@ -389,19 +394,38 @@ namespace WorkNest.Application.Services
 
             var rosters = HikEnrollmentService.ParseRosters(await _db.GetHikDevCacheSnapshotsDbAsync());
             foreach (var a in enrolled)
-            {
-                var acc = new BookingEmployeeAccessDto();
-                foreach (var users in rosters.Values)
-                {
-                    if (!users.TryGetValue(a.MachineId!.Trim(), out var u)) continue;
-                    acc.Fingerprint |= Count(u["numOfFP"]) > 0;
-                    acc.Face |= Count(u["numOfFace"]) > 0;
-                    acc.Card |= Count(u["numOfCard"]) > 0;
-                }
-                map[a.PersonId] = acc;
-            }
+                map[a.PersonId] = CredentialsOn(rosters, a.MachineId);
             return map;
         }
+
+        /// <summary>
+        /// What a machine user (Machine ID, WN_HIK_PersonMap) has on any machine, from the machines' user lists (HIK roster
+        /// cache, <see cref="HikEnrollmentService.ParseRosters"/>): a fingerprint, a face, a card. All false when never
+        /// enrolled (no Machine ID).
+        /// </summary>
+        internal static BookingEmployeeAccessDto CredentialsOn(Dictionary<int, Dictionary<string, JsonNode>> rosters, string? machineId)
+        {
+            var acc = new BookingEmployeeAccessDto();
+            if (string.IsNullOrWhiteSpace(machineId)) return acc;
+            foreach (var users in rosters.Values)
+            {
+                if (!users.TryGetValue(machineId.Trim(), out var u)) continue;
+                acc.Fingerprint |= Count(u["numOfFP"]) > 0;
+                acc.Face |= Count(u["numOfFace"]) > 0;
+                acc.Card |= Count(u["numOfCard"]) > 0;
+            }
+            return acc;
+        }
+
+        /// <summary>Shortest / longest passport or other ID number accepted next to a CNIC (letters and digits).</summary>
+        internal const int MinOtherIdLength = 5;
+        internal const int MaxOtherIdLength = 30; // WN_Persons.IdNumber
+        internal const string OtherIdErrorMessage =
+            "Enter the CNIC (13 digits, e.g. 12345-1234567-1) or the passport number.";
+
+        /// <summary>An ID number compared on its letters and digits only, upper case (12345-1234567-1 = 1234512345671).</summary>
+        internal static string IdKey(string? idNumber) =>
+            AttendantService.CleanRawDigitsAndChars(idNumber ?? "").ToUpperInvariant();
 
         /// <summary>The customer's people (WN_CustomerAttendants) who are not on this booking.</summary>
         private async Task<List<SavedEmployeeDto>> SavedEmployeesAsync(int? customerId, Snapshot s)
@@ -424,7 +448,7 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>A CNIC as 12345-1234567-1 (stored as 13 digits); anything else as stored.</summary>
-        private static string FormatId(string? idType, string? idNumber)
+        internal static string FormatId(string? idType, string? idNumber)
         {
             var v = (idNumber ?? "").Trim();
             if (string.Equals(idType, "Passport", StringComparison.OrdinalIgnoreCase)) return v;
