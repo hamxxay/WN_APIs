@@ -7,10 +7,12 @@ using WorkNest.Common.Responses;
 namespace WorkNest.Application.Services
 {
     /// <summary>
-    /// Sales Manager dashboard (api/sales-manager/*): read-only, the caller's locations (super admins: all). The numbers
-    /// come from the dbo.WN_SalesMgr_* procedures, which use the same rules as the CEO dashboard (dbo.WN_Ceo_*), with
-    /// the same invoice statuses and business clock, so the figures match it for the same location and period. Tour
-    /// inquiries have no location: always all of them. Level 1 = dashboard, level 2 = breakdown, level 3 = records.
+    /// Sales Manager dashboard (api/sales-manager/*): read-only, the caller's locations (super admins: all). No money:
+    /// counts and desks only (desks of a booking / quotation = its Capacity, else the Capacity of its space; meeting
+    /// rooms count 0). The numbers come from the dbo.WN_SalesMgr_* procedures (SM_01, desks from SM_02), which count
+    /// with the same rules and business clock as the CEO dashboard (dbo.WN_Ceo_*), so the counts match it for the same
+    /// location and period. Tour inquiries have no location: always all of them. Level 1 = dashboard, level 2 =
+    /// breakdown, level 3 = records.
     /// </summary>
     public class SalesManagerDashboardService : ISalesManagerDashboardService
     {
@@ -25,18 +27,16 @@ namespace WorkNest.Application.Services
             (InquiryTypes.Reference, "Reference"), ("NotSet", "Not set")
         };
 
-        private static readonly string[] Metrics = { "funnel-month", "staff", "inquiries-type", "renewals-month", "revenue-month" };
+        private static readonly string[] Metrics = { "funnel-month", "staff", "inquiries-type", "renewals-month", "desks-month" };
 
         private static readonly string[] Outcomes = { "followup_due", "not_interested", "converted", "open", "followed_up" };
 
         private readonly ISalesManagerDashboardRepository _repo;
-        private readonly IOrderStatusService _orderStatus;
         private readonly IBusinessClock _clock;
 
-        public SalesManagerDashboardService(ISalesManagerDashboardRepository repo, IOrderStatusService orderStatus, IBusinessClock clock)
+        public SalesManagerDashboardService(ISalesManagerDashboardRepository repo, IBusinessClock clock)
         {
             _repo = repo;
-            _orderStatus = orderStatus;
             _clock = clock;
         }
 
@@ -46,13 +46,16 @@ namespace WorkNest.Application.Services
         {
             if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
             var now = _clock.Now;
-            var s = await _repo.GetDashboardAsync(scope.LocationIdsCsv, scope.PickerCsv, months, now, await VoidStatusesAsync(), ExpiringDays);
+            var s = await _repo.GetDashboardAsync(scope.LocationIdsCsv, scope.PickerCsv, months, now, ExpiringDays);
 
             var funnel = Set(s, 1).FirstOrDefault();
             var inq = Set(s, 5).FirstOrDefault();
             var ren = Set(s, 9).FirstOrDefault();
             var quotations = Int(funnel, "Quotations");
             var bookings = Int(funnel, "Bookings");
+            var bookedDesks = Int(funnel, "BookedDesks");
+            var bookedDesksPrev = Int(funnel, "BookedDesksPrev");
+            var endedDesks = Int(ren, "EndedDesks");
             var byType = Set(s, 6).ToDictionary(r => Str(r, "InquiryType") ?? "NotSet", r => Int(r, "Inquiries"), StringComparer.OrdinalIgnoreCase);
 
             var dto = new SalesManagerDashboardDto
@@ -72,13 +75,13 @@ namespace WorkNest.Application.Services
                     },
                     ConversionRate = Pct(bookings, quotations),
                     ConversionRatePrev = Pct(Int(funnel, "BookingsPrev"), Int(funnel, "QuotationsPrev")),
-                    QuotedValue = Dec(funnel, "QuotedValue"),
-                    BookedValue = Dec(funnel, "BookedValue"),
-                    BookedValuePrev = Dec(funnel, "BookedValuePrev"),
+                    QuotedDesks = Int(funnel, "QuotedDesks"),
+                    BookedDesks = bookedDesks,
+                    BookedDesksPrev = bookedDesksPrev,
                     Months = Set(s, 2).Select(r => new SalesManagerFunnelMonthDto
                     {
                         Month = Str(r, "Month") ?? "", Quotations = Int(r, "Quotations"), Accepted = Int(r, "Accepted"),
-                        Bookings = Int(r, "Bookings"), BookedValue = Dec(r, "BookedValue")
+                        Bookings = Int(r, "Bookings"), BookedDesks = Int(r, "BookedDesks")
                     }).ToList()
                 },
                 Team = new SalesManagerTeamDto
@@ -88,13 +91,13 @@ namespace WorkNest.Application.Services
                         UserId = Int(r, "UserId"), Name = Str(r, "Name") ?? "", Role = Str(r, "RoleName") ?? "",
                         Locations = Str(r, "Locations"), InquiriesHandled = Int(r, "InquiriesHandled"),
                         Quotations = Int(r, "Quotations"), Accepted = Int(r, "Accepted"), Converted = Int(r, "Converted"),
-                        ConvertedValue = Dec(r, "ConvertedValue"), ConversionRate = Pct(Int(r, "Converted"), Int(r, "Quotations")),
+                        DesksSold = Int(r, "DesksSold"), ConversionRate = Pct(Int(r, "Converted"), Int(r, "Quotations")),
                         FollowUpsDue = Int(r, "FollowUpsDue")
                     }).ToList(),
                     PerLocation = Set(s, 4).Select(r => new SalesManagerTeamLocationDto
                     {
                         LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "", SalesExecutives = Int(r, "SalesExecutives"),
-                        Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"), ConvertedValue = Dec(r, "ConvertedValue")
+                        Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"), DesksSold = Int(r, "DesksSold")
                     }).ToList()
                 },
                 Inquiries = new SalesManagerInquiriesDto
@@ -118,11 +121,17 @@ namespace WorkNest.Application.Services
                 {
                     Expiring = Set(s, 10).Select(Lease).ToList(),
                     ExpiringCount = Int(ren, "ExpiringCount"),
-                    ExpiringMonthlyValue = Dec(ren, "ExpiringMonthlyValue"),
-                    NewBookingRevenue = Dec(ren, "NewBookingRevenue"),
-                    NewBookingRevenuePrev = Dec(ren, "NewBookingRevenuePrev"),
+                    ExpiringDesks = Int(ren, "ExpiringDesks"),
+                    Expiring30Count = Int(ren, "Expiring30Count"),
+                    Expiring30Desks = Int(ren, "Expiring30Desks"),
+                    EndedDesks = endedDesks,
+                    NetDesks = bookedDesks - endedDesks,
+                    NetDesksPrev = bookedDesksPrev - Int(ren, "EndedDesksPrev"),
                     Months = Set(s, 11).Select(r => new SalesManagerRenewalMonthDto
-                        { Month = Str(r, "Month") ?? "", NewBookingRevenue = Dec(r, "NewBookingRevenue"), Expiring = Int(r, "Expiring") }).ToList()
+                    {
+                        Month = Str(r, "Month") ?? "", BookedDesks = Int(r, "BookedDesks"), EndingDesks = Int(r, "EndingDesks"),
+                        Expiring = Int(r, "Expiring")
+                    }).ToList()
                 }
             };
             return ApiResponse.Ok(dto);
@@ -138,7 +147,7 @@ namespace WorkNest.Application.Services
             if (!string.IsNullOrWhiteSpace(q.Period) && !TryPeriod(q.Period, out _, out _)) return ApiResponse.Fail(PeriodError);
 
             DateTime? month = null;
-            if (metric is "funnel-month" or "renewals-month" or "revenue-month")
+            if (metric is "funnel-month" or "renewals-month" or "desks-month")
             {
                 if (string.IsNullOrWhiteSpace(q.Month)) return ApiResponse.Fail($"month (yyyy-MM) is required for metric {metric}.");
                 if (!TryMonth(q.Month, out var m)) return ApiResponse.Fail(MonthError);
@@ -154,7 +163,7 @@ namespace WorkNest.Application.Services
             if (metric == "staff" && q.UserId is null or <= 0) return ApiResponse.Fail("userId is required for metric staff.");
 
             var s = await _repo.GetBreakdownAsync(metric, scope.LocationIdsCsv, month, type, metric == "staff" ? q.UserId : null,
-                _clock.Now, await VoidStatusesAsync());
+                _clock.Now);
             var head = Set(s, 0).FirstOrDefault();
             if (metric == "staff" && Val(head, "InScope") is { } inScope && !Convert.ToBoolean(inScope))
                 throw new SalesManagerForbiddenException("That person does not work at your locations.");
@@ -169,8 +178,8 @@ namespace WorkNest.Application.Services
                     {
                         Key = key,
                         Label = monthRows && TryMonth(key, out var m) ? m.ToString("MMM yyyy", En) : Str(r, "Label") ?? key,
-                        Value = Dec(r, "Value"),
-                        Value2 = Val(r, "Value2") != null ? Dec(r, "Value2") : null,
+                        Value = Int(r, "Value"),
+                        Value2 = Val(r, "Value2") != null ? Int(r, "Value2") : null,
                         Count = Val(r, "Count") is { } c ? Convert.ToInt32(c) : null
                     };
                 }).ToList()
@@ -178,12 +187,13 @@ namespace WorkNest.Application.Services
             var monthName = month?.ToString("MMMM yyyy", En);
             (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) = metric switch
             {
-                "funnel-month" => ("Sales funnel by location", $"Bookings and quotations made in {monthName}", "Bookings", "Quotations"),
-                "staff" => ($"Quotations: {subject ?? $"User #{q.UserId}"}", "Last 6 months", "Quotations", "Converted"),
+                "funnel-month" => ("Desks booked by location", $"Bookings made in {monthName}", "Desks booked", "Bookings"),
+                "staff" => ($"Quotations: {subject ?? $"User #{q.UserId}"}", "Last 6 months", "Quotations", "Desks sold"),
                 "inquiries-type" => ($"Tour inquiries: {InquiryTypeLabels.First(t => t.Type == type).Label}",
                     "Last 6 months, all branches", "Inquiries", null),
-                "renewals-month" => ("Leases ending by location", $"Confirmed leases ending in {monthName}", "Leases ending", "Monthly value"),
-                _ => ("New-booking revenue by location", $"Invoiced on bookings made in {monthName}", "Revenue", (string?)null)
+                "renewals-month" => ("Leases ending by location", $"Confirmed leases ending in {monthName}", "Leases ending", "Desks"),
+                _ => ("Desks booked and ending by location", $"Desks booked and desks on leases ending in {monthName}", "Desks booked",
+                    (string?)"Desks ending")
             };
             return ApiResponse.Ok(dto);
         }
@@ -215,10 +225,10 @@ namespace WorkNest.Application.Services
             var userId = q.UserId is > 0 ? q.UserId : null;
 
             var s = await _repo.GetQuotationRecordsAsync(scope.LocationIdsCsv, from, to, userId, stage, MaxRows);
-            var rows = Set(s, 1).Select(r => new CeoQuotationRecordDto
+            var rows = Set(s, 1).Select(r => new SalesManagerQuotationRecordDto
             {
                 QuotationId = Int(r, "QuotationId"), QuotationNumber = Str(r, "QuotationNumber"), Customer = Str(r, "Customer"),
-                Location = Str(r, "Location"), CreatedBy = Str(r, "CreatedBy"), Status = Str(r, "Status"), Total = Dec(r, "Total"),
+                Location = Str(r, "Location"), CreatedBy = Str(r, "CreatedBy"), Status = Str(r, "Status"), Desks = Int(r, "Desks"),
                 CreatedOn = Utc(r, "CreatedOn")
             }).ToList();
 
@@ -251,10 +261,10 @@ namespace WorkNest.Application.Services
             }
 
             var s = await _repo.GetBookingRecordsAsync(scope.LocationIdsCsv, scope.NoLocation, from, to, statusIds, running, _clock.Now, MaxRows);
-            var rows = Set(s, 1).Select(r => new CeoBookingRecordDto
+            var rows = Set(s, 1).Select(r => new SalesManagerBookingRecordDto
             {
                 BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"), Location = Str(r, "Location"),
-                StartOn = Day(r, "StartOn"), EndOn = Day(r, "EndOn"), Status = Str(r, "Status"), TotalAmount = Dec(r, "TotalAmount")
+                StartOn = Day(r, "StartOn"), EndOn = Day(r, "EndOn"), Status = Str(r, "Status"), Desks = Int(r, "Desks")
             }).ToList();
 
             var parts = new List<string> { $"made {window}" };
@@ -347,17 +357,10 @@ namespace WorkNest.Application.Services
         private const string MonthError = "month must be yyyy-MM (e.g. 2026-10).";
         private const string TypeError = "type must be Website, WhatsApp, WalkIn, Reference or NotSet.";
 
-        /// <summary>Void / cancelled invoice StatusIds, as the CEO dashboard (Cancelled + legacy 5), CSV.</summary>
-        private async Task<string> VoidStatusesAsync()
-        {
-            var st = await _orderStatus.GetInvoiceStatusesAsync();
-            return string.Join(",", st.Cancelled.Append(5).Distinct());
-        }
-
         private static SalesManagerLeaseDto Lease(IDictionary<string, object?> r) => new()
         {
             BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"), Location = Str(r, "Location"),
-            EndOn = Day(r, "EndOn"), MonthlyAmount = Dec(r, "MonthlyAmount"), DaysLeft = Int(r, "DaysLeft")
+            EndOn = Day(r, "EndOn"), Desks = Int(r, "Desks"), DaysLeft = Int(r, "DaysLeft")
         };
 
         private static bool TryPeriod(string? value, out string period, out int months)
@@ -473,7 +476,6 @@ namespace WorkNest.Application.Services
         private static List<IDictionary<string, object?>> Set(List<List<IDictionary<string, object?>>> s, int i) => i < s.Count ? s[i] : new();
         private static object? Val(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) ? v : null;
         private static int Int(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : 0;
-        private static decimal Dec(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Math.Round(Convert.ToDecimal(v), 2) : 0m;
         private static string? Str(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToString(v, En) : null;
         private static string? Day(IDictionary<string, object?>? r, string key) => Val(r, key) switch
         {

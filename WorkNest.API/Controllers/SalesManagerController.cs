@@ -14,8 +14,8 @@ namespace WorkNest.API.Controllers
     /// locations a Super Admin assigned (JWT location_id + location_ids, like an admin); tour inquiries have no location
     /// and are always all of them. Super admins may open them too (all locations). Common query parameters:
     /// period = month (default) | quarter | year (to date, against the previous period, as the CEO dashboard) and
-    /// locationId (one of the caller's locations; another location answers 403). Bad parameters answer 400; before
-    /// the database update SM_01 has run, 503.
+    /// locationId (one of the caller's locations; another location answers 403). No money: counts and desks only.
+    /// Bad parameters answer 400; before the database update SM_01 (procedures) or SM_02 (desks) has run, 503.
     /// </summary>
     [ApiController]
     [Authorize(Roles = "sales_manager,super_admin,SuperAdmin")]
@@ -31,14 +31,14 @@ namespace WorkNest.API.Controllers
             _logger = logger;
         }
 
-        /// <summary>Level 1: sales funnel, team, tour inquiries, renewals and revenue, plus the locations for the picker.</summary>
+        /// <summary>Level 1: sales funnel, team, tour inquiries, renewals and desks, plus the locations for the picker.</summary>
         [HttpGet("api/sales-manager/dashboard")]
         public Task<IActionResult> Dashboard([FromQuery] string? period, [FromQuery] int? locationId) =>
             Run(locationId, false, scope => _sales.GetDashboardAsync(period, scope));
 
         /// <summary>
         /// Level 2: one chart element broken down. metric = funnel-month (month) | staff (userId) | inquiries-type (type)
-        /// | renewals-month (month) | revenue-month (month).
+        /// | renewals-month (month) | desks-month (month).
         /// </summary>
         [HttpGet("api/sales-manager/breakdown")]
         public Task<IActionResult> Breakdown([FromQuery] SalesManagerBreakdownQuery query) =>
@@ -99,8 +99,8 @@ namespace WorkNest.API.Controllers
             }
             catch (SalesManagerDatabaseUpdateMissingException ex)
             {
-                _logger.LogWarning("Sales Manager dashboard called before the database update SM_01: {Error}", ex.InnerException?.Message);
-                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(SalesManagerDatabaseUpdateMissingException.UserMessage));
+                _logger.LogWarning("Sales Manager dashboard called before the database update {Update}: {Error}", ex.Update, ex.Detail);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
             }
         }
     }
