@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Configuration;
@@ -13,7 +14,9 @@ namespace WorkNest.Application.Services
     /// 1. Book a Tour (branch -> workspace type -> seats -> name -> phone, saved as a Tour Inquiry),
     /// 2. Complaints / Support (branch -> category -> description, saved as a complaint with its branch),
     /// 3. Location & Directions (map pin + address). "0" / "menu" returns to the menu from anywhere.
-    /// Branches come from dbo.WN_Locations (active, by Id); map pins / phones from WhatsApp:Branches.
+    /// Branches come from dbo.WN_Locations (active, by Id), read with a short time limit and kept for a few minutes
+    /// (<see cref="WhatsAppBranchCache"/>); when it can't be read: the last good list, else WhatsApp:Branches, else the
+    /// built-in I-8 / F-7. Titles / map pins / phones: WhatsApp:Branches, else WN_Locations, else the built-in values.
     /// </summary>
     public class WhatsAppBotService : IWhatsAppBotService
     {
@@ -23,20 +26,26 @@ namespace WorkNest.Application.Services
         private readonly IContactService _contacts;
         private readonly IComplaintService _complaints;
         private readonly IConfiguration _config;
+        private readonly WhatsAppBranchCache _branchCache;
         private readonly ILogger<WhatsAppBotService> _logger;
 
         private static readonly string[] WorkspaceTypes = { "Shared Seat", "Private Office", "Meeting Room" };
         private static readonly string[] ComplaintCategories =
             { "Internet / WiFi", "Electricity / AC", "Cleaning", "Noise", "Access / Entry", "Booking Issue", "Other" };
 
-        // Defaults for the two branches when WhatsApp:Branches is not configured (same values the Python bot used).
+        // Last resort for the two branches when neither WN_Locations nor WhatsApp:Branches has them (same values the
+        // Python bot used); the ids are their dbo.WN_Locations ids, used for ordering only.
         private static readonly WhatsAppBranchOptions[] DefaultBranchOptions =
         {
-            new() { Name = "I-8", Title = "I-8 Markaz Branch", Latitude = 33.6684509m, Longitude = 73.0737427m, Phone = "+92 51 8444001",
+            new() { Id = 1, Name = "I-8", Title = "I-8 Markaz Branch", Latitude = 33.6684509m, Longitude = 73.0737427m, Phone = "+92 51 8444001",
                     MapsUrl = "https://www.google.com/maps/place/WorkNest+Co+Working/data=!4m2!3m1!1s0x0:0xcb86c3882189a887" },
-            new() { Name = "F-7", Title = "F-7 Markaz Branch", Latitude = 33.7215m, Longitude = 73.0558m, Phone = "+92 51 8444002",
+            new() { Id = 2, Name = "F-7", Title = "F-7 Markaz Branch", Latitude = 33.7215m, Longitude = 73.0558m, Phone = "+92 51 8444002",
                     MapsUrl = "https://www.google.com/maps/place/WorkNest+Co+Working/data=!4m2!3m1!1s0x0:0xf35c1de8139d7bc5" },
         };
+
+        // Last resort for the main menu's sales line when neither WhatsApp:SalesContacts nor WN_Locations has a number.
+        private static readonly (string Label, string Phone)[] DefaultSalesContacts =
+            { ("F-7, Islamabad", "03280256000"), ("I-8, Islamabad", "03201809696") };
 
         private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -67,7 +76,7 @@ namespace WorkNest.Application.Services
         }
 
         public WhatsAppBotService(IWhatsAppRepository repo, IWhatsAppClient client, IDbRepository db, IContactService contacts,
-            IComplaintService complaints, IConfiguration config, ILogger<WhatsAppBotService> logger)
+            IComplaintService complaints, IConfiguration config, WhatsAppBranchCache branchCache, ILogger<WhatsAppBotService> logger)
         {
             _repo = repo;
             _client = client;
@@ -75,6 +84,7 @@ namespace WorkNest.Application.Services
             _contacts = contacts;
             _complaints = complaints;
             _config = config;
+            _branchCache = branchCache;
             _logger = logger;
         }
 
@@ -84,7 +94,7 @@ namespace WorkNest.Application.Services
         {
             public string? Branch { get; set; }
             /// <summary>The branch's dbo.WN_Locations.Id (null in conversations saved before it was kept, or when the
-            /// branches could not be read from the database): the tour inquiry is saved with it (BR_01 branch routing).</summary>
+            /// branch came from a fallback list, not WN_Locations): the tour inquiry is saved with it (BR_01 branch routing).</summary>
             public int? BranchId { get; set; }
             public string? WorkspaceType { get; set; }
             public string? Seats { get; set; }
@@ -103,8 +113,13 @@ namespace WorkNest.Application.Services
             public void Reset(string state = "main_menu") { State = state; Data = new BotData(); }
         }
 
-        /// <summary>A branch to choose; <see cref="FromDatabase"/> false = the built-in defaults (no real location id).</summary>
-        private sealed record Branch(int Id, string Name, string? Address, bool FromDatabase = true);
+        /// <summary>
+        /// A branch to choose. <see cref="IsLocation"/>: <see cref="Id"/> is a WN_Locations id (the database or its last
+        /// good list); false for the WhatsApp:Branches / built-in fallbacks, whose id is never saved as a location.
+        /// Latitude / Longitude / Phone: WN_Locations' own values, when its rows carry them.
+        /// </summary>
+        private sealed record Branch(int Id, string Name, string? Address, bool IsLocation,
+            decimal? Latitude = null, decimal? Longitude = null, string? Phone = null, string? City = null);
 
         // ---- entry ------------------------------------------------------------------------------
 
@@ -128,10 +143,11 @@ namespace WorkNest.Application.Services
             // The conversation expired: start again from the main menu instead of resuming the old step.
             if (turn.NewSession) turn.Reset();
 
+            var branches = await GetBranchesAsync();
             if (messageType != "text")
-                turn.Texts.Add("Currently, I can process text messages only.\n\nPlease send a text message.\n\n" + MainMenu());
+                turn.Texts.Add("Currently, I can process text messages only.\n\nPlease send a text message.\n\n" + MainMenu(branches));
             else
-                await ReplyAsync(turn, phone, profileName, (text ?? "").Trim());
+                await ReplyAsync(turn, phone, profileName, (text ?? "").Trim(), branches);
 
             await _repo.SaveBotStateAsync(phone, turn.State, JsonSerializer.Serialize(turn.Data, Json));
 
@@ -153,16 +169,15 @@ namespace WorkNest.Application.Services
 
         // ---- conversation -----------------------------------------------------------------------
 
-        private async Task ReplyAsync(Turn t, string phone, string? profileName, string message)
+        private async Task ReplyAsync(Turn t, string phone, string? profileName, string message, List<Branch> branches)
         {
             var lower = message.ToLowerInvariant();
-            var branches = await GetBranchesAsync();
 
             // Anywhere: back to the menu.
             if (lower is "menu" or "home" or "start" or "0")
             {
                 t.Reset();
-                t.Texts.Add(MainMenu());
+                t.Texts.Add(MainMenu(branches));
                 return;
             }
 
@@ -170,7 +185,7 @@ namespace WorkNest.Application.Services
             if (!FreeTextStates.Contains(t.State) && IsGreeting(lower))
             {
                 t.Reset();
-                t.Texts.Add("Hello!\n\n" + MainMenu());
+                t.Texts.Add("Hello!\n\n" + MainMenu(branches));
                 return;
             }
 
@@ -233,7 +248,7 @@ namespace WorkNest.Application.Services
                     var b = MatchBranch(branches, lower);
                     if (b == null) { t.Texts.Add("Please select a valid branch:\n\n" + BranchList(branches) + "\nType 0 for the main menu.\n\nReply with a number."); return; }
                     t.Data.Branch = b.Name;
-                    t.Data.BranchId = b.FromDatabase ? b.Id : null;
+                    t.Data.BranchId = b.IsLocation ? b.Id : null;
                     t.State = "booking_type";
                     t.Texts.Add($"Branch: {b.Name}\n\nPlease select a workspace type:\n\n{NumberedList(WorkspaceTypes)}\nType 0 for the main menu.\n\nReply with a number.");
                     return;
@@ -268,12 +283,12 @@ namespace WorkNest.Application.Services
                     if (message.Length < 2 || message.Length > 200) { t.Texts.Add("Please enter a valid full name.\n\nType 0 for the main menu."); return; }
                     t.Data.Name = message;
                     // The phone number is the customer's WhatsApp number: no need to ask for it.
-                    await FinishTourAsync(t, phone, profileName);
+                    await FinishTourAsync(t, phone, profileName, branches);
                     return;
                 }
                 case "booking_phone": // conversations started before the phone question was removed
                 {
-                    await FinishTourAsync(t, phone, profileName);
+                    await FinishTourAsync(t, phone, profileName, branches);
                     return;
                 }
                 case "complaint_branch":
@@ -338,7 +353,7 @@ namespace WorkNest.Application.Services
             t.Reset();
             if (IsGreeting(lower))
             {
-                t.Texts.Add("Hello!\n\n" + MainMenu());
+                t.Texts.Add("Hello!\n\n" + MainMenu(branches));
             }
             else if (message == "1" || lower is "book" or "booking" or "book a tour" or "tour")
             {
@@ -373,16 +388,18 @@ namespace WorkNest.Application.Services
             else if (t.NewSession)
             {
                 // First message (or first after a while) that isn't a menu choice: just welcome them.
-                t.Texts.Add(MainMenu());
+                t.Texts.Add(MainMenu(branches));
             }
             else
             {
-                t.Texts.Add("Please select a valid option.\n\n" + MainMenu());
+                t.Texts.Add("Please select a valid option.\n\n" + MainMenu(branches));
             }
         }
 
-        /// <summary>Saves the Book a Tour answers as a Tour Inquiry, with the customer's WhatsApp number as the phone.</summary>
-        private async Task FinishTourAsync(Turn t, string whatsAppPhone, string? profileName)
+        /// <summary>Saves the Book a Tour answers as a Tour Inquiry, with the customer's WhatsApp number as the phone.
+        /// LocationId only when WN_Locations confirmed the branch; a fallback branch is saved by name ("Branch: X"),
+        /// which the inquiry matches to an active location (BR_01) or the staff assign.</summary>
+        private async Task FinishTourAsync(Turn t, string whatsAppPhone, string? profileName, List<Branch> branches)
         {
             var phone = LocalPhone(whatsAppPhone);
             var reference = "WN-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
@@ -400,7 +417,7 @@ namespace WorkNest.Application.Services
             if (!saved.IsSuccessful)
             {
                 t.State = "booking_phone"; // any reply retries the save with the same answers
-                t.Texts.Add("We could not save your tour request right now. Please reply with any message to try again, or call our sales team.\n\n" + SalesContacts());
+                t.Texts.Add("We could not save your tour request right now. Please reply with any message to try again, or call our sales team.\n\n" + SalesContacts(branches));
                 return;
             }
             t.Texts.Add("Tour request received!\n\n" +
@@ -420,20 +437,24 @@ namespace WorkNest.Application.Services
 
         // ---- texts ------------------------------------------------------------------------------
 
-        private string MainMenu() =>
+        private string MainMenu(List<Branch> branches) =>
             "Welcome to WorkNest Co-Working!\n\nHow can we help you today?\n\n" +
             "1. Book a Tour\n2. Complaints / Support\n3. Location & Directions\n\n" +
-            "Reply with a number.\n\n" + SalesContacts();
+            "Reply with a number.\n\n" + SalesContacts(branches);
 
-        /// <summary>WhatsApp:SalesContacts ([{ "Label": "F-7, Islamabad", "Phone": "..." }]) or the default sales numbers.</summary>
-        private string SalesContacts()
+        /// <summary>WhatsApp:SalesContacts ([{ "Label": "F-7, Islamabad", "Phone": "..." }]), else the phones WN_Locations
+        /// gives its branches, else the built-in sales numbers.</summary>
+        private string SalesContacts(List<Branch> branches)
         {
-            var configured = _config.GetSection("WhatsApp:SalesContacts").GetChildren()
-                .Select(c => (Label: c["Label"], Phone: c["Phone"]))
+            var contacts = _config.GetSection("WhatsApp:SalesContacts").GetChildren()
+                .Select(c => (Label: c["Label"] ?? "", Phone: c["Phone"] ?? ""))
                 .Where(c => !string.IsNullOrWhiteSpace(c.Label) && !string.IsNullOrWhiteSpace(c.Phone)).ToList();
-            if (configured.Count == 0)
-                configured = new() { ("F-7, Islamabad", "03280256000"), ("I-8, Islamabad", "03201809696") };
-            return "For direct contact to sales\n" + string.Join("\n", configured.Select(c => $"{c.Label}: {c.Phone}"));
+            if (contacts.Count == 0)
+                contacts = branches.Where(b => b.IsLocation && !string.IsNullOrWhiteSpace(b.Phone))
+                    .Select(b => (Label: string.IsNullOrWhiteSpace(b.City) ? b.Name : $"{b.Name}, {b.City}", Phone: b.Phone!)).ToList();
+            if (contacts.Count == 0)
+                contacts = DefaultSalesContacts.ToList();
+            return "For direct contact to sales\n" + string.Join("\n", contacts.Select(c => $"{c.Label}: {c.Phone}"));
         }
 
         private string LocationPrompt(List<Branch> branches) =>
@@ -473,41 +494,146 @@ namespace WorkNest.Application.Services
 
         // ---- branches ---------------------------------------------------------------------------
 
-        /// <summary>Active locations from dbo.WN_Locations in Id order (I-8 = 1, F-7 = 2), so "1. I-8 / 2. F-7".</summary>
+        /// <summary>
+        /// Active locations from dbo.WN_Locations in Id order (I-8 = 1, F-7 = 2), so "1. I-8 / 2. F-7". Read at most every
+        /// <see cref="WhatsAppBranchCache.Lifetime"/>, and a reply waits at most <see cref="WhatsAppBranchCache.LoadTimeout"/>
+        /// for it. When it fails, is slow or has no active location: the last good list, else WhatsApp:Branches, else the
+        /// built-in I-8 / F-7 (a warning names the fallback used).
+        /// </summary>
         private async Task<List<Branch>> GetBranchesAsync()
+        {
+            if (_branchCache.IsFresh && _branchCache.LastGood is { } fresh) return FromLocationRows(fresh);
+
+            string problem;
+            Exception? error = null;
+            try
+            {
+                var load = _db.GetAllLocationsAsync();
+                using var stopWaiting = new CancellationTokenSource();
+                var timeLimit = Task.Delay(_branchCache.LoadTimeout, stopWaiting.Token);
+                if (await Task.WhenAny(load, timeLimit) == load)
+                {
+                    stopWaiting.Cancel();
+                    var rows = UsableRows(await load);
+                    if (rows.Count > 0)
+                    {
+                        _branchCache.Store(rows);
+                        return FromLocationRows(rows);
+                    }
+                    problem = "WN_Locations has no active location";
+                }
+                else
+                {
+                    problem = $"WN_Locations did not answer within {_branchCache.LoadTimeout.TotalSeconds:0.#} s";
+                    _ = StoreWhenLoadedAsync(load, _branchCache, _logger);   // a late answer still serves the next messages
+                }
+            }
+            catch (Exception ex)
+            {
+                problem = "could not load WN_Locations";
+                error = ex;
+            }
+
+            if (_branchCache.LastGood is { } last)
+            {
+                _logger.LogWarning(error, "WhatsApp bot: {Problem}; using the last good branch list (loaded {LoadedAtUtc:u})",
+                    problem, _branchCache.LoadedAtUtc);
+                return FromLocationRows(last);
+            }
+            var configured = ConfiguredBranchOptions().Where(o => o.Name.Length > 0).ToList();
+            if (configured.Count > 0)
+            {
+                _logger.LogWarning(error, "WhatsApp bot: {Problem}; using the WhatsApp:Branches configuration", problem);
+                return FallbackBranches(configured);
+            }
+            _logger.LogWarning(error, "WhatsApp bot: {Problem}; using the built-in branches (I-8, F-7)", problem);
+            return FallbackBranches(DefaultBranchOptions);
+        }
+
+        private static async Task StoreWhenLoadedAsync(Task<IEnumerable<IDictionary<string, object?>>> load,
+            WhatsAppBranchCache cache, ILogger logger)
         {
             try
             {
-                var rows = await _db.GetAllLocationsAsync();
-                var list = rows
-                    .Select(r => new Branch(
-                        r.TryGetValue("Id", out var id) && id is not null ? Convert.ToInt32(id) : 0,
-                        r.TryGetValue("Name", out var n) ? n?.ToString()?.Trim() ?? "" : "",
-                        r.TryGetValue("Address", out var a) ? a?.ToString()?.Trim() : null))
-                    .Where(b => b.Name.Length > 0)
-                    .OrderBy(b => b.Id)
-                    .ToList();
-                if (list.Count > 0) return list;
+                var rows = UsableRows(await load);
+                if (rows.Count > 0) cache.Store(rows);
             }
-            catch (Exception ex) { _logger.LogWarning(ex, "WhatsApp bot: could not load WN_Locations"); }
-            return DefaultBranchOptions.Select((o, i) => new Branch(i + 1, o.Name, null, FromDatabase: false)).ToList();
+            catch (Exception ex) { logger.LogWarning(ex, "WhatsApp bot: the late WN_Locations load failed"); }
         }
 
-        private WhatsAppBranchOptions Options(Branch b)
+        /// <summary>Rows with a name (null-safe).</summary>
+        private static List<IDictionary<string, object?>> UsableRows(IEnumerable<IDictionary<string, object?>>? rows) =>
+            (rows ?? Enumerable.Empty<IDictionary<string, object?>>()).Where(r => Text(r, "Name") != null).ToList();
+
+        /// <summary>WN_Locations rows (dbo.WN_Locations_GetAll) as branches in Id order. Latitude / Longitude / Phone are
+        /// taken when the rows carry them (WN_Locations_GetAll returns none of them today).</summary>
+        private static List<Branch> FromLocationRows(IEnumerable<IDictionary<string, object?>> rows) =>
+            rows.Select(r => new Branch(
+                    r.TryGetValue("Id", out var id) && id is not null and not DBNull ? Convert.ToInt32(id) : 0,
+                    Text(r, "Name") ?? "",
+                    Text(r, "Address"),
+                    IsLocation: true,
+                    Latitude: Number(r, "Latitude"),
+                    Longitude: Number(r, "Longitude"),
+                    Phone: Text(r, "Phone"),
+                    City: Text(r, "CityName")))
+                .Where(b => b.Name.Length > 0)
+                .OrderBy(b => b.Id)
+                .ToList();
+
+        /// <summary>A fallback list (WhatsApp:Branches or the built-in one): ordered by its configured ids, never saved as
+        /// a location id (WN_Locations did not confirm it); the name still goes with the tour inquiry / complaint.</summary>
+        private static List<Branch> FallbackBranches(IEnumerable<WhatsAppBranchOptions> options) =>
+            options.OrderBy(o => o.Id ?? int.MaxValue)
+                .Select(o => new Branch(o.Id ?? 0, o.Name.Trim(), null, IsLocation: false))
+                .ToList();
+
+        private static string? Text(IDictionary<string, object?> row, string key) =>
+            row.TryGetValue(key, out var v) && v is not null and not DBNull && v.ToString()!.Trim() is { Length: > 0 } s ? s : null;
+
+        private static decimal? Number(IDictionary<string, object?> row, string key)
         {
-            var configured = _config.GetSection("WhatsApp:Branches").GetChildren()
+            if (!row.TryGetValue(key, out var v) || v is null or DBNull) return null;
+            try { return Convert.ToDecimal(v, CultureInfo.InvariantCulture); } catch { return null; }
+        }
+
+        /// <summary>WhatsApp:Branches: [{ "Id": 1, "Name": "I-8", "Title": "...", "Latitude": .., "Longitude": .., "Phone": "...", "MapsUrl": "..." }].</summary>
+        private List<WhatsAppBranchOptions> ConfiguredBranchOptions() =>
+            _config.GetSection("WhatsApp:Branches").GetChildren()
                 .Select(c => new WhatsAppBranchOptions
                 {
-                    Name = c["Name"] ?? "",
+                    Id = int.TryParse(c["Id"], out var id) ? id : null,
+                    Name = (c["Name"] ?? "").Trim(),
                     Title = c["Title"],
-                    Latitude = decimal.TryParse(c["Latitude"], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var la) ? la : null,
-                    Longitude = decimal.TryParse(c["Longitude"], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lo) ? lo : null,
+                    Latitude = decimal.TryParse(c["Latitude"], NumberStyles.Float, CultureInfo.InvariantCulture, out var la) ? la : null,
+                    Longitude = decimal.TryParse(c["Longitude"], NumberStyles.Float, CultureInfo.InvariantCulture, out var lo) ? lo : null,
                     Phone = c["Phone"],
                     MapsUrl = c["MapsUrl"]
-                });
-            return configured.Concat(DefaultBranchOptions).FirstOrDefault(o => Norm(o.Name) == Norm(b.Name))
-                   ?? new WhatsAppBranchOptions { Name = b.Name };
+                })
+                .ToList();
+
+        /// <summary>What the bot shows for a branch, field by field: WhatsApp:Branches (matched by name), else what
+        /// WN_Locations gives, else the built-in values for I-8 / F-7.</summary>
+        private WhatsAppBranchOptions Options(Branch b)
+        {
+            var cfg = ConfiguredBranchOptions().FirstOrDefault(o => Norm(o.Name) == Norm(b.Name));
+            var builtIn = DefaultBranchOptions.FirstOrDefault(o => Norm(o.Name) == Norm(b.Name));
+            var (lat, lng) = cfg is { Latitude: not null, Longitude: not null } ? (cfg.Latitude, cfg.Longitude)
+                : b is { Latitude: not null, Longitude: not null } ? (b.Latitude, b.Longitude)
+                : (builtIn?.Latitude, builtIn?.Longitude);
+            return new WhatsAppBranchOptions
+            {
+                Id = b.Id,
+                Name = b.Name,
+                Title = NonEmpty(cfg?.Title) ?? builtIn?.Title,
+                Latitude = lat,
+                Longitude = lng,
+                Phone = NonEmpty(cfg?.Phone) ?? b.Phone ?? builtIn?.Phone,
+                MapsUrl = NonEmpty(cfg?.MapsUrl) ?? builtIn?.MapsUrl
+            };
         }
+
+        private static string? NonEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
         private static Branch? MatchBranch(List<Branch> branches, string lower)
         {

@@ -65,6 +65,9 @@ namespace WorkNest.Application.DTOs.WhatsApp
     /// <summary>Map pin / contact details of a branch (WhatsApp:Branches in appsettings, matched by WN_Locations.Name).</summary>
     public class WhatsAppBranchOptions
     {
+        /// <summary>The branch's dbo.WN_Locations.Id, if known: orders the branch list the bot falls back to when
+        /// WN_Locations can't be read (it is never saved as a location id unless WN_Locations confirmed it).</summary>
+        public int? Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Title { get; set; }
         public decimal? Latitude { get; set; }
