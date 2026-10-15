@@ -16,21 +16,33 @@ namespace WorkNest.Application.Services
         private readonly IComplaintRepository _repo;
         private readonly IChatbotNotifier _bot;
         private readonly IBusinessClock _clock;
+        private readonly IDbRepository _db;
 
         /// <summary>A customer's 1 / 2 reply counts only within this many days of the "resolved" message.</summary>
         private const int ReplyWindowDays = 7;
 
-        public ComplaintService(IComplaintRepository repo, IChatbotNotifier bot, IBusinessClock clock)
+        public ComplaintService(IComplaintRepository repo, IChatbotNotifier bot, IBusinessClock clock, IDbRepository db)
         {
             _repo = repo;
             _bot = bot;
             _clock = clock;
+            _db = db;
         }
 
-        public Task<(List<ComplaintDto> Items, int Total)> GetListAsync(int page, int limit, string? search, string? status) =>
-            _repo.GetListAsync(Math.Max(1, page), Math.Clamp(limit, 1, 200), search, NormalizeStatus(status));
+        public Task<(List<ComplaintDto> Items, int Total)> GetListAsync(int page, int limit, string? search, string? status,
+            BranchFilter? branch = null) =>
+            _repo.GetListAsync(Math.Max(1, page), Math.Clamp(limit, 1, 200), search, NormalizeStatus(status), branch);
 
-        public async Task<ApiResponse> CreateManualAsync(ComplaintCreateRequest request, int? actorId)
+        public async Task<BranchChoice> ChooseBranchAsync(int? locationId, string? branchName, BranchScope scope, bool change = false)
+        {
+            var active = BranchScope.Options(await _db.GetAllLocationsAsync());
+            // Older forms send only the branch name: the location with that name is the chosen one.
+            var requested = locationId is > 0 ? locationId : (change ? null : BranchScope.ByName(branchName, active)?.Id);
+            return change ? scope.ForChange(requested, active) : scope.ForNew(requested, active);
+        }
+
+        public async Task<ApiResponse> CreateManualAsync(ComplaintCreateRequest request, int? actorId, BranchChoice? branch = null,
+            BranchScope? scope = null)
         {
             var error = Validate(request.Category, request.Description);
             if (error != null) return ApiResponse.Fail(error);
@@ -45,24 +57,41 @@ namespace WorkNest.Application.Services
                 CustomerName = Clean(request.CustomerName),
                 PhoneNumber = NormalizePhone(request.PhoneNumber),
                 Email = Clean(request.Email),
-                Branch = Clean(request.Branch),
+                // The chosen location's name; without one, staff who see every branch keep a typed branch as before.
+                Branch = branch?.Location?.Name is { } name ? Clean(name)
+                    : (scope?.IsBound == true || request.LocationId is > 0 ? null : Clean(request.Branch)),
                 Category = request.Category.Trim(),
                 Description = request.Description.Trim()
             };
+            if (complaint.Branch is { Length: > 50 }) return ApiResponse.Fail("The branch name can be at most 50 characters.");
             var saved = await InsertWithNumberAsync(complaint, actorId);
             return saved == null
                 ? ApiResponse.Fail("The complaint could not be saved. Please try again.")
-                : ApiResponse.Ok(new { id = saved.Value.Id, complaintNo = saved.Value.No }, $"Complaint {saved.Value.No} recorded.");
+                : ApiResponse.Ok(new { id = saved.Value.Id, complaintNo = saved.Value.No, branch = complaint.Branch, locationId = branch?.LocationId },
+                    $"Complaint {saved.Value.No} recorded.");
         }
 
-        public async Task<ApiResponse> UpdateStatusAsync(int id, ComplaintStatusUpdateRequest request, int? actorId)
+        public async Task<ApiResponse> UpdateBranchAsync(int id, BranchOption? location, BranchScope scope, int? actorId)
+        {
+            var complaint = await _repo.GetByIdAsync(id);
+            if (complaint == null || !scope.Sees(complaint.LocationId)) return ApiResponse.Fail("Complaint not found.");
+            var branch = Clean(location?.Name);
+            if (branch is { Length: > 50 }) return ApiResponse.Fail("The branch name can be at most 50 characters.");
+            var updated = await _repo.UpdateBranchAsync(id, branch, actorId);
+            if (updated is null) return ApiResponse.Fail(BranchMessages.ComplaintsUpdateMissing);
+            if (updated == 0) return ApiResponse.Fail("Complaint not found.");
+            return ApiResponse.Ok(new { branch, locationId = location?.Id, locationName = location?.Name }, "Branch saved.");
+        }
+
+        public async Task<ApiResponse> UpdateStatusAsync(int id, ComplaintStatusUpdateRequest request, int? actorId, BranchScope? scope = null)
         {
             var status = NormalizeStatus(request.Status);
             if (status == null) return ApiResponse.Fail("Choose Open, In Progress, Resolved or Closed.");
             if (request.StaffNotes is { Length: > 1000 }) return ApiResponse.Fail("Notes can be at most 1000 characters.");
 
             var complaint = await _repo.GetByIdAsync(id);
-            if (complaint == null) return ApiResponse.Fail("Complaint not found.");
+            // Location-bound staff change only the complaints they can see (their branches + those without one).
+            if (complaint == null || (scope != null && !scope.Sees(complaint.LocationId))) return ApiResponse.Fail("Complaint not found.");
 
             await _repo.UpdateStatusAsync(id, status, Clean(request.StaffNotes), actorId);
 

@@ -9,6 +9,7 @@ using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.DTOs.Announcement;
 using WorkNest.Application.DTOs.HikDevice;
+using WorkNest.Application.Helpers;
 
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
@@ -2485,7 +2486,28 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
 
         // --- Contact ---
 
-        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null)
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
+            BranchFilter? branch = null)
+        {
+            var scoped = branch is { IsNone: false } ? branch : null;
+            List<IDictionary<string, object?>> rows;
+            try
+            {
+                rows = await ReadContactListAsync(page, limit, search, inquiryType, scoped);
+            }
+            catch (SqlException ex) when (ex.Number == 8144 && scoped is not null)
+            {
+                // "Too many arguments": the database does not have BR_01 yet (WN_Contacts_GetList without @LocationIds).
+                if (scoped.Requested)
+                    throw new InvalidOperationException("Filtering by branch needs the database update BR_01_branch_routing.");
+                rows = await ReadContactListAsync(page, limit, search, inquiryType, null);   // everyone sees every inquiry, as before
+            }
+            AddLocationColumns(rows);
+            int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
+            return (rows, total);
+        }
+
+        private async Task<List<IDictionary<string, object?>>> ReadContactListAsync(int page, int limit, string? search, string? inquiryType, BranchFilter? branch)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_GetList", c);
@@ -2494,44 +2516,85 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
             // Only sent when filtering, so the list keeps working on a database without CT_01 (no @InquiryType there).
             if (!string.IsNullOrWhiteSpace(inquiryType)) cmd.Parameters.AddWithValue("@InquiryType", inquiryType);
+            // Only sent when there is a branch filter, so the list keeps working on a database without BR_01.
+            AddBranchParameters(cmd, branch);
             SqlDataReader r;
             try { r = await cmd.ExecuteReaderAsync(); }
-            catch (SqlException ex) when (ex.Number == 8144)
+            catch (SqlException ex) when (ex.Number == 8144 && branch is null)
             {
                 throw new InvalidOperationException("Filtering by Type needs the database update Database/Contact/CT_01_inquiry_type.txt.");
             }
             await using var _ = r;
-            var rows = await ReadAll(r);
-            int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
-            return (rows, total);
+            return await ReadAll(r);
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top)
+        /// <summary>@LocationIds (CSV, "-1" = none) and @IncludeNoLocation of the BR_01 list procedures.</summary>
+        private static void AddBranchParameters(SqlCommand cmd, BranchFilter? branch)
+        {
+            if (branch is null || branch.IsNone) return;
+            cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = branch.Csv!;
+            cmd.Parameters.Add("@IncludeNoLocation", SqlDbType.Bit).Value = branch.IncludeUnassigned;
+        }
+
+        /// <summary>Rows read before BR_01 have no branch columns: add them empty, so every row has locationId / locationName.</summary>
+        private static void AddLocationColumns(IEnumerable<IDictionary<string, object?>> rows)
+        {
+            foreach (var row in rows)
+            {
+                if (!row.ContainsKey("LocationId")) row["LocationId"] = null;
+                if (!row.ContainsKey("LocationName")) row["LocationName"] = null;
+            }
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top, BranchFilter? branch = null)
+        {
+            var scoped = branch is { IsNone: false } ? branch : null;
+            List<IDictionary<string, object?>> rows;
+            try
+            {
+                rows = await ReadRecentContactsAsync(top, scoped);
+            }
+            catch (SqlException ex) when (ex.Number == 8144 && scoped is not null)
+            {
+                rows = await ReadRecentContactsAsync(top, null);   // no BR_01 yet: every inquiry, as before
+            }
+            AddLocationColumns(rows);
+            return rows;
+        }
+
+        private async Task<List<IDictionary<string, object?>>> ReadRecentContactsAsync(int top, BranchFilter? branch)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_GetRecent", c);
             cmd.Parameters.AddWithValue("@Top", top);
+            AddBranchParameters(cmd, branch);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
 
         public async Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message,
-            string? inquiryType = null, string? referenceName = null)
+            string? inquiryType = null, string? referenceName = null, int? locationId = null)
         {
             try
             {
-                return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, inquiryType, referenceName);
+                return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, inquiryType, referenceName, locationId);
+            }
+            catch (SqlException ex) when (ex.Number == 8144 && locationId is not null)
+            {
+                // "Too many arguments": the database does not have BR_01 yet (WN_Contacts_Insert without @LocationId).
+                // Save the inquiry without its branch (the branch name stays in the message) rather than lose it.
+                return await InsertContactAsync(contactType, userId, name, email, phone, message, inquiryType, referenceName, null);
             }
             catch (SqlException ex) when (ex.Number == 8144 && inquiryType is not null)
             {
                 // "Too many arguments": the database does not have CT_01 yet (WN_Contacts_Insert without @InquiryType).
                 // Save the inquiry without its Type rather than lose it (website / WhatsApp forms keep working).
-                return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, null, null);
+                return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, null, null, null);
             }
         }
 
         private async Task<(int? Id, string? PublicId)> InsertContactCoreAsync(string contactType, int? userId, string name, string email, string? phone, string? message,
-            string? inquiryType, string? referenceName)
+            string? inquiryType, string? referenceName, int? locationId)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Contacts_Insert", c);
@@ -2546,6 +2609,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 cmd.Parameters.AddWithValue("@InquiryType", inquiryType);
                 cmd.Parameters.AddWithValue("@ReferenceName", (object?)referenceName ?? DBNull.Value);
             }
+            if (locationId is not null) cmd.Parameters.Add("@LocationId", SqlDbType.Int).Value = locationId.Value;
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -2554,6 +2618,21 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                 row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
             }
             return (null, null);
+        }
+
+        public async Task<int?> UpdateContactLocationAsync(Guid publicId, int? locationId, int? updatedById, string? scopeLocationIds)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Contacts_UpdateLocation", c);
+                cmd.Parameters.Add("@PublicId", SqlDbType.UniqueIdentifier).Value = publicId;
+                cmd.Parameters.Add("@LocationId", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
+                cmd.Parameters.Add("@UpdatedById", SqlDbType.Int).Value = (object?)updatedById ?? DBNull.Value;
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = (object?)scopeLocationIds ?? DBNull.Value;
+                return Convert.ToInt32(await cmd.ExecuteScalarAsync() ?? 0);
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: BR_01 not run
         }
 
         public async Task<int?> UpdateContactInquiryTypeAsync(Guid publicId, string inquiryType, string? referenceName, int? updatedById)
@@ -2634,18 +2713,20 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return result;
         }
 
-        public async Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today)
+        public async Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today, IReadOnlyCollection<int>? locationIds = null)
         {
             var list = new List<(int, DateTime)>();
             try
             {
                 await using var c = await Open();
-                await using var cmd = new SqlCommand(@"
+                // Location-bound staff: their inquiries + those without a branch (once BR_01 has added the column).
+                var branch = BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), "ct", locationIds);
+                await using var cmd = new SqlCommand($@"
                     SELECT f.ContactId, f.FollowUpOn
                     FROM (SELECT ContactId, Outcome, FollowUpOn, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) AS rn
                           FROM dbo.WN_ContactFeedback WITH (NOLOCK)) f
                     JOIN dbo.WN_Contacts ct WITH (NOLOCK) ON ct.Id = f.ContactId
-                    WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today;", c);
+                    WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today{branch};", c);
                 cmd.Parameters.Add("@Today", SqlDbType.Date).Value = today.Date;
                 await using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.GetDateTime(1)));
@@ -2859,11 +2940,13 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         /// <summary>
         /// Admin sidebar badges (read-only, polled every 60 s by every open admin tab): one row of scalar counts of
         /// work waiting on staff right now. @Loc limits the counts that have a location (via the space) to that
-        /// location; contacts and machines stay global. Status values are the ones the screens and services write:
+        /// location; machines stay global; tour inquiries (contacts) follow @branchLocationIds (their branches + those without
+        /// one, BR_01). Status values are the ones the screens and services write:
         /// agreements 'EmailFailed' / signed copy on file (WN_Agreements.SignedPdfPath), contacts StatusId 1 = New,
         /// bookings 1 / 5 = old / new Pending, quotations 'Accepted' / 'Declined', KYC document Status 0 = Pending.
         /// </summary>
-        public async Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow)
+        public async Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
+            IReadOnlyCollection<int>? branchLocationIds = null)
         {
             // One row per item waiting on staff: K = badge, ItemKey = what "read" remembers. The key includes the
             // part that makes an item new again (e.g. agreement status, quotation status, KYC document count).
@@ -2873,6 +2956,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             await using var c = await Open();
             // Offline machines of the caller's location (and unassigned ones) once machines have a location.
             var machinesLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationId is int l ? new[] { l } : null);
+            // Tour inquiries of the caller's locations and those without a branch (once BR_01 has added WN_Contacts.LocationId).
+            var contactsLoc = BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), "ct", branchLocationIds);
             var sql = $@"
                 DECLARE @Items TABLE (K VARCHAR(20) NOT NULL, ItemKey NVARCHAR(100) NOT NULL);
 
@@ -2908,7 +2993,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                    AND (@Loc IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = q.SpaceId AND s.LocationId = @Loc))
                 UNION ALL
                 -- contact + book-tour messages still New (WN_Contacts_Insert writes StatusId 1)
-                SELECT 'Contacts', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1
+                SELECT 'Contacts', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{contactsLoc}
                 UNION ALL
                 -- bookings waiting for confirmation (same rule as the dashboard's PendingConfirmations)
                 SELECT 'Bookings', CAST(b.Id AS NVARCHAR(20))

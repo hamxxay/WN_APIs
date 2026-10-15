@@ -83,6 +83,9 @@ namespace WorkNest.Application.Services
         private sealed class BotData
         {
             public string? Branch { get; set; }
+            /// <summary>The branch's dbo.WN_Locations.Id (null in conversations saved before it was kept, or when the
+            /// branches could not be read from the database): the tour inquiry is saved with it (BR_01 branch routing).</summary>
+            public int? BranchId { get; set; }
             public string? WorkspaceType { get; set; }
             public string? Seats { get; set; }
             public string? Name { get; set; }
@@ -100,7 +103,8 @@ namespace WorkNest.Application.Services
             public void Reset(string state = "main_menu") { State = state; Data = new BotData(); }
         }
 
-        private sealed record Branch(int Id, string Name, string? Address);
+        /// <summary>A branch to choose; <see cref="FromDatabase"/> false = the built-in defaults (no real location id).</summary>
+        private sealed record Branch(int Id, string Name, string? Address, bool FromDatabase = true);
 
         // ---- entry ------------------------------------------------------------------------------
 
@@ -229,6 +233,7 @@ namespace WorkNest.Application.Services
                     var b = MatchBranch(branches, lower);
                     if (b == null) { t.Texts.Add("Please select a valid branch:\n\n" + BranchList(branches) + "\nType 0 for the main menu.\n\nReply with a number."); return; }
                     t.Data.Branch = b.Name;
+                    t.Data.BranchId = b.FromDatabase ? b.Id : null;
                     t.State = "booking_type";
                     t.Texts.Add($"Branch: {b.Name}\n\nPlease select a workspace type:\n\n{NumberedList(WorkspaceTypes)}\nType 0 for the main menu.\n\nReply with a number.");
                     return;
@@ -387,6 +392,7 @@ namespace WorkNest.Application.Services
                 Name = d.Name ?? profileName ?? "WhatsApp customer",
                 Phone = phone,
                 Branch = d.Branch,
+                LocationId = d.BranchId,
                 WorkspaceType = d.WorkspaceType,
                 Seats = int.TryParse(d.Seats, out var s) ? s : null,
                 Reference = reference
@@ -484,7 +490,7 @@ namespace WorkNest.Application.Services
                 if (list.Count > 0) return list;
             }
             catch (Exception ex) { _logger.LogWarning(ex, "WhatsApp bot: could not load WN_Locations"); }
-            return DefaultBranchOptions.Select((o, i) => new Branch(i + 1, o.Name, null)).ToList();
+            return DefaultBranchOptions.Select((o, i) => new Branch(i + 1, o.Name, null, FromDatabase: false)).ToList();
         }
 
         private WhatsAppBranchOptions Options(Branch b)

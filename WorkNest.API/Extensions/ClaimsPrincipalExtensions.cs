@@ -99,6 +99,15 @@ namespace WorkNest.API.Extensions
         }
 
         /// <summary>
+        /// Branch routing of tour inquiries and complaints: location-bound users see their locations (location_id +
+        /// location_ids) plus the items without a branch; everyone else (super admin, CEO, receptionist) sees everything.
+        /// </summary>
+        public static WorkNest.Application.Helpers.BranchScope GetBranchScope(this ClaimsPrincipal user) =>
+            user?.Identity?.IsAuthenticated == true && user.IsLocationBoundRole()
+                ? WorkNest.Application.Helpers.BranchScope.Bound(user.GetLocationIds())
+                : WorkNest.Application.Helpers.BranchScope.Everything;
+
+        /// <summary>
         /// The CEO: read-only, every location (not location-bound, like a super admin), but only the endpoints marked
         /// [CeoAllowed] (CeoAccessFilter answers 403 everywhere else). Not staff.
         /// </summary>

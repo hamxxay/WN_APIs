@@ -112,7 +112,9 @@ namespace WorkNest.API.Controllers
                 return Ok(new Dictionary<string, int>()); // e.g. receptionist: no admin sidebar routes
 
             var scope = User.IsLocationBoundRole() ? User.GetLocationId() : null;
-            var badges = await _dashboard.GetNavBadgesAsync(scope, includeMachines: isAdmin, User.GetEmail());
+            // Tour inquiries and complaints: every branch the user is assigned to, plus the ones without a branch.
+            var branches = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
+            var badges = await _dashboard.GetNavBadgesAsync(scope, includeMachines: isAdmin, User.GetEmail(), branches);
             if (!isAdmin)
                 badges = badges.Where(kv => SalesExecutiveRoutes.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
             else
@@ -155,7 +157,8 @@ namespace WorkNest.API.Controllers
                 : allowed.ToList();
 
             var scope = User.IsLocationBoundRole() ? User.GetLocationId() : null;
-            if (!await _dashboard.MarkNavBadgesReadAsync(scope, email, routes))
+            var branches = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
+            if (!await _dashboard.MarkNavBadgesReadAsync(scope, email, routes, branches))
                 return StatusCode(503, new { isSuccessful = false, message = "Mark as read is not set up yet: the WN_NAV_BadgeReads table is missing." });
             return Ok(new { isSuccessful = true });
         }

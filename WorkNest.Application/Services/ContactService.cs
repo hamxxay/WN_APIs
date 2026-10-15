@@ -21,9 +21,10 @@ namespace WorkNest.Application.Services
             _clock = clock;
         }
 
-        public async Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null)
+        public async Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
+            BranchFilter? branch = null)
         {
-            var (rows, total) = await _db.GetContactsAsync(page, limit, search, InquiryTypes.Normalize(inquiryType));
+            var (rows, total) = await _db.GetContactsAsync(page, limit, search, InquiryTypes.Normalize(inquiryType), branch);
             var list = rows.ToList();
             // Each inquiry's latest feedback (outcome, reason, follow-up date, quotation) for the Feedback column.
             var ids = list.Select(r => r.TryGetValue("Id", out var v) && v is not null && v is not DBNull ? Convert.ToInt32(v) : 0);
@@ -59,14 +60,37 @@ namespace WorkNest.Application.Services
             var message = string.Join(" | ", parts);
             if (message.Length > 1000) message = message[..1000];
 
+            // The branch the customer picked: its WN_Locations.Id, so the inquiry goes to that branch's staff. A bot
+            // conversation started before the id was kept only has the name: matched to an active location.
+            var locationId = await BotBranchAsync(request.LocationId, request.Branch);
+
             // WhatsApp gives no email: stored empty (the Tour Inquiries page shows "-").
-            var (newId, publicId) = await _db.InsertContactAsync("book_tour", null, name, "", phone, message, InquiryTypes.WhatsApp);
+            var (newId, publicId) = await _db.InsertContactAsync("book_tour", null, name, "", phone, message, InquiryTypes.WhatsApp, null, locationId);
             _ = Task.Run(async () =>
             {
                 try { await _email.SendTourNotificationAsync(name, "", phone, message); }
                 catch { }
             });
-            return ApiResponse.Ok(new { id = newId, publicId }, "Tour inquiry recorded.");
+            return ApiResponse.Ok(new { id = newId, publicId, locationId }, "Tour inquiry recorded.");
+        }
+
+        /// <summary>The bot's branch as an active location id (by id, else by name); null when it matches none.</summary>
+        private async Task<int?> BotBranchAsync(int? locationId, string? branchName)
+        {
+            if (locationId is not > 0 && string.IsNullOrWhiteSpace(branchName)) return null;
+            List<BranchOption> active;
+            try { active = BranchScope.Options(await _db.GetAllLocationsAsync()); }
+            catch { return locationId is > 0 ? locationId : null; }   // keep the bot's id rather than lose the branch
+            if (locationId is > 0 && active.Any(l => l.Id == locationId)) return locationId;
+            return BranchScope.ByName(branchName, active)?.Id;
+        }
+
+        public async Task<BranchChoice> ChooseBranchAsync(int? requested, BranchScope scope, bool change = false)
+        {
+            // Active locations are read only when a branch was chosen or one has to be filled in.
+            var needsLocations = requested is > 0 || (!change && scope.Locations is { Count: 1 });
+            var active = needsLocations ? BranchScope.Options(await _db.GetAllLocationsAsync()) : new List<BranchOption>();
+            return change ? scope.ForChange(requested, active) : scope.ForNew(requested, active);
         }
 
         public async Task<ApiResponse> SaveFeedbackAsync(int id, ContactFeedbackRequest request, int? actorId)
@@ -101,10 +125,11 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(new { outcome, followUpOn = followUp?.ToString("yyyy-MM-dd") }, "Feedback saved.");
         }
 
-        public async Task<IEnumerable<object>> GetRecentContactsAsync(int top) =>
-            (await _db.GetRecentContactsAsync(top)).Cast<object>();
+        public async Task<IEnumerable<object>> GetRecentContactsAsync(int top, BranchFilter? branch = null) =>
+            (await _db.GetRecentContactsAsync(top, branch)).Cast<object>();
 
-        public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail, bool fromStaff = false)
+        public async Task<ApiResponse> CreateContactAsync(ContactRequest request, string contactType, string? userEmail, bool fromStaff = false,
+            int? locationId = null)
         {
             var phoneError = Phone.Validate(request.Phone);
             if (phoneError != null) return ApiResponse.Fail(phoneError);
@@ -130,7 +155,7 @@ namespace WorkNest.Application.Services
             }
 
             var (newId, publicId) = await _db.InsertContactAsync(
-                contactType, userId, request.FullName, request.Email, request.Phone, request.Message, inquiryType, referenceName);
+                contactType, userId, request.FullName, request.Email, request.Phone, request.Message, inquiryType, referenceName, locationId);
 
             _ = Task.Run(async () =>
             {
@@ -138,7 +163,17 @@ namespace WorkNest.Application.Services
                 catch { }
             });
 
-            return ApiResponse.Ok(new { id = newId, publicId }, "Contact recorded.");
+            return ApiResponse.Ok(new { id = newId, publicId, locationId }, "Contact recorded.");
+        }
+
+        public async Task<ApiResponse> UpdateLocationAsync(Guid publicId, BranchOption? location, BranchScope scope, string? actorEmail)
+        {
+            int? actorId = string.IsNullOrWhiteSpace(actorEmail) ? null : (await _db.GetUserIdByEmailAsync(actorEmail)).Item1;
+            var scopeCsv = scope.Locations is null ? null : (scope.Locations.Count == 0 ? "-1" : string.Join(",", scope.Locations));
+            var updated = await _db.UpdateContactLocationAsync(publicId, location?.Id, actorId, scopeCsv);
+            if (updated is null) return ApiResponse.Fail(BranchMessages.ContactsUpdateMissing);
+            if (updated == 0) return ApiResponse.Fail("Inquiry not found. Older website bookings can't be changed.");
+            return ApiResponse.Ok(new { locationId = location?.Id, locationName = location?.Name }, "Branch saved.");
         }
 
         public async Task<ApiResponse> UpdateInquiryTypeAsync(Guid publicId, ContactInquiryTypeRequest request, string? actorEmail)

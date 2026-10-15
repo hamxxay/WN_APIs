@@ -17,6 +17,10 @@ namespace WorkNest.Application.DTOs.Complaint
         public string? PhoneNumber { get; set; }
         public string? Email { get; set; }
         public string? Branch { get; set; }
+        /// <summary>The location whose name is <see cref="Branch"/> (case and spaces ignored); null = no branch or no such location.</summary>
+        public int? LocationId { get; set; }
+        /// <summary>That location's name as stored in dbo.WN_Locations.</summary>
+        public string? LocationName { get; set; }
         public string Category { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Status { get; set; } = ComplaintStatus.Open;
@@ -38,9 +42,21 @@ namespace WorkNest.Application.DTOs.Complaint
         public string? CustomerName { get; set; }
         public string? PhoneNumber { get; set; }
         public string? Email { get; set; }
+        /// <summary>Older forms: the branch name. Used only when <see cref="LocationId"/> is empty.</summary>
         public string? Branch { get; set; }
+        /// <summary>
+        /// The branch (dbo.WN_Locations.Id), saved as its name in WN_Complaints.Branch. Location-bound staff: one of their
+        /// own locations (one location: always that one). Others: an active location, or empty = no branch.
+        /// </summary>
+        public int? LocationId { get; set; }
         public string Category { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
+    }
+
+    /// <summary>Set / change a complaint's branch. Null = no branch (not for location-bound staff).</summary>
+    public class ComplaintBranchUpdateRequest
+    {
+        public int? LocationId { get; set; }
     }
 
     public class ComplaintStatusUpdateRequest
@@ -58,6 +74,8 @@ namespace WorkNest.Application.DTOs.Complaint
         public string Name { get; set; } = string.Empty;
         public string Phone { get; set; } = string.Empty;
         public string? Branch { get; set; }
+        /// <summary>The branch's dbo.WN_Locations.Id, saved as WN_Contacts.LocationId (BR_01); the name stays in the message.</summary>
+        public int? LocationId { get; set; }
         public string? WorkspaceType { get; set; }
         public int? Seats { get; set; }
         /// <summary>The bot's own booking reference (WN-XXXXXXXX), kept in the message.</summary>
