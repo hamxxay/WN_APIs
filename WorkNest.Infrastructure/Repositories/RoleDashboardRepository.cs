@@ -115,7 +115,8 @@ namespace WorkNest.Infrastructure.Repositories
                    ORDER BY b.StartOn;
 
                 -- [3] tour inquiries: the branches in scope + those without a branch (BR_01; before it, all of them)
-                DECLARE @NewInquiries INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct});
+                -- New = status New, the same rows as the Tour Inquiries New filter and badge (old website bookings included)
+                DECLARE @NewInquiries INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct}) + {BranchSql.OldWebsiteNewCount};
                 DECLARE @InquiriesInPeriod INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.CreatedOn >= @PStart{ct});
                 DECLARE @FollowUpsDue INT = 0, @ConvertedInquiries INT = 0;
                 IF OBJECT_ID(N'dbo.WN_ContactFeedback', N'U') IS NOT NULL
@@ -224,7 +225,7 @@ namespace WorkNest.Infrastructure.Repositories
                                     WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0
                                       AND d.EndDateTime >= @Today);
                 SELECT @OpenComplaints AS OpenComplaints, @UnreadWhatsApp AS UnreadWhatsApp,
-                       (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct}) AS NewInquiries,
+                       (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct}) + {BranchSql.OldWebsiteNewCount} AS NewInquiries,
                        @KycPending AS KycPending, @AccessSuspended AS AccessSuspended,
                        (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE hd.Online = 0{devLoc}) AS MachinesOffline,
                        (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) WHERE 1 = 1{devLoc}) AS Machines;

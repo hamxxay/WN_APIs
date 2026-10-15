@@ -14,12 +14,14 @@ namespace WorkNest.Application.Interfaces
         /// Machines offline ("/admin/access-dashboard") only when <paramref name="includeMachines"/>.
         /// </summary>
         /// <summary>Items waiting on staff that this user has not marked as read, per sidebar route.</summary>
+        /// <param name="locationIds">Location-bound staff's locations (all they are assigned to, as their lists show) for
+        /// bookings, quotations, agreements, invoices, KYC, door access and machines; null = every location.</param>
         /// <param name="branchLocationIds">Location-bound staff's locations: tour inquiries and complaints of those branches plus
         /// the ones without a branch; null = all.</param>
-        Task<Dictionary<string, int>> GetNavBadgesAsync(int? locationId, bool includeMachines, string? userEmail,
+        Task<Dictionary<string, int>> GetNavBadgesAsync(IReadOnlyCollection<int>? locationIds, bool includeMachines, string? userEmail,
             IReadOnlyCollection<int>? branchLocationIds = null);
         /// <summary>Marks every item currently waiting on the given routes as read for this user. False if the table is missing.</summary>
-        Task<bool> MarkNavBadgesReadAsync(int? locationId, string userEmail, IEnumerable<string> routes,
+        Task<bool> MarkNavBadgesReadAsync(IReadOnlyCollection<int>? locationIds, string userEmail, IEnumerable<string> routes,
             IReadOnlyCollection<int>? branchLocationIds = null);
     }
 }

@@ -248,8 +248,14 @@ namespace WorkNest.Application.Interfaces
         Task<int?> UpdateContactLocationAsync(Guid publicId, int? locationId, int? updatedById, string? scopeLocationIds);
         /// <summary>Rows changed (0 = not found), or null when the database update CT_01 has not been run.</summary>
         Task<int?> UpdateContactInquiryTypeAsync(Guid publicId, string inquiryType, string? referenceName, int? updatedById);
-        Task UpdateContactStatusAsync(int id, byte statusId, int? updatedById);
-        Task DeleteContactAsync(int id);
+        /// <summary>
+        /// Sets an inquiry's status. <paramref name="source"/> "contact" / "booktour" (WorkNest.Application.Helpers.InquiryRows):
+        /// only that table's row (QA_05); null = the WN_Contacts row with this Id, else the WN_BookTour one (as before).
+        /// False (nothing changed) when a source was given but the database does not have QA_05 yet.
+        /// </summary>
+        Task<bool> UpdateContactStatusAsync(int id, byte statusId, int? updatedById, string? source = null);
+        /// <summary>As <see cref="UpdateContactStatusAsync"/>: false (nothing deleted) when a source was given before QA_05.</summary>
+        Task<bool> DeleteContactAsync(int id, string? source = null);
         /// <summary>Adds a feedback row to dbo.WN_ContactFeedback (false if the table has not been created yet).</summary>
         Task<bool> InsertContactFeedbackAsync(int contactId, string outcome, string? reason, DateTime? followUpOn, int? quotationId, int? createdById);
         /// <summary>Newest feedback row per inquiry for the given inquiries (empty if the table does not exist).</summary>
@@ -263,8 +269,10 @@ namespace WorkNest.Application.Interfaces
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
+        /// <paramref name="locationIds"/>: location-bound staff's locations (every one they are assigned to) for the items that
+        /// have a location (via the space); null = all locations.
         /// <paramref name="branchLocationIds"/>: tour inquiries of these locations + those without a branch (location-bound staff); null = all.
-        Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(int? locationId, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
+        Task<List<(string Key, string ItemKey)>> GetNavBadgeItemsDbAsync(IReadOnlyCollection<int>? locationIds, IEnumerable<int> openInvoiceStatusIds, DateTime businessToday, DateTime businessNow,
             IReadOnlyCollection<int>? branchLocationIds = null);
         Task<Dictionary<string, HashSet<string>>> GetNavBadgeReadsDbAsync(string userEmail);
         /// <summary>False when the WN_NAV_BadgeReads table has not been created yet.</summary>

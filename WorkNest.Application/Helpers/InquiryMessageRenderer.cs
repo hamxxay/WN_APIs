@@ -300,6 +300,13 @@ namespace WorkNest.Application.Helpers
             return digits;
         }
 
+        /// <summary>
+        /// <see cref="WhatsAppNumber"/> of a phone that passes the phone rule (<see cref="Phone.IsValid"/>: 11-15 digits,
+        /// digits / spaces / dashes / brackets and a leading +); "" otherwise, so text such as "Tour: 2026-06-26 02:" in an
+        /// old booking's phone field never becomes a wa.me number.
+        /// </summary>
+        public static string ValidWhatsAppNumber(string? phone) => Phone.IsValid(phone) ? WhatsAppNumber(phone) : "";
+
         /// <summary>https://wa.me/&lt;number&gt;?text=&lt;message&gt; (no number: WhatsApp asks whom to send it to).</summary>
         public static string WhatsAppUrl(string? number, string text) =>
             $"https://wa.me/{number ?? ""}?text={Uri.EscapeDataString(text)}";

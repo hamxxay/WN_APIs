@@ -90,7 +90,8 @@ namespace WorkNest.Application.Services
             var (staffName, email) = await StaffAsync(actorEmail);
             var values = InquiryMessageRenderer.FromInquiry(row, staffName, email, _clock.Today, _clock.FromUtc);
             var text = InquiryMessageRenderer.Render(wording, values);
-            var phone = InquiryMessageRenderer.WhatsAppNumber(row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null);
+            // Only a real phone number (the phone rule); otherwise no number, and WhatsApp asks whom to send it to.
+            var phone = InquiryMessageRenderer.ValidWhatsAppNumber(row.TryGetValue("PhoneNumber", out var p) ? p?.ToString() : null);
             return MessageTemplateOutcome.Ok(new InquiryWhatsAppMessage
             {
                 Phone = phone.Length == 0 ? null : phone,
