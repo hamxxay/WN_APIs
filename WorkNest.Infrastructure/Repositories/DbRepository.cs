@@ -2377,6 +2377,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 return true;
             }));
 
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceCategoriesAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT Id, Code, Label FROM dbo.WN_SpaceCategories WITH (NOLOCK) ORDER BY Label", c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
         public Task DeleteSpaceTypeAsync(int id) =>
             SpaceTypeSql.RulesAsync(async () =>
             {

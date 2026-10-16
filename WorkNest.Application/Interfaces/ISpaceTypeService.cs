@@ -14,5 +14,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> CreateSpaceTypeAsync(SpaceTypeUpsertRequest request, int? actorId);
         Task<ApiResponse> UpdateSpaceTypeAsync(int id, SpaceTypeUpsertRequest request, int? actorId);
         Task<ApiResponse> DeleteSpaceTypeAsync(int id);
+        /// <summary>Space categories (dbo.WN_SpaceCategories: Id, Code, Label) for the Space Types form.</summary>
+        Task<IEnumerable<object>> GetSpaceCategoriesAsync();
     }
 }

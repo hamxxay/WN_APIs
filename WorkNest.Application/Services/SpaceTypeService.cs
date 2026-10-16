@@ -9,6 +9,9 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         public SpaceTypeService(IDbRepository db) => _db = db;
 
+        public async Task<IEnumerable<object>> GetSpaceCategoriesAsync() =>
+            (await _db.GetSpaceCategoriesAsync()).Cast<object>();
+
         public async Task<IEnumerable<object>> GetAllSpaceTypesAsync(int? locationId = null) =>
             (await _db.GetAllSpaceTypesAsync(Location(locationId))).Cast<object>();
 

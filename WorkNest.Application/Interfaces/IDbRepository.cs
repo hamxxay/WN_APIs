@@ -204,6 +204,8 @@ namespace WorkNest.Application.Interfaces
         Task<(int? Id, string? PublicId, int? LocationId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById, int? locationId = null);
         Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById, int? locationId = null);
         Task DeleteSpaceTypeAsync(int id);
+        /// <summary>dbo.WN_SpaceCategories (Id, Code, Label), by Label.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceCategoriesAsync();
 
         // --- Space ---
         Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigAsync();

@@ -25,6 +25,11 @@ namespace WorkNest.API.Controllers
         private const string NotYourLocation = "You can only manage the space types of your own locations.";
         private const string NoLocation = "Your account isn't assigned to a location, so you can't add space types.";
 
+        /// <summary>Space categories (Id, Code, Label) for the Space Types form: every type needs one (space lists, pricing).</summary>
+        [HttpGet("api/spacetype/categories")]
+        public async Task<IActionResult> Categories() =>
+            Ok(ApiResponse.Ok(await _spaceTypes.GetSpaceCategoriesAsync()));
+
         [HttpGet("api/spacetype/all")]
         [AllowAnonymous]
         public async Task<IActionResult> All([FromQuery] int? locationId = null) =>
