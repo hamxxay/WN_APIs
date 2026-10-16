@@ -1,4 +1,4 @@
-﻿using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.Helpers;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
@@ -1035,7 +1035,7 @@ namespace WorkNest.Application.Services
             // Task 2: Support charge and PST
             int capacity = dto?.SpaceCapacity > 0 ? dto.SpaceCapacity : 1;
             decimal perSeatSupportRate = 2000.00m;
-            decimal taxPercentage = dto?.AppliedTaxPercentage > 0 ? dto.AppliedTaxPercentage : 16.00m;
+            decimal taxPercentage = dto?.AppliedTaxPercentage >= 0 ? dto.AppliedTaxPercentage : 16.00m;
             decimal supportChargeTotal = Math.Round(perSeatSupportRate * capacity * advanceMonths, 2);
             decimal taxTotal = Math.Round(supportChargeTotal * (taxPercentage / 100.0m), 2);
 
@@ -1135,7 +1135,7 @@ namespace WorkNest.Application.Services
                 baseAmount = dto.SubtotalAmount,
                 supportServiceAmount = supportAmt,
                 taxableAmount = supportAmt,
-                pstRate = dto.AppliedTaxPercentage > 0 ? dto.AppliedTaxPercentage : 16.00m,
+                pstRate = dto.AppliedTaxPercentage >= 0 ? dto.AppliedTaxPercentage : 16.00m,
                 pstAmount = dto.TaxAmount,
                 totalAmount = dto.TotalPayable
             };

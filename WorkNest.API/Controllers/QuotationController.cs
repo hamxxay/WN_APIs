@@ -115,6 +115,22 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [AllowAnonymous]
+        [HttpGet("api/quotation/tax-rate")]
+        [HttpGet("api/tax-rate")]
+        public async Task<IActionResult> GetTaxRate([FromQuery] int? locationId = null, [FromQuery] int? spaceId = null)
+        {
+            try
+            {
+                var (taxPercentage, taxApplicable) = await _db.GetSupportTaxRateAsync(locationId, spaceId);
+                return Ok(ApiResponse.Ok(new { taxPercentage, taxApplicable }));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ApiResponse.Fail(ex.Message));
+            }
+        }
+
         // Login required (was anonymous and trusted an x-user-email header): the caller's own quotations only.
         [HttpGet("api/quotations")]
         [HttpGet("api/quotation/my")]

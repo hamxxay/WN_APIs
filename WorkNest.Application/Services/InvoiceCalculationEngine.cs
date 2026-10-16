@@ -97,7 +97,7 @@ namespace WorkNest.Application.Services
 
             int capacity = request.Capacity > 0 ? request.Capacity : 1;
             decimal chargeRate = request.AppliedChargePercentage > 0 ? request.AppliedChargePercentage : 10.00m;
-            decimal taxRate = request.AppliedTaxPercentage > 0 ? request.AppliedTaxPercentage : 16.00m;
+            decimal taxRate = request.AppliedTaxPercentage >= 0 ? request.AppliedTaxPercentage : 16.00m;
 
             DateTime periodStart = request.StartOn ?? today.Date;
             DateTime periodEnd;

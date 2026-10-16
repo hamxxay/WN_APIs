@@ -7151,6 +7151,58 @@ END";
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? ToDict(r) : null;
         }
+
+        public async Task<(decimal TaxPercentage, bool TaxApplicable)> GetSupportTaxRateAsync(int? locationId = null, int? spaceId = null)
+        {
+            await using var c = await Open();
+            const string sql = @"
+DECLARE @ProvinceId INT = 4;
+IF @SpaceId IS NOT NULL
+BEGIN
+    SELECT @ProvinceId = loc.ProvinceId 
+    FROM dbo.WN_Spaces s
+    JOIN dbo.WN_Locations loc ON loc.Id = s.LocationId
+    WHERE s.Id = @SpaceId;
+END
+ELSE IF @LocationId IS NOT NULL
+BEGIN
+    SELECT @ProvinceId = loc.ProvinceId 
+    FROM dbo.WN_Locations loc
+    WHERE loc.Id = @LocationId;
+END
+
+IF @ProvinceId IS NULL SET @ProvinceId = 4;
+
+DECLARE @TaxApplicable BIT = 1;
+SELECT TOP 1 @TaxApplicable = pct.TaxApplicable
+FROM dbo.WN_ProvinceChargeTypeTax pct
+WHERE pct.ProvinceId = @ProvinceId AND pct.ChargeTypeId = 4;
+
+DECLARE @TaxPercentage DECIMAL(18,2) = 0.00;
+IF @TaxApplicable = 1
+BEGIN
+    SELECT TOP 1 @TaxPercentage = ISNULL(t.TaxPercentage, 0.00)
+    FROM dbo.WN_Tax t
+    WHERE t.ProvinceId = @ProvinceId
+      AND (t.StartDate IS NULL OR t.StartDate <= CAST(GETDATE() AS DATE))
+      AND (t.EndDate IS NULL OR t.EndDate >= CAST(GETDATE() AS DATE))
+    ORDER BY t.Id DESC;
+END
+
+SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) AS TaxApplicable;";
+
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceId", (object?)spaceId ?? DBNull.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                var pct = Convert.ToDecimal(r["TaxPercentage"]);
+                var app = Convert.ToBoolean(r["TaxApplicable"]);
+                return (pct, app);
+            }
+            return (0.00m, false);
+        }
     }
 }
 

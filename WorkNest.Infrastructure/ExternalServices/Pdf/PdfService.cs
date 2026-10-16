@@ -162,10 +162,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         decimal supportCharge = q.SupportChargeAmount > 0 
                             ? q.SupportChargeAmount 
                             : (spaceType == "MeetingRoom" ? Math.Round(firstCycleRent * 0.10m, 2) : 2000.00m * (q.Capacity.HasValue && q.Capacity.Value > 0 ? q.Capacity.Value : 1) * billingMonths);
-                        decimal taxPct = q.AppliedTaxPercentage > 0 ? q.AppliedTaxPercentage : 16.00m;
-                        decimal taxOnAdvanceRent = q.TaxAmountOnAdvanceRent > 0 
+                        decimal taxPct = q.AppliedTaxPercentage >= 0 ? q.AppliedTaxPercentage : 16.00m;
+                        decimal taxOnAdvanceRent = q.AppliedTaxPercentage == 0 ? 0m : (q.TaxAmountOnAdvanceRent > 0 
                             ? q.TaxAmountOnAdvanceRent 
-                            : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(supportCharge * (taxPct / 100.0m), 2));
+                            : (q.TaxAmount > 0 ? q.TaxAmount : Math.Round(supportCharge * (taxPct / 100.0m), 2)));
                         decimal initialPayable = Math.Max(0, (spaceType == "MeetingRoom" ? q.SubtotalAmount : firstCycleRent) + secDeposit + taxOnAdvanceRent - discountAmount);
 
                         // Dynamic Summary Ribbon
@@ -706,7 +706,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 inner.Item().Row(r =>
                                 {
-                                    r.ConstantItem(220).AlignRight().Text($"PST on Support Services ({(c.AppliedTaxPercentage > 0 ? c.AppliedTaxPercentage : 16.00m):G29}%):" ).FontColor("#000000ff");
+                                    r.ConstantItem(220).AlignRight().Text($"PST on Support Services ({(c.AppliedTaxPercentage >= 0 ? c.AppliedTaxPercentage : 16.00m):G29}%):" ).FontColor("#000000ff");
                                     r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.TaxAmount:N0}").FontColor("#000000ff");
                                 });
                             }
@@ -744,7 +744,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             decimal firstCycleRent = c.CurrentCycleAmount > 0 ? c.CurrentCycleAmount : (c.FirstCycleRent > 0 ? c.FirstCycleRent : c.SubtotalAmount);
                             decimal secDeposit = c.SecurityDeposit > 0 ? c.SecurityDeposit : 0m;
                             decimal discountAmount = c.DiscountAmount;
-                            decimal taxPct = c.AppliedTaxPercentage > 0 ? c.AppliedTaxPercentage : 16.00m;
+                            decimal taxPct = c.AppliedTaxPercentage >= 0 ? c.AppliedTaxPercentage : 16.00m;
 
                             decimal serviceChargeAmount = c.SupportChargeAmount > 0 
                                 ? c.SupportChargeAmount 

@@ -348,6 +348,7 @@ namespace WorkNest.Application.Interfaces
         Task SoftRemoveAttendantFromBookingDbAsync(int bookingDetailId, int personId);
         Task<int> ToggleAccessStatusSpAsync(int bookingDetailId, int customerId, int? personId, bool isEnabled);
         Task<IEnumerable<IDictionary<string, object?>>> GetAccessStatusExportDbAsync();
+        Task<(decimal TaxPercentage, bool TaxApplicable)> GetSupportTaxRateAsync(int? locationId = null, int? spaceId = null);
         Task<IEnumerable<IDictionary<string, object?>>> GetCustomerActiveSpacesDbAsync(int customerId);
         Task<IDictionary<string, object?>?> GetBookingDetailSummaryDbAsync(int bookingDetailId);
         Task<IDictionary<string, object?>> CreateSurchargeInvoiceSpAsync(int bookingDetailId, int personId, int customerId, decimal surchargeAmount, int excessSeatCount);

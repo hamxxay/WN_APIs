@@ -401,15 +401,17 @@ namespace WorkNest.Application.Services
                 TotalAmount = Convert.ToDecimal(header["TotalAmount"]),
                 SupportChargesId = header.TryGetValue("SupportChargesId", out var scid) && scid is not null ? Convert.ToByte(scid) : (byte)4,
                 AppliedChargePercentage = header.TryGetValue("AppliedChargePercentage", out var acp) && acp is not null ? Convert.ToDecimal(acp) : 10.00m,
-                AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp is not null ? Convert.ToDecimal(atp) : 16.00m,
+                AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp is not null ? Convert.ToDecimal(atp) : 0.00m,
                 SupportChargeAmount = header.TryGetValue("SupportChargeAmount", out var sca) && sca is not null && Convert.ToDecimal(sca) > 0 
                     ? Convert.ToDecimal(sca) 
                     : ((header.TryGetValue("Capacity", out var cVal) && cVal is not null ? Convert.ToInt32(cVal) : 1) * (header.TryGetValue("BillingPeriodMonths", out var bpmVal) && bpmVal is not null ? Convert.ToInt32(bpmVal) : 3) * 2000.00m),
-                TaxAmount = header.TryGetValue("TaxAmount", out var ta) && ta is not null && Convert.ToDecimal(ta) > 0 
+                TaxAmount = header.TryGetValue("TaxAmount", out var ta) && ta is not null
                     ? Convert.ToDecimal(ta) 
-                    : Math.Round((header.TryGetValue("SupportChargeAmount", out var sca2) && sca2 is not null && Convert.ToDecimal(sca2) > 0 
-                        ? Convert.ToDecimal(sca2) 
-                        : ((header.TryGetValue("Capacity", out var cVal2) && cVal2 is not null ? Convert.ToInt32(cVal2) : 1) * (header.TryGetValue("BillingPeriodMonths", out var bpmVal2) && bpmVal2 is not null ? Convert.ToInt32(bpmVal2) : 3) * 2000.00m)) * 0.16m, 2),
+                    : (header.TryGetValue("AppliedTaxPercentage", out var atpZero) && Convert.ToDecimal(atpZero) == 0m
+                        ? 0m
+                        : Math.Round((header.TryGetValue("SupportChargeAmount", out var sca2) && sca2 is not null && Convert.ToDecimal(sca2) > 0 
+                            ? Convert.ToDecimal(sca2) 
+                            : ((header.TryGetValue("Capacity", out var cVal2) && cVal2 is not null ? Convert.ToInt32(cVal2) : 1) * (header.TryGetValue("BillingPeriodMonths", out var bpmVal2) && bpmVal2 is not null ? Convert.ToInt32(bpmVal2) : 3) * 2000.00m)) * (header.TryGetValue("AppliedTaxPercentage", out var atpRate) && atpRate is not null ? Convert.ToDecimal(atpRate) / 100m : 0.16m), 2)),
                 // the WN_WHTaxRate Id (or an old percentage), under WHTaxId, WHTRate_ID, or the old column name
                 WithholdingTaxRate = (header.TryGetValue("WHTaxId", out var wtrTaxId) && wtrTaxId is not null && wtrTaxId is not DBNull ? wtrTaxId
                                       : header.TryGetValue("WHTRate_ID", out var wtrNew) && wtrNew is not null && wtrNew is not DBNull ? wtrNew
