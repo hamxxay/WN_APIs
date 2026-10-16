@@ -12,7 +12,8 @@ namespace WorkNest.API.Controllers
     /// super admins may open them too. Common query parameters: period = month (default) | quarter | year (to date,
     /// against the previous period, as api/dashboard/overview) and locationId (narrow to one location; tour inquiries by
     /// their branch once the database update QA_07 has run, before it they count every location and say so).
-    /// Bad parameters answer 400; before the database update CEO_01 has run, 503 (records/leases: before QA_07).
+    /// Bad parameters answer 400; before the database update CEO_01 has run, 503 (records/leases: before QA_07; rooms:
+    /// before CEO_02 a 200 with available = false).
     /// </summary>
     [ApiController]
     [Authorize(Roles = "ceo,super_admin,SuperAdmin")]
@@ -49,6 +50,15 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>
             Run(() => _ceo.GetRecordsAsync(kind, query));
+
+        /// <summary>
+        /// Rooms (private offices, shared spaces): occupancy now and in the period, and each confirmed booking's price
+        /// per seat against the list price (24/7) or the shift price (Morning / Evening), under / at / over. Before the
+        /// database update CEO_02: 200 with available = false and a message.
+        /// </summary>
+        [HttpGet("api/ceo/rooms")]
+        public Task<IActionResult> Rooms([FromQuery] string? period, [FromQuery] int? locationId) =>
+            Run(() => _ceo.GetRoomReportAsync(period, locationId));
 
         private async Task<IActionResult> Run(Func<Task<ApiResponse>> action)
         {

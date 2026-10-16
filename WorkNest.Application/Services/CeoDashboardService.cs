@@ -13,7 +13,8 @@ namespace WorkNest.Application.Services
     /// match the rest of the system. Level 1 = dashboard, level 2 = breakdown of one chart element, level 3 = records.
     /// Tour inquiries follow the location filter by their branch (WN_Contacts.LocationId) once QA_07 has run, as on the
     /// Sales Manager dashboard: one location = only its inquiries, all locations = every inquiry. Before QA_07 they count
-    /// every location's inquiries and say so (inquiriesAllLocations, "all locations").
+    /// every location's inquiries and say so (inquiriesAllLocations, "all locations"). Rooms (api/ceo/rooms, CEO_02):
+    /// room occupancy and the price each room was sold at against its list / shift price.
     /// </summary>
     public class CeoDashboardService : ICeoDashboardService
     {
@@ -459,6 +460,218 @@ namespace WorkNest.Application.Services
             var title = stage switch { "accepted" => "Accepted quotations", "converted" => "Converted quotations", _ => "Quotations" };
             return Records(title, parts, Total(s), rows);
         }
+
+        // ------------------------------------------------------------------ rooms (CEO_02)
+
+        /// <summary>Sold within this share of the expected price per seat (either way) counts as "at": 0.5%.</summary>
+        public const decimal PricingBand = 0.005m;
+
+        /// <summary>The shifts, in the order byShift lists them.</summary>
+        public static readonly IReadOnlyList<string> RoomShifts = new[] { "24/7", "Morning", "Evening" };
+
+        /// <summary>
+        /// Rooms sold monthly (dbo.WN_Ceo_RoomReport, CEO_02): occupancy now and in the period, and every confirmed
+        /// booking running in the period priced against its expected price (<see cref="PriceSale"/>), with totals
+        /// (<see cref="SummarizeRooms"/>). Before CEO_02: available = false and the message, no summary, no rooms.
+        /// </summary>
+        public async Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId)
+        {
+            if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            var now = _clock.Now;
+            var dto = new CeoRoomReportDto
+            {
+                Period = p,
+                PeriodLabel = PeriodLabel(p, now),
+                GeneratedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En)
+            };
+            List<List<IDictionary<string, object?>>> s;
+            try
+            {
+                s = await _repo.GetRoomReportAsync(Location(locationId), months, now);
+            }
+            catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_02")
+            {
+                dto.Available = false;
+                dto.Message = CeoDatabaseUpdateMissingException.RoomsMessage;
+                return ApiResponse.Ok(dto);
+            }
+
+            var rooms = new List<CeoRoomDto>();
+            var byId = new Dictionary<int, CeoRoomDto>();
+            int occupiedDays = 0, periodDays = 0;
+            foreach (var r in Set(s, 0))
+            {
+                var seats = Int(r, "Capacity");
+                var list = Val(r, "ListSeatPrice") is { } lp && Convert.ToDecimal(lp, En) > 0 ? Math.Round(Convert.ToDecimal(lp, En), 2) : (decimal?)null;
+                var room = new CeoRoomDto
+                {
+                    SpaceId = Int(r, "SpaceId"), Name = Str(r, "Name"), Code = Str(r, "Code"),
+                    LocationId = Val(r, "LocationId") is { } l ? Convert.ToInt32(l, En) : null,
+                    Location = Str(r, "Location"), SpaceType = Str(r, "SpaceType"), CategoryCode = Str(r, "CategoryCode"),
+                    Seats = seats, ListSeatPrice = list, ListRoomPrice = list is { } x ? Money(x * seats) : null,
+                    OccupiedNow = Flag(r, "OccupiedNow"),
+                    PeriodOccupancyPct = Pct(Int(r, "OccupiedDays"), Int(r, "PeriodDays"))
+                };
+                if (!byId.TryAdd(room.SpaceId, room)) continue;
+                rooms.Add(room);
+                occupiedDays += Int(r, "OccupiedDays");
+                periodDays += Int(r, "PeriodDays");
+            }
+            foreach (var r in Set(s, 1))
+            {
+                if (!byId.TryGetValue(Int(r, "SpaceId"), out var room)) continue;
+                var sold = Val(r, "SoldMonthly") is { } sm
+                    ? Convert.ToDecimal(sm, En)
+                    : (Val(r, "MonthlyRent") is { } mr ? Convert.ToDecimal(mr, En) : 0m) * (1 - (Val(r, "DiscountPct") is { } dp ? Convert.ToDecimal(dp, En) : 0m) / 100m);
+                room.Sales.Add(PriceSale(new CeoRoomSaleDto
+                {
+                    BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"),
+                    Shift = Str(r, "Shift") ?? Str(r, "ShiftRaw") ?? "",
+                    SeatsSold = Int(r, "SeatsSold"), StartOn = Day(r, "StartOn"), EndOn = Day(r, "EndOn"),
+                    ListSeatPriceAtSale = Val(r, "ListSeatPriceAtSale") is { } ls ? Convert.ToDecimal(ls, En) : null,
+                    ShiftDiscountCapPct = Val(r, "ShiftDiscountCapPct") is { } cp ? Convert.ToDecimal(cp, En) : 0m,
+                    SoldMonthly = sold
+                }, room.Seats, room.ListSeatPrice));
+            }
+
+            dto.Rooms = SortRooms(rooms);
+            dto.Summary = SummarizeRooms(dto.Rooms, occupiedDays, periodDays);
+            return ApiResponse.Ok(dto);
+        }
+
+        /// <summary>24/7 | Morning | Evening from a booking's ShiftType (or the procedure's Shift), as dbo.WN_Ceo_RoomReport:
+        /// morning... / shift_morning... / 2 = Morning; evening... / night... / shift_evening... / 3 = Evening; else 24/7.</summary>
+        public static string NormalizeShift(string? shift)
+        {
+            var v = (shift ?? "").Trim().ToLowerInvariant();
+            if (v.StartsWith("morning") || v.StartsWith("shift_morning") || v == "2") return "Morning";
+            if (v.StartsWith("evening") || v.StartsWith("night") || v.StartsWith("shift_evening") || v.StartsWith("shift_night") || v == "3")
+                return "Evening";
+            return "24/7";
+        }
+
+        /// <summary>
+        /// Prices one sale (the procedure's raw figures in <paramref name="sale"/>; it is completed and returned):
+        /// seats sold = the booking's seats, else the room's (<paramref name="roomSeats"/>), else 1; list per seat = the
+        /// price at sale, else today's (<paramref name="roomListSeatPrice"/>); expected per seat = the list (24/7) or
+        /// list x (1 - shift discount cap / 100) (Morning / Evening); variance per month = (sold per seat - expected per
+        /// seat) x seats; under / over = more than <see cref="PricingBand"/> below / above the expected per seat, else
+        /// at. No list price known (or nothing expected): not compared, the expected / variance figures and Pricing null.
+        /// </summary>
+        public static CeoRoomSaleDto PriceSale(CeoRoomSaleDto sale, int roomSeats, decimal? roomListSeatPrice)
+        {
+            sale.Shift = NormalizeShift(sale.Shift);
+            var seats = sale.SeatsSold > 0 ? sale.SeatsSold : roomSeats > 0 ? roomSeats : 1;
+            sale.SeatsSold = seats;
+            decimal? list = sale.ListSeatPriceAtSale is > 0 ? sale.ListSeatPriceAtSale : roomListSeatPrice is > 0 ? roomListSeatPrice : null;
+            sale.ListSeatPriceAtSale = list is { } lv ? Money(lv) : null;
+            var cap = Math.Clamp(sale.ShiftDiscountCapPct, 0m, 100m);
+            sale.ShiftDiscountCapPct = Math.Round(cap, 2);
+
+            var sold = sale.SoldMonthly;
+            var soldSeat = sold / seats;
+            sale.SoldMonthly = Money(sold);
+            sale.SoldSeatPrice = Money(soldSeat);
+
+            decimal? expectedSeat = list is { } l ? (sale.Shift == "24/7" ? l : l * (1 - cap / 100m)) : null;
+            if (expectedSeat is not > 0)
+            {
+                sale.ExpectedSeatPrice = sale.ExpectedMonthly = sale.VarianceMonthly = sale.VariancePct = null;
+                sale.Pricing = null;
+                return sale;
+            }
+            var expected = expectedSeat.Value;
+            var ratio = soldSeat / expected - 1;
+            sale.ExpectedSeatPrice = Money(expected);
+            sale.ExpectedMonthly = Money(expected * seats);
+            sale.VarianceMonthly = Money((soldSeat - expected) * seats);
+            sale.VariancePct = Money(ratio * 100m);
+            sale.Pricing = ratio < -PricingBand ? "under" : ratio > PricingBand ? "over" : "at";
+            return sale;
+        }
+
+        /// <summary>
+        /// Totals of the rooms and their priced sales: occupancy now (rooms with a confirmed booking now), occupancy in
+        /// the period (<paramref name="occupiedDays"/> / <paramref name="periodDays"/>, room-days), under / at / over,
+        /// expected (list) / sold / variance per month, and the same by shift (always 24/7, Morning, Evening).
+        /// </summary>
+        public static CeoRoomSummaryDto SummarizeRooms(IReadOnlyCollection<CeoRoomDto> rooms, int occupiedDays, int periodDays)
+        {
+            var sales = rooms.SelectMany(r => r.Sales).ToList();
+            var occupied = rooms.Count(r => r.OccupiedNow);
+            return new CeoRoomSummaryDto
+            {
+                Rooms = rooms.Count,
+                OccupiedNow = occupied,
+                VacantNow = rooms.Count - occupied,
+                OccupancyNowPct = Pct(occupied, rooms.Count),
+                PeriodOccupancyPct = Pct(occupiedDays, periodDays),
+                Sales = sales.Count,
+                Under = sales.Count(x => x.Pricing == "under"),
+                At = sales.Count(x => x.Pricing == "at"),
+                Over = sales.Count(x => x.Pricing == "over"),
+                Unpriced = sales.Count(x => x.Pricing == null),
+                ListMonthly = sales.Sum(x => x.ExpectedMonthly ?? 0m),
+                SoldMonthly = sales.Sum(x => x.SoldMonthly),
+                VarianceMonthly = sales.Sum(x => x.VarianceMonthly ?? 0m),
+                UnderMonthly = sales.Where(x => x.Pricing == "under").Sum(x => x.VarianceMonthly ?? 0m),
+                OverMonthly = sales.Where(x => x.Pricing == "over").Sum(x => x.VarianceMonthly ?? 0m),
+                ByShift = RoomShifts.Select(shift =>
+                {
+                    var g = sales.Where(x => x.Shift == shift).ToList();
+                    return new CeoRoomShiftSummaryDto
+                    {
+                        Shift = shift,
+                        Sales = g.Count,
+                        Under = g.Count(x => x.Pricing == "under"),
+                        At = g.Count(x => x.Pricing == "at"),
+                        Over = g.Count(x => x.Pricing == "over"),
+                        Unpriced = g.Count(x => x.Pricing == null),
+                        ExpectedMonthly = g.Sum(x => x.ExpectedMonthly ?? 0m),
+                        SoldMonthly = g.Sum(x => x.SoldMonthly),
+                        VarianceMonthly = g.Sum(x => x.VarianceMonthly ?? 0m)
+                    };
+                }).ToList()
+            };
+        }
+
+        /// <summary>By location (rooms without one last), then room code, then name; numbers in order (9 before 10).</summary>
+        private static List<CeoRoomDto> SortRooms(IEnumerable<CeoRoomDto> rooms) =>
+            rooms.OrderBy(r => string.IsNullOrWhiteSpace(r.Location))
+                .ThenBy(r => r.Location ?? "", Natural)
+                .ThenBy(r => r.Code ?? r.Name ?? "", Natural)
+                .ThenBy(r => r.Name ?? "", Natural)
+                .ThenBy(r => r.SpaceId)
+                .ToList();
+
+        /// <summary>Compares text with runs of digits taken as numbers ("Office 9" before "Office 10"), case-insensitive.</summary>
+        private static readonly IComparer<string> Natural = Comparer<string>.Create((a, b) =>
+        {
+            int i = 0, j = 0;
+            while (i < a.Length && j < b.Length)
+            {
+                if (char.IsDigit(a[i]) && char.IsDigit(b[j]))
+                {
+                    int si = i, sj = j;
+                    while (i < a.Length && char.IsDigit(a[i])) i++;
+                    while (j < b.Length && char.IsDigit(b[j])) j++;
+                    var x = a[si..i].TrimStart('0');
+                    var y = b[sj..j].TrimStart('0');
+                    var c = x.Length != y.Length ? x.Length.CompareTo(y.Length) : string.CompareOrdinal(x, y);
+                    if (c != 0) return c;
+                }
+                else
+                {
+                    var c = char.ToUpperInvariant(a[i]).CompareTo(char.ToUpperInvariant(b[j]));
+                    if (c != 0) return c;
+                    i++; j++;
+                }
+            }
+            return (a.Length - i).CompareTo(b.Length - j);
+        });
+
+        /// <summary>PKR, 2 decimals (half away from zero).</summary>
+        private static decimal Money(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
         // ------------------------------------------------------------------ helpers
 

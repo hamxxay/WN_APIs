@@ -48,6 +48,13 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         Task<List<List<IDictionary<string, object?>>>> GetLeaseRecordsAsync(int? locationId, bool noLocation, DateTime? from, DateTime? to,
             int expiringDays, DateTime businessNow, int top);
+
+        /// <summary>
+        /// Room report (dbo.WN_Ceo_RoomReport, CEO_02): [0] rooms sold monthly with their list price per seat and
+        /// occupancy, [1] their confirmed bookings running in the period. Before CEO_02:
+        /// <see cref="CeoDatabaseUpdateMissingException"/> naming CEO_02.
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow);
     }
 
     /// <summary>
@@ -59,16 +66,24 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetDashboardAsync(string? period, int? locationId);
         Task<ApiResponse> GetBreakdownAsync(CeoBreakdownQuery query);
         Task<ApiResponse> GetRecordsAsync(string kind, CeoRecordsQuery query);
+
+        /// <summary>
+        /// Rooms: occupancy per room and the price each was sold at against its list (or shift) price. Before CEO_02 a
+        /// successful response with available = false and a message.
+        /// </summary>
+        Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId);
     }
 
     /// <summary>
-    /// A CEO dashboard procedure is not on this database yet: the dashboard ones (script CEO_01), or the full list of
-    /// leases expiring (QA_07). <see cref="Update"/> names the script; the message says it in plain words.
+    /// A CEO dashboard procedure is not on this database yet: the dashboard ones (script CEO_01), the full list of
+    /// leases expiring (QA_07) or the room report (CEO_02). <see cref="Update"/> names the script; the message says it in
+    /// plain words.
     /// </summary>
     public sealed class CeoDatabaseUpdateMissingException : Exception
     {
         public const string UserMessage = "The CEO dashboard needs the database update CEO_01.";
         public const string LeasesMessage = "The full list of leases expiring needs the database update QA_07.";
+        public const string RoomsMessage = "Run CEO_02_room_report on the database to see the room report.";
 
         /// <summary>The database update (script) that is missing, e.g. CEO_01 or QA_07.</summary>
         public string Update { get; }
@@ -84,5 +99,8 @@ namespace WorkNest.Application.Interfaces
 
         /// <summary>dbo.WN_Ceo_Records_Leases is missing: QA_07 has not run.</summary>
         public static CeoDatabaseUpdateMissingException LeasesMissing(Exception? inner) => new(inner, "QA_07", LeasesMessage);
+
+        /// <summary>dbo.WN_Ceo_RoomReport is missing: CEO_02 has not run.</summary>
+        public static CeoDatabaseUpdateMissingException RoomReportMissing(Exception? inner) => new(inner, "CEO_02", RoomsMessage);
     }
 }
