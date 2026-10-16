@@ -17,9 +17,18 @@ namespace WorkNest.Application.Services
         private readonly ILoginHistoryService _loginHistory;
         private readonly IRoleService _roles;
         private readonly DateTime _grandfatherBeforeUtc;
+        private readonly bool _requireVerifiedEmail;
 
         /// <summary>Config key: only sign-ins recorded before this UTC instant let an unverified Firebase email through.</summary>
         public const string GrandfatherCutoffKey = "Security:UnverifiedSignInGrandfatherBeforeUtc";
+        /// <summary>
+        /// Config key: "true" = an email / password Firebase sign-in needs a verified email (or a sign-in before the
+        /// grandfather cutoff), refused with EMAIL_NOT_VERIFIED otherwise. Missing / "false" (default since 16 Oct 2026:
+        /// the owner asked to remove email verification for now) = every Firebase sign-in is treated as verified; only a
+        /// turned-off account is refused. Turning it back on needs no code or app change: the CMS, website and app show
+        /// "Verify your email" whenever the API answers EMAIL_NOT_VERIFIED.
+        /// </summary>
+        public const string RequireVerifiedEmailKey = "Security:RequireVerifiedEmail";
         /// <summary>Default cutoff (QA_01 deployment): 2026-10-16T00:00:00Z.</summary>
         public static readonly DateTime DefaultGrandfatherCutoffUtc = new(2026, 10, 16, 0, 0, 0, DateTimeKind.Utc);
 
@@ -32,6 +41,7 @@ namespace WorkNest.Application.Services
             _loginHistory = loginHistory;
             _roles = roles;
             _grandfatherBeforeUtc = GrandfatherCutoff(configuration?[GrandfatherCutoffKey], logger);
+            _requireVerifiedEmail = bool.TryParse(configuration?[RequireVerifiedEmailKey], out var require) && require;
         }
 
         /// <summary>The configured cutoff as UTC (a value without an offset is read as UTC); the default when missing or unreadable.</summary>
@@ -188,6 +198,7 @@ namespace WorkNest.Application.Services
 
         /// <summary>
         /// May this verified Firebase token sign in as its email? Null = yes, else why not (sent as a 403).
+        /// With Security:RequireVerifiedEmail off (the default) every token counts as email_verified (rules below).
         /// - email_verified (Google sign-ins, or the owner opened Firebase's verification link): yes, unless the WN_Users
         ///   row is turned off (ACCOUNT_DISABLED).
         /// - not verified: anyone can create a Firebase email / password account for an address that has none yet (e.g.
@@ -201,6 +212,7 @@ namespace WorkNest.Application.Services
         /// </summary>
         public async Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified)
         {
+            if (!_requireVerifiedEmail) emailVerified = true;
             UserSignInStatus? status;
             try
             {
