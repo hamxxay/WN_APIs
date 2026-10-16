@@ -119,20 +119,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             : (q.MonthlyRent > 0 ? q.MonthlyRent : (contractMonths > 0 ? totalContract / contractMonths : totalContract));
                         decimal firstCycleRent = monthlyRent * billingMonths;
                         
-                        decimal secDeposit = q.SecurityDeposit;
-                        if (secDeposit <= 0 && q.Details != null && q.Details.Count > 0)
-                        {
-                            var secLine = q.Details.FirstOrDefault(d => string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) || (d.Description != null && d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase)));
-                            if (secLine != null && secLine.Amount > 0) secDeposit = secLine.Amount;
-                        }
-                        if (secDeposit <= 0 && q.Contract != null && q.Contract.SecurityDeposit > 0)
-                        {
-                            secDeposit = q.Contract.SecurityDeposit;
-                        }
-                        if (secDeposit <= 0 && spaceType == "PrivateRoom")
-                        {
-                            secDeposit = monthlyRent;
-                        }
+                        // The quotation's deposit as saved (Security Deposit (Months) rule); no default month for private
+                        // offices. 0 = no deposit line, row or note.
+                        var (secDeposit, secDepositMonths) = QuotationDeposit.Of(q);
 
                         decimal discountAmount = q.DiscountAmount;
                         if (q.DiscountPercentage > 0 && spaceType != "MeetingRoom")
@@ -284,11 +273,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             {
                                 foreach (var d in q.Details)
                                 {
+                                    bool isSecurityDeposit = string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) ||
+                                                             (d.Description != null && d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase));
+                                    if (isSecurityDeposit && secDeposit <= 0) continue;   // no deposit: no deposit line
+
                                     var bg = alt ? "#f9f9f9" : "#ffffff";
                                     table.Cell().Background(bg).Padding(6).Text(sno++.ToString());
-
-                                    bool isSecurityDeposit = string.Equals(d.FeeType, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) || 
-                                                             (d.Description != null && d.Description.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase));
 
                                     string desc = d.Description ?? "";
                                     if (!isSecurityDeposit)
@@ -325,10 +315,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                     {
                                         if (isSecurityDeposit)
                                         {
-                                            decimal qty = d.Quantity > 0 ? d.Quantity : (q.SecurityDepositMonths > 0 ? q.SecurityDepositMonths : 1);
-                                            qtyLabel = $"{qty:G29}";
-                                            unitPrice = d.UnitPrice > 0 ? d.UnitPrice : (qty > 0 ? d.Amount / qty : (monthlyRent > 0 ? monthlyRent : secDeposit));
+                                            decimal qty = d.Quantity > 0 ? d.Quantity : secDepositMonths;   // no invented month
                                             lineAmount = d.Amount > 0 ? d.Amount : secDeposit;
+                                            qtyLabel = qty > 0 ? $"{qty:G29}" : "-";
+                                            unitPrice = d.UnitPrice > 0 ? d.UnitPrice : (qty > 0 ? Math.Round(lineAmount / qty, 2) : lineAmount);
                                         }
                                         else
                                         {
@@ -461,7 +451,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             tc.Item().Text($"{itemNum++}. The {spaceType} facility charges are inclusive of support service charges of PKR {supportCharge:N0}.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. This quotation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#495057");
-                            if (spaceType == "PrivateRoom" || secDeposit > 0)
+                            if (secDeposit > 0)
                             {
                                 tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to terms of agreement.").FontSize(8).FontColor("#495057");
                             }
@@ -644,6 +634,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 ? c.Details.Where(d => !d.ChargeTypeCode.Contains("TAX", StringComparison.OrdinalIgnoreCase) && !d.ChargeTypeLabel.Contains("Tax", StringComparison.OrdinalIgnoreCase) && !d.ChargeTypeCode.Contains("SERVICE", StringComparison.OrdinalIgnoreCase)).ToList()
                                 : c.Details;
 
+                            // No deposit (0 months): no security deposit line either.
+                            displayLines = displayLines.Where(d => !(IsSecurityDepositLine(d) && (c.SecurityDeposit <= 0 || d.LineTotal <= 0))).ToList();
+
                             if (displayLines.Count == 0)
                             {
                                 displayLines = new List<ChallanLineDto>
@@ -684,7 +677,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                     r.ConstantItem(220).AlignRight().Text($"Advance ({c.BillingPeriodMonths} Month(s)):");
                                     r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {c.CurrentCycleAmount:N0}");
                                 });
-                                if (spaceType == "PrivateRoom" && c.SecurityDeposit > 0)
+                                if (c.SecurityDeposit > 0)   // the booking's stored deposit; none = no row
                                 {
                                     inner.Item().Row(r =>
                                     {
@@ -767,7 +760,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             tc.Item().Text($"{itemNum++}. The {spaceType} facility charges are inclusive of support service charges of PKR {supportCharge:N0}.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial sales tax on support service.").FontSize(8).FontColor("#495057");
                             tc.Item().Text($"{itemNum++}. This booking confirmation is valid until the date specified above. Prices are subject to change after expiry.").FontSize(8).FontColor("#495057");
-                            if (spaceType == "PrivateRoom" || secDeposit > 0)
+                            if (secDeposit > 0)
                             {
                                 tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to terms of agreement.").FontSize(8).FontColor("#495057");
                             }
@@ -819,7 +812,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 c.Item().AlignRight().Text($"Issued: {inv.IssuedOn:dd MMM yyyy}").FontColor("#555555");
                                 c.Item().AlignRight().Text($"Due Date: {(inv.DueOn.HasValue ? inv.DueOn.Value : inv.StartOn):dd MMM yyyy}").Bold().FontColor("#1a1a2e");
                                 c.Item().AlignRight().Text($"Advance Months: {inv.AdvanceRentMonths}").FontColor("#555555");
-                                if (inv.SecurityDepositMonths > 0)
+                                if (inv.SecurityDepositMonths > 0 && inv.SecurityDepositTotal > 0)
                                     c.Item().AlignRight().Text($"Security Deposit Months: {inv.SecurityDepositMonths}").FontColor("#555555");
                             });
                         });
@@ -899,7 +892,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             if (inv.SecurityDepositTotal > 0)
                             {
                                 var bg = alt ? "#f9f9f9" : "#ffffff";
-                                table.Cell().Background(bg).Padding(6).Text($"Security Deposit ({inv.SecurityDepositMonths} Month(s))");
+                                table.Cell().Background(bg).Padding(6).Text(inv.SecurityDepositMonths > 0 ? $"Security Deposit ({inv.SecurityDepositMonths} Month(s))" : "Security Deposit");
                                 table.Cell().Background(bg).Padding(6).AlignRight().Text($"PKR {inv.SecurityDepositTotal:N0}");
                                 alt = !alt;
                             }
@@ -1064,9 +1057,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             return SalesTaxInvoicePdfGenerator.GeneratePdf(dto);
         }
 
-        public byte[] GenerateAgreementPdf(WorkNest.Application.DTOs.Agreement.SendAgreementRequest request, string quotationNumber)
+        private static bool IsSecurityDepositLine(ChallanLineDto line) =>
+            string.Equals(line.ChargeTypeCode, "SecurityDeposit", StringComparison.OrdinalIgnoreCase) ||
+            (line.Description?.Contains("Security Deposit", StringComparison.OrdinalIgnoreCase) ?? false);
+
+        public byte[] GenerateAgreementPdf(WorkNest.Application.DTOs.Agreement.SendAgreementRequest request, string quotationNumber, int securityDepositMonths = 0)
         {
-            return AgreementPdfGenerator.Generate(request, quotationNumber);
+            return AgreementPdfGenerator.Generate(request, quotationNumber, securityDepositMonths);
         }
 
         public byte[] GenerateESignatureCertificatePdf(WorkNest.Application.DTOs.Agreement.AgreementESignatureEvidence evidence)

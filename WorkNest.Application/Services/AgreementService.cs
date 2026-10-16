@@ -133,9 +133,14 @@ namespace WorkNest.Application.Services
             string formattedOpHours = NormalizeOperatingHours(request.OperatingHours);
             request.OperatingHours = formattedOpHours;
 
+            // Security deposit: the quotation's own (Security Deposit (Months) rule). The amount the send form posts is
+            // ignored; 0 = no deposit row in the agreement.
+            var (deposit, depositMonths) = QuotationDeposit.Of(q);
+            request.SecurityDeposit = deposit;
+
             // 2. Generate Page 1 (Dynamic Schedule & Preamble) via QuestPDF
             string qNum = q.QuotationNumber ?? $"QTN-{q.Id}";
-            byte[] page1Pdf = _pdf.GenerateAgreementPdf(request, qNum);
+            byte[] page1Pdf = _pdf.GenerateAgreementPdf(request, qNum, depositMonths);
 
             // 3. Render Static Pages 2+ from stored active HTML via PuppeteerSharp
             byte[] staticPagesPdf = await _htmlToPdfService.ConvertHtmlToPdfAsync(activeTemplate.ContentHtml);
@@ -150,7 +155,7 @@ namespace WorkNest.Application.Services
                 request.EntityType,
                 request.RefundDays,
                 request.FeeAmount > 0 ? request.FeeAmount : q.TotalAmount,
-                request.SecurityDeposit > 0 ? request.SecurityDeposit : q.SecurityDeposit,
+                deposit,
                 formattedOpHours,
                 request.FullName ?? q.CustomerName,
                 request.Cnic,
@@ -207,7 +212,7 @@ namespace WorkNest.Application.Services
                 SentDate = DateTime.UtcNow,
                 RefundDays = request.RefundDays,
                 FeeAmount = request.FeeAmount,
-                SecurityDeposit = request.SecurityDeposit,
+                SecurityDeposit = deposit,
                 OperatingHours = request.OperatingHours,
                 CustomerName = request.FullName ?? q.CustomerName,
                 CustomerCnic = request.Cnic,
@@ -301,8 +306,8 @@ namespace WorkNest.Application.Services
 
             string qNum = row["QuotationNumber"]?.ToString() ?? $"QTN-{req.QuotationId}";
 
-            // 1. Generate Page 1 (Dynamic)
-            byte[] page1Pdf = _pdf.GenerateAgreementPdf(req, qNum);
+            // 1. Generate Page 1 (Dynamic): the deposit saved with the agreement (0 = no deposit row)
+            byte[] page1Pdf = _pdf.GenerateAgreementPdf(req, qNum, await SavedDepositMonthsAsync(req.QuotationId, req.SecurityDeposit));
 
             // 2. Load stored template HTML
             string? templateHtml = row.TryGetValue("TemplateHtml", out var th) && th != null ? th.ToString() : null;
@@ -319,6 +324,28 @@ namespace WorkNest.Application.Services
             }
 
             return page1Pdf;
+        }
+
+        /// <summary>
+        /// Months to print next to a saved agreement's deposit (WN_Agreements keeps the amount only): the quotation's
+        /// Security Deposit (Months) when its deposit is still that amount, so a re-download matches the emailed copy;
+        /// otherwise 0 (amount only).
+        /// </summary>
+        private async Task<int> SavedDepositMonthsAsync(int quotationId, decimal savedDeposit)
+        {
+            if (savedDeposit <= 0m) return 0;
+            try
+            {
+                var q = await _quotations.GetQuotationByIdAsync(quotationId);
+                if (q == null) return 0;
+                var (amount, months) = QuotationDeposit.Of(q);
+                return Math.Abs(amount - savedDeposit) <= 1m ? months : 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read quotation {QuotationId} for the agreement deposit months.", quotationId);
+                return 0;
+            }
         }
 
         private static string? GetString(IDictionary<string, object?> r, string key)

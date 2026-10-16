@@ -10,7 +10,11 @@ namespace WorkNest.Application.Interfaces
         byte[] GenerateBookingConfirmationPdf(ChallanResponseDto challan);
         byte[] GenerateAdvanceInvoicePdf(WorkNest.Application.DTOs.Payment.AdvanceInvoicePdfDto inv);
         byte[] GenerateSalesTaxInvoicePdf(CustomerSTInvoiceDto dto);
-        byte[] GenerateAgreementPdf(WorkNest.Application.DTOs.Agreement.SendAgreementRequest request, string quotationNumber);
+        /// <summary>
+        /// Agreement page 1. <paramref name="securityDepositMonths"/> labels the deposit ("PKR 126,000 (2 months)"; 0 = amount
+        /// only); a 0 deposit (request.SecurityDeposit) has no deposit row.
+        /// </summary>
+        byte[] GenerateAgreementPdf(WorkNest.Application.DTOs.Agreement.SendAgreementRequest request, string quotationNumber, int securityDepositMonths = 0);
         /// <summary>One-page "Electronic signature certificate" appended to an e-signed agreement.</summary>
         byte[] GenerateESignatureCertificatePdf(WorkNest.Application.DTOs.Agreement.AgreementESignatureEvidence evidence);
     }
