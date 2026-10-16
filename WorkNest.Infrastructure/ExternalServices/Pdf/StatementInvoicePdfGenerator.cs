@@ -332,12 +332,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal totalLineVat = data.LineItems.Sum(i => i.VatAmount);
             decimal effectiveTaxTotal = data.TaxTotal > 0 ? data.TaxTotal : totalLineVat;
 
-            decimal taxPercentage = data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0
+            decimal taxPercentage = data.AppliedTaxPercentage.HasValue
                 ? data.AppliedTaxPercentage.Value
                 : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
 
             bool isExplicitlyNoTax = (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value == 0m)
-                                  && (data.AppliedChargePercentage.HasValue && data.AppliedChargePercentage.Value == 0m);
+                                  || (effectiveTaxTotal <= 0 && data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value == 0m);
 
             bool hasTax = !isExplicitlyNoTax && (
                 effectiveTaxTotal > 0

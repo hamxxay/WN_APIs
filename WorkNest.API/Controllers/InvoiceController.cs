@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Threading.Tasks;
@@ -1601,7 +1601,7 @@ namespace WorkNest.API.Controllers
 
                 decimal discountedBase = Math.Max(0, grossAdvanceRent - appliedDiscount);
                 decimal supportCharge;
-                decimal taxRate = appliedTaxPercentage > 0 ? appliedTaxPercentage : 16.00m;
+                decimal taxRate = appliedTaxPercentage >= 0 ? appliedTaxPercentage : 16.00m;
                 if (isMeetingRoom)
                 {
                     supportCharge = Math.Round(discountedBase * 0.10m, 2);
