@@ -9,8 +9,9 @@ namespace WorkNest.Infrastructure.Repositories
     /// CEO dashboard data: calls the read-only stored procedures dbo.WN_Ceo_* (script CEO_01_dashboard_procedures,
     /// changed by QA_07_dashboards). Until CEO_01 has run the procedures are missing (SQL error 2812) and every call
     /// throws <see cref="CeoDatabaseUpdateMissingException"/>, which the API answers with 503 (the full leases list:
-    /// naming QA_07). Until QA_07 has run the procedures do not know the tour inquiry location parameters (SQL error
-    /// 8144 / 8145, too many arguments): the call is repeated without them and every location's inquiries count, as before.
+    /// naming QA_07; the room report: naming CEO_02, which api/ceo/rooms answers with available = false). Until QA_07
+    /// has run the procedures do not know the tour inquiry location parameters (SQL error 8144 / 8145, too many
+    /// arguments): the call is repeated without them and every location's inquiries count, as before.
     /// </summary>
     public class CeoDashboardRepository : ICeoDashboardRepository
     {
@@ -197,6 +198,23 @@ namespace WorkNest.Infrastructure.Repositories
             catch (CeoDatabaseUpdateMissingException ex) // this procedure comes with QA_07, not CEO_01
             {
                 throw CeoDatabaseUpdateMissingException.LeasesMissing(ex.InnerException);
+            }
+        }
+
+        public async Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_RoomReport", p =>
+                {
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException ex) // this procedure comes with CEO_02, not CEO_01
+            {
+                throw CeoDatabaseUpdateMissingException.RoomReportMissing(ex.InnerException);
             }
         }
     }

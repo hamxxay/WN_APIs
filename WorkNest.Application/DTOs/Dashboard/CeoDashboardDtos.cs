@@ -325,4 +325,125 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// <summary>UTC, ISO 8601 with Z.</summary>
         public string? CreatedOn { get; set; }
     }
+
+    /// <summary>
+    /// GET api/ceo/rooms: rooms sold monthly (private offices, shared spaces), their occupancy and the price each was
+    /// sold at against the list price per seat (24/7) or the shift price (Morning / Evening: list less the location's
+    /// shift discount cap). Before the database update CEO_02: Available = false with Message, no summary, no rooms.
+    /// </summary>
+    public class CeoRoomReportDto
+    {
+        public bool Available { get; set; } = true;
+        /// <summary>Set when Available is false: what to do (run CEO_02_room_report).</summary>
+        public string? Message { get; set; }
+        /// <summary>month | quarter | year</summary>
+        public string Period { get; set; } = "month";
+        /// <summary>e.g. "October 2026", "Q4 2026", "2026".</summary>
+        public string PeriodLabel { get; set; } = "";
+        /// <summary>UTC, ISO 8601 with Z.</summary>
+        public string GeneratedAt { get; set; } = "";
+        /// <summary>Null when Available is false.</summary>
+        public CeoRoomSummaryDto? Summary { get; set; }
+        /// <summary>By location, then room code / name (numbers in order: 9 before 10).</summary>
+        public List<CeoRoomDto> Rooms { get; set; } = new();
+    }
+
+    public class CeoRoomSummaryDto
+    {
+        public int Rooms { get; set; }
+        /// <summary>Rooms with a confirmed booking right now.</summary>
+        public int OccupiedNow { get; set; }
+        public int VacantNow { get; set; }
+        /// <summary>Occupied now / rooms, percent (one decimal).</summary>
+        public decimal OccupancyNowPct { get; set; }
+        /// <summary>Room-days with a confirmed booking / room-days of the period so far, percent (one decimal).</summary>
+        public decimal PeriodOccupancyPct { get; set; }
+        /// <summary>Confirmed bookings on the rooms running in the period (Under + At + Over + Unpriced).</summary>
+        public int Sales { get; set; }
+        public int Under { get; set; }
+        public int At { get; set; }
+        public int Over { get; set; }
+        /// <summary>Sales with no list price known (no pricing row): not compared, not in Under / At / Over.</summary>
+        public int Unpriced { get; set; }
+        /// <summary>Sum of the expected monthly (list or shift price x seats) of the priced sales.</summary>
+        public decimal ListMonthly { get; set; }
+        /// <summary>Sum of the monthly sold (after the booking discount) of all sales.</summary>
+        public decimal SoldMonthly { get; set; }
+        /// <summary>Sum of the monthly variance of the priced sales (negative = sold below the price).</summary>
+        public decimal VarianceMonthly { get; set; }
+        /// <summary>Monthly gap of the under-priced sales (sum of their variance, zero or negative).</summary>
+        public decimal UnderMonthly { get; set; }
+        /// <summary>Monthly premium of the over-priced sales (sum of their variance, zero or positive).</summary>
+        public decimal OverMonthly { get; set; }
+        /// <summary>Always three: 24/7, Morning, Evening.</summary>
+        public List<CeoRoomShiftSummaryDto> ByShift { get; set; } = new();
+    }
+
+    public class CeoRoomShiftSummaryDto
+    {
+        /// <summary>24/7 | Morning | Evening</summary>
+        public string Shift { get; set; } = "";
+        public int Sales { get; set; }
+        public int Under { get; set; }
+        public int At { get; set; }
+        public int Over { get; set; }
+        public int Unpriced { get; set; }
+        public decimal ExpectedMonthly { get; set; }
+        public decimal SoldMonthly { get; set; }
+        public decimal VarianceMonthly { get; set; }
+    }
+
+    public class CeoRoomDto
+    {
+        public int SpaceId { get; set; }
+        public string? Name { get; set; }
+        public string? Code { get; set; }
+        public int? LocationId { get; set; }
+        public string? Location { get; set; }
+        public string? SpaceType { get; set; }
+        /// <summary>PrivateOffice | SharedSpace</summary>
+        public string? CategoryCode { get; set; }
+        /// <summary>Seats of the room (WN_Spaces.Capacity).</summary>
+        public int Seats { get; set; }
+        /// <summary>Today's monthly list price per seat; null when the room has no active monthly price.</summary>
+        public decimal? ListSeatPrice { get; set; }
+        /// <summary>List price per seat x seats; null when there is no list price.</summary>
+        public decimal? ListRoomPrice { get; set; }
+        public bool OccupiedNow { get; set; }
+        /// <summary>Days of the period so far with a confirmed booking, percent (one decimal).</summary>
+        public decimal PeriodOccupancyPct { get; set; }
+        /// <summary>Confirmed bookings running in the period, by start; empty = vacant all period.</summary>
+        public List<CeoRoomSaleDto> Sales { get; set; } = new();
+    }
+
+    public class CeoRoomSaleDto
+    {
+        public int BookingId { get; set; }
+        public string? Customer { get; set; }
+        /// <summary>24/7 | Morning | Evening</summary>
+        public string Shift { get; set; } = "24/7";
+        public int SeatsSold { get; set; }
+        /// <summary>yyyy-MM-dd</summary>
+        public string? StartOn { get; set; }
+        /// <summary>yyyy-MM-dd</summary>
+        public string? EndOn { get; set; }
+        /// <summary>List price per seat when sold (the booking's pricing row, else today's); null when unknown.</summary>
+        public decimal? ListSeatPriceAtSale { get; set; }
+        /// <summary>The location's discount cap for the shift, percent (applied to Morning / Evening only).</summary>
+        public decimal ShiftDiscountCapPct { get; set; }
+        /// <summary>24/7: the list price per seat; Morning / Evening: list x (1 - cap / 100). Null when unpriced.</summary>
+        public decimal? ExpectedSeatPrice { get; set; }
+        /// <summary>Expected per seat x seats sold. Null when unpriced.</summary>
+        public decimal? ExpectedMonthly { get; set; }
+        /// <summary>Monthly rent of the room after the booking discount.</summary>
+        public decimal SoldMonthly { get; set; }
+        /// <summary>Sold monthly / seats sold.</summary>
+        public decimal SoldSeatPrice { get; set; }
+        /// <summary>(Sold per seat - expected per seat) x seats sold. Null when unpriced.</summary>
+        public decimal? VarianceMonthly { get; set; }
+        /// <summary>Sold per seat / expected per seat - 1, percent (two decimals). Null when unpriced.</summary>
+        public decimal? VariancePct { get; set; }
+        /// <summary>under | at | over (more than 0.5% below / above the expected price); null when unpriced.</summary>
+        public string? Pricing { get; set; }
+    }
 }
