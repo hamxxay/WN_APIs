@@ -82,7 +82,7 @@ namespace WorkNest.Application.DTOs.Quotation
         public byte? SupportChargesId { get; set; }
         public decimal? PerSeatSupportRate { get; set; } = 2000.00m;
         public decimal AppliedChargePercentage { get; set; } = 10.00m;
-        public decimal AppliedTaxPercentage { get; set; } = 16.00m;
+        public decimal AppliedTaxPercentage { get; set; } = 0.00m;
         public decimal SupportChargeAmount { get; set; }
         public decimal TaxAmount { get; set; }
         public decimal TaxAmountOnAdvanceRent { get; set; }

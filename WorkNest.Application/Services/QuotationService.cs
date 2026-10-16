@@ -401,7 +401,7 @@ namespace WorkNest.Application.Services
                 TotalAmount = Convert.ToDecimal(header["TotalAmount"]),
                 SupportChargesId = header.TryGetValue("SupportChargesId", out var scid) && scid is not null ? Convert.ToByte(scid) : (byte)4,
                 AppliedChargePercentage = header.TryGetValue("AppliedChargePercentage", out var acp) && acp is not null ? Convert.ToDecimal(acp) : 10.00m,
-                AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp is not null ? Convert.ToDecimal(atp) : 16.00m,
+                AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp is not null ? Convert.ToDecimal(atp) : 0.00m,
                 SupportChargeAmount = header.TryGetValue("SupportChargeAmount", out var sca) && sca is not null && Convert.ToDecimal(sca) > 0 
                     ? Convert.ToDecimal(sca) 
                     : ((header.TryGetValue("Capacity", out var cVal) && cVal is not null ? Convert.ToInt32(cVal) : 1) * (header.TryGetValue("BillingPeriodMonths", out var bpmVal) && bpmVal is not null ? Convert.ToInt32(bpmVal) : 3) * 2000.00m),
