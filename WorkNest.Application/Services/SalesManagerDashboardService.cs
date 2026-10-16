@@ -58,6 +58,13 @@ namespace WorkNest.Application.Services
             var quotations = Int(funnel, "Quotations");
             var bookings = Int(funnel, "Bookings");
             var bookedDesks = Int(funnel, "BookedDesks");
+            // Conversion = quotations created in the period that were booked / quotations created in it (SM_04 columns).
+            // Before SM_04 ran: the per-location "converted" counts of the same quotations; the previous period capped at 100%.
+            var quotationsPrev = Int(funnel, "QuotationsPrev");
+            var quotationsBooked = Has(funnel, "QuotationsBooked") ? Int(funnel, "QuotationsBooked")
+                : Math.Min(Set(s, 4).Sum(r => Int(r, "Converted")), quotations);
+            var quotationsBookedPrev = Has(funnel, "QuotationsBookedPrev") ? Int(funnel, "QuotationsBookedPrev")
+                : Math.Min(Int(funnel, "BookingsPrev"), quotationsPrev);
             var bookedDesksPrev = Int(funnel, "BookedDesksPrev");
             var endedDesks = Int(ren, "EndedDesks");
             var byType = Set(s, 6).ToDictionary(r => Str(r, "InquiryType") ?? "NotSet", r => Int(r, "Inquiries"), StringComparer.OrdinalIgnoreCase);
@@ -78,15 +85,18 @@ namespace WorkNest.Application.Services
                         new() { Stage = "accepted", Label = "Accepted", Count = Int(funnel, "Accepted") },
                         new() { Stage = "bookings", Label = "Bookings", Count = bookings }
                     },
-                    ConversionRate = Pct(bookings, quotations),
-                    ConversionRatePrev = Pct(Int(funnel, "BookingsPrev"), Int(funnel, "QuotationsPrev")),
+                    ConversionRate = Pct(quotationsBooked, quotations),
+                    ConversionRatePrev = Pct(quotationsBookedPrev, quotationsPrev),
+                    QuotationsBooked = quotationsBooked,
+                    QuotationsBookedPrev = quotationsBookedPrev,
                     QuotedDesks = Int(funnel, "QuotedDesks"),
                     BookedDesks = bookedDesks,
                     BookedDesksPrev = bookedDesksPrev,
                     Months = Set(s, 2).Select(r => new SalesManagerFunnelMonthDto
                     {
                         Month = Str(r, "Month") ?? "", Quotations = Int(r, "Quotations"), Accepted = Int(r, "Accepted"),
-                        Bookings = Int(r, "Bookings"), BookedDesks = Int(r, "BookedDesks")
+                        Bookings = Int(r, "Bookings"), BookedDesks = Int(r, "BookedDesks"),
+                        QuotationsBooked = Has(r, "QuotationsBooked") ? Int(r, "QuotationsBooked") : Math.Min(Int(r, "Bookings"), Int(r, "Quotations"))
                     }).ToList()
                 },
                 Team = new SalesManagerTeamDto
@@ -633,6 +643,7 @@ namespace WorkNest.Application.Services
         private static int Total(List<List<IDictionary<string, object?>>> s) => Int(Set(s, 0).FirstOrDefault(), "Total");
 
         private static List<IDictionary<string, object?>> Set(List<List<IDictionary<string, object?>>> s, int i) => i < s.Count ? s[i] : new();
+        private static bool Has(IDictionary<string, object?>? r, string key) => r != null && r.ContainsKey(key);
         private static object? Val(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) ? v : null;
         private static int Int(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : 0;
         /// <summary>A bit column; false when it is missing (e.g. a procedure from before BR_02).</summary>
