@@ -37,6 +37,10 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// <summary>inquiries, quotations, accepted, bookings: created in the period.</summary>
         public List<CeoFunnelStageDto> Stages { get; set; } = new();
         /// <summary>Bookings / quotations, percent (one decimal).</summary>
+        /// <summary>Quotations created in the period that were booked (converted); conversion = this / quotations.</summary>
+        public int QuotationsBooked { get; set; }
+        /// <summary>The same for the previous period.</summary>
+        public int QuotationsBookedPrev { get; set; }
         public decimal ConversionRate { get; set; }
         /// <summary>The same for the previous period (same number of days).</summary>
         public decimal ConversionRatePrev { get; set; }
@@ -55,6 +59,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string Month { get; set; } = "";
         public int Quotations { get; set; }
         public int Accepted { get; set; }
+        /// <summary>Quotations created in the month that were booked (converted).</summary>
+        public int QuotationsBooked { get; set; }
         public int Bookings { get; set; }
         /// <summary>Desks on the bookings created in the month.</summary>
         public int BookedDesks { get; set; }

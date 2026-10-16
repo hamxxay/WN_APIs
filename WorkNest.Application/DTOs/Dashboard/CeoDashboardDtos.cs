@@ -129,8 +129,10 @@ namespace WorkNest.Application.DTOs.Dashboard
     {
         /// <summary>inquiries, quotations, accepted, bookings: created in the period.</summary>
         public List<CeoFunnelStageDto> Funnel { get; set; } = new();
-        /// <summary>Bookings / quotations, percent (one decimal).</summary>
+        /// <summary>Quotations created in the period that were booked / quotations created in it, percent (one decimal); never above 100.</summary>
         public decimal ConversionRate { get; set; }
+        /// <summary>Quotations created in the period that were booked (converted).</summary>
+        public int QuotationsBooked { get; set; }
         /// <summary>Website, WhatsApp, WalkIn, Reference, NotSet (always all five).</summary>
         public List<CeoInquiryTypeCountDto> InquiriesByType { get; set; } = new();
         /// <summary>

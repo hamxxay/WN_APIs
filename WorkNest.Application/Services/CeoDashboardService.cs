@@ -116,6 +116,10 @@ namespace WorkNest.Application.Services
 
             var quotations = Int(sales, "Quotations");
             var bookings = Int(sales, "Bookings");
+            // Conversion = quotations created in the period that were booked / quotations created in it (SM_04 column);
+            // before SM_04 ran: the per-location "converted" counts of the same quotations.
+            var quotationsBooked = Has(sales, "QuotationsBooked") ? Int(sales, "QuotationsBooked")
+                : Math.Min(Set(s, 11).Sum(r => Int(r, "Converted")), quotations);
             var byType = Set(s, 10).ToDictionary(r => Str(r, "InquiryType") ?? "NotSet", r => Int(r, "Inquiries"), StringComparer.OrdinalIgnoreCase);
             dto.Sales = new CeoSalesDto
             {
@@ -126,7 +130,8 @@ namespace WorkNest.Application.Services
                     new() { Stage = "accepted", Label = "Accepted", Count = Int(sales, "Accepted") },
                     new() { Stage = "bookings", Label = "Bookings", Count = bookings }
                 },
-                ConversionRate = Pct(bookings, quotations),
+                ConversionRate = Pct(quotationsBooked, quotations),
+                QuotationsBooked = quotationsBooked,
                 InquiriesByType = InquiryTypeLabels
                     .Select(t => new CeoInquiryTypeCountDto { Type = t.Type, Label = t.Label, Count = byType.GetValueOrDefault(t.Type) })
                     .Concat(byType.Where(kv => InquiryTypeLabels.All(t => !t.Type.Equals(kv.Key, StringComparison.OrdinalIgnoreCase)))
@@ -601,6 +606,7 @@ namespace WorkNest.Application.Services
         private static int Total(List<List<IDictionary<string, object?>>> s) => Int(Set(s, 0).FirstOrDefault(), "Total");
 
         private static List<IDictionary<string, object?>> Set(List<List<IDictionary<string, object?>>> s, int i) => i < s.Count ? s[i] : new();
+        private static bool Has(IDictionary<string, object?>? r, string key) => r != null && r.ContainsKey(key);
         private static object? Val(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) ? v : null;
         private static int Int(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : 0;
         private static decimal Dec(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Math.Round(Convert.ToDecimal(v), 2) : 0m;
