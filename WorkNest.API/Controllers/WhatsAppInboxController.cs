@@ -7,13 +7,18 @@ using WorkNest.API.Extensions;
 
 namespace WorkNest.API.Controllers
 {
-    /// <summary>WhatsApp Inbox page: conversations with customers, staff replies and broadcasts.</summary>
+    /// <summary>
+    /// WhatsApp Inbox page: conversations with customers, staff replies and broadcasts. Every staff role may read the
+    /// conversations (and edit a contact's name / tags / notes); only admins and super admins send anything (reply,
+    /// new conversation, broadcast).
+    /// </summary>
     [ApiController]
     [Authorize(Roles = StaffRoles)]
     public class WhatsAppInboxController : ControllerBase
     {
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
-        private const string BroadcastRoles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive";
+        /// <summary>Who may send messages from the inbox (on top of StaffRoles). Sales executives read only.</summary>
+        private const string SendRoles = "admin,Admin,super_admin,SuperAdmin";
         private readonly IWhatsAppInboxService _inbox;
         private readonly IDbRepository _db;
 
@@ -39,6 +44,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/whatsapp/conversations/{id:int}/messages")]
+        [Authorize(Roles = SendRoles)]
         public async Task<IActionResult> Reply(int id, [FromBody] WhatsAppSendMessageRequest request)
         {
             var result = await _inbox.ReplyAsync(id, request.Message, await ActorIdAsync());
@@ -46,6 +52,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/whatsapp/conversations/start")]
+        [Authorize(Roles = SendRoles)]
         public async Task<IActionResult> Start([FromBody] WhatsAppStartConversationRequest request)
         {
             var result = await _inbox.StartConversationAsync(request, await ActorIdAsync());
@@ -60,7 +67,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/whatsapp/broadcast")]
-        [Authorize(Roles = BroadcastRoles)]
+        [Authorize(Roles = SendRoles)]
         public async Task<IActionResult> Broadcast([FromBody] WhatsAppBroadcastRequest request)
         {
             var result = await _inbox.BroadcastAsync(request, await ActorIdAsync());
