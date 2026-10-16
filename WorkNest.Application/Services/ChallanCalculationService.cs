@@ -44,7 +44,10 @@ namespace WorkNest.Application.Services
         public decimal CurrentCycleAmount { get; set; }
         public int ContractPeriodMonths { get; set; } = 12;
         public int BillingPeriodMonths { get; set; } = 3;
+        /// <summary>The stored deposit amount (see SecurityDepositRules).</summary>
         public decimal SecurityDeposit { get; set; }
+        /// <summary>The stored Security Deposit (Months); only used when SecurityDeposit is 0 (older rows). 0 = none.</summary>
+        public int SecurityDepositMonths { get; set; }
         public decimal PerSeatSupportRate { get; set; } = 2000.00m;
         public decimal AppliedChargePercentage { get; set; } = 10.00m;
         public decimal AppliedTaxPercentage { get; set; } = 16.00m;
@@ -116,6 +119,7 @@ namespace WorkNest.Application.Services
                 BillingPeriodMonths = input.BillingPeriodMonths,
                 ContractPeriodMonths = input.ContractPeriodMonths,
                 SecurityDeposit = input.SecurityDeposit,
+                SecurityDepositMonths = input.SecurityDepositMonths,
                 PerSeatSupportRate = input.PerSeatSupportRate,
                 AppliedTaxPercentage = input.AppliedTaxPercentage,
                 DiscountType = input.DiscountType,
@@ -282,7 +286,9 @@ namespace WorkNest.Application.Services
                 fields.Add(new ChallanFieldDto { Key = "advanceRent", Label = $"Advance Rent ({advanceLabel})", Value = FormatCurrency(res.FirstCycleRent) });
                 fields.Add(new ChallanFieldDto { Key = "monthlyRent", Label = "Monthly Rent", Value = FormatCurrency(res.MonthlyRent) });
 
-                if (res.SpaceType == "PrivateRoom" && res.SecurityDeposit > 0)
+                // No deposit row when there is no deposit (0 months); a stored deposit is shown whatever the space kind,
+                // since it is in the total.
+                if (res.SecurityDeposit > 0)
                 {
                     fields.Add(new ChallanFieldDto { Key = "securityDeposit", Label = "Security Deposit (Refundable)", Value = FormatCurrency(res.SecurityDeposit) });
                 }
@@ -324,6 +330,8 @@ namespace WorkNest.Application.Services
                 }
             }
 
+            // The stored deposit (header, else its quotation line); with none, the engine works it out from the stored
+            // months for an older private-office row, and 0 months = no deposit (SecurityDepositRules).
             decimal secDeposit = q.SecurityDeposit;
             if (secDeposit <= 0 && q.Details != null && q.Details.Count > 0)
             {
@@ -377,6 +385,7 @@ namespace WorkNest.Application.Services
                 Capacity = q.Capacity ?? 1,
                 PerSeatSupportRate = q.PerSeatSupportRate ?? 2000.00m,
                 SecurityDeposit = secDeposit,
+                SecurityDepositMonths = q.SecurityDepositMonths,
                 AppliedChargePercentage = q.AppliedChargePercentage > 0 ? q.AppliedChargePercentage : 10.00m,
                 AppliedTaxPercentage = q.AppliedTaxPercentage >= 0 ? q.AppliedTaxPercentage : 16.00m,
                 DiscountType = q.DiscountType ?? "Percentage",
@@ -484,7 +493,7 @@ namespace WorkNest.Application.Services
                 CurrentCycleAmount = 0,
                 ContractPeriodMonths = c.Contract?.NumberOfMonths > 0 ? c.Contract.NumberOfMonths : (c.NumberOfMonths > 0 ? c.NumberOfMonths : 12),
                 BillingPeriodMonths = c.BillingPeriodMonths > 0 ? c.BillingPeriodMonths : 3,
-                SecurityDeposit = c.SecurityDeposit,
+                SecurityDeposit = c.SecurityDeposit,   // already the stored deposit (the view applies the reading rule)
                 AppliedChargePercentage = 10.00m,
                 AppliedTaxPercentage = c.AppliedTaxPercentage >= 0 ? c.AppliedTaxPercentage : 16.00m,
                 DiscountPercentage = c.DiscountPercentage,

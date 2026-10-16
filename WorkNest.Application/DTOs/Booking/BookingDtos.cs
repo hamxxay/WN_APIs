@@ -36,6 +36,8 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime? NextBillingDate { get; set; }
         public decimal BalanceLeft { get; set; }
         public decimal SecurityDeposit { get; set; }
+        /// <summary>The booking's stored Security Deposit (Months) (0 = no deposit).</summary>
+        public int SecurityDepositMonths { get; set; }
         public int? OfferingTypeId { get; set; }
         public string? OfferingType { get; set; } = "24/7";
         public string? ShiftType { get; set; } = "24_7";
@@ -95,9 +97,12 @@ namespace WorkNest.Application.DTOs.Booking
         public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; } = 0;
         public decimal DiscountValue { get; set; } = 0;
+        /// <summary>No longer used: the deposit is worked out from SecurityDepositMonths (kept so older clients still bind).</summary>
         public decimal? SecurityDepositOverride { get; set; }
         public int? FloorId { get; set; }
         public int? BillingPeriodMonths { get; set; }
+        /// <summary>Security Deposit (Months): 0, 1, 2 or 3 (anything else is rejected). Null = the space kind's default
+        /// (private office 2). Shared spaces and meeting rooms are always 0.</summary>
         public int? SecurityDepositMonths { get; set; }
         public int? AdvanceRentMonths { get; set; }
         public byte? SupportChargesId { get; set; }
@@ -165,6 +170,12 @@ namespace WorkNest.Application.DTOs.Booking
         public DateTime? StartDateTime { get; set; }
         public DateTime? EndDateTime { get; set; }
         public string? Notes { get; set; }
+        /// <summary>
+        /// Security Deposit (Months), 0-3 (null = unchanged). A new value recomputes the booking's deposit (months x
+        /// monthly rent x (1 - rent discount)); shared spaces and meeting rooms stay 0. Not changeable once the
+        /// booking has an invoice.
+        /// </summary>
+        public int? SecurityDepositMonths { get; set; }
     }
 
     public class CancelBookingRequest

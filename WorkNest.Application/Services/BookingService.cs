@@ -329,6 +329,10 @@ namespace WorkNest.Application.Services
             var phoneError = Phone.Validate(request.Phone);
             if (phoneError != null) return ApiResponse.Fail(phoneError);
 
+            // Security Deposit (Months): 0, 1, 2 or 3 only.
+            if (!SecurityDepositRules.IsValidMonths(request.SecurityDepositMonths))
+                return ApiResponse.Fail(SecurityDepositRules.InvalidMonthsMessage);
+
             int userId = request.UserId ?? 0;
 
             if (userId == 0 && !string.IsNullOrWhiteSpace(request.UserIdGuid))
@@ -416,8 +420,12 @@ namespace WorkNest.Application.Services
                 return ApiResponse.Fail("Discount value cannot be negative.");
 
             // Base price and discount cap: same rules as QuotationService.CreateQuotationAsync.
-            var (standardPerSeat, spaceCapacity, categoryCode, spaceName) = await GetSpacePricingAsync(spaceId);
+            var (standardPerSeat, spaceCapacity, categoryCode, spaceName, spaceTypeName) = await GetSpacePricingAsync(spaceId);
             bool isPrivate = categoryCode is "PrivateOffice" or "Private";
+            // Deposit months for the space kind: private office 0-3 (default 2), shared space / meeting room always 0.
+            // WN_Bookings_Insert and the update after it work the amount out from these months (no override).
+            int securityDepositMonths = SecurityDepositRules.ResolveMonths(
+                SecurityDepositRules.KindOf(categoryCode, spaceTypeName), request.SecurityDepositMonths);
             bool isMeetingRoom = categoryCode.Contains("Meeting", StringComparison.OrdinalIgnoreCase);
             // WN_Bookings_Insert prices a private office per seat (price x capacity). Meeting rooms also multiply
             // by @Capacity, so it is sent for private offices only.
@@ -487,7 +495,7 @@ namespace WorkNest.Application.Services
                 null, null, null, "Created by administrator",
                 discountType == "Percentage" ? discountValue : 0,
                 discountType, discountValue,
-                request.SecurityDepositOverride, request.FloorId, request.BillingPeriodMonths, request.SecurityDepositMonths, request.AdvanceRentMonths,
+                null, request.FloorId, request.BillingPeriodMonths, securityDepositMonths, request.AdvanceRentMonths,
                 shiftType, capacity, perSeatBasePrice, request.SendWhtInvoice, request.SendWhtInvoice ? request.WhtRate : null);
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -496,17 +504,18 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(result, "Admin booking created.");
         }
 
-        /// <summary>Standard per-seat monthly price (s.Price, as WN_Bookings_Insert uses), capacity and category of a space.</summary>
-        private async Task<(decimal StandardPerSeat, int Capacity, string CategoryCode, string Name)> GetSpacePricingAsync(int spaceId)
+        /// <summary>Standard per-seat monthly price (s.Price, as WN_Bookings_Insert uses), capacity, category and type name of a space.</summary>
+        private async Task<(decimal StandardPerSeat, int Capacity, string CategoryCode, string Name, string SpaceTypeName)> GetSpacePricingAsync(int spaceId)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
             var row = rows.FirstOrDefault(r => r.TryGetValue("Id", out var id) && id is not null && Convert.ToInt32(id) == spaceId);
-            if (row is null) return (0m, 1, "", "this space");
+            if (row is null) return (0m, 1, "", "this space", "");
             decimal price = row.TryGetValue("Price", out var p) && p is not null ? Convert.ToDecimal(p) : 0m;
             int cap = row.TryGetValue("Capacity", out var c) && c is not null ? Convert.ToInt32(c) : 1;
             string category = row.TryGetValue("CategoryCode", out var cc) ? cc?.ToString() ?? "" : "";
             string name = row.TryGetValue("Name", out var n) ? n?.ToString() ?? "this space" : "this space";
-            return (price, Math.Max(1, cap), category, name);
+            string typeName = row.TryGetValue("SpaceTypeName", out var tn) ? tn?.ToString() ?? "" : "";
+            return (price, Math.Max(1, cap), category, name, typeName);
         }
 
         public async Task<ApiResponse> CreateSmartBookingAsync(SmartBookingRequest request, string userEmail)
@@ -561,8 +570,23 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> UpdateBookingAsync(int id, BookingUpdateRequest request, int? actorId)
         {
+            // Security Deposit (Months): 0, 1, 2 or 3 only; checked before anything is saved.
+            if (!SecurityDepositRules.IsValidMonths(request.SecurityDepositMonths))
+                return ApiResponse.Fail(SecurityDepositRules.InvalidMonthsMessage);
+
+            // A new month count recomputes the stored deposit (WN_Bookings_UpdateSecurityDeposit, SD_01: shared spaces
+            // and meeting rooms stay 0; the same months change nothing; refused once the booking has an invoice, as
+            // issued invoices never change). Done first so a refusal leaves the whole booking unchanged.
+            IDictionary<string, object?>? deposit = null;
+            if (request.SecurityDepositMonths.HasValue)
+            {
+                deposit = await _db.UpdateBookingSecurityDepositAsync(id, request.SecurityDepositMonths.Value, actorId);
+                if (deposit.TryGetValue("ErrorMessage", out var err) && err is not null && err is not DBNull && !string.IsNullOrWhiteSpace(err.ToString()))
+                    return ApiResponse.Fail(err.ToString()!);
+            }
+
             await _db.UpdateBookingAsync(id, request.StartDateTime, request.EndDateTime, request.Notes, actorId);
-            return ApiResponse.Ok("Booking updated.");
+            return deposit is { Count: > 0 } ? ApiResponse.Ok(deposit, "Booking updated.") : ApiResponse.Ok("Booking updated.");
         }
 
         public async Task<ApiResponse> UpdateBookingStatusAsync(int id, byte statusId, int? actorId)
@@ -714,6 +738,9 @@ namespace WorkNest.Application.Services
             {
                 result.ChallanNumber = summary.TryGetValue("ChallanNumber", out var chn) && chn is not null ? chn.ToString() : null;
                 result.ChallanValidUntil = ParseDateSafely(summary.TryGetValue("ChallanValidUntil", out var chv) ? chv : null);
+                // The stored Security Deposit (Months); 0 when there is no deposit.
+                result.SecurityDepositMonths = result.SecurityDeposit > 0 && summary.TryGetValue("SecurityDepositMonths", out var sdm)
+                    && sdm is not null && sdm is not DBNull ? Convert.ToInt32(sdm) : 0;
             }
             result.BillingFiguresReliable = BillingFiguresReliable(summary);
 
@@ -954,7 +981,7 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok("Challan email sent successfully.");
         }
 
-        public async Task<byte[]> GenerateAdvanceInvoicePdfAsync(int bookingId, int advanceMonths, int secDepositMonths, decimal monthlyRate, decimal discountAmount)
+        public async Task<byte[]> GenerateAdvanceInvoicePdfAsync(int bookingId, int advanceMonths, int? secDepositMonths, decimal monthlyRate, decimal discountAmount)
         {
             var challanResult = await GetChallanAsync(bookingId);
             var dto = challanResult.IsSuccessful ? (ChallanResponseDto)challanResult.Data! : null;
@@ -1021,16 +1048,34 @@ namespace WorkNest.Application.Services
                 advTotal = monthlyRate * advanceMonths;
             }
 
-            // Task 1: Mirror discount to security deposit (Deposit is full months, not prorated)
-            decimal baseSecTotal = monthlyRate * secDepositMonths;
+            // Security deposit (never prorated, SecurityDepositRules): the booking's stored months and stored deposit;
+            // months asked for explicitly (0-3) are worked out with the rent's discount. No default months.
+            var depositKind = SecurityDepositRules.KindOf(dto?.SpaceType, dto?.SpaceTypeName);
+            int storedMonths = 0;
+            var summaryRow = await _db.GetBookingSummaryRowDbAsync(bookingId);
+            if (summaryRow is not null && summaryRow.TryGetValue("SecurityDepositMonths", out var sdmVal) && sdmVal is not null && sdmVal is not DBNull)
+                storedMonths = Convert.ToInt32(sdmVal);
+            decimal storedDeposit = dto?.SecurityDeposit ?? 0m;
             decimal depositDiscountPct = (dto?.DiscountPercentage > 0)
                 ? dto.DiscountPercentage
                 : ((monthlyRate > 0 && discountAmount > 0 && advanceMonths > 0)
                     ? Math.Min(100m, (discountAmount / (monthlyRate * advanceMonths)) * 100m)
                     : 0m);
-            decimal secTotal = baseSecTotal > 0
-                ? Math.Max(0, Math.Round(baseSecTotal * (1 - (depositDiscountPct / 100.0m)), 2))
-                : 0m;
+            int secMonthsShown;
+            decimal secTotal;
+            if (secDepositMonths is null || secDepositMonths.Value == storedMonths)
+            {
+                secTotal = storedDeposit > 0 ? storedDeposit : 0m;
+                secMonthsShown = secTotal > 0 ? storedMonths : 0;
+            }
+            else
+            {
+                secMonthsShown = depositKind == DepositSpaceKind.PrivateOffice
+                    ? Math.Clamp(secDepositMonths.Value, SecurityDepositRules.MinMonths, SecurityDepositRules.MaxMonths)
+                    : 0;
+                secTotal = SecurityDepositRules.AmountForPercent(secMonthsShown, monthlyRate, depositDiscountPct);
+                if (secTotal <= 0) secMonthsShown = 0;
+            }
 
             // Task 2: Support charge and PST
             int capacity = dto?.SpaceCapacity > 0 ? dto.SpaceCapacity : 1;
@@ -1053,7 +1098,7 @@ namespace WorkNest.Application.Services
                 EndOn                 = dto?.EndOn ?? _clock.Today,
                 DueOn                 = _clock.Today.AddDays(7), // invoice date + 7 days, like every invoice
                 AdvanceRentMonths     = advanceMonths,
-                SecurityDepositMonths = secDepositMonths,
+                SecurityDepositMonths = secMonthsShown,
                 AdvanceRentTotal      = advTotal,
                 SecurityDepositTotal  = secTotal,
                 SupportChargeTotal    = supportChargeTotal,

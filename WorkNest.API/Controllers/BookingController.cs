@@ -237,8 +237,11 @@ namespace WorkNest.API.Controllers
 
         [HttpPut("api/booking/{id:int}")]
         [Authorize(Roles = StaffRoles)]
-        public async Task<IActionResult> Update(int id, [FromBody] BookingUpdateRequest request) =>
-            Ok(await _bookings.UpdateBookingAsync(id, request, null));
+        public async Task<IActionResult> Update(int id, [FromBody] BookingUpdateRequest request)
+        {
+            var result = await _bookings.UpdateBookingAsync(id, request, null);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);   // e.g. a deposit outside 0-3 months
+        }
 
         [HttpPut("api/booking/{publicId:guid}")]
         [Authorize(Roles = StaffRoles)]
@@ -247,7 +250,8 @@ namespace WorkNest.API.Controllers
             var booking = await _db.GetBookingByPublicIdAsync(publicId, null);
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
-            return Ok(await _bookings.UpdateBookingAsync(id, request, null));
+            var result = await _bookings.UpdateBookingAsync(id, request, null);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
         [HttpPatch("api/booking/{id:int}/cancel")]

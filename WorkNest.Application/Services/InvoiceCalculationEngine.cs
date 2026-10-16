@@ -1,4 +1,5 @@
 using System;
+using WorkNest.Application.Helpers;
 
 namespace WorkNest.Application.Services
 {
@@ -15,8 +16,13 @@ namespace WorkNest.Application.Services
         public decimal CurrentCycleAmount { get; set; }
         public int BillingPeriodMonths { get; set; } = 3;
         public int ContractPeriodMonths { get; set; } = 12;
+        /// <summary>The stored deposit amount (already discounted). Used as it is when above 0.</summary>
         public decimal SecurityDeposit { get; set; }
-        public int SecurityDepositMonths { get; set; } = 2;
+        /// <summary>
+        /// The stored Security Deposit (Months). Only used when SecurityDeposit is 0 (an older row): a private office
+        /// then gets months x monthly rent less the rent's discount. 0 = no deposit (there is no default).
+        /// </summary>
+        public int SecurityDepositMonths { get; set; }
         public int SecurityDepositInstallments { get; set; } = 1;
         public decimal PerSeatSupportRate { get; set; } = 2000.00m;
         public decimal AppliedChargePercentage { get; set; } = 10.00m;
@@ -246,31 +252,22 @@ namespace WorkNest.Application.Services
             // Tax: 16% on service charge only
             result.Tax = Round2(result.ServiceCharge * (taxRate / 100.0m));
 
-            // Security Deposit Calculation (Full amount / months, never prorated)
-            decimal baseDeposit = 0m;
-            if (request.SecurityDeposit > 0)
+            // Security Deposit (never prorated), SecurityDepositRules: the stored amount; a stored 0 with months above 0
+            // on a private office = months x monthly rent less the rent's discount %; otherwise none (no default months).
+            var depositKind = result.SpaceType == "PrivateRoom" ? DepositSpaceKind.PrivateOffice : DepositSpaceKind.SharedSpace;
+            decimal deposit = SecurityDepositRules.Stored(depositKind, request.SecurityDeposit, request.SecurityDepositMonths,
+                result.MonthlyRent, discountPct / 100.0m);
+            if (request.SecurityDeposit > 0 || deposit <= 0)
             {
-                baseDeposit = request.SecurityDeposit;
-                result.DepositBase = baseDeposit;
+                result.DepositBase = deposit;
                 result.DepositDiscount = 0m;
-                result.DepositAfterDiscount = baseDeposit;
+                result.DepositAfterDiscount = deposit;
             }
             else
             {
-                int secMonths = request.SecurityDepositMonths > 0 ? request.SecurityDepositMonths : 2;
-                if (secMonths > 0 && result.MonthlyRent > 0)
-                {
-                    baseDeposit = Round2(result.MonthlyRent * secMonths);
-                }
-                result.DepositBase = baseDeposit;
-
-                decimal depositDiscount = 0m;
-                if (baseDeposit > 0 && discountPct > 0)
-                {
-                    depositDiscount = Round2(baseDeposit * (discountPct / 100.0m));
-                }
-                result.DepositDiscount = depositDiscount;
-                result.DepositAfterDiscount = Round2(Math.Max(0m, baseDeposit - depositDiscount));
+                result.DepositBase = Round2(result.MonthlyRent * request.SecurityDepositMonths);
+                result.DepositAfterDiscount = deposit;
+                result.DepositDiscount = Round2(Math.Max(0m, result.DepositBase - deposit));
             }
 
             // Deposit Installments

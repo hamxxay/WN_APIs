@@ -1136,7 +1136,7 @@ namespace WorkNest.API.Controllers
 
                 int userId = 0;
                 decimal monthlyRent = 0, subtotalAmount = 0, totalAmount = 0, discountAmount = 0, discountPercentage = 0, secDepositReq = 0, resolvedSecDep = 0;
-                int billingMonths = 3, secMonths = 2, spaceCapacity = 1;
+                int billingMonths = 3, secMonths = 0, spaceCapacity = 1;   // deposit months: stored value only, no default
                 decimal appliedTaxPercentage = 16.00m, appliedChargePercentage = 10.00m, perSeatSupportRate = 2000.00m;
                 int? rentAccountId = null, securityReceivedId = null, servicesIncomeId = null, salesTaxId = null, accountReceivableId = null;
                 string discountType = "Percentage";
@@ -1162,7 +1162,7 @@ namespace WorkNest.API.Controllers
                         secDepositReq = reader.IsDBNull(reader.GetOrdinal("SecurityDepositRequired")) ? 0 : reader.GetDecimal(reader.GetOrdinal("SecurityDepositRequired"));
                         resolvedSecDep = HasColumn(reader, "ResolvedSecurityDeposit") && !reader.IsDBNull(reader.GetOrdinal("ResolvedSecurityDeposit")) ? reader.GetDecimal(reader.GetOrdinal("ResolvedSecurityDeposit")) : 0;
                         billingMonths = reader.IsDBNull(reader.GetOrdinal("BillingPeriodMonths")) ? 3 : reader.GetInt32(reader.GetOrdinal("BillingPeriodMonths"));
-                        secMonths = reader.IsDBNull(reader.GetOrdinal("SecurityDepositMonths")) ? 2 : reader.GetInt32(reader.GetOrdinal("SecurityDepositMonths"));
+                        secMonths = reader.IsDBNull(reader.GetOrdinal("SecurityDepositMonths")) ? 0 : reader.GetInt32(reader.GetOrdinal("SecurityDepositMonths"));
                         customerEmail = reader.IsDBNull(reader.GetOrdinal("CustomerEmail")) ? "" : reader.GetString(reader.GetOrdinal("CustomerEmail"));
                         customerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? "Valued Customer" : reader.GetString(reader.GetOrdinal("CustomerName"));
                         spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));
@@ -1198,6 +1198,8 @@ namespace WorkNest.API.Controllers
                     CurrentCycleAmount = subtotalAmount > 0 ? subtotalAmount : totalAmount,
                     BillingPeriodMonths = billingMonths,
                     ContractPeriodMonths = contractMonths,
+                    // Stored deposit (SecurityDepositRules); a stored 0 with months above 0 on a private office is worked
+                    // out from the months; 0 months = no deposit and no deposit line.
                     SecurityDeposit = secDepositReq > 0 ? secDepositReq : resolvedSecDep,
                     SecurityDepositMonths = secMonths,
                     PerSeatSupportRate = perSeatSupportRate,
@@ -1219,6 +1221,7 @@ namespace WorkNest.API.Controllers
                 decimal taxTotal = calc.Tax;
                 decimal supportCharge = calc.ServiceCharge;
                 decimal securityDeposit = calc.DepositFirstInstallment;
+                if (securityDeposit <= 0) secMonths = 0;   // no deposit: no months on the invoice either
                 decimal roomRentExclusive = calc.RoomRentExclTax;
                 decimal expectedSubtotal = calc.Rent;
                 decimal expectedGrandTotal = calc.GrandTotal;
@@ -1482,7 +1485,7 @@ namespace WorkNest.API.Controllers
 
                 int userId = 0;
                 decimal monthlyRent = 0, subtotalAmount = 0, discountAmount = 0, discountPercentage = 0, totalAmount = 0;
-                int billingMonths = 3, secMonths = 2, spaceCapacity = 1;
+                int billingMonths = 3, secMonths = 0, spaceCapacity = 1;   // deposit months: stored value only
                 decimal appliedTaxPercentage = 16.00m, appliedChargePercentage = 10.00m, perSeatSupportRate = 2000.00m;
                 int? rentAccountId = null, securityReceivedId = null, servicesIncomeId = null, salesTaxId = null, accountReceivableId = null;
                 DateTime? startOn = null, endOn = null;
@@ -1504,7 +1507,7 @@ namespace WorkNest.API.Controllers
                         discountAmount = reader.IsDBNull(reader.GetOrdinal("DiscountAmount")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountAmount"));
                         discountPercentage = reader.IsDBNull(reader.GetOrdinal("DiscountPercentage")) ? 0 : reader.GetDecimal(reader.GetOrdinal("DiscountPercentage"));
                         billingMonths = reader.IsDBNull(reader.GetOrdinal("BillingPeriodMonths")) ? 3 : reader.GetInt32(reader.GetOrdinal("BillingPeriodMonths"));
-                        secMonths = HasColumn(reader, "SecurityDepositMonths") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositMonths")) ? Convert.ToInt32(reader["SecurityDepositMonths"]) : 2;
+                        secMonths = HasColumn(reader, "SecurityDepositMonths") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositMonths")) ? Convert.ToInt32(reader["SecurityDepositMonths"]) : 0;
                         customerEmail = reader.IsDBNull(reader.GetOrdinal("CustomerEmail")) ? "" : reader.GetString(reader.GetOrdinal("CustomerEmail"));
                         customerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? "Valued Customer" : reader.GetString(reader.GetOrdinal("CustomerName"));
                         spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));

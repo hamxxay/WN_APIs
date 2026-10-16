@@ -82,6 +82,9 @@ namespace WorkNest.Application.Services
 
         public async Task<QuotationResponse> CreateQuotationAsync(QuotationRequest request, int? createdById)
         {
+            // Security Deposit (Months): 0, 1, 2 or 3 only (400 from the controller); checked before anything is read.
+            SecurityDepositRules.EnsureValidMonths(request.SecurityDepositMonths);
+
             var spaceDetails = await ResolveSpaceDetailsAsync(request.SpaceId);
 
             // Base price validation: can only be increased, NOT decreased below standard space rate
@@ -169,10 +172,13 @@ namespace WorkNest.Application.Services
             decimal subtotal = 0;
             var details = new List<QuotationDetailDto>();
 
-            // Calculate effective rent discount percentage for mirroring to deposit (Task 1)
-            decimal rentDiscountPct = (discountType == "Amount" || discountType == "Fixed")
-                ? (monthlyBasePrice > 0 ? (discountValue / monthlyBasePrice) * 100m : 0m)
-                : discountPercentage;
+            // Security deposit: months for the space kind (private 0-3, default 2; shared / meeting room 0) and the amount
+            // = months x monthly rent x (1 - the rent's discount; a fixed amount as its share of one month's rent).
+            // SecurityDepositOverride is no longer used (kept on the request so older clients still bind).
+            var depositKind = SecurityDepositRules.KindOf(spaceDetails.Category, spaceDetails.SpaceTypeName);
+            int securityDepositMonths = SecurityDepositRules.ResolveMonths(depositKind, request.SecurityDepositMonths);
+            decimal securityDeposit = SecurityDepositRules.Amount(securityDepositMonths, monthlyBasePrice,
+                SecurityDepositRules.DiscountFraction(discountType, discountValue, monthlyBasePrice));
 
             string spaceTypeName = !string.IsNullOrWhiteSpace(spaceDetails.SpaceTypeName)
                 ? spaceDetails.SpaceTypeName.Trim()
@@ -245,27 +251,16 @@ namespace WorkNest.Application.Services
                     Amount = rentAmount
                 });
 
-                // Security deposit (discount applied once)
-                int secMonths = request.SecurityDepositMonths.HasValue
-                    ? request.SecurityDepositMonths.Value
-                    : (request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value == 0 ? 0 : 1);
-                decimal baseSecDeposit = request.SecurityDepositOverride.HasValue
-                    ? request.SecurityDepositOverride.Value
-                    : (monthlyRentOfRoom * secMonths);
-
-                decimal discountedSecDeposit = request.SecurityDepositOverride.HasValue
-                    ? request.SecurityDepositOverride.Value
-                    : (baseSecDeposit > 0 ? Math.Max(0, Math.Round(baseSecDeposit * (1 - (rentDiscountPct / 100m)), 2)) : 0m);
-
-                if (discountedSecDeposit > 0 && secMonths > 0)
+                // Security deposit line only when there is one (0 months = no deposit line).
+                if (securityDeposit > 0 && securityDepositMonths > 0)
                 {
                     details.Add(new QuotationDetailDto
                     {
                         FeeType = "SecurityDeposit",
-                        Description = $"Security Deposit ({secMonths} Month{(secMonths > 1 ? "s" : "")}) (Refundable)",
-                        Quantity = secMonths,
-                        UnitPrice = secMonths > 0 ? Math.Round(discountedSecDeposit / secMonths, 2) : discountedSecDeposit,
-                        Amount = discountedSecDeposit
+                        Description = SecurityDepositRules.QuotationLineDescription(securityDepositMonths),
+                        Quantity = securityDepositMonths,
+                        UnitPrice = Math.Round(securityDeposit / securityDepositMonths, 2, MidpointRounding.AwayFromZero),
+                        Amount = securityDeposit
                     });
                 }
             }
@@ -303,18 +298,6 @@ namespace WorkNest.Application.Services
                 ? request.BillingPeriodMonths.Value
                 : (spaceDetails.Category == "MeetingRoom" ? 1 : 3);
 
-            int securityDepositMonths = request.SecurityDepositMonths.HasValue
-                ? request.SecurityDepositMonths.Value
-                : (request.SecurityDepositOverride.HasValue && request.SecurityDepositOverride.Value == 0 ? 0 : 1);
-
-            decimal baseDepositForInsert = request.SecurityDepositOverride.HasValue
-                ? request.SecurityDepositOverride.Value
-                : (spaceDetails.Category == "PrivateOffice" ? monthlyBasePrice * securityDepositMonths : 0);
-
-            decimal calculatedSecDeposit = request.SecurityDepositOverride.HasValue
-                ? request.SecurityDepositOverride.Value
-                : (baseDepositForInsert > 0 ? Math.Max(0, Math.Round(baseDepositForInsert * (1 - (rentDiscountPct / 100m)), 2)) : 0m);
-
             var result = await _db.InsertQuotationAsync(
                 quotationNumber,
                 request.ValidUntil,
@@ -328,7 +311,7 @@ namespace WorkNest.Application.Services
                 createdById,
                 discountType,
                 discountValue,
-                request.SecurityDepositOverride,
+                null,   // SecurityDepositOverride is ignored: the amount below is worked out from the months
                 request.FloorId,
                 billingPeriodMonths,
                 perSeatBasePrice,
@@ -336,7 +319,7 @@ namespace WorkNest.Application.Services
                 monthlyBasePrice,
                 maxDiscountCap,
                 securityDepositMonths,
-                calculatedSecDeposit,
+                securityDeposit,
                 offeringTypeDbValue,
                 null,   // WHT is chosen on the Initial Invoice Preview, not the quotation:
                 null    // WN_Quotations.WHTaxId / SendWhtInvoice are no longer written
@@ -590,6 +573,9 @@ namespace WorkNest.Application.Services
                     Version = Convert.ToInt32(r["Version"]),
                     IsActive = Convert.ToBoolean(r["IsActive"]),
                     BillingPeriodMonths = r.TryGetValue("BillingPeriodMonths", out var bpm) && bpm is not null ? Convert.ToInt32(bpm) : 3,
+                    // Stored deposit months / amount (no default months).
+                    SecurityDepositMonths = r.TryGetValue("SecurityDepositMonths", out var sdm) && sdm is not null && sdm is not DBNull ? Convert.ToInt32(sdm) : 0,
+                    SecurityDeposit = r.TryGetValue("SecurityDeposit", out var sdv) && sdv is not null && sdv is not DBNull ? Convert.ToDecimal(sdv) : 0m,
                     BillingPeriod = r.TryGetValue("BillingPeriod", out var bp) && bp is not null ? bp.ToString() : "3 Months (Quarterly)",
                     BillingPeriodLabel = r.TryGetValue("BillingPeriodLabel", out var bpl) && bpl is not null ? bpl.ToString() : "3 Months (Quarterly)"
                 });

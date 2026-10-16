@@ -281,9 +281,8 @@ namespace WorkNest.Infrastructure.Repositories
                     ? discountValue
                     : subtotalAmount * (discountValue / 100m);
 
-                decimal secDeposit = securityDeposit.HasValue
-                    ? securityDeposit.Value
-                    : (securityDepositOverride ?? 0);
+                // The deposit worked out by QuotationService from the months (SecurityDepositRules); the override is ignored.
+                decimal secDeposit = securityDeposit ?? 0m;
 
                 var updateParts = new List<string> {
                     "DiscountType = @DT",
@@ -514,8 +513,9 @@ namespace WorkNest.Infrastructure.Repositories
                 decimal perSeatPrice = quotation.TryGetValue("PerSeatBasePrice", out var psObj) && psObj != null ? Convert.ToDecimal(psObj) : 0m;
                 decimal monthlyPrice = quotation.TryGetValue("MonthlyBasePrice", out var mbObj) && mbObj != null ? Convert.ToDecimal(mbObj) : 0m;
                 int bpm = quotation.TryGetValue("BillingPeriodMonths", out var bpmObj) && bpmObj != null ? Convert.ToInt32(bpmObj) : 3;
-                int secMonths = quotation.TryGetValue("SecurityDepositMonths", out var smObj) && smObj != null ? Convert.ToInt32(smObj) : 2;
-                decimal secDeposit = quotation.TryGetValue("SecurityDeposit", out var sdObj) && sdObj != null ? Convert.ToDecimal(sdObj) : 0m;
+                // Stored months (no default: NULL / 0 = no deposit) and stored amount.
+                int secMonths = quotation.TryGetValue("SecurityDepositMonths", out var smObj) && smObj != null && smObj is not DBNull ? Convert.ToInt32(smObj) : 0;
+                decimal secDeposit = quotation.TryGetValue("SecurityDeposit", out var sdObj) && sdObj != null && sdObj is not DBNull ? Convert.ToDecimal(sdObj) : 0m;
                 string discountType = quotation.TryGetValue("DiscountType", out var dtObj) && dtObj != null ? dtObj.ToString()! : "Percentage";
                 decimal discountPct = quotation.TryGetValue("DiscountPercentage", out var dpObj) && dpObj != null ? Convert.ToDecimal(dpObj) : 0m;
                 decimal discountVal = quotation.TryGetValue("DiscountValue", out var dvObj) && dvObj != null && Convert.ToDecimal(dvObj) > 0
@@ -530,11 +530,13 @@ namespace WorkNest.Infrastructure.Repositories
                 decimal resolvedMonthlyRent = monthlyPrice > 0 ? monthlyPrice : (perSeatPrice > 0 ? perSeatPrice * Math.Max(1, capacity) : (subtotal > 0 && bpm > 0 ? subtotal / bpm : 0m));
                 if (resolvedMonthlyRent <= 0 && subtotal > 0) resolvedMonthlyRent = subtotal;
 
-                decimal baseDeposit = secMonths * resolvedMonthlyRent;
-                decimal discPctForDeposit = (discountType.Equals("Percentage", StringComparison.OrdinalIgnoreCase) || discountType.Equals("Percent", StringComparison.OrdinalIgnoreCase))
-                    ? discountPct
-                    : (resolvedMonthlyRent > 0 && discountVal > 0 ? (discountVal / resolvedMonthlyRent) * 100m : 0m);
-                decimal resolvedSecDeposit = secDeposit > 0 ? secDeposit : (baseDeposit > 0 ? Math.Max(0m, Math.Round(baseDeposit * (1 - (discPctForDeposit / 100m)), 2)) : 0m);
+                // The booking gets the quotation's stored deposit; an older quotation with months but no amount (private
+                // office only) = months x monthly rent x (1 - rent discount); otherwise none (SecurityDepositRules).
+                var depositKind = SecurityDepositRules.KindOf(null, quotation.TryGetValue("SpaceTypeName", out var stnObj) ? stnObj?.ToString() : null);
+                decimal depositDiscount = SecurityDepositRules.DiscountFraction(discountType,
+                    SecurityDepositRules.IsFixedDiscount(discountType) ? discountVal : discountPct, resolvedMonthlyRent);
+                decimal resolvedSecDeposit = SecurityDepositRules.Stored(depositKind, secDeposit, secMonths, resolvedMonthlyRent, depositDiscount);
+                if (resolvedSecDeposit <= 0m) secMonths = 0;
 
                 string syncSql = @"
                     UPDATE dbo.WN_Bookings
@@ -680,6 +682,28 @@ VALUES (@QuotationId, @Version, 'Declined', @Note, @UserId, @CustomerId, SYSUTCD
             };
         }
 
+        /// <summary>The copy a new quotation version is saved with (Draft); it keeps the deposit months and amount.</summary>
+        public const string QuotationNewVersionInsertSql = @"
+INSERT INTO dbo.WN_Quotations (
+    QuotationNumber, ValidUntil, CustomerId, SpaceId, StartDateTime, EndDateTime,
+    SubtotalAmount, DiscountPercentage, DiscountAmount, TotalAmount, Remarks, Status,
+    Version, IsActive, CreatedById, DiscountType, SecurityDeposit, SecurityDepositMonths, FloorId, BillingPeriodMonths
+)
+VALUES (
+    @QuotationNumber, @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
+    @SubtotalAmount, @DiscountPercentage, @DiscountAmount, @TotalAmount, @Remarks, 'Draft',
+    @Version, 1, @CreatedById, @DiscountType, @SecurityDeposit, @SecurityDepositMonths, @FloorId, @BillingPeriodMonths
+);
+SELECT SCOPE_IDENTITY() AS NewId;";
+
+        /// <summary>
+        /// A new quotation version copies the source's stored deposit amount AND months as they are (no default months:
+        /// a missing value stays NULL), so the version bills the same deposit (SecurityDepositRules).
+        /// </summary>
+        public static (object Amount, object Months) QuotationVersionDeposit(IDictionary<string, object?> source) =>
+            (source.TryGetValue("SecurityDeposit", out var sd) && sd is not null && sd is not DBNull ? sd : 0m,
+             source.TryGetValue("SecurityDepositMonths", out var sm) && sm is not null && sm is not DBNull ? sm : DBNull.Value);
+
         public async Task<IDictionary<string, object?>> CreateQuotationNewVersionAsync(int quotationId, int? createdById)
         {
             await using var c = await Open();
@@ -703,20 +727,7 @@ VALUES (@QuotationId, @Version, 'Declined', @Note, @UserId, @CustomerId, SYSUTCD
                 ? (rawDiscountType.Equals("Fixed", StringComparison.OrdinalIgnoreCase) ? "Fixed" : "Amount")
                 : "Percentage";
 
-            const string insertSql = @"
-INSERT INTO dbo.WN_Quotations (
-    QuotationNumber, ValidUntil, CustomerId, SpaceId, StartDateTime, EndDateTime,
-    SubtotalAmount, DiscountPercentage, DiscountAmount, TotalAmount, Remarks, Status,
-    Version, IsActive, CreatedById, DiscountType, SecurityDeposit, FloorId, BillingPeriodMonths
-)
-VALUES (
-    @QuotationNumber, @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
-    @SubtotalAmount, @DiscountPercentage, @DiscountAmount, @TotalAmount, @Remarks, 'Draft',
-    @Version, 1, @CreatedById, @DiscountType, @SecurityDeposit, @FloorId, @BillingPeriodMonths
-);
-SELECT SCOPE_IDENTITY() AS NewId;";
-
-            await using var cmd = new SqlCommand(insertSql, c);
+            await using var cmd = new SqlCommand(QuotationNewVersionInsertSql, c);
             cmd.Parameters.AddWithValue("@QuotationNumber", qNo);
             cmd.Parameters.AddWithValue("@ValidUntil", Convert.ToDateTime(source["ValidUntil"]));
             cmd.Parameters.AddWithValue("@CustomerId", source["CustomerId"]);
@@ -731,7 +742,9 @@ SELECT SCOPE_IDENTITY() AS NewId;";
             cmd.Parameters.AddWithValue("@Version", newVersion);
             cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@DiscountType", discountType);
-            cmd.Parameters.AddWithValue("@SecurityDeposit", source.TryGetValue("SecurityDeposit", out var sd) && sd != null ? sd : 0);
+            var (depositAmount, depositMonths) = QuotationVersionDeposit(source);
+            cmd.Parameters.AddWithValue("@SecurityDeposit", depositAmount);
+            cmd.Parameters.AddWithValue("@SecurityDepositMonths", depositMonths);
             cmd.Parameters.AddWithValue("@FloorId", source.TryGetValue("FloorId", out var fid) && fid != null ? fid : DBNull.Value);
             cmd.Parameters.AddWithValue("@BillingPeriodMonths", source.TryGetValue("BillingPeriodMonths", out var bpm) && bpm != null ? bpm : 3);
 
@@ -1348,22 +1361,19 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
 
                 int advRentM = advanceRentMonths ?? billingPeriodMonths ?? 1;
                 int secDepM = securityDepositMonths ?? 0;
-                decimal monthlyRent = result.TryGetValue("MonthlyRent", out var mrObj) && mrObj is not null ? Convert.ToDecimal(mrObj) : 0m;
-                if (result.TryGetValue("SubtotalAmount", out var subObj) && subObj is not null)
+                // Monthly rent before discount as WN_Bookings_Insert worked it out (private: seat price x seats, shared:
+                // seat price); only without one is it taken from the advance rent.
+                decimal monthlyRent = result.TryGetValue("MonthlyRent", out var mrObj) && mrObj is not null && mrObj is not DBNull ? Convert.ToDecimal(mrObj) : 0m;
+                if (monthlyRent <= 0m && result.TryGetValue("SubtotalAmount", out var subObj) && subObj is not null && subObj is not DBNull)
                 {
                     decimal subVal = Convert.ToDecimal(subObj);
-                    if (subVal > 0m && (monthlyRent == 0m || Math.Abs(monthlyRent * Math.Max(1, advRentM) - subVal) > 1m))
-                    {
-                        monthlyRent = subVal / Math.Max(1, advRentM);
-                    }
+                    if (subVal > 0m) monthlyRent = subVal / Math.Max(1, advRentM);
                 }
-                decimal baseDeposit = secDepM * monthlyRent;
-                decimal discPct = (discountType == "Percentage" || discountType == "Percent")
-                    ? (discountValue > 0 ? discountValue : discountPercentage)
-                    : (monthlyRent > 0 && discountValue > 0 ? (discountValue / monthlyRent) * 100m : 0m);
-                decimal secDepReq = securityDepositOverride.HasValue
-                    ? securityDepositOverride.Value
-                    : (baseDeposit > 0 ? Math.Max(0, Math.Round(baseDeposit * (1 - (discPct / 100m)), 2)) : 0m);
+                // Deposit = months x monthly rent x (1 - rent discount) (SecurityDepositRules); the months were already
+                // checked and forced to 0 for shared spaces / meeting rooms by BookingService. No override.
+                decimal secDepReq = SecurityDepositRules.Amount(secDepM, monthlyRent,
+                    SecurityDepositRules.DiscountFraction(discountType, discountValue > 0 ? discountValue : discountPercentage, monthlyRent));
+                if (secDepReq <= 0m) secDepM = 0;
 
                 var updateParts = new List<string> {
                     "DiscountType = @DT",
@@ -1388,6 +1398,11 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     UPDATE dbo.WN_BookingDetails
                     SET SecurityDeposit = @SDR
                     WHERE BookingGuid = (SELECT IdGUID FROM dbo.WN_Bookings WHERE Id = @BID);
+
+                    -- The deposit record WN_Bookings_Insert just made (not invoiced yet) gets the discounted amount too.
+                    UPDATE dbo.WN_SecurityDeposits
+                    SET Amount = @SDR
+                    WHERE BookingId = @BID AND RefId IS NULL AND @SDR > 0;
 
                     UPDATE dbo.WN_BookingLines
                     SET DiscountAmount = CASE WHEN ChargeTypeId = 1 THEN @DA ELSE 0 END,
@@ -1643,6 +1658,25 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
+        }
+
+        public async Task<IDictionary<string, object?>> UpdateBookingSecurityDepositAsync(int id, int securityDepositMonths, int? updatedById)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Bookings_UpdateSecurityDeposit", c);
+            cmd.Parameters.AddWithValue("@BookingId", id);
+            cmd.Parameters.AddWithValue("@SecurityDepositMonths", securityDepositMonths);
+            cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
+            try
+            {
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? ToDict(r) : new Dictionary<string, object?>();
+            }
+            catch (SqlException ex) when (ex.Number == 2812)
+            {
+                // SD_01 not run yet: the months are ignored, as before.
+                return new Dictionary<string, object?>();
+            }
         }
 
         public async Task<List<int>> GetPendingBookingsWithPaidFirstInvoiceDbAsync(IEnumerable<int> pendingStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds)
