@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -51,6 +52,36 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             }
         }
 
+        private static List<string> GetSystemBrowserPaths()
+        {
+            var list = new List<string>();
+
+            var envPath = Environment.GetEnvironmentVariable("PUPPETEER_EXECUTABLE_PATH");
+            if (!string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath))
+                list.Add(envPath);
+
+            var candidates = new[]
+            {
+                @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                @"/usr/bin/google-chrome",
+                @"/usr/bin/google-chrome-stable",
+                @"/usr/bin/chromium",
+                @"/usr/bin/chromium-browser",
+                @"/snap/bin/chromium"
+            };
+
+            foreach (var path in candidates)
+            {
+                if (File.Exists(path) && !list.Contains(path))
+                    list.Add(path);
+            }
+
+            return list;
+        }
+
         private async Task<IBrowser> GetOrLaunchBrowserAsync()
         {
             if (_browserInstance != null && !_browserInstance.IsClosed && _browserInstance.IsConnected)
@@ -66,13 +97,6 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 {
                     ResetIdleTimer();
                     return _browserInstance;
-                }
-
-                if (!_isBrowserDownloaded)
-                {
-                    var browserFetcher = new BrowserFetcher();
-                    await browserFetcher.DownloadAsync();
-                    _isBrowserDownloaded = true;
                 }
 
                 var launchOptions = new LaunchOptions
@@ -91,9 +115,43 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     }
                 };
 
-                _browserInstance = await Puppeteer.LaunchAsync(launchOptions);
-                ResetIdleTimer();
-                return _browserInstance;
+                // 1. Try system-installed browser (Edge / Chrome) first to avoid side-by-side / VC++ runtime errors
+                var systemBrowsers = GetSystemBrowserPaths();
+                foreach (var exePath in systemBrowsers)
+                {
+                    try
+                    {
+                        launchOptions.ExecutablePath = exePath;
+                        _browserInstance = await Puppeteer.LaunchAsync(launchOptions);
+                        ResetIdleTimer();
+                        return _browserInstance;
+                    }
+                    catch
+                    {
+                        // Candidate failed, try next
+                    }
+                }
+
+                // 2. Fall back to Puppeteer downloaded browser
+                try
+                {
+                    if (!_isBrowserDownloaded)
+                    {
+                        var browserFetcher = new BrowserFetcher();
+                        await browserFetcher.DownloadAsync();
+                        _isBrowserDownloaded = true;
+                    }
+
+                    launchOptions.ExecutablePath = null;
+                    _browserInstance = await Puppeteer.LaunchAsync(launchOptions);
+                    ResetIdleTimer();
+                    return _browserInstance;
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to start PDF rendering engine. System browsers ({string.Join(", ", systemBrowsers)}) and downloaded Chromium could not be started: {ex.Message}", ex);
+                }
             }
             finally
             {
