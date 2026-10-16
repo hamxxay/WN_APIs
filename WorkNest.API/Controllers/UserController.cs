@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.User;
@@ -18,7 +19,13 @@ namespace WorkNest.API.Controllers
     {
         private readonly IUserService _users;
         private readonly IDbRepository _db;
-        public UserController(IUserService users, IDbRepository db) { _users = users; _db = db; }
+        private readonly ILogger<UserController>? _logger;
+        public UserController(IUserService users, IDbRepository db, ILogger<UserController>? logger = null)
+        {
+            _users = users;
+            _db = db;
+            _logger = logger;
+        }
 
         [HttpGet("api/user")]
         public async Task<IActionResult> List(
@@ -105,8 +112,19 @@ namespace WorkNest.API.Controllers
             if (GrantsAdminRole(request?.Role)) return OnlySuperAdmin();
             if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
                 return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
-            var result = await _users.CreateUserAsync(request!, null);
-            return StatusCode(201, result);
+            try
+            {
+                var result = await _users.CreateUserAsync(request!, null);
+                return StatusCode(201, result);
+            }
+            catch (Exception ex)
+            {
+                // Admins only (ManageRoles): the reason instead of "An unexpected error occurred", so a failure on the live
+                // database (a missing column, procedure or permission) can be told and fixed.
+                _logger?.LogError(ex, "Creating user {Email} failed", request?.Email);
+                var reason = ex is Microsoft.Data.SqlClient.SqlException sql ? $"database error {sql.Number}: {sql.Message}" : ex.Message;
+                return StatusCode(500, ApiResponse.Fail($"The user could not be created: {reason}"));
+            }
         }
 
         [Authorize(Roles = ManageRoles)]
