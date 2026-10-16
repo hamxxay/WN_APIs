@@ -158,25 +158,44 @@ namespace WorkNest.Application.Services
                 request.Address, request.CnicOrPassport, request.AvatarUrl,
                 request.Notes, actorId, finalLocationId);
 
-            var existingCustomer = await _db.GetCustomerByEmailAsync(request.Email);
-            if (existingCustomer is null)
+            // The user is saved at this point. The customer profile and the locations are extras: when one of them fails the
+            // user still exists, so say what's missing instead of failing the whole request (a retry would only hit the
+            // "email already has an account" check).
+            string? customerWarning = null;
+            try
             {
-                var nameParts = (request.Name ?? "").Split(' ', 2);
-                await _db.CreateCustomerAsync(
-                    nameParts[0],
-                    nameParts.Length > 1 ? nameParts[1] : null,
-                    request.Email,
-                    request.Phone,
-                    request.CnicOrPassport,
-                    request.Address,
-                    request.CityId,
-                    request.Notes,
-                    null);
+                var existingCustomer = await _db.GetCustomerByEmailAsync(request.Email);
+                if (existingCustomer is null)
+                {
+                    var nameParts = (request.Name ?? "").Split(' ', 2);
+                    await _db.CreateCustomerAsync(
+                        nameParts[0],
+                        nameParts.Length > 1 ? nameParts[1] : null,
+                        request.Email,
+                        request.Phone,
+                        request.CnicOrPassport,
+                        request.Address,
+                        request.CityId,
+                        request.Notes,
+                        null);
+                }
+            }
+            catch (Exception ex)
+            {
+                customerWarning = $"User created, but their customer profile could not be saved ({ex.Message}).";
             }
 
-            string? locationWarning = id.HasValue ? await SaveLocationsAsync(id.Value, roleId, finalLocationId, request.LocationIds, actorId) : null;
+            string? locationWarning;
+            try
+            {
+                locationWarning = id.HasValue ? await SaveLocationsAsync(id.Value, roleId, finalLocationId, request.LocationIds, actorId) : null;
+            }
+            catch (Exception ex)
+            {
+                locationWarning = $"User created, but their locations could not be saved ({ex.Message}). Edit the user to set them.";
+            }
             return ApiResponse.Ok(new { id, publicId, email = request.Email, locationId = finalLocationId },
-                locationWarning ?? "User created successfully.");
+                locationWarning ?? customerWarning ?? "User created successfully.");
         }
 
         public async Task<ApiResponse> UpdateUserAsync(int id, UserUpdateRequest request)
