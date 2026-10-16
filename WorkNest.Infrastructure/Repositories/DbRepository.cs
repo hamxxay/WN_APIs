@@ -2947,6 +2947,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         // --- Dashboard ---
 
         /// <summary>
+        /// Live bookings on the admin dashboard: old 1 / 2 + WN_BookingStatuses 5 Pending / 33 Confirmed. A space is "in use"
+        /// (Occupancy KPI and its list of rooms) when it is active (WN_Spaces.Status = 1) and a live, not deleted booking on it
+        /// has StartOn &lt;= now &lt;= EndOn (business time, to the second). Keep GetDashboardOverviewDbAsync and
+        /// GetDashboardOccupiedSpacesDbAsync on this rule so the list always matches the card.
+        /// </summary>
+        private const string DashboardLiveBookingStatuses = "1, 2, 5, 33";
+
+        /// <summary>
         /// Admin dashboard overview (read-only): [0] headline numbers, [1] last 6 months,
         /// [2] overdue invoices, [3] leases ending soon, [4] bookings waiting for confirmation,
         /// [5] receivables aging, [6] occupancy by space type, [7] top customers, [8] lease expiries next 6 months.
@@ -2990,7 +2998,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 SELECT b.Id, b.SpaceId, b.StartOn, b.EndOn, b.BookingStatusId, b.UserId, b.CustomerCode, b.TotalAmount
                   FROM dbo.WN_Bookings b WITH (NOLOCK)
                   JOIN @Spaces sp ON sp.Id = b.SpaceId
-                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33);
+                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN ({DashboardLiveBookingStatuses});
 
                 DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4));
                 INSERT INTO @Inv
@@ -3142,6 +3150,67 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow ?? _clock.Now;
             cmd.Parameters.Add("@Series", SqlDbType.Int).Value = seriesMonths;
             cmd.Parameters.Add("@Ahead", SqlDbType.Int).Value = aheadMonths;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
+        /// <summary>
+        /// The rooms behind the overview's Occupancy KPI (read-only), on the same rule (see DashboardLiveBookingStatuses):
+        /// [0] TotalSpaces = active spaces in the locations, [1] one row per active space with a live booking covering now.
+        /// When a space has several (e.g. morning + evening shifts) the row shows a confirmed one before a pending one,
+        /// then the earliest start, and BookingCount says how many there are. Sorted by location, then room.
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOccupiedSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow)
+        {
+            // Location filter as the overview: null = all locations; otherwise only spaces in those locations (ints, never user text).
+            var ids = locationIds?.Distinct().ToList();
+            var spaceLocFilter = ids is null ? "1 = 1" : $"s.LocationId IN ({(ids.Count == 0 ? "-1" : string.Join(",", ids))})";
+            await using var c = await Open();
+            var sql = $@"
+                DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) wall-clock time from the app clock, as the overview
+
+                -- [0] the card's ""of Y"": active spaces
+                SELECT COUNT(*) AS TotalSpaces
+                  FROM dbo.WN_Spaces s WITH (NOLOCK)
+                 WHERE s.Status = 1 AND {spaceLocFilter};
+
+                -- [1] the card's ""X"": active spaces with a live booking right now, one row each
+                ;WITH live AS (
+                    SELECT b.Id, b.SpaceId, b.StartOn, b.EndOn, b.BookingStatusId, b.UserId, b.CustomerCode, b.Capacity,
+                           ROW_NUMBER() OVER (PARTITION BY b.SpaceId
+                                              ORDER BY CASE WHEN b.BookingStatusId IN (2, 33) THEN 0 ELSE 1 END, b.StartOn, b.Id) AS rn,
+                           COUNT(*) OVER (PARTITION BY b.SpaceId) AS BookingCount
+                      FROM dbo.WN_Bookings b WITH (NOLOCK)
+                      JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                     WHERE s.Status = 1 AND {spaceLocFilter}
+                       AND ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN ({DashboardLiveBookingStatuses})
+                       AND b.StartOn <= @Now AND b.EndOn >= @Now
+                )
+                SELECT s.Id AS SpaceId, s.Code AS SpaceCode, COALESCE(NULLIF(s.Name, ''), s.Code) AS Room,
+                       s.LocationId, loc.Name AS Location, COALESCE(NULLIF(st.Description, ''), 'Other') AS SpaceType,
+                       s.Capacity AS Seats, NULLIF(l.Capacity, 0) AS BookedSeats,
+                       l.Id AS BookingId, l.StartOn, l.EndOn, l.BookingStatusId AS StatusId,
+                       COALESCE(NULLIF(bs.Label, ''),
+                                CASE l.BookingStatusId WHEN 1 THEN 'Pending' WHEN 2 THEN 'Confirmed' END,
+                                CONCAT('Status ', l.BookingStatusId)) AS Status,
+                       l.BookingCount, l.CustomerCode,
+                       COALESCE(NULLIF(cust.Name, ''), NULLIF(u.Name, ''), NULLIF(u.UserName, ''), NULLIF(u.Email, ''), 'Customer') AS Customer
+                  FROM live l
+                  JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = l.SpaceId
+                  LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+                  LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+                  LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = l.BookingStatusId
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = l.UserId
+                 OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Name
+                                FROM dbo.WN_Customers cu WITH (NOLOCK)
+                               WHERE (l.CustomerCode IS NOT NULL AND cu.Code = l.CustomerCode)
+                                  OR (l.UserId IS NOT NULL AND cu.UserId = l.UserId)
+                                  OR (u.Email IS NOT NULL AND cu.Email = u.Email)
+                               ORDER BY CASE WHEN cu.Code = l.CustomerCode THEN 0 WHEN cu.UserId = l.UserId THEN 1 ELSE 2 END, cu.Id) cust
+                 WHERE l.rn = 1
+                 ORDER BY loc.Name, Room, s.Code, s.Id;";
+            await using var cmd = new SqlCommand(sql, c) { CommandTimeout = 60 };
+            cmd.Parameters.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadResultSets(r);
         }

@@ -8,6 +8,12 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetSummaryAsync();
         /// <param name="locationIds">Locations to total; null = all locations.</param>
         Task<DashboardOverviewDto> GetOverviewAsync(IReadOnlyCollection<int>? locationIds, string? period = null);
+        /// <summary>
+        /// The rooms behind the overview's Occupancy card: every active space in use right now (same rule, so the count is
+        /// the card's "X of Y"), with the booking that covers it, sorted by location then room.
+        /// </summary>
+        /// <param name="locationIds">Locations to list; null = all locations.</param>
+        Task<DashboardOccupiedSpacesDto> GetOccupiedSpacesAsync(IReadOnlyCollection<int>? locationIds);
 
         /// <summary>
         /// Admin sidebar badges: counts of items waiting on staff, keyed by sidebar route ("/admin/bookings" ...).

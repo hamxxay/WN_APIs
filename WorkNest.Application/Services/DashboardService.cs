@@ -162,5 +162,46 @@ namespace WorkNest.Application.Services
                 { Label = Convert.ToString(r["Month"]) ?? "", Amount = Math.Round(Dec(r, "Value"), 2), Count = Int(r, "Leases") }).ToList();
             return dto;
         }
+
+        public async Task<DashboardOccupiedSpacesDto> GetOccupiedSpacesAsync(IReadOnlyCollection<int>? locationIds)
+        {
+            var now = _clock.Now;
+            var sets = await _db.GetDashboardOccupiedSpacesDbAsync(locationIds, now);
+
+            static object? Val(IDictionary<string, object?> r, string key) => r.TryGetValue(key, out var v) ? v : null;
+            static int? IntOrNull(IDictionary<string, object?> r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : null;
+            static string? Str(IDictionary<string, object?> r, string key) => Val(r, key) is { } v ? Convert.ToString(v) : null;
+            static string? Time(IDictionary<string, object?> r, string key) => Val(r, key) is DateTime d ? d.ToString("yyyy-MM-ddTHH:mm:ss") : null;
+
+            var head = sets.Count > 0 ? sets[0].FirstOrDefault() : null;
+            var rows = sets.Count > 1 ? sets[1] : new List<IDictionary<string, object?>>();
+            var dto = new DashboardOccupiedSpacesDto
+            {
+                TotalSpaces = head != null ? IntOrNull(head, "TotalSpaces") ?? 0 : 0,
+                GeneratedAt = now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                Items = rows.Select(r => new DashboardOccupiedSpaceDto
+                {
+                    SpaceId = IntOrNull(r, "SpaceId") ?? 0,
+                    Room = Str(r, "Room") ?? "",
+                    SpaceCode = Str(r, "SpaceCode"),
+                    LocationId = IntOrNull(r, "LocationId"),
+                    Location = Str(r, "Location"),
+                    SpaceType = Str(r, "SpaceType") ?? "",
+                    Seats = IntOrNull(r, "Seats"),
+                    BookedSeats = IntOrNull(r, "BookedSeats"),
+                    BookingId = IntOrNull(r, "BookingId") ?? 0,
+                    Customer = Str(r, "Customer") ?? "",
+                    CustomerCode = Str(r, "CustomerCode"),
+                    StartOn = Time(r, "StartOn"),
+                    EndOn = Time(r, "EndOn"),
+                    StatusId = IntOrNull(r, "StatusId") ?? 0,
+                    Status = Str(r, "Status") ?? "",
+                    BookingCount = Math.Max(1, IntOrNull(r, "BookingCount") ?? 1)
+                }).ToList()
+            };
+            dto.OccupiedSpaces = dto.Items.Count;
+            dto.OccupancyPct = dto.TotalSpaces > 0 ? Math.Round(dto.OccupiedSpaces * 100m / dto.TotalSpaces, 1) : 0m;
+            return dto;
+        }
     }
 }
