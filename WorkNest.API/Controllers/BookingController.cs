@@ -377,7 +377,8 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetAdvanceInvoicePdf(
             int id,
             [FromQuery] int advMonths = 3,
-            [FromQuery] int secMonths = 2,
+            // Security deposit months: none given = the booking's stored months and amount (the owner's 0-3 rule).
+            [FromQuery] int? secMonths = null,
             [FromQuery] decimal monthlyRate = 0,
             [FromQuery] decimal discount = 0)
         {
@@ -385,7 +386,7 @@ namespace WorkNest.API.Controllers
                 return NotFound(ApiResponse.Fail("Booking not found."));
 
             advMonths = Math.Clamp(advMonths, 1, 36);
-            secMonths = Math.Clamp(secMonths, 0, 36);
+            if (secMonths.HasValue) secMonths = Math.Clamp(secMonths.Value, 0, 3);
 
             var challan = await _bookings.GetChallanAsync(id);
             if (!challan.IsSuccessful || challan.Data is not ChallanResponseDto booking)
