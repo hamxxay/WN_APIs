@@ -196,11 +196,16 @@ namespace WorkNest.Application.Interfaces
         Task<int?> InsertFloorAsync(int locationId, string name, short floorNumber, int? createdById);
 
         // --- Space ---
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync();
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit);
-        Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById);
-        Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById);
+        // Space types per location (P1_02..P1_04): locationId null = every location (lists) / location 1 (insert) / the
+        // type's own location (update). Before those scripts the procedures have no @LocationId: the calls work as before
+        // (rows without LocationId). A procedure rule (THROW 50000) throws SpaceTypeRuleException with its message.
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync(int? locationId = null);
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit, int? locationId = null);
+        Task<(int? Id, string? PublicId, int? LocationId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById, int? locationId = null);
+        Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById, int? locationId = null);
         Task DeleteSpaceTypeAsync(int id);
+        /// <summary>dbo.WN_SpaceCategories (Id, Code, Label), by Label.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceCategoriesAsync();
 
         // --- Space ---
         Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigAsync();

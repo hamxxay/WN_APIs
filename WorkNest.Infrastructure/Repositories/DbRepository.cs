@@ -2302,78 +2302,98 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
 
         // --- Space ---
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync()
-        {
-            await using var c = await Open();
-            await using var cmd = SP("dbo.WN_SpaceTypes_GetList", c);
-            cmd.Parameters.AddWithValue("@CategoryId", DBNull.Value);
-            await using var r = await cmd.ExecuteReaderAsync();
-            return await ReadAll(r);
-        }
+        // Space types per location (SpaceTypes_Location P1_02..P1_04): @LocationId is only sent when there is one, and a
+        // database without those scripts answers 8144 / 8145, so the call runs again without it (SpaceTypeSql).
 
-        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync(int? locationId = null) =>
+            await SpaceTypeSql.WithLocationAsync(locationId, ReadSpaceTypesAsync);
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit, int? locationId = null)
         {
-            await using var c = await Open();
-            await using var cmd = SP("dbo.WN_SpaceTypes_GetList", c);
-            cmd.Parameters.AddWithValue("@CategoryId", DBNull.Value);
-            await using var r = await cmd.ExecuteReaderAsync();
-            var all = await ReadAll(r);
+            var all = await SpaceTypeSql.WithLocationAsync(locationId, ReadSpaceTypesAsync);
             int total = all.Count > 0 && all[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : all.Count;
             var rows = all.Skip((page - 1) * limit).Take(limit).ToList();
             return (rows, total);
         }
 
-        public async Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById)
+        /// <summary>WN_SpaceTypes_GetList: every type, or one location's (rows gain LocationId / LocationName with P1_02).</summary>
+        private async Task<List<IDictionary<string, object?>>> ReadSpaceTypesAsync(int? locationId)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_SpaceTypes_Insert", c);
-            cmd.Parameters.AddWithValue("@Name", name);
-            cmd.Parameters.AddWithValue("@Description", (object?)description ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CategoryId", (object?)categoryId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed ? 1 : 0);
-            cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+            await using var cmd = SP("dbo.WN_SpaceTypes_GetList", c);
+            cmd.Parameters.AddWithValue("@CategoryId", DBNull.Value);
+            if (locationId is not null) cmd.Parameters.Add("@LocationId", SqlDbType.Int).Value = locationId.Value;
             await using var r = await cmd.ExecuteReaderAsync();
-            if (await r.ReadAsync())
+            return await ReadAll(r);
+        }
+
+        public Task<(int? Id, string? PublicId, int? LocationId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById, int? locationId = null) =>
+            SpaceTypeSql.RulesAsync(() => SpaceTypeSql.WithLocationAsync(locationId, async loc =>
             {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_SpaceTypes_Insert", c);
+                cmd.Parameters.AddWithValue("@Name", name);
+                cmd.Parameters.AddWithValue("@Description", (object?)description ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CategoryId", (object?)categoryId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed ? 1 : 0);
+                cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
+                if (loc is not null) cmd.Parameters.Add("@LocationId", SqlDbType.Int).Value = loc.Value;   // none = location 1
+                await using var r = await cmd.ExecuteReaderAsync();
+                if (!await r.ReadAsync()) return ((int?)null, (string?)null, (int?)null);
                 var row = ToDict(r);
-                return (row.TryGetValue("Id", out var id) ? Convert.ToInt32(id) : (int?)null,
-                        row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
-            }
-            return (null, null);
-        }
+                // The procedure returns Id, IdGUID, Capacity (+ LocationId with P1_03).
+                var publicId = row.TryGetValue("IdGUID", out var g) && g is not null ? g.ToString()
+                             : row.TryGetValue("PublicId", out var p) ? p?.ToString() : null;
+                return (row.TryGetValue("Id", out var id) && id is not null ? Convert.ToInt32(id) : (int?)null,
+                        publicId,
+                        row.TryGetValue("LocationId", out var l) && l is not null ? Convert.ToInt32(l) : (int?)null);
+            }));
 
-        public async Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById)
+        public Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById, int? locationId = null) =>
+            SpaceTypeSql.RulesAsync(() => SpaceTypeSql.WithLocationAsync(locationId, async loc =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_SpaceTypes_Update", c);
+                cmd.Parameters.AddWithValue("@Id", id);
+                cmd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Description", (object?)description ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@CategoryId", (object?)categoryId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed.HasValue ? (object)(hourlyAllowed.Value ? 1 : 0) : DBNull.Value);
+                cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
+                if (loc is not null) cmd.Parameters.Add("@LocationId", SqlDbType.Int).Value = loc.Value;   // none = stays where it is
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            }));
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceCategoriesAsync()
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_SpaceTypes_Update", c);
-            cmd.Parameters.AddWithValue("@Id", id);
-            cmd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Description", (object?)description ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CategoryId", (object?)categoryId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Capacity", (object?)capacity ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@HourlyAllowed", hourlyAllowed.HasValue ? (object)(hourlyAllowed.Value ? 1 : 0) : DBNull.Value);
-            cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)accountReceivableId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@RentAccountId", (object?)rentAccountId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)servicesIncomeId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SalesTaxId", (object?)salesTaxId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)securityReceivedId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
-            await cmd.ExecuteNonQueryAsync();
+            await using var cmd = new SqlCommand("SELECT Id, Code, Label FROM dbo.WN_SpaceCategories WITH (NOLOCK) ORDER BY Label", c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
         }
 
-        public async Task DeleteSpaceTypeAsync(int id)
-        {
-            await using var c = await Open();
-            await using var cmd = SP("dbo.WN_SpaceTypes_Delete", c);
-            cmd.Parameters.AddWithValue("@Id", id);
-            await cmd.ExecuteNonQueryAsync();
-        }
+        public Task DeleteSpaceTypeAsync(int id) =>
+            SpaceTypeSql.RulesAsync(async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_SpaceTypes_Delete", c);
+                cmd.Parameters.AddWithValue("@Id", id);
+                await cmd.ExecuteNonQueryAsync();
+                return true;
+            });
 
         // --- Space ---
 
