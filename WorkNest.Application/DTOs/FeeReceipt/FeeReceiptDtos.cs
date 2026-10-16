@@ -15,6 +15,13 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public string? DepositorName { get; set; }
         /// <summary>Depositor's CNIC: 12345-1234567-1, or 13 digits without dashes (the API adds them). Required.</summary>
         public string? DepositorCnic { get; set; }
+        /// <summary>
+        /// "Full" (default): the invoice's whole remaining balance, worked out by the database at the moment of saving.
+        /// "Partial": <see cref="Amount"/> (more than 0, at most the balance, 2 decimals). Not for withholding-tax invoices.
+        /// </summary>
+        public string? PaymentMode { get; set; }
+        /// <summary>Amount received, for a Partial payment (ignored for Full).</summary>
+        public decimal? Amount { get; set; }
 
         public Guid GetResolvedInvoiceIdGuid() => InvoiceIdGUID;
 
@@ -68,8 +75,16 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public int? CompanyId { get; set; }
         public int? BranchId { get; set; }
         public int StatusId { get; set; }
-        /// <summary>Unpaid | Overdue (Challan Expire invoices can also get a receipt).</summary>
+        /// <summary>Unpaid | Partial | Overdue (Challan Expire invoices can also get a receipt).</summary>
         public string StatusLabel { get; set; } = "Unpaid";
+        /// <summary>Paid so far (net of WHT), 2 decimals.</summary>
+        public decimal AmountPaid { get; set; }
+        /// <summary>Left to pay: <see cref="NetReceivableAmount"/> less <see cref="AmountPaid"/>, never below 0.</summary>
+        public decimal BalanceAmount { get; set; }
+        /// <summary>Unpaid | Partial | Paid.</summary>
+        public string PaymentStatus { get; set; } = "Unpaid";
+        /// <summary>False for withholding-tax invoices (paid in full only) and before the database update FR_01.</summary>
+        public bool AllowPartial { get; set; }
     }
 
     public class FeeReceiptAccountDto
@@ -130,6 +145,18 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public int? LocationId { get; set; }
         public string? LocationName { get; set; }
         public string? LocationCity { get; set; }
+        // FR_01 snapshot, taken when the receipt was saved (printed receipts show these, never recalculated values).
+        /// <summary>What the invoice asked (net of WHT). Null only before the database update FR_01.</summary>
+        public decimal? InvoiceTotal { get; set; }
+        /// <summary>Paid on the invoice before this receipt.</summary>
+        public decimal? PreviousPaid { get; set; }
+        /// <summary>Received in this receipt (same as <see cref="TotalAmount"/>, 2 decimals).</summary>
+        public decimal AmountPaid { get; set; }
+        /// <summary>Left on the invoice after this receipt.</summary>
+        public decimal? BalanceAfter { get; set; }
+        /// <summary>The invoice's balance today (changes with later receipts; not for printing).</summary>
+        public decimal? InvoiceBalanceNow { get; set; }
+        public string? InvoicePaymentStatus { get; set; }
     }
 
     /// <summary>How a fee receipt call ended; the controller maps it to the HTTP status.</summary>

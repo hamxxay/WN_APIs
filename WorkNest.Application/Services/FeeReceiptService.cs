@@ -16,6 +16,11 @@ namespace WorkNest.Application.Services
         private const int MinDepositorNameLength = 2;
         private const int MaxDepositorNameLength = 150;   // DepositorName column is NVARCHAR(150)
         private const string DepositorCnicFormatMessage = "Depositor CNIC must be in the format 12345-1234567-1.";
+        // FR_01 part payments. The database checks the amount against the invoice's balance inside the same transaction
+        // that saves the receipt (the invoice row is locked), so two people paying the same invoice cannot overpay it.
+        public const string FullMode = "Full";
+        public const string PartialMode = "Partial";
+        private const decimal MaxAmount = 999_999_999_999.99m;   // DECIMAL(18,2)
 
         // ASCII digits only ([0-9], not \d, which also matches other scripts' digits) - same as CK_WN_FeeReceipts_DepositorCNIC.
         private static readonly Regex CnicDigitsOnly = new(@"^[0-9]{13}$", RegexOptions.Compiled);
@@ -89,6 +94,10 @@ namespace WorkNest.Application.Services
             if (!CnicFormatted.IsMatch(depositorCnic))
                 return BadRequest(DepositorCnicFormatMessage);
 
+            var (amount, amountError) = ResolveAmount(dto.PaymentMode, dto.Amount);
+            if (amountError != null)
+                return BadRequest(amountError);
+
             string? allowedCsv = isSuperAdmin ? null : ToCsv(allowedLocationIds);
 
             try
@@ -102,7 +111,8 @@ namespace WorkNest.Application.Services
                     depositorName,
                     depositorCnic,
                     createdById,
-                    allowedCsv);
+                    allowedCsv,
+                    amount);
 
                 if (row == null)
                     throw new InvalidOperationException("WN_FeeReceipts_Insert returned no receipt row.");
@@ -193,6 +203,29 @@ namespace WorkNest.Application.Services
 
         private static FeeReceiptResult BadRequest(string message) => FeeReceiptResult.Fail(FeeReceiptOutcome.BadRequest, message);
 
+        /// <summary>
+        /// The amount to send for a receipt: null for Full (the database takes the whole balance at the moment of saving,
+        /// never a figure the browser had), the amount for Partial. Partial: more than 0, at most 2 decimals; the upper
+        /// limit (the balance) is checked by the database. Returns an error message instead when the request is wrong.
+        /// </summary>
+        public static (decimal? Amount, string? Error) ResolveAmount(string? paymentMode, decimal? amount)
+        {
+            var mode = string.IsNullOrWhiteSpace(paymentMode) ? FullMode : paymentMode.Trim();
+            if (string.Equals(mode, FullMode, StringComparison.OrdinalIgnoreCase))
+                return (null, null);
+            if (!string.Equals(mode, PartialMode, StringComparison.OrdinalIgnoreCase))
+                return (null, "Payment mode must be Full or Partial.");
+            if (amount is not { } a)
+                return (null, "Enter the amount received for a partial payment.");
+            if (a <= 0)
+                return (null, "The amount received must be more than zero.");
+            if (a > MaxAmount)
+                return (null, "The amount received is too large.");
+            if (decimal.Round(a, 2) != a)
+                return (null, "The amount received can have at most 2 decimals.");
+            return (a, null);
+        }
+
         /// <summary>NULL = every location; otherwise the caller's ids (the controller sends -1 for "none", which matches nothing).</summary>
         private static string? ToCsv(List<int>? allowedLocationIds) =>
             allowedLocationIds == null ? null : string.Join(",", allowedLocationIds);
@@ -239,7 +272,15 @@ namespace WorkNest.Application.Services
                 CompanyId = GetIntOrNull(r, "CompanyId"),
                 BranchId = GetIntOrNull(r, "BranchId"),
                 StatusId = GetInt(r, "StatusId"),
-                StatusLabel = GetString(r, "StatusLabel", "Unpaid")
+                StatusLabel = GetString(r, "StatusLabel", "Unpaid"),
+                // FR_01 columns; before the database update: nothing paid (the list then has only unpaid invoices) and
+                // no part payments.
+                AmountPaid = Math.Round(GetDecimal(r, "AmountPaid", GetDecimal(r, "PaidTotal")), 2),
+                BalanceAmount = Value(r, "BalanceAmount") is not null
+                    ? GetDecimal(r, "BalanceAmount")
+                    : Math.Max(0, Math.Round(GetDecimal(r, "NetReceivableAmount") - GetDecimal(r, "PaidTotal"), 2)),
+                PaymentStatus = GetString(r, "PaymentStatus", "Unpaid"),
+                AllowPartial = GetBool(r, "AllowPartial")
             };
         }
 
@@ -304,7 +345,13 @@ namespace WorkNest.Application.Services
                 CustomerAddress = GetStringOrNull(r, "CustomerAddress"),
                 LocationId = GetIntOrNull(r, "LocationId"),
                 LocationName = GetStringOrNull(r, "LocationName"),
-                LocationCity = GetStringOrNull(r, "LocationCity")
+                LocationCity = GetStringOrNull(r, "LocationCity"),
+                InvoiceTotal = GetDecimalOrNull(r, "InvoiceTotal"),
+                PreviousPaid = GetDecimalOrNull(r, "PreviousPaid"),
+                AmountPaid = Math.Round(GetDecimal(r, "AmountPaid", GetDecimal(r, "TotalAmount")), 2),
+                BalanceAfter = GetDecimalOrNull(r, "BalanceAfter"),
+                InvoiceBalanceNow = GetDecimalOrNull(r, "InvoiceBalanceNow"),
+                InvoicePaymentStatus = GetStringOrNull(r, "InvoicePaymentStatus")
             };
         }
 
