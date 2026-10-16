@@ -144,6 +144,14 @@ namespace WorkNest.Application.Services
                 }
             }
 
+            // One WorkNest account per email (UX_WN_Users_Email): the insert would fail with a database error ("An unexpected
+            // error occurred"), e.g. for a customer who already signed up on the website or app with this email.
+            var existing = await _db.GetUserSignInStatusAsync(request.Email);
+            if (existing is not null)
+                return ApiResponse.Fail(existing.IsActive
+                    ? "This email already has a WorkNest account (for example a customer who signed up). Search for it on the Users page and edit it, e.g. change its role, instead of creating a new user."
+                    : "This email belongs to a WorkNest account that is turned off, so it can't be added as a new user. Use another email, or ask WorkNest support to turn the old account back on.");
+
             var (id, publicId) = await _db.CreateUserAsync(
                 request.Email, request.Password, request.Name, request.Phone,
                 roleId, request.CompanyId, request.CityId,
