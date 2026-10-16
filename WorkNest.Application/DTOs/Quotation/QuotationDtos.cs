@@ -26,8 +26,11 @@ namespace WorkNest.Application.DTOs.Quotation
         public string DiscountType { get; set; } = "Percentage";
         public decimal DiscountPercentage { get; set; } = 0;
         public decimal DiscountValue { get; set; } = 0;
+        /// <summary>No longer used: the deposit is worked out from SecurityDepositMonths (kept so older clients still bind).</summary>
         public decimal? SecurityDepositOverride { get; set; }
         public int? BillingPeriodMonths { get; set; }
+        /// <summary>Security Deposit (Months): 0, 1, 2 or 3 (anything else is rejected). Null = the space kind's default
+        /// (private office 2). Shared spaces and meeting rooms are always 0.</summary>
         public int? SecurityDepositMonths { get; set; }
         public int? OfferingTypeId { get; set; }
         public string? OfferingType { get; set; } = "1";
@@ -100,7 +103,8 @@ namespace WorkNest.Application.DTOs.Quotation
         public bool IsActive { get; set; }
 
         public int BillingPeriodMonths { get; set; } = 3;
-        public int SecurityDepositMonths { get; set; } = 1;
+        /// <summary>The stored Security Deposit (Months), 0-3 (0 = no deposit); not a default.</summary>
+        public int SecurityDepositMonths { get; set; }
         public string? BillingPeriod { get; set; }
         public string? BillingPeriodLabel { get; set; }
         public decimal MonthlyRent { get; set; }

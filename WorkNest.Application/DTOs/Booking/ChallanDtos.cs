@@ -99,6 +99,7 @@ namespace WorkNest.Application.DTOs.Booking
         public decimal MonthlyRent { get; set; }
         public decimal FirstCycleRent { get; set; }
         public decimal CurrentCycleAmount { get; set; }
+        /// <summary>The booking's deposit as stored (WN_vw_BookingSummary.SecurityDeposit, SecurityDepositRules); 0 = none.</summary>
         public decimal SecurityDeposit { get; set; }
         public decimal SupportChargeAmount { get; set; }
         public decimal DiscountPercentage { get; set; }

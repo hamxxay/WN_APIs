@@ -52,20 +52,44 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             return string.Join(" ", tokens);
         }
 
-        /// <summary>
-        /// Generates Page 1 (Dynamic Terms, Customer/Entity Details, Financial Schedule, Signatures)
-        /// using QuestPDF Span-based composition.
-        /// </summary>
-        public static byte[] Generate(SendAgreementRequest req, string quotationNumber)
-        {
-            string logoPath = GetLogoFilePath();
+        /// <summary>One row of Schedule A: up to two label / value pairs side by side.</summary>
+        public sealed record ScheduleRow(string Label1, string Value1, string Label2 = "", string Value2 = "", bool Highlight1 = false, bool Highlight2 = false);
 
+        public const string SecurityDepositLabel = "Security Deposit (Refundable)";
+
+        /// <summary>
+        /// The Schedule A deposit value, e.g. "PKR 126,000 (2 months)" (months left out when 0 / unknown); null when there
+        /// is no deposit, so the agreement has no deposit row at all (Security Deposit (Months) = 0).
+        /// </summary>
+        public static string? SecurityDepositText(decimal amount, int months)
+        {
+            if (amount <= 0m) return null;
+            string text = $"PKR {amount:N0}";
+            return months > 0 ? $"{text} ({months} month{(months == 1 ? "" : "s")})" : text;
+        }
+
+        /// <summary>Schedule A (key commercial and occupancy terms) as printed on page 1.</summary>
+        public static IReadOnlyList<ScheduleRow> BuildScheduleRows(SendAgreementRequest req, int securityDepositMonths = 0)
+        {
             string startDateStr = req.ContractStartDate.HasValue ? req.ContractStartDate.Value.ToString("dd MMMM yyyy") : WorkNest.Application.Services.BusinessClock.Default.Now.ToString("dd MMMM yyyy");
             string endDateStr = req.ContractEndDate.HasValue ? req.ContractEndDate.Value.ToString("dd MMMM yyyy") : WorkNest.Application.Services.BusinessClock.Default.Now.AddYears(1).ToString("dd MMMM yyyy");
-            string agreementDateStr = WorkNest.Application.Services.BusinessClock.Default.Now.ToString("dd MMMM yyyy");
             string billingPeriodStr = !string.IsNullOrWhiteSpace(req.BillingFrequency) ? req.BillingFrequency : "Monthly";
-            
-            string rawOp = (req.OperatingHours ?? "").Trim();
+
+            var rows = new List<ScheduleRow>
+            {
+                new("Customer Entity Type", req.EntityType, "Agreement Status", "Standard Issued"),
+                new("Commencement Date", startDateStr, "Expiration Date", endDateStr, Highlight1: true),
+                new("Recurring Fee Amount", $"PKR {req.FeeAmount:N0}", "Billing Frequency", billingPeriodStr, Highlight1: true)
+            };
+            string? deposit = SecurityDepositText(req.SecurityDeposit, securityDepositMonths);
+            if (deposit != null) rows.Add(new(SecurityDepositLabel, deposit));
+            rows.Add(new("Designated Operating Hours", OperatingHoursText(req.OperatingHours), "Contact Number", req.PhoneNumber ?? "-"));
+            return rows;
+        }
+
+        private static string OperatingHoursText(string? operatingHours)
+        {
+            string rawOp = (operatingHours ?? "").Trim();
             string opHoursStr;
             if (rawOp == "1" || rawOp.Equals("24-by-7", StringComparison.OrdinalIgnoreCase) || rawOp.Equals("24/7", StringComparison.OrdinalIgnoreCase) || rawOp.StartsWith("24/7", StringComparison.OrdinalIgnoreCase) || rawOp.StartsWith("24-by-7", StringComparison.OrdinalIgnoreCase))
             {
@@ -91,6 +115,20 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             {
                 opHoursStr = "24/7";
             }
+            return opHoursStr;
+        }
+
+        /// <summary>
+        /// Generates Page 1 (Dynamic Terms, Customer/Entity Details, Financial Schedule, Signatures)
+        /// using QuestPDF Span-based composition. <paramref name="securityDepositMonths"/> (0 = not shown) only labels the
+        /// deposit; a 0 deposit leaves the deposit row out.
+        /// </summary>
+        public static byte[] Generate(SendAgreementRequest req, string quotationNumber, int securityDepositMonths = 0)
+        {
+            string logoPath = GetLogoFilePath();
+
+            string agreementDateStr = WorkNest.Application.Services.BusinessClock.Default.Now.ToString("dd MMMM yyyy");
+            var scheduleRows = BuildScheduleRows(req, securityDepositMonths);
 
             int refundDays = req.RefundDays > 0 ? req.RefundDays : 30;
 
@@ -272,11 +310,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                 else cell2.Text(val2).FontSize(8.5f).FontColor("#0f172a");
                             }
 
-                            AddRow("Customer Entity Type", req.EntityType, "Agreement Status", "Standard Issued", false, false);
-                            AddRow("Commencement Date", startDateStr, "Expiration Date", endDateStr, true, false);
-                            AddRow("Recurring Fee Amount", $"PKR {req.FeeAmount:N0}", "Billing Frequency", billingPeriodStr, true, false);
-                            AddRow("Security Deposit (Refundable)", $"PKR {req.SecurityDeposit:N0}");
-                            AddRow("Designated Operating Hours", opHoursStr, "Contact Number", req.PhoneNumber ?? "-", false, false);
+                            // No deposit row when there is no deposit (BuildScheduleRows leaves it out).
+                            foreach (var row in scheduleRows)
+                                AddRow(row.Label1, row.Value1, row.Label2, row.Value2, row.Highlight1, row.Highlight2);
                         });
 
                         // Core Acknowledgement Note

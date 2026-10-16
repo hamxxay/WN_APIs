@@ -32,7 +32,11 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetChallanAsync(int bookingId);
         Task<ApiResponse> SendChallanEmailAsync(int bookingId, byte[]? pdfBytes = null);
         Task<ApiResponse> SendBookingConfirmationEmailAsync(int bookingId);
-        Task<byte[]> GenerateAdvanceInvoicePdfAsync(int bookingId, int advanceMonths, int secDepositMonths, decimal monthlyRate, decimal discountAmount);
+        /// <summary>
+        /// Advance invoice PDF. <paramref name="secDepositMonths"/> null = the booking's stored Security Deposit (Months)
+        /// and stored deposit; a value (0-3) shows that many months instead (always 0 for shared spaces / meeting rooms).
+        /// </summary>
+        Task<byte[]> GenerateAdvanceInvoicePdfAsync(int bookingId, int advanceMonths, int? secDepositMonths, decimal monthlyRate, decimal discountAmount);
         Task<ApiResponse> GetBookingFinancialBreakdownAsync(int bookingId);
     }
 }
