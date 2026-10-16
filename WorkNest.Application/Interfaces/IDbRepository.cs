@@ -268,6 +268,12 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null);
+        /// <summary>
+        /// The spaces behind the overview's Occupancy KPI, same rule (read-only): [0] TotalSpaces (active spaces),
+        /// [1] one row per active space with a live booking covering <paramref name="businessNow"/>, sorted by location, then room.
+        /// </summary>
+        /// <param name="locationIds">Locations to list; null = all locations.</param>
+        Task<List<List<IDictionary<string, object?>>>> GetDashboardOccupiedSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
         /// <paramref name="locationIds"/>: location-bound staff's locations (every one they are assigned to) for the items that
         /// have a location (via the space); null = all locations.

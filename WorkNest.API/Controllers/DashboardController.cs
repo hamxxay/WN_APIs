@@ -39,6 +39,16 @@ namespace WorkNest.API.Controllers
             Ok(await _dashboard.GetOverviewAsync(Scope(locationId, locationIds), period));
 
         /// <summary>
+        /// The rooms behind the overview's Occupancy card ("X of Y spaces in use"): one row per active space with a live
+        /// booking right now (same rule as the card, so the count matches it), with location, space type, seats, customer,
+        /// booking dates and status; sorted by location, then room. Same roles and location rules as the overview.
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpGet("api/dashboard/occupied-spaces")]
+        public async Task<IActionResult> OccupiedSpaces([FromQuery] int? locationId, [FromQuery] string? locationIds) =>
+            Ok(await _dashboard.GetOccupiedSpacesAsync(Scope(locationId, locationIds)));
+
+        /// <summary>
         /// Role-based dashboard sections (same location rules as the overview). Sales executive: sales pipeline,
         /// tour inquiries &amp; follow-ups, renewals and collections. Admin: team &amp; service. Super admin: team &amp;
         /// service, location comparison, staff overview and system health (company-wide).
