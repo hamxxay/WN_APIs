@@ -69,7 +69,8 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// Search eligible unpaid non-cancelled invoices with no active receipt.
+        /// Invoices that can take a receipt: not cancelled, with a balance left (unpaid, overdue or part-paid), with their
+        /// amount paid so far, balance and whether they can be paid in parts.
         /// </summary>
         [HttpGet("unpaid-invoices")]
         public async Task<IActionResult> GetUnpaidInvoices(
@@ -93,7 +94,8 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
-        /// Create a fee receipt for an unpaid invoice and mark the invoice paid.
+        /// Create a fee receipt for an invoice: the whole balance (PaymentMode Full, the default) or a part of it (Partial
+        /// with Amount). The invoice becomes Paid when nothing is left, else Partial.
         /// </summary>
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] FeeReceiptCreateDto request)

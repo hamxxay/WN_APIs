@@ -524,7 +524,8 @@ namespace WorkNest.Application.Interfaces
         // --- Fee Receipts ---
         Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptUnpaidInvoicesDbAsync(string? search, int? locationId, string? allowedLocationIds, int top);
         Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptAccountsDbAsync(int? companyId);
-        Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds);
+        /// <summary>amount: the amount received (FR_01 part payments); null = the invoice's whole balance (works before FR_01 too).</summary>
+        Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null);
         Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds);
         Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds);
         Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid, string? allowedLocationIds);

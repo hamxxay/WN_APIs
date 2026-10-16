@@ -7130,7 +7130,7 @@ END";
             return await ReadAll(r);
         }
 
-        public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds)
+        public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_FeeReceipts_Insert", c);
@@ -7143,6 +7143,14 @@ END";
             cmd.Parameters.Add("@DepositorCNIC", SqlDbType.VarChar, 15).Value = depositorCnic;
             cmd.Parameters.AddWithValue("@CreatedById", createdById);
             cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
+            // FR_01: sent only for a part payment, so a full payment also works with the procedure from before FR_01.
+            if (amount.HasValue)
+            {
+                var p = cmd.Parameters.Add("@Amount", SqlDbType.Decimal);
+                p.Precision = 18;
+                p.Scale = 2;
+                p.Value = amount.Value;
+            }
             try
             {
                 await using var r = await cmd.ExecuteReaderAsync();
@@ -7151,6 +7159,12 @@ END";
             catch (SqlException ex) when (ex.Number == 50000)
             {
                 throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(ex.Message, ex.State, ex);
+            }
+            catch (SqlException ex) when (amount.HasValue && (ex.Number == 8144 || ex.Number == 8145))
+            {
+                // The procedure has no @Amount yet: never fall back to a full payment for a part payment.
+                throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(
+                    "Part payments need the database update FR_01. Ask the WorkNest team to run it, or record the full balance.", 1, ex);
             }
         }
 
