@@ -280,6 +280,19 @@ namespace WorkNest.Application.Services
                     UnitPrice = monthlyBasePrice,
                     Amount = rentAmount
                 });
+
+                // Shared spaces take a security deposit too (owner's decision, 18 Oct 2026): a line only when there is one.
+                if (securityDeposit > 0 && securityDepositMonths > 0)
+                {
+                    details.Add(new QuotationDetailDto
+                    {
+                        FeeType = "SecurityDeposit",
+                        Description = SecurityDepositRules.QuotationLineDescription(securityDepositMonths),
+                        Quantity = securityDepositMonths,
+                        UnitPrice = Math.Round(securityDeposit / securityDepositMonths, 2, MidpointRounding.AwayFromZero),
+                        Amount = securityDeposit
+                    });
+                }
             }
 
             // Generate unique Quotation Number (e.g. WN-QT-YYYYMMDD-XXXXXX)

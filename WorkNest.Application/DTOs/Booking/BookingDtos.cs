@@ -172,7 +172,7 @@ namespace WorkNest.Application.DTOs.Booking
         public string? Notes { get; set; }
         /// <summary>
         /// Security Deposit (Months), 0-3 (null = unchanged). A new value recomputes the booking's deposit (months x
-        /// monthly rent x (1 - rent discount)); shared spaces and meeting rooms stay 0. Not changeable once the
+        /// monthly rent x (1 - rent discount)) for private offices and shared spaces; meeting rooms stay 0. Not changeable once the
         /// booking has an invoice.
         /// </summary>
         public int? SecurityDepositMonths { get; set; }

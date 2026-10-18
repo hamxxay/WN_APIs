@@ -422,7 +422,7 @@ namespace WorkNest.Application.Services
             // Base price and discount cap: same rules as QuotationService.CreateQuotationAsync.
             var (standardPerSeat, spaceCapacity, categoryCode, spaceName, spaceTypeName) = await GetSpacePricingAsync(spaceId);
             bool isPrivate = categoryCode is "PrivateOffice" or "Private";
-            // Deposit months for the space kind: private office 0-3 (default 2), shared space / meeting room always 0.
+            // Deposit months for the space kind: private office / shared space 0-3 (default 2), meeting room always 0.
             // WN_Bookings_Insert and the update after it work the amount out from these months (no override).
             int securityDepositMonths = SecurityDepositRules.ResolveMonths(
                 SecurityDepositRules.KindOf(categoryCode, spaceTypeName), request.SecurityDepositMonths);
@@ -1070,7 +1070,7 @@ namespace WorkNest.Application.Services
             }
             else
             {
-                secMonthsShown = depositKind == DepositSpaceKind.PrivateOffice
+                secMonthsShown = depositKind != DepositSpaceKind.MeetingRoom
                     ? Math.Clamp(secDepositMonths.Value, SecurityDepositRules.MinMonths, SecurityDepositRules.MaxMonths)
                     : 0;
                 secTotal = SecurityDepositRules.AmountForPercent(secMonthsShown, monthlyRate, depositDiscountPct);
