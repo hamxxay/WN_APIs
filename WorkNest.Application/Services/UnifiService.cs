@@ -779,8 +779,14 @@ namespace WorkNest.Application.Services
 
         private static readonly Dictionary<string, string> Kinds = new()
         {
-            ["phone"] = "Phone", ["computer"] = "Computer", ["tablet"] = "Tablet", ["printer"] = "Printer", ["tv"] = "TV / media",
-            ["camera"] = "Camera", ["access"] = "Access control", ["network"] = "Network device", ["iot"] = "Smart device", ["other"] = "Device",
+            ["phone"] = "Mobile", ["computer"] = "Laptop / PC", ["tablet"] = "Tablet", ["printer"] = "Printer", ["tv"] = "TV / media",
+            ["camera"] = "Camera", ["access"] = "Access control", ["network"] = "Network device", ["iot"] = "Smart device", ["other"] = "Unknown",
+        };
+
+        // Word used inside auto-generated names ("Apple phone · 3f:a1"); kept as before so names don't change.
+        private static string KindNoun(string kind) => kind switch
+        {
+            "phone" => "phone", "computer" => "computer", "other" => "device", _ => Kinds[kind].ToLowerInvariant(),
         };
 
         private static readonly Regex AccessNameRe = new(@"^access\b|door|turnstile|attendance");
@@ -829,7 +835,7 @@ namespace WorkNest.Application.Services
             if (Truthy(P(c, "name"))) return Str(P(c, "name"))!;
             if (Truthy(P(c, "hostname"))) return Str(P(c, "hostname"))!;
             var tail = mac.Length > 5 ? mac[^5..] : mac;
-            var word = kind == "other" ? "device" : Kinds[kind].ToLowerInvariant();
+            var word = KindNoun(kind);
             var vendor = ShortVendor(Str(P(c, "oui")));
             if (vendor != "") return $"{vendor} {word} · {tail}";
             if (IsPrivateMac(mac)) return $"Private {word} · {tail}";
