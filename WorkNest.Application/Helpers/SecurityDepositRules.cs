@@ -13,7 +13,7 @@ namespace WorkNest.Application.Helpers
     /// <summary>
     /// "Security Deposit (Months)" (owner's rule, 16 Oct 2026). A quotation / booking stores the months (0, 1, 2 or 3)
     /// and the amount worked out when it is saved: months x monthly rent x (1 - rent discount), 2 decimals. Private
-    /// offices choose 0-3 (default 2); shared spaces and meeting rooms never take a deposit. Reading a saved deposit
+    /// offices and shared spaces choose 0-3 (default 2); meeting rooms never take a deposit. Reading a saved deposit
     /// later (invoice, agreement, PDFs, previews) uses the stored amount; a stored 0 with months above 0 (an older row)
     /// is worked out from the months; otherwise there is no deposit. Nothing turns 0 / missing months into 2 (or 1).
     /// The SD_01 database script applies the same rule in the procedures.
@@ -53,13 +53,14 @@ namespace WorkNest.Application.Helpers
         }
 
         /// <summary>
-        /// The months to store: the request's value (checked 0-3) for a private office, 2 when none was sent; always 0
-        /// for shared spaces and meeting rooms whatever was sent.
+        /// The months to store: the request's value (checked 0-3) for a private office or a shared space (owner's
+        /// decision, 18 Oct 2026: shared spaces take a deposit too), 2 when none was sent; always 0 for meeting rooms
+        /// whatever was sent.
         /// </summary>
         public static int ResolveMonths(DepositSpaceKind kind, int? requested)
         {
             EnsureValidMonths(requested);
-            if (kind != DepositSpaceKind.PrivateOffice) return 0;
+            if (kind == DepositSpaceKind.MeetingRoom) return 0;
             return requested ?? DefaultPrivateMonths;
         }
 
@@ -92,14 +93,14 @@ namespace WorkNest.Application.Helpers
             Amount(months, monthlyRent, Math.Clamp(discountPercent, 0m, 100m) / 100m);
 
         /// <summary>
-        /// A saved deposit read back: the stored amount; a stored 0 with months above 0 on a private office (an older
-        /// row) = months x rent x (1 - discount); otherwise 0. Meeting rooms never have one.
+        /// A saved deposit read back: the stored amount; a stored 0 with months above 0 on a private office or shared
+        /// space (an older row) = months x rent x (1 - discount); otherwise 0. Meeting rooms never have one.
         /// </summary>
         public static decimal Stored(DepositSpaceKind kind, decimal storedAmount, int? storedMonths, decimal monthlyRent, decimal discountFraction)
         {
             if (kind == DepositSpaceKind.MeetingRoom) return 0m;
             if (storedAmount > 0m) return Math.Round(storedAmount, 2, MidpointRounding.AwayFromZero);
-            if (kind != DepositSpaceKind.PrivateOffice || (storedMonths ?? 0) <= 0) return 0m;
+            if ((storedMonths ?? 0) <= 0) return 0m;
             return Amount(storedMonths!.Value, monthlyRent, discountFraction);
         }
 
