@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Complaint;
 using WorkNest.Application.DTOs.WhatsApp;
 using WorkNest.Application.Interfaces;
+using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
 {
@@ -147,7 +148,24 @@ namespace WorkNest.Application.Services
             if (messageType != "text")
                 turn.Texts.Add("Currently, I can process text messages only.\n\nPlease send a text message.\n\n" + MainMenu(branches));
             else
-                await ReplyAsync(turn, phone, profileName, (text ?? "").Trim(), branches);
+            {
+                var stateBefore = turn.State;
+                try
+                {
+                    await ReplyAsync(turn, phone, profileName, (text ?? "").Trim(), branches);
+                }
+                catch (Exception ex)
+                {
+                    // Never leave the customer without an answer: a failure on our side (e.g. the database) used to stop
+                    // the reply, so the customer saw nothing and the same step failed again. They stay on the same step
+                    // (their answers are kept) and get the sales numbers.
+                    _logger.LogError(ex, "WhatsApp bot: the reply to {Phone} at step {State} failed", phone, stateBefore);
+                    turn.State = stateBefore;
+                    turn.Texts.Clear();
+                    turn.Pins.Clear();
+                    turn.Texts.Add(SomethingWentWrong(branches));
+                }
+            }
 
             await _repo.SaveBotStateAsync(phone, turn.State, JsonSerializer.Serialize(turn.Data, Json));
 
@@ -404,16 +422,26 @@ namespace WorkNest.Application.Services
             var phone = LocalPhone(whatsAppPhone);
             var reference = "WN-" + Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
             var d = t.Data;
-            var saved = await _contacts.CreateChatbotTourInquiryAsync(new ChatbotTourInquiryRequest
+            ApiResponse saved;
+            try
             {
-                Name = d.Name ?? profileName ?? "WhatsApp customer",
-                Phone = phone,
-                Branch = d.Branch,
-                LocationId = d.BranchId,
-                WorkspaceType = d.WorkspaceType,
-                Seats = int.TryParse(d.Seats, out var s) ? s : null,
-                Reference = reference
-            });
+                saved = await _contacts.CreateChatbotTourInquiryAsync(new ChatbotTourInquiryRequest
+                {
+                    Name = d.Name ?? profileName ?? "WhatsApp customer",
+                    Phone = phone,
+                    Branch = d.Branch,
+                    LocationId = d.BranchId,
+                    WorkspaceType = d.WorkspaceType,
+                    Seats = int.TryParse(d.Seats, out var s) ? s : null,
+                    Reference = reference
+                });
+            }
+            catch (Exception ex)
+            {
+                // The save failed on our side: the customer is told and can retry (below), and the error is logged.
+                _logger.LogError(ex, "WhatsApp bot: saving the tour request of {Phone} failed", whatsAppPhone);
+                saved = ApiResponse.Fail("The tour request could not be saved.");
+            }
             if (!saved.IsSuccessful)
             {
                 t.State = "booking_phone"; // any reply retries the save with the same answers
@@ -426,6 +454,11 @@ namespace WorkNest.Application.Services
                         "Our sales team will contact you on this WhatsApp number shortly.\n\nThank you for choosing WorkNest!\n\nType 0 to return to the main menu.");
             t.Reset();
         }
+
+        /// <summary>The answer when a step fails on our side: try again, or call sales.</summary>
+        private string SomethingWentWrong(List<Branch> branches) =>
+            "Sorry, something went wrong on our side. Please send your last reply again in a moment, or contact our sales team directly.\n\n" +
+            SalesContacts(branches);
 
         /// <summary>WhatsApp number (923001234567) shown the local way (03001234567); other countries keep +.</summary>
         private static string LocalPhone(string whatsAppPhone)

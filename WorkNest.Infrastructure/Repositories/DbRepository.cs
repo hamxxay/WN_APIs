@@ -2835,15 +2835,16 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             {
                 return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, inquiryType, referenceName, locationId);
             }
-            catch (SqlException ex) when (ex.Number == 8144 && locationId is not null)
+            catch (SqlException ex) when (ex.Number is 8144 or 8145 && locationId is not null)
             {
-                // "Too many arguments": the database does not have BR_01 yet (WN_Contacts_Insert without @LocationId).
+                // "Too many arguments" (8144) or "@LocationId is not a parameter" (8145, the usual answer to a named
+                // parameter the procedure lacks): the database does not have BR_01 yet (WN_Contacts_Insert without @LocationId).
                 // Save the inquiry without its branch (the branch name stays in the message) rather than lose it.
                 return await InsertContactAsync(contactType, userId, name, email, phone, message, inquiryType, referenceName, null);
             }
-            catch (SqlException ex) when (ex.Number == 8144 && inquiryType is not null)
+            catch (SqlException ex) when (ex.Number is 8144 or 8145 && inquiryType is not null)
             {
-                // "Too many arguments": the database does not have CT_01 yet (WN_Contacts_Insert without @InquiryType).
+                // 8144 / 8145 (see above): the database does not have CT_01 yet (WN_Contacts_Insert without @InquiryType).
                 // Save the inquiry without its Type rather than lose it (website / WhatsApp forms keep working).
                 return await InsertContactCoreAsync(contactType, userId, name, email, phone, message, null, null, null);
             }
