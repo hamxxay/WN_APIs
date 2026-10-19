@@ -19,6 +19,8 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetUserHistoryAsync(int userId);
         Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById, int? locationId = null);
         Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null);
+        /// <summary>Sets the user's WorkNest password (dbo.WN_Users_SetPassword, PW_01): rows changed, or null when that procedure is not on the database yet.</summary>
+        Task<int?> SetUserPasswordAsync(int id, string password);
         Task DeleteUserAsync(int id);
         Task SetUserStatusAsync(int id, bool isActive);
         Task SetUserRoleAsync(int id, int roleId);

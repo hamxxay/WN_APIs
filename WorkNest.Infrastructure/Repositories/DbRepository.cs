@@ -973,6 +973,22 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return (null, null);
         }
 
+        public async Task<int?> SetUserPasswordAsync(int id, string password)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Users_SetPassword", c);
+            cmd.Parameters.AddWithValue("@UserId", id);
+            cmd.Parameters.Add("@Password", System.Data.SqlDbType.NVarChar, 500).Value = password;
+            try
+            {
+                return Convert.ToInt32(await cmd.ExecuteScalarAsync() ?? 0);
+            }
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2812)
+            {
+                return null; // PW_01 not run yet
+            }
+        }
+
         public async Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null)
         {
             await using var c = await Open();

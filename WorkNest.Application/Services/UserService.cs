@@ -198,8 +198,18 @@ namespace WorkNest.Application.Services
                 locationWarning ?? customerWarning ?? "User created successfully.");
         }
 
+        /// <summary>Users page password rules (Firebase's minimum is 6; WN_Users.PasswordHash holds 500).</summary>
+        internal const int MinPasswordLength = 6, MaxPasswordLength = 128;
+        internal const string PasswordDbUpdateMessage =
+            "Database update needed: run the script PW_01_user_password_TEST (PW_01_user_password_LIVE on the live database). The other changes were saved; the password was not changed.";
+
         public async Task<ApiResponse> UpdateUserAsync(int id, UserUpdateRequest request)
         {
+            // Users page, edit: a new password is optional (empty = keep the current one). Checked before anything is saved.
+            var newPassword = string.IsNullOrWhiteSpace(request.Password) ? null : request.Password;
+            if (newPassword != null && (newPassword.Length < MinPasswordLength || newPassword.Length > MaxPasswordLength))
+                return ApiResponse.Fail($"The password must be {MinPasswordLength} to {MaxPasswordLength} characters.");
+
             var cnicError = Cnic.Validate(request.CnicOrPassport);
             if (cnicError != null) return ApiResponse.Fail(cnicError);
             var phoneError = Phone.Validate(request.Phone);
@@ -254,12 +264,20 @@ namespace WorkNest.Application.Services
                 request.CnicOrPassport, request.AvatarUrl, request.Notes, finalLocationId);
 
             // Only touch the location list when the form sent one (or changed the role).
+            string? warning = null;
             if (effectiveRoleId.HasValue && (request.LocationIds != null || !Roles.IsLocationBoundRole(effectiveRoleId.Value)))
+                warning = await SaveLocationsAsync(id, effectiveRoleId.Value, finalLocationId, request.LocationIds, null);
+
+            // Before 19 Oct 2026 an edit dropped the password without a word, so sign-in kept the old one.
+            if (newPassword != null)
             {
-                var warning = await SaveLocationsAsync(id, effectiveRoleId.Value, finalLocationId, request.LocationIds, null);
-                if (warning != null) return ApiResponse.Ok(warning);
+                var changed = await _db.SetUserPasswordAsync(id, newPassword);
+                if (changed is null) return ApiResponse.Fail(PasswordDbUpdateMessage);
+                if (changed == 0) return ApiResponse.Fail("User not found.");
             }
-            return ApiResponse.Ok("User updated.");
+
+            var done = newPassword != null ? "User updated. Password changed." : "User updated.";
+            return ApiResponse.Ok(warning != null ? (newPassword != null ? $"{warning} Password changed." : warning) : done);
         }
 
         public async Task<ApiResponse> DeleteUserAsync(int id)
