@@ -12,7 +12,7 @@ namespace WorkNest.API.Controllers
     /// Free meeting-room hours (page My Meeting Rooms): a customer with a confirmed private office booking gets a monthly
     /// allowance and books meeting rooms at that location with it. Like api/booking/my, always the signed-in user's own
     /// allowance and bookings (user from the JWT email). Procedures dbo.WN_MeetingRooms_* (script MR_01_meeting_rooms);
-    /// before it is run every call answers 503 "Database update needed: ...".
+    /// before it is run every call answers 503 "Database update needed: run the script MR_01_meeting_rooms_TEST ...".
     /// </summary>
     [ApiController]
     [Authorize]

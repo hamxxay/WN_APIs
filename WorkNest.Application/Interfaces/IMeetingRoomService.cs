@@ -30,12 +30,13 @@ namespace WorkNest.Application.Interfaces
 
     /// <summary>
     /// The dbo.WN_MeetingRooms_* procedures (or a table / procedure they use) are not on the database yet: SQL errors
-    /// 2812 / 208. The page shows <see cref="UserMessage"/> instead of an error.
+    /// 2812 / 208. The page shows <see cref="UserMessage"/> instead of an error (no ".sql" in it: the web error filter
+    /// hides any text that looks like SQL).
     /// </summary>
     public class MeetingRoomsNotInstalledException : Exception
     {
         public const string UserMessage =
-            "Database update needed: run MR_01_meeting_rooms_TEST.sql (MR_01_meeting_rooms_LIVE.sql on the live database).";
+            "Database update needed: run the script MR_01_meeting_rooms_TEST (MR_01_meeting_rooms_LIVE on the live database).";
 
         public MeetingRoomsNotInstalledException(Exception inner) : base(UserMessage, inner) { }
     }
