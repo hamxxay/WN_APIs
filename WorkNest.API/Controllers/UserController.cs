@@ -112,6 +112,12 @@ namespace WorkNest.API.Controllers
             if (GrantsAdminRole(request?.Role)) return OnlySuperAdmin();
             if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
                 return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
+            // Creating a user whose account was deleted turns that account back on: like editing it, an old super admin,
+            // admin, CEO, sales manager or access officer account needs a super admin.
+            if (!string.IsNullOrWhiteSpace(request?.Email)
+                && await _db.GetUserSignInStatusAsync(request.Email) is { IsActive: false } deleted
+                && await IsProtectedAsync(deleted.Id))
+                return OnlySuperAdmin();
             try
             {
                 var result = await _users.CreateUserAsync(request!, null);

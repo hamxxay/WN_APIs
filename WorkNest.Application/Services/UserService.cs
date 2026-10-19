@@ -147,10 +147,12 @@ namespace WorkNest.Application.Services
             // One WorkNest account per email (UX_WN_Users_Email): the insert would fail with a database error ("An unexpected
             // error occurred"), e.g. for a customer who already signed up on the website or app with this email.
             var existing = await _db.GetUserSignInStatusAsync(request.Email);
+            if (existing is { IsActive: true })
+                return ApiResponse.Fail("This email already has a WorkNest account (for example a customer who signed up). Search for it on the Users page and edit it, e.g. change its role, instead of creating a new user.");
+            // Deleting a user only turns the account off (WN_Users_Delete sets IsActive = 0) and the email stays taken, so
+            // creating the user again turns that account back on with the new details (19 Oct 2026).
             if (existing is not null)
-                return ApiResponse.Fail(existing.IsActive
-                    ? "This email already has a WorkNest account (for example a customer who signed up). Search for it on the Users page and edit it, e.g. change its role, instead of creating a new user."
-                    : "This email belongs to a WorkNest account that is turned off, so it can't be added as a new user. Use another email, or ask WorkNest support to turn the old account back on.");
+                return await RestoreDeletedUserAsync(existing.Id, request, roleId, finalLocationId, actorId);
 
             var (id, publicId) = await _db.CreateUserAsync(
                 request.Email, request.Password, request.Name, request.Phone,
@@ -202,6 +204,62 @@ namespace WorkNest.Application.Services
         internal const int MinPasswordLength = 6, MaxPasswordLength = 128;
         internal const string PasswordDbUpdateMessage =
             "Database update needed: run the script PW_01_user_password_TEST (PW_01_user_password_LIVE on the live database). The other changes were saved; the password was not changed.";
+
+        internal const string RestoredMessage = "This email had a deleted account. It has been turned back on with these details.";
+        internal const string RestorePasswordDbUpdateMessage =
+            "Database update needed: run the script PW_01_user_password_TEST (PW_01_user_password_LIVE on the live database). Nothing was changed; the deleted account is still turned off.";
+
+        /// <summary>
+        /// Create for an email whose account was deleted (turned off): the same account is turned back on with the new
+        /// details, since one WorkNest account per email (UX_WN_Users_Email) rules out a second row. The password goes
+        /// first, so when it can't be saved (PW_01 not run) nothing changes and the account stays off. Fields left empty
+        /// keep what the account had (WN_Users_Update leaves a NULL as it is).
+        /// </summary>
+        private async Task<ApiResponse> RestoreDeletedUserAsync(int id, UserCreateRequest request, int roleId, int? finalLocationId, int? actorId)
+        {
+            var password = string.IsNullOrWhiteSpace(request.Password) ? null : request.Password;
+            if (password != null && (password.Length < MinPasswordLength || password.Length > MaxPasswordLength))
+                return ApiResponse.Fail($"The password must be {MinPasswordLength} to {MaxPasswordLength} characters.");
+            if (password != null)
+            {
+                var changed = await _db.SetUserPasswordAsync(id, password);
+                if (changed is null) return ApiResponse.Fail(RestorePasswordDbUpdateMessage);
+                if (changed == 0) return ApiResponse.Fail("User not found.");
+            }
+
+            await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId);
+            await _db.UpdateUserAsync(id, request.Name, request.Phone, request.CompanyId, request.CityId, request.Address,
+                request.CnicOrPassport, request.AvatarUrl, request.Notes, finalLocationId);
+            await _db.SetUserStatusAsync(id, true);
+
+            string? warning = null;
+            try
+            {
+                if (await _db.GetCustomerByEmailAsync(request.Email) is null)
+                {
+                    var nameParts = (request.Name ?? "").Split(' ', 2);
+                    await _db.CreateCustomerAsync(nameParts[0], nameParts.Length > 1 ? nameParts[1] : null, request.Email,
+                        request.Phone, request.CnicOrPassport, request.Address, request.CityId, request.Notes, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                warning = $"{RestoredMessage} Their customer profile could not be saved ({ex.Message}).";
+            }
+            try
+            {
+                var locationWarning = await SaveLocationsAsync(id, roleId, finalLocationId, request.LocationIds, actorId);
+                if (locationWarning != null) warning = $"{RestoredMessage} {locationWarning}";
+            }
+            catch (Exception ex)
+            {
+                warning = $"{RestoredMessage} Their locations could not be saved ({ex.Message}). Edit the user to set them.";
+            }
+
+            var row = await _db.GetUserByIdAsync(id);
+            var publicId = row != null && row.TryGetValue("IdGUID", out var g) ? g?.ToString() : null;
+            return ApiResponse.Ok(new { id, publicId, email = request.Email, locationId = finalLocationId, restored = true }, warning ?? RestoredMessage);
+        }
 
         public async Task<ApiResponse> UpdateUserAsync(int id, UserUpdateRequest request)
         {
