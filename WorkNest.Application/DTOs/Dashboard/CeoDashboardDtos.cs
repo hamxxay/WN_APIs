@@ -418,6 +418,28 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal OverMonthly { get; set; }
         /// <summary>Always three: 24/7, Morning, Evening.</summary>
         public List<CeoRoomShiftSummaryDto> ByShift { get; set; } = new();
+        /// <summary>
+        /// Occupancy per room category, from the same rooms as the totals above (the categories' Rooms / OccupiedNow /
+        /// VacantNow add up to them): always Private Office then Shared Space (zeros when the location has none), then
+        /// any other category the rooms carry.
+        /// </summary>
+        public List<CeoRoomCategorySummaryDto> ByCategory { get; set; } = new();
+    }
+
+    public class CeoRoomCategorySummaryDto
+    {
+        /// <summary>WN_SpaceCategories.Code: PrivateOffice | SharedSpace.</summary>
+        public string CategoryCode { get; set; } = "";
+        /// <summary>WN_SpaceCategories.Label (e.g. "Private Office"); worked out from the code only when the database has none.</summary>
+        public string Label { get; set; } = "";
+        public int Rooms { get; set; }
+        /// <summary>Rooms of the category with a confirmed booking right now.</summary>
+        public int OccupiedNow { get; set; }
+        public int VacantNow { get; set; }
+        /// <summary>Occupied now / rooms, percent (one decimal).</summary>
+        public decimal OccupancyNowPct { get; set; }
+        /// <summary>Days occupied: room-days with a confirmed booking / room-days of the period so far, percent (one decimal).</summary>
+        public decimal PeriodOccupancyPct { get; set; }
     }
 
     public class CeoRoomShiftSummaryDto
@@ -453,6 +475,10 @@ namespace WorkNest.Application.DTOs.Dashboard
         public bool OccupiedNow { get; set; }
         /// <summary>Days of the period so far with a confirmed booking, percent (one decimal).</summary>
         public decimal PeriodOccupancyPct { get; set; }
+        /// <summary>Days of the period so far with a confirmed booking (PeriodOccupancyPct = OccupiedDays / PeriodDays).</summary>
+        public int OccupiedDays { get; set; }
+        /// <summary>Days of the period so far (the same for every room).</summary>
+        public int PeriodDays { get; set; }
         /// <summary>Confirmed bookings running in the period, by start; empty = vacant all period.</summary>
         public List<CeoRoomSaleDto> Sales { get; set; } = new();
     }
