@@ -10,10 +10,12 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// CEO dashboard: read-only, every location. The CEO (role ceo) sees only these endpoints (and the forecast);
     /// super admins may open them too. Common query parameters: period = month (default) | quarter | year (to date,
-    /// against the previous period, as api/dashboard/overview) and locationId (narrow to one location; tour inquiries by
+    /// against the previous period, as api/dashboard/overview) | custom (CS_01: a day range, against the same number of
+    /// days just before it; dashboard and rooms: from / to, breakdown and records: periodFrom / periodTo, yyyy-MM-dd, at
+    /// most 366 days, not after today) and locationId (narrow to one location; tour inquiries by
     /// their branch once the database update QA_07 has run, before it they count every location and say so).
     /// Bad parameters answer 400; before the database update CEO_01 has run, 503 (records/leases: before QA_07; rooms:
-    /// before CEO_02 a 200 with available = false).
+    /// before CEO_02 a 200 with available = false; a custom period: before CS_01).
     /// </summary>
     [ApiController]
     [Authorize(Roles = "ceo,super_admin,SuperAdmin")]
@@ -31,12 +33,14 @@ namespace WorkNest.API.Controllers
 
         /// <summary>Level 1: money, occupancy, sales funnel and team, plus the locations for the filter.</summary>
         [HttpGet("api/ceo/dashboard")]
-        public Task<IActionResult> Dashboard([FromQuery] string? period, [FromQuery] int? locationId) =>
-            Run(() => _ceo.GetDashboardAsync(period, locationId));
+        public Task<IActionResult> Dashboard([FromQuery] string? period, [FromQuery] int? locationId,
+            [FromQuery] string? from = null, [FromQuery] string? to = null) =>
+            Run(() => _ceo.GetDashboardAsync(period, locationId, from, to));
 
         /// <summary>
         /// Level 2: one chart element broken down. metric = revenue (month) | aging (bucket) | occupancy-type
         /// (spaceTypeId) | occupancy-location (locationId) | bookings-month (month) | inquiries-type (type) | staff (userId).
+        /// revenue takes from / to (issued in that range, CS_01) instead of a month for a custom period.
         /// </summary>
         [HttpGet("api/ceo/breakdown")]
         public Task<IActionResult> Breakdown([FromQuery] CeoBreakdownQuery query) =>
@@ -45,7 +49,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
         /// match). kind = invoices | spaces | bookings | inquiries | quotations | leases (QA_07: confirmed leases ending in
-        /// the next 90 days, or month / from / to).
+        /// the next 90 days, or month / from / to). invoices: from / to = issued in that range (CS_01).
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>
@@ -57,8 +61,9 @@ namespace WorkNest.API.Controllers
         /// database update CEO_02: 200 with available = false and a message.
         /// </summary>
         [HttpGet("api/ceo/rooms")]
-        public Task<IActionResult> Rooms([FromQuery] string? period, [FromQuery] int? locationId) =>
-            Run(() => _ceo.GetRoomReportAsync(period, locationId));
+        public Task<IActionResult> Rooms([FromQuery] string? period, [FromQuery] int? locationId,
+            [FromQuery] string? from = null, [FromQuery] string? to = null) =>
+            Run(() => _ceo.GetRoomReportAsync(period, locationId, from, to));
 
         private async Task<IActionResult> Run(Func<Task<ApiResponse>> action)
         {

@@ -12,7 +12,10 @@ namespace WorkNest.Infrastructure.Repositories
     /// missing (SQL error 2812); until SM_02 has run they answer without their desk columns. Either way the call throws
     /// <see cref="SalesManagerDatabaseUpdateMissingException"/>, which the API answers with 503. Until BR_02 has run the
     /// procedures do not know the inquiry branch parameters (SQL error 8144, too many arguments): the call is repeated
-    /// without them and the tour inquiries of every branch are counted, as before.
+    /// without them and the tour inquiries of every branch are counted, as before. A custom date range
+    /// (CS_01_ceo_sales_dates: @From / @To) is sent only when one is asked for, so the calendar periods keep working with
+    /// the procedures from before CS_01; with a range, 8144 / 8145 means CS_01 has not run
+    /// (<see cref="SalesManagerDatabaseUpdateMissingException.CustomRangeMissing"/>).
     /// </summary>
     public class SalesManagerDashboardRepository : ISalesManagerDashboardRepository
     {
@@ -83,8 +86,12 @@ namespace WorkNest.Infrastructure.Repositories
         /// BR_02 answers 8144 (too many arguments): run it again without them (every branch's inquiries, as before).
         /// </summary>
         private async Task<List<List<IDictionary<string, object?>>>> RunWithInquiryBranchAsync(string procedure,
-            Action<SqlParameterCollection> bind, Action<SqlParameterCollection> branch, int deskSet = 0, string? deskColumn = null)
+            Action<SqlParameterCollection> bind, Action<SqlParameterCollection> branch, int deskSet = 0, string? deskColumn = null,
+            DateTime? from = null, DateTime? to = null)
         {
+            // A custom range: no fallback without the branch parameters (the CS_01 procedures have both).
+            if (from != null && to != null)
+                return await RunWithRangeAsync(procedure, p => { bind(p); branch(p); }, from, to, deskSet, deskColumn);
             try
             {
                 return await RunAsync(procedure, p => { bind(p); branch(p); }, deskSet, deskColumn);
@@ -95,11 +102,35 @@ namespace WorkNest.Infrastructure.Repositories
             }
         }
 
+        /// <summary>
+        /// Runs a procedure, with @From / @To (days, both included) only when both are given (CS_01). Without them the
+        /// call is exactly the one from before CS_01. With them, 8144 / 8145 (too many arguments / not a parameter): the
+        /// procedure is still the one from before CS_01.
+        /// </summary>
+        private async Task<List<List<IDictionary<string, object?>>>> RunWithRangeAsync(string procedure, Action<SqlParameterCollection> bind,
+            DateTime? from, DateTime? to, int deskSet = 0, string? deskColumn = null)
+        {
+            if (from == null || to == null) return await RunAsync(procedure, bind, deskSet, deskColumn);
+            try
+            {
+                return await RunAsync(procedure, p =>
+                {
+                    bind(p);
+                    p.Add("@From", SqlDbType.Date).Value = from.Value.Date;
+                    p.Add("@To", SqlDbType.Date).Value = to.Value.Date;
+                }, deskSet, deskColumn);
+            }
+            catch (SqlException ex) when (ex.Number is 8144 or 8145) // CS_01 not run yet: no @From / @To
+            {
+                throw SalesManagerDatabaseUpdateMissingException.CustomRangeMissing(procedure, ex.Message);
+            }
+        }
+
         // SM_02 marks: the funnel's BookedDesks, the breakdown head's InDesks, the records' Desks.
         // BR_02 marks: the inquiries row's ByBranch, the breakdown head's InqByBranch, the inquiry records' ByBranch.
 
         public Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(string? locationIds, string? pickerLocationIds,
-            bool inquiriesNoBranch, int periodMonths, DateTime businessNow, int expiringDays) =>
+            bool inquiriesNoBranch, int periodMonths, DateTime businessNow, int expiringDays, DateTime? from = null, DateTime? to = null) =>
             RunWithInquiryBranchAsync("dbo.WN_SalesMgr_Dashboard", p =>
             {
                 p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
@@ -107,7 +138,7 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
-            }, p => p.Add("@InquiriesNoBranch", SqlDbType.Bit).Value = inquiriesNoBranch, 1, "BookedDesks");
+            }, p => p.Add("@InquiriesNoBranch", SqlDbType.Bit).Value = inquiriesNoBranch, 1, "BookedDesks", from, to);
 
         public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, string? locationIds, bool inquiriesNoBranch,
             DateTime? monthStart, string? inquiryType, int? userId, DateTime businessNow) =>
@@ -180,7 +211,7 @@ namespace WorkNest.Infrastructure.Repositories
         // Complaints section (SM_03): a missing procedure means SM_03 has not run (whatever SM_01 / SM_02 did).
 
         public Task<List<List<IDictionary<string, object?>>>> GetComplaintsAsync(string? locationIds, bool includeNoBranch, int periodMonths,
-            DateTime businessNow, int oldestTop) =>
+            DateTime businessNow, int oldestTop, DateTime? from = null, DateTime? to = null) =>
             RunComplaintsAsync("dbo.WN_SalesMgr_Complaints", p =>
             {
                 p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
@@ -188,10 +219,11 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@OldestTop", SqlDbType.Int).Value = oldestTop;
-            });
+            }, from, to);
 
         public Task<List<List<IDictionary<string, object?>>>> GetComplaintRecordsAsync(string? locationIds, bool includeNoBranch,
-            string? status, string? category, string? branch, DateTime? month, int periodMonths, DateTime businessNow, int top) =>
+            string? status, string? category, string? branch, DateTime? month, int periodMonths, DateTime businessNow, int top,
+            DateTime? from = null, DateTime? to = null) =>
             RunComplaintsAsync("dbo.WN_SalesMgr_Records_Complaints", p =>
             {
                 p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
@@ -203,13 +235,14 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@Top", SqlDbType.Int).Value = top;
-            });
+            }, from, to);
 
-        private async Task<List<List<IDictionary<string, object?>>>> RunComplaintsAsync(string procedure, Action<SqlParameterCollection> bind)
+        private async Task<List<List<IDictionary<string, object?>>>> RunComplaintsAsync(string procedure, Action<SqlParameterCollection> bind,
+            DateTime? from = null, DateTime? to = null)
         {
             try
             {
-                return await RunAsync(procedure, bind);
+                return await RunWithRangeAsync(procedure, bind, from, to);
             }
             catch (SalesManagerDatabaseUpdateMissingException ex) when (ex.Update == "SM_01") // procedure missing (2812)
             {

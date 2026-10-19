@@ -1,6 +1,7 @@
 using System.Globalization;
 using WorkNest.Application.DTOs.Contact;
 using WorkNest.Application.DTOs.Dashboard;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
@@ -17,6 +18,9 @@ namespace WorkNest.Application.Services
     /// every branch's inquiries (inquiriesAllBranches = true). Level 1 = dashboard, level 2 = breakdown, level 3 =
     /// records. The Complaints section (SM_03) is a separate call, so the rest of the dashboard keeps working without it:
     /// complaints have no location column, they are matched to a location by their branch.
+    /// Period: month | quarter | year (to date) or, since CS_01, custom: a day range (from / to on the dashboard and the
+    /// complaints; periodFrom / periodTo on the drill-down, where from / to narrow a list), compared with the same number
+    /// of days just before it (<see cref="DashboardPeriod"/>). Only a custom range reaches the procedures as @From / @To.
     /// </summary>
     public class SalesManagerDashboardService : ISalesManagerDashboardService
     {
@@ -46,11 +50,12 @@ namespace WorkNest.Application.Services
 
         // ------------------------------------------------------------------ level 1: dashboard
 
-        public async Task<ApiResponse> GetDashboardAsync(string? period, SalesManagerScope scope)
+        public async Task<ApiResponse> GetDashboardAsync(string? period, SalesManagerScope scope, string? from = null, string? to = null)
         {
-            if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
-            var s = await _repo.GetDashboardAsync(scope.LocationIdsCsv, scope.PickerCsv, scope.IncludeNoBranch, months, now, ExpiringDays);
+            var s = await _repo.GetDashboardAsync(scope.LocationIdsCsv, scope.PickerCsv, scope.IncludeNoBranch, p.Months, now, ExpiringDays,
+                p.From, p.To);
 
             var funnel = Set(s, 1).FirstOrDefault();
             var inq = Set(s, 5).FirstOrDefault();
@@ -71,9 +76,13 @@ namespace WorkNest.Application.Services
 
             var dto = new SalesManagerDashboardDto
             {
-                Period = p,
-                PeriodLabel = PeriodLabel(p, now),
+                Period = p.Key,
+                PeriodLabel = p.Label(now),
                 GeneratedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En),
+                From = p.FromText,
+                To = p.ToText,
+                PreviousFrom = p.PreviousFromText,
+                PreviousTo = p.PreviousToText,
                 InquiriesAllBranches = !Flag(inq, "ByBranch"),
                 Locations = Set(s, 0).Select(r => new CeoLocationDto { LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "" }).ToList(),
                 Funnel = new SalesManagerFunnelDto
@@ -159,7 +168,9 @@ namespace WorkNest.Application.Services
             var metric = (q.Metric ?? "").Trim().ToLowerInvariant();
             if (metric.Length == 0) return ApiResponse.Fail($"metric is required: {string.Join(", ", Metrics)}.");
             if (!Metrics.Contains(metric)) return ApiResponse.Fail($"Unknown metric '{q.Metric}'. Use {string.Join(", ", Metrics)}.");
-            if (!string.IsNullOrWhiteSpace(q.Period) && !TryPeriod(q.Period, out _, out _)) return ApiResponse.Fail(PeriodError);
+            // The breakdowns are by month or the last 6 months: a custom period only has to be valid.
+            if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out _, out var periodError))
+                return ApiResponse.Fail(periodError!);
 
             DateTime? month = null;
             if (metric is "funnel-month" or "renewals-month" or "desks-month")
@@ -218,7 +229,8 @@ namespace WorkNest.Application.Services
         public async Task<ApiResponse> GetRecordsAsync(string kind, SalesManagerRecordsQuery q, SalesManagerScope scope)
         {
             kind = (kind ?? "").Trim().ToLowerInvariant();
-            if (!string.IsNullOrWhiteSpace(q.Period) && !TryPeriod(q.Period, out _, out _)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out _, out var periodError))
+                return ApiResponse.Fail(periodError!);
             return kind switch
             {
                 "quotations" => scope.NoLocation
@@ -385,19 +397,23 @@ namespace WorkNest.Application.Services
         /// Complaints in scope: the manager's locations matched by branch name, plus the complaints without a branch
         /// (WhatsApp) when no single location is chosen; super admins: all (or the chosen location's branch).
         /// </summary>
-        public async Task<ApiResponse> GetComplaintsAsync(string? period, SalesManagerScope scope)
+        public async Task<ApiResponse> GetComplaintsAsync(string? period, SalesManagerScope scope, string? from = null, string? to = null)
         {
-            if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
-            var s = await _repo.GetComplaintsAsync(scope.LocationIdsCsv, scope.IncludeNoBranch, months, now, OldestComplaints);
+            var s = await _repo.GetComplaintsAsync(scope.LocationIdsCsv, scope.IncludeNoBranch, p.Months, now, OldestComplaints, p.From, p.To);
 
             var sum = Set(s, 0).FirstOrDefault();
             var open = Int(sum, "OpenCount");
             var inProgress = Int(sum, "InProgressCount");
             var dto = new SalesManagerComplaintsDto
             {
-                Period = p,
-                PeriodLabel = PeriodLabel(p, now),
+                Period = p.Key,
+                PeriodLabel = p.Label(now),
+                From = p.FromText,
+                To = p.ToText,
+                PreviousFrom = p.PreviousFromText,
+                PreviousTo = p.PreviousToText,
                 Status = new SalesManagerComplaintStatusDto
                 {
                     Open = open, InProgress = inProgress, Resolved = Int(sum, "ResolvedCount"), Closed = Int(sum, "ClosedCount")
@@ -442,7 +458,8 @@ namespace WorkNest.Application.Services
         /// </summary>
         public async Task<ApiResponse> GetComplaintRecordsAsync(SalesManagerComplaintRecordsQuery q, SalesManagerScope scope)
         {
-            if (!TryPeriod(q.Period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out var p, out var periodError))
+                return ApiResponse.Fail(periodError!);
             string? status = null;
             if (!string.IsNullOrWhiteSpace(q.Status))
             {
@@ -466,8 +483,10 @@ namespace WorkNest.Application.Services
                 month = m;
             }
 
+            // A custom range matters only to the *_period statuses: the other lists do not need CS_01.
+            var periodBound = status is "resolved_period" or "new_period" or "reopened_period";
             var s = await _repo.GetComplaintRecordsAsync(scope.LocationIdsCsv, scope.IncludeNoBranch, status, category, branch, month,
-                months, _clock.Now, MaxRows);
+                p.Months, _clock.Now, MaxRows, periodBound ? p.From : null, periodBound ? p.To : null);
             var rows = Set(s, 1).Select(r => new SalesManagerComplaintRecordDto
             {
                 ComplaintId = Int(r, "ComplaintId"), ComplaintNo = Str(r, "ComplaintNo"), CustomerName = Str(r, "CustomerName"),
@@ -508,9 +527,14 @@ namespace WorkNest.Application.Services
         private static bool IsNoBranch(string value) =>
             new string(value.Where(char.IsLetter).ToArray()).ToLowerInvariant() is "none" or "nobranch";
 
-        /// <summary>"in October 2026" / "in Q4 2026" / "in 2026": the current period, as the records titles say it.</summary>
-        private string PeriodWords(string period)
+        /// <summary>
+        /// "in October 2026" / "in Q4 2026" / "in 2026": the current period, as the records titles say it; a custom one as
+        /// "between 1 Oct 2026 and 15 Oct 2026".
+        /// </summary>
+        private string PeriodWords(DashboardPeriod p)
         {
+            if (p.IsCustom) return p.BetweenWords();
+            var period = p.Key;
             var from = PeriodStart(period);
             return period switch
             {
@@ -522,7 +546,6 @@ namespace WorkNest.Application.Services
 
         // ------------------------------------------------------------------ helpers
 
-        private const string PeriodError = "period must be month, quarter or year.";
         private const string MonthError = "month must be yyyy-MM (e.g. 2026-10).";
         private const string TypeError = "type must be Website, WhatsApp, WalkIn, Reference or NotSet.";
 
@@ -531,13 +554,6 @@ namespace WorkNest.Application.Services
             BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"), Location = Str(r, "Location"),
             EndOn = Day(r, "EndOn"), Desks = Int(r, "Desks"), DaysLeft = Int(r, "DaysLeft")
         };
-
-        private static bool TryPeriod(string? value, out string period, out int months)
-        {
-            period = string.IsNullOrWhiteSpace(value) ? "month" : value.Trim().ToLowerInvariant();
-            months = period switch { "month" => 1, "quarter" => 3, "year" => 12, _ => 0 };
-            return months > 0;
-        }
 
         /// <summary>Start of the current period (calendar month / quarter / year), as the procedures.</summary>
         private DateTime PeriodStart(string period)
@@ -550,13 +566,6 @@ namespace WorkNest.Application.Services
                 _ => new DateTime(today.Year, today.Month, 1)
             };
         }
-
-        private static string PeriodLabel(string period, DateTime now) => period switch
-        {
-            "year" => now.Year.ToString(En),
-            "quarter" => $"Q{(now.Month - 1) / 3 + 1} {now.Year}",
-            _ => now.ToString("MMMM yyyy", En)
-        };
 
         private static bool TryMonth(string? value, out DateTime month) =>
             DateTime.TryParseExact((value ?? "").Trim(), "yyyy-MM", En, DateTimeStyles.None, out month);
@@ -584,7 +593,8 @@ namespace WorkNest.Application.Services
 
         /// <summary>
         /// Created-in window for quotations, bookings and inquiries: month (that month), else from / to (yyyy-MM-dd,
-        /// both days included), else the period to date (default this month). <paramref name="label"/> describes it.
+        /// both days included), else the period: to date (default this month), or a custom period's range (periodFrom /
+        /// periodTo, already checked by the caller). <paramref name="label"/> describes it.
         /// </summary>
         private bool TryWindow(SalesManagerRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error)
         {
@@ -597,7 +607,15 @@ namespace WorkNest.Application.Services
             }
             if (!string.IsNullOrWhiteSpace(q.From) || !string.IsNullOrWhiteSpace(q.To))
                 return TryDays(q.From, q.To, out from, out to, out label, out error);
-            TryPeriod(q.Period, out var period, out _);
+            if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out var p, out error)) return false;
+            if (p.IsCustom)
+            {
+                // These lists filter on columns written in UTC (bookings CreatedOn, quotations CreatedDate, tour
+                // inquiries CreatedOn): the Pakistan days of the range as UTC times, as the dashboard counts them (CS_01).
+                from = p.UtcStart; to = p.UtcEnd; label = p.BetweenWords();
+                return true;
+            }
+            var period = p.Key;
             from = PeriodStart(period);
             label = period switch
             {

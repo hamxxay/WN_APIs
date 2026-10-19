@@ -16,15 +16,24 @@ namespace WorkNest.Application.Interfaces
     public interface ICeoDashboardRepository
     {
         /// <summary>Tour inquiries narrowed to <paramref name="locationId"/> when the procedure knows how (QA_07).</summary>
+        /// <remarks>
+        /// CS_01: <paramref name="from"/> / <paramref name="to"/> (both or neither, days included) = a custom range instead of
+        /// the calendar period; sent to the procedure only when given (before CS_01: <see cref="CeoDatabaseUpdateMissingException"/>
+        /// naming CS_01).
+        /// </remarks>
         Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
-            CeoInvoiceStatusIds statuses, int expiringDays);
+            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null);
 
         /// <summary>Metric inquiries-type: narrowed to <paramref name="locationId"/> when the procedure knows how (QA_07).</summary>
+        /// <remarks>CS_01, metric revenue: <paramref name="from"/> / <paramref name="to"/> (days included) instead of a month.</remarks>
         Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, DateTime? monthStart, string? bucket,
-            int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses);
+            int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses,
+            DateTime? from = null, DateTime? to = null);
 
+        /// <remarks>CS_01: <paramref name="from"/> / <paramref name="to"/> (days included) = issued in that range.</remarks>
         Task<List<List<IDictionary<string, object?>>>> GetInvoiceRecordsAsync(DateTime? monthStart, int? locationId, bool noLocation,
-            string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top);
+            string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top,
+            DateTime? from = null, DateTime? to = null);
 
         Task<List<List<IDictionary<string, object?>>>> GetSpaceRecordsAsync(int? spaceTypeId, int? locationId, bool noLocation,
             bool? occupied, DateTime businessNow, int top);
@@ -54,7 +63,9 @@ namespace WorkNest.Application.Interfaces
         /// occupancy, [1] their confirmed bookings running in the period. Before CEO_02:
         /// <see cref="CeoDatabaseUpdateMissingException"/> naming CEO_02.
         /// </summary>
-        Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow);
+        /// <remarks>CS_01: <paramref name="from"/> / <paramref name="to"/> (days included) = a custom range instead of the period.</remarks>
+        Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow,
+            DateTime? from = null, DateTime? to = null);
     }
 
     /// <summary>
@@ -63,7 +74,8 @@ namespace WorkNest.Application.Interfaces
     /// </summary>
     public interface ICeoDashboardService
     {
-        Task<ApiResponse> GetDashboardAsync(string? period, int? locationId);
+        /// <summary>period = month | quarter | year | custom (custom: <paramref name="from"/> / <paramref name="to"/>, yyyy-MM-dd).</summary>
+        Task<ApiResponse> GetDashboardAsync(string? period, int? locationId, string? from = null, string? to = null);
         Task<ApiResponse> GetBreakdownAsync(CeoBreakdownQuery query);
         Task<ApiResponse> GetRecordsAsync(string kind, CeoRecordsQuery query);
 
@@ -71,12 +83,12 @@ namespace WorkNest.Application.Interfaces
         /// Rooms: occupancy per room and the price each was sold at against its list (or shift) price. Before CEO_02 a
         /// successful response with available = false and a message.
         /// </summary>
-        Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId);
+        Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId, string? from = null, string? to = null);
     }
 
     /// <summary>
     /// A CEO dashboard procedure is not on this database yet: the dashboard ones (script CEO_01), the full list of
-    /// leases expiring (QA_07) or the room report (CEO_02). <see cref="Update"/> names the script; the message says it in
+    /// leases expiring (QA_07), the room report (CEO_02), or the procedures do not take a custom date range yet (CS_01). <see cref="Update"/> names the script; the message says it in
     /// plain words.
     /// </summary>
     public sealed class CeoDatabaseUpdateMissingException : Exception
@@ -84,6 +96,7 @@ namespace WorkNest.Application.Interfaces
         public const string UserMessage = "The CEO dashboard needs the database update CEO_01.";
         public const string LeasesMessage = "The full list of leases expiring needs the database update QA_07.";
         public const string RoomsMessage = "Run CEO_02_room_report on the database to see the room report.";
+        public const string CustomRangeMessage = DashboardDatabaseUpdate.CustomRangeMessage;
 
         /// <summary>The database update (script) that is missing, e.g. CEO_01 or QA_07.</summary>
         public string Update { get; }
@@ -102,5 +115,20 @@ namespace WorkNest.Application.Interfaces
 
         /// <summary>dbo.WN_Ceo_RoomReport is missing: CEO_02 has not run.</summary>
         public static CeoDatabaseUpdateMissingException RoomReportMissing(Exception? inner) => new(inner, "CEO_02", RoomsMessage);
+
+        /// <summary>A procedure does not know @From / @To (SQL error 8144 / 8145): CS_01 has not run.</summary>
+        public static CeoDatabaseUpdateMissingException CustomRangeMissing(Exception? inner) =>
+            new(inner, DashboardDatabaseUpdate.CustomRange, CustomRangeMessage);
+    }
+
+    /// <summary>The database update that lets the CEO and Sales Manager dashboards take a custom date range.</summary>
+    public static class DashboardDatabaseUpdate
+    {
+        /// <summary>Script CS_01_ceo_sales_dates (TEST / LIVE).</summary>
+        public const string CustomRange = "CS_01";
+
+        /// <remarks>No ".sql" in it: the CMS and the app hide any message that mentions SQL.</remarks>
+        public const string CustomRangeMessage =
+            "Database update needed: run the script CS_01_ceo_sales_dates_TEST (CS_01_ceo_sales_dates_LIVE on the live database) to use a custom date range.";
     }
 }

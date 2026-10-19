@@ -6,9 +6,9 @@ namespace WorkNest.Application.DTOs.Dashboard
     /// <summary>GET api/ceo/dashboard</summary>
     public class CeoDashboardDto
     {
-        /// <summary>month | quarter | year</summary>
+        /// <summary>month | quarter | year | custom</summary>
         public string Period { get; set; } = "month";
-        /// <summary>e.g. "October 2026", "Q4 2026", "2026".</summary>
+        /// <summary>e.g. "October 2026", "Q4 2026", "2026", "1 Oct - 15 Oct 2026".</summary>
         public string PeriodLabel { get; set; } = "";
         /// <summary>UTC, ISO 8601 with Z.</summary>
         public string GeneratedAt { get; set; } = "";
@@ -17,6 +17,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         public CeoOccupancyDto Occupancy { get; set; } = new();
         public CeoSalesDto Sales { get; set; } = new();
         public CeoTeamDto Team { get; set; } = new();
+        /// <summary>Custom period (CS_01): the first and last day of the range, yyyy-MM-dd; null for month / quarter / year.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
+        /// <summary>Custom period: the previous range the *Prev figures cover (as many days, just before From); else null.</summary>
+        public string? PreviousFrom { get; set; }
+        public string? PreviousTo { get; set; }
     }
 
     public class CeoLocationDto
@@ -214,6 +220,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Period { get; set; }
         public int? LocationId { get; set; }
         public string? Month { get; set; }
+        /// <summary>Metric revenue (CS_01): invoices issued from / to (yyyy-MM-dd, both days included) instead of a month.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
+        /// <summary>period = custom (CS_01): the dashboard's range, yyyy-MM-dd (from / to narrow a list on their own).</summary>
+        public string? PeriodFrom { get; set; }
+        public string? PeriodTo { get; set; }
         public string? Bucket { get; set; }
         public int? SpaceTypeId { get; set; }
         public string? Type { get; set; }
@@ -245,6 +257,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Type { get; set; }
         public int? UserId { get; set; }
         public string? Stage { get; set; }
+        /// <summary>period = custom (CS_01): the dashboard's range, yyyy-MM-dd (from / to narrow a list on their own).</summary>
+        public string? PeriodFrom { get; set; }
+        public string? PeriodTo { get; set; }
     }
 
     public class CeoInvoiceRecordDto
@@ -338,9 +353,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public bool Available { get; set; } = true;
         /// <summary>Set when Available is false: what to do (run CEO_02_room_report).</summary>
         public string? Message { get; set; }
-        /// <summary>month | quarter | year</summary>
+        /// <summary>month | quarter | year | custom</summary>
         public string Period { get; set; } = "month";
-        /// <summary>e.g. "October 2026", "Q4 2026", "2026".</summary>
+        /// <summary>e.g. "October 2026", "Q4 2026", "2026", "1 Oct - 15 Oct 2026".</summary>
         public string PeriodLabel { get; set; } = "";
         /// <summary>UTC, ISO 8601 with Z.</summary>
         public string GeneratedAt { get; set; } = "";
@@ -348,6 +363,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public CeoRoomSummaryDto? Summary { get; set; }
         /// <summary>By location, then room code / name (numbers in order: 9 before 10).</summary>
         public List<CeoRoomDto> Rooms { get; set; } = new();
+        /// <summary>Custom period (CS_01): the first and last day of the range, yyyy-MM-dd; null for month / quarter / year.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
     }
 
     public class CeoRoomSummaryDto
