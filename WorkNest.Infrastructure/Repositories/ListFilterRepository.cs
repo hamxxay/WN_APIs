@@ -14,6 +14,7 @@ namespace WorkNest.Infrastructure.Repositories
     /// dbo.WN_Customers_GetListFiltered and dbo.WN_ListStatusOptions_Get. Rows are read like DbRepository reads the old
     /// list procedures (DBNull = null, UTC audit columns marked UTC), so the JSON is the same. SQL errors 2812 / 8144 /
     /// 8145 (procedure missing, parameters unknown) mean LST_01 has not run: <see cref="ListFiltersDatabaseUpdateMissingException"/>.
+    /// GetInvoicesUnfilteredAsync reads the old dbo.WN_GetInvoicesList (the invoices fallback before LST_01).
     /// </summary>
     public class ListFilterRepository : IListFilterRepository
     {
@@ -92,6 +93,36 @@ namespace WorkNest.Infrastructure.Repositories
                 })
                 .Where(o => o.Value.Length > 0 && o.Label.Length > 0)
                 .ToList();
+        }
+
+        /// <summary>The old invoices list (dbo.WN_GetInvoicesList: a TotalCount result set, then the rows), read as GET api/invoice reads it.</summary>
+        public async Task<(List<IDictionary<string, object?>> Rows, int Total)> GetInvoicesUnfilteredAsync(int page, int limit, string? search, int? typeId, int? locationId)
+        {
+            await using var c = new SqlConnection(_connectionString);
+            await c.OpenAsync();
+            await using var cmd = new SqlCommand("dbo.WN_GetInvoicesList", c) { CommandType = CommandType.StoredProcedure };
+            Paging(cmd.Parameters, page, limit);
+            cmd.Parameters.Add("@Search", SqlDbType.NVarChar, 200).Value = (object?)search ?? DBNull.Value;
+            cmd.Parameters.Add("@TypeId", SqlDbType.Int).Value = (object?)typeId ?? DBNull.Value;
+            cmd.Parameters.Add("@LocationId", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
+            int total = 0;
+            var rows = new List<IDictionary<string, object?>>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync() && !r.IsDBNull(0)) total = Convert.ToInt32(r.GetValue(0));
+            if (await r.NextResultAsync())
+            {
+                while (await r.ReadAsync())
+                {
+                    var d = new Dictionary<string, object?>(r.FieldCount, StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < r.FieldCount; i++)
+                    {
+                        var name = r.GetName(i);
+                        d[name] = r.IsDBNull(i) ? null : DbDateTimeKinds.Normalize(name, r.GetValue(i));
+                    }
+                    rows.Add(d);
+                }
+            }
+            return (rows, total);
         }
 
         private static void Paging(SqlParameterCollection p, int page, int limit)

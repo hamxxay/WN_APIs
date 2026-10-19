@@ -71,6 +71,8 @@ namespace WorkNest.API.Controllers
 
         // status (Unpaid / Partial / Paid / Overdue / Cancelled as the list shows it, from api/invoice/statuses), from / to
         // (issue date, both included): only then the LST_01 procedure is used; without them the list is read as before.
+        // The CMS Invoices page sends the current month by default. Before LST_01 has run the filtered list is read from
+        // the old procedure and filtered in the API (ListFilterService), so that page keeps working.
         [HttpGet("api/invoice")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(

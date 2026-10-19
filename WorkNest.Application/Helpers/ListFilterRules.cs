@@ -78,6 +78,84 @@ namespace WorkNest.Application.Helpers
         public static string? LocationCsv(IReadOnlyCollection<int>? locationIds) =>
             locationIds == null ? null : locationIds.Count == 0 ? "-1" : string.Join(",", locationIds.Distinct());
 
+        // ---- Invoices list before LST_01 (dbo.WN_GetInvoicesListFiltered missing): filtered here, same rules ----
+
+        private static readonly string[] InvoiceStatuses = { "Unpaid", "Paid", "Partial", "Overdue", "Cancelled" };
+
+        /// <summary>
+        /// The status the invoices list shows, as dbo.WN_GetInvoicesListFiltered computes ListStatus: the StatusLabel when
+        /// it is Unpaid / Paid / Partial / Overdue / Cancelled, otherwise from the amounts (paid in full = Paid, part paid =
+        /// Partial, else Unpaid); Unpaid or Partial past the due date (business today) = Overdue.
+        /// </summary>
+        public static string InvoiceListStatus(string? statusLabel, decimal grandTotal, decimal paidTotal, DateTime? dueOn, DateTime today)
+        {
+            var label = statusLabel?.Trim() ?? "";
+            var baseStatus = InvoiceStatuses.FirstOrDefault(s => string.Equals(s, label, StringComparison.OrdinalIgnoreCase))
+                ?? (grandTotal > 0 && paidTotal >= grandTotal ? "Paid" : paidTotal > 0 ? "Partial" : "Unpaid");
+            return (baseStatus == "Unpaid" || baseStatus == "Partial") && dueOn.HasValue && dueOn.Value.Date < today.Date
+                ? "Overdue"
+                : baseStatus;
+        }
+
+        /// <summary>
+        /// One page of the invoices list read with the old procedure (dbo.WN_GetInvoicesList, newest first): the rows
+        /// whose issue date is in <paramref name="issueDate"/> (Start included, End excluded; no issue date = left out
+        /// when a bound is set) and whose list status is <paramref name="status"/> (null = any), each with ListStatus and
+        /// TotalCount like the LST_01 procedure. Total = all the rows that match.
+        /// </summary>
+        public static (List<IDictionary<string, object?>> Rows, int Total) PageInvoices(
+            IEnumerable<IDictionary<string, object?>> rows, string? status, ListDateRange issueDate, DateTime today, int page, int limit)
+        {
+            if (page < 1) page = 1;
+            if (limit < 1) limit = 10;
+            var matching = new List<(IDictionary<string, object?> Row, string ListStatus)>();
+            foreach (var row in rows)
+            {
+                var issued = DateValue(Field(row, "IssuedOn"));
+                if (issueDate.Start.HasValue && (issued == null || issued.Value < issueDate.Start.Value)) continue;
+                if (issueDate.End.HasValue && (issued == null || issued.Value >= issueDate.End.Value)) continue;
+                var listStatus = InvoiceListStatus(Convert.ToString(Field(row, "StatusLabel")),
+                    DecimalValue(Field(row, "GrandTotal")), DecimalValue(Field(row, "PaidTotal")), DateValue(Field(row, "DueOn")), today);
+                if (status != null && !string.Equals(listStatus, status.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+                matching.Add((row, listStatus));
+            }
+            var pageRows = matching
+                .Skip((int)Math.Min((long)(page - 1) * limit, int.MaxValue))
+                .Take(limit)
+                .Select(m =>
+                {
+                    m.Row["ListStatus"] = m.ListStatus;
+                    m.Row["TotalCount"] = matching.Count;
+                    return m.Row;
+                })
+                .ToList();
+            return (pageRows, matching.Count);
+        }
+
+        private static object? Field(IDictionary<string, object?> row, string key)
+        {
+            if (row.TryGetValue(key, out var v)) return v;
+            var k = row.Keys.FirstOrDefault(x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase));
+            return k == null ? null : row[k];
+        }
+
+        private static DateTime? DateValue(object? v) => v switch
+        {
+            DateTime d => d,
+            DateTimeOffset o => o.DateTime,
+            DateOnly d => d.ToDateTime(TimeOnly.MinValue),
+            _ => null
+        };
+
+        private static decimal DecimalValue(object? v)
+        {
+            if (v == null || v is DBNull) return 0m;
+            try { return Convert.ToDecimal(v, System.Globalization.CultureInfo.InvariantCulture); }
+            catch (FormatException) { return 0m; }
+            catch (InvalidCastException) { return 0m; }
+            catch (OverflowException) { return 0m; }
+        }
+
         private static int? IntStatus(string? status)
         {
             var s = status?.Trim();
