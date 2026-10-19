@@ -101,7 +101,8 @@ namespace WorkNest.Application.Helpers
     public sealed class ListFiltersDatabaseUpdateMissingException : Exception
     {
         public const string Script = "LST_01_list_filters";
-        public const string UserMessage = "Database update needed: run " + Script + "_TEST.sql (" + Script + "_LIVE.sql on the live database).";
+        // No ".sql" in the text: the CMS and the app hide any message with the word "sql" in it.
+        public const string UserMessage = "Database update needed: run the script " + Script + "_TEST (" + Script + "_LIVE on the live database).";
 
         public ListFiltersDatabaseUpdateMissingException(Exception inner) : base(UserMessage, inner)
         {

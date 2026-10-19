@@ -152,17 +152,17 @@ namespace WorkNest.API.Controllers
             }
         }
 
-        /// <summary>
-        /// The signed-in customer's bills (app Payments tab): their invoices (paid, unpaid, overdue, with the
-        /// door-access suspension date) plus the booking challans that have no invoice, and the totals. Only the
-        /// caller's own records (owner rule of GET api/invoice/{id}/pdf, so every invoice listed can be downloaded).
-        /// </summary>
         /// <summary>Choices of the Invoices list Status filter (the statuses the list shows), [{ value, label }].</summary>
         [HttpGet("api/invoice/statuses")]
         [Authorize(Roles = StaffRoles)]
         public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
             ListFilterResults.StatusOptionsAsync(lists, ListFilterRules.Invoices);
 
+        /// <summary>
+        /// The signed-in customer's bills (app Payments tab): their invoices (paid, unpaid, overdue, with the
+        /// door-access suspension date) plus the booking challans that have no invoice, and the totals. Only the
+        /// caller's own records (owner rule of GET api/invoice/{id}/pdf, so every invoice listed can be downloaded).
+        /// </summary>
         [HttpGet("api/invoice/my")]
         public async Task<IActionResult> MyInvoices()
         {

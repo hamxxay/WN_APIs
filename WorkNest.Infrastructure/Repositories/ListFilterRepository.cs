@@ -52,7 +52,7 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Search", SqlDbType.NVarChar, 200).Value = (object?)search ?? DBNull.Value;
                 p.Add("@TypeId", SqlDbType.Int).Value = (object?)typeId ?? DBNull.Value;
                 p.Add("@LocationId", SqlDbType.Int).Value = (object?)locationId ?? DBNull.Value;
-                p.Add("@Status", SqlDbType.NVarChar, 20).Value = (object?)status ?? DBNull.Value;
+                p.Add("@Status", SqlDbType.NVarChar, 50).Value = (object?)status ?? DBNull.Value;
                 p.Add("@Today", SqlDbType.Date).Value = today.Date;
                 Dates(p, issueDate);
             });

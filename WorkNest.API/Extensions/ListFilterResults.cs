@@ -14,7 +14,7 @@ namespace WorkNest.API.Extensions
     /// <summary>
     /// Shared answers of the admin list filters (LST_01_list_filters) on GET api/booking, api/quotation, api/invoice,
     /// api/payment and api/customer, and of their GET .../statuses choices: a wrong filter value = 400, the database
-    /// update not run yet = 503 "Database update needed: run LST_01_list_filters_TEST.sql ...".
+    /// update not run yet = 503 "Database update needed: run the script LST_01_list_filters_TEST ...".
     /// </summary>
     public static class ListFilterResults
     {
