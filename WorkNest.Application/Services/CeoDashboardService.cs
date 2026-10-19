@@ -587,10 +587,10 @@ namespace WorkNest.Application.Services
         /// <summary>
         /// Prices one sale (the procedure's raw figures in <paramref name="sale"/>; it is completed and returned):
         /// seats sold = the booking's seats, else the room's (<paramref name="roomSeats"/>), else 1; list per seat = the
-        /// price at sale, else today's (<paramref name="roomListSeatPrice"/>); expected per seat = the list, for every
-        /// shift (19 Oct 2026: the shift discount cap is only the most a salesperson may take off, not the shift's price);
-        /// variance per month = (sold per seat - expected per seat) x seats; under / over = more than
-        /// <see cref="PricingBand"/> below / above the expected per seat, else at. No list price known (or nothing expected): not compared, the expected / variance figures and Pricing null.
+        /// price at sale, else today's (<paramref name="roomListSeatPrice"/>); expected per seat = the list (24/7) or
+        /// list x (1 - shift discount cap / 100) (Morning / Evening); variance per month = (sold per seat - expected per
+        /// seat) x seats; under / over = more than <see cref="PricingBand"/> below / above the expected per seat, else
+        /// at. No list price known (or nothing expected): not compared, the expected / variance figures and Pricing null.
         /// </summary>
         public static CeoRoomSaleDto PriceSale(CeoRoomSaleDto sale, int roomSeats, decimal? roomListSeatPrice)
         {
@@ -607,7 +607,7 @@ namespace WorkNest.Application.Services
             sale.SoldMonthly = Money(sold);
             sale.SoldSeatPrice = Money(soldSeat);
 
-            decimal? expectedSeat = list;
+            decimal? expectedSeat = list is { } l ? (sale.Shift == "24/7" ? l : l * (1 - cap / 100m)) : null;
             if (expectedSeat is not > 0)
             {
                 sale.ExpectedSeatPrice = sale.ExpectedMonthly = sale.VarianceMonthly = sale.VariancePct = null;
