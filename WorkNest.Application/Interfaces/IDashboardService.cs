@@ -7,7 +7,10 @@ namespace WorkNest.Application.Interfaces
     {
         Task<ApiResponse> GetSummaryAsync();
         /// <param name="locationIds">Locations to total; null = all locations.</param>
-        Task<DashboardOverviewDto> GetOverviewAsync(IReadOnlyCollection<int>? locationIds, string? period = null);
+        /// <param name="period">month | quarter | year (to date) | custom (<paramref name="from"/> .. <paramref name="to"/>,
+        /// yyyy-MM-dd, see <see cref="WorkNest.Application.Services.DashboardPeriod"/>).</param>
+        Task<DashboardOverviewDto> GetOverviewAsync(IReadOnlyCollection<int>? locationIds, string? period = null,
+            string? from = null, string? to = null);
         /// <summary>
         /// The rooms behind the overview's Occupancy card: every active space in use right now (same rule, so the count is
         /// the card's "X of Y"), with the booking that covers it, sorted by location then room.

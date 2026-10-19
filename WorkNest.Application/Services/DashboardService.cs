@@ -88,15 +88,19 @@ namespace WorkNest.Application.Services
             return toSave.Count == 0 || await _db.SaveNavBadgeReadsDbAsync(userEmail, toSave);
         }
 
-        public async Task<DashboardOverviewDto> GetOverviewAsync(IReadOnlyCollection<int>? locationIds, string? period = null)
+        public async Task<DashboardOverviewDto> GetOverviewAsync(IReadOnlyCollection<int>? locationIds, string? period = null,
+            string? from = null, string? to = null)
         {
-            period = (period ?? "month").Trim().ToLowerInvariant();
-            if (period is not ("month" or "quarter" or "year")) period = "month";
+            // month / quarter / year as before; custom = from .. to (the controller refuses a bad range first, here it falls back to month).
+            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var range, out _))
+                range = DashboardPeriod.Calendar("month", _clock.Today);
+            period = range.Period;
             var st = await _orderStatus.GetInvoiceStatusesAsync();
             // Open = still owed (Unpaid / Partial / Overdue, legacy + OrderStatus); void = legacy 5 + OrderStatus Cancelled.
             var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue);
             var voids = st.Cancelled.Append(5);
-            var sets = await _db.GetDashboardOverviewDbAsync(locationIds, EndingSoonDays, open, st.Paid, voids, period, _clock.Now);
+            var sets = await _db.GetDashboardOverviewDbAsync(locationIds, EndingSoonDays, open, st.Paid, voids, period, _clock.Now,
+                range.From, range.To);
 
             var k = sets.Count > 0 ? sets[0].FirstOrDefault() : null;
             int Int(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) && v != null ? Convert.ToInt32(v) : 0;
@@ -121,7 +125,10 @@ namespace WorkNest.Application.Services
                 PaidThisPeriod = Math.Round(Dec(k, "PaidThisPeriod"), 2),
                 LeasesEndingSoon = Int(k, "LeasesEndingSoon"),
                 EndingSoonDays = EndingSoonDays,
-                GeneratedAt = _clock.Now.ToString("yyyy-MM-ddTHH:mm:ss")
+                GeneratedAt = _clock.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                From = range.From?.ToString("yyyy-MM-dd"),
+                To = range.To?.ToString("yyyy-MM-dd"),
+                RangeDays = range.Days
             };
             dto.OccupancyPct = Pct(dto.OccupiedSpaces, dto.TotalSpaces);
             dto.OccupancyPctLastMonth = Pct(dto.OccupiedSpacesLastMonth, dto.TotalSpaces);

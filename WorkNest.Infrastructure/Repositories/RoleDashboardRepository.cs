@@ -67,8 +67,9 @@ namespace WorkNest.Infrastructure.Repositories
             return BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), alias, locationIds);
         }
 
+        /// <param name="periodEnd">A custom range (DASH_01): the day after its last day; null = to date (month / quarter / year).</param>
         public async Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds,
-            DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays)
+            DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays, DateTime? periodEnd = null)
         {
             var ct = await ContactsInScopeAsync("ct", locationIds);
             return await QueryAsync($@"
@@ -86,7 +87,7 @@ namespace WorkNest.Infrastructure.Repositories
                        ISNULL(SUM(CASE WHEN q.Status IN ('Converted') THEN q.TotalAmount ELSE 0 END), 0) AS ConvertedValue
                   FROM dbo.WN_Quotations q WITH (NOLOCK)
                   JOIN @Spaces sp ON sp.Id = q.SpaceId
-                 WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= @PStart;
+                 WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= @PStart AND (@PEnd IS NULL OR q.CreatedDate < @PEnd);
 
                 -- [1] agreements sent but not signed yet (newest agreement per quotation)
                 SELECT TOP 8 a.Id, q.QuotationNumber AS Reference, a.SentDate AS [Date], q.TotalAmount AS Amount,
@@ -117,7 +118,7 @@ namespace WorkNest.Infrastructure.Repositories
                 -- [3] tour inquiries: the branches in scope + those without a branch (BR_01; before it, all of them)
                 -- New = status New, the same rows as the Tour Inquiries New filter and badge (old website bookings included)
                 DECLARE @NewInquiries INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct}) + {BranchSql.OldWebsiteNewCount};
-                DECLARE @InquiriesInPeriod INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.CreatedOn >= @PStart{ct});
+                DECLARE @InquiriesInPeriod INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.CreatedOn >= @PStart AND (@PEnd IS NULL OR ct.CreatedOn < @PEnd){ct});
                 DECLARE @FollowUpsDue INT = 0, @ConvertedInquiries INT = 0;
                 IF OBJECT_ID(N'dbo.WN_ContactFeedback', N'U') IS NOT NULL
                 BEGIN
@@ -127,7 +128,7 @@ namespace WorkNest.Infrastructure.Repositories
                      WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today{(ct.Length == 0 ? "" : $@"
                        AND EXISTS (SELECT 1 FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.Id = f.ContactId{ct})")};
                     SELECT @ConvertedInquiries = COUNT(DISTINCT cf.ContactId) FROM dbo.WN_ContactFeedback cf WITH (NOLOCK)
-                     WHERE cf.Outcome = N'converted' AND cf.CreatedOn >= @PStart{(ct.Length == 0 ? "" : $@"
+                     WHERE cf.Outcome = N'converted' AND cf.CreatedOn >= @PStart AND (@PEnd IS NULL OR cf.CreatedOn < @PEnd){(ct.Length == 0 ? "" : $@"
                        AND EXISTS (SELECT 1 FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.Id = cf.ContactId{ct})")};
                 END
                 SELECT @NewInquiries AS NewInquiries, @InquiriesInPeriod AS InquiriesInPeriod,
@@ -189,6 +190,7 @@ namespace WorkNest.Infrastructure.Repositories
                 p =>
                 {
                     p.Add("@PStart", SqlDbType.DateTime2).Value = periodStart;
+                    p.Add("@PEnd", SqlDbType.DateTime2).Value = (object?)periodEnd ?? DBNull.Value;
                     p.Add("@Today", SqlDbType.Date).Value = now.Date;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = now;
                     p.Add("@RenewalDays", SqlDbType.Int).Value = renewalDays;
@@ -233,7 +235,8 @@ namespace WorkNest.Infrastructure.Repositories
                 p => p.Add("@Today", SqlDbType.Date).Value = now.Date);
         }
 
-        public Task<List<List<IDictionary<string, object?>>>> GetLocationComparisonAsync(DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> voidStatusIds) =>
+        public Task<List<List<IDictionary<string, object?>>>> GetLocationComparisonAsync(DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> voidStatusIds,
+            DateTime? periodEnd = null) =>
             QueryAsync($@"
                 DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) time from the app clock
                 SELECT l.Id, l.Name,
@@ -247,8 +250,8 @@ namespace WorkNest.Infrastructure.Repositories
                        inv.Invoiced, inv.Collected, inv.Outstanding, inv.Overdue
                   FROM dbo.WN_Locations l WITH (NOLOCK)
                  OUTER APPLY (
-                       SELECT ISNULL(SUM(CASE WHEN i.IssuedOn >= @PStart THEN i.GrandTotal ELSE 0 END), 0) AS Invoiced,
-                              ISNULL(SUM(CASE WHEN i.IssuedOn >= @PStart THEN i.PaidTotal ELSE 0 END), 0) AS Collected,
+                       SELECT ISNULL(SUM(CASE WHEN i.IssuedOn >= @PStart AND (@PEnd IS NULL OR i.IssuedOn < @PEnd) THEN i.GrandTotal ELSE 0 END), 0) AS Invoiced,
+                              ISNULL(SUM(CASE WHEN i.IssuedOn >= @PStart AND (@PEnd IS NULL OR i.IssuedOn < @PEnd) THEN i.PaidTotal ELSE 0 END), 0) AS Collected,
                               ISNULL(SUM(CASE WHEN i.StatusId IN ({IdList(openInvoiceStatusIds)}) THEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) ELSE 0 END), 0) AS Outstanding,
                               ISNULL(SUM(CASE WHEN i.StatusId IN ({IdList(openInvoiceStatusIds)}) AND i.DueOn < @Today THEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) ELSE 0 END), 0) AS Overdue
                          FROM dbo.WN_Invoices i WITH (NOLOCK)
@@ -259,11 +262,12 @@ namespace WorkNest.Infrastructure.Repositories
                 p =>
                 {
                     p.Add("@PStart", SqlDbType.DateTime2).Value = periodStart;
+                    p.Add("@PEnd", SqlDbType.DateTime2).Value = (object?)periodEnd ?? DBNull.Value;
                     p.Add("@Today", SqlDbType.Date).Value = now.Date;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = now;
                 });
 
-        public Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart) =>
+        public Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart, DateTime? periodEnd = null) =>
             QueryAsync($@"
                 -- user -> locations: the multi-location mapping when present, plus the user's main location
                 DECLARE @UL TABLE (UserId INT, LocationId INT, PRIMARY KEY (UserId, LocationId));
@@ -289,11 +293,15 @@ namespace WorkNest.Infrastructure.Repositories
                        SUM(CASE WHEN q.Status = 'Converted' THEN 1 ELSE 0 END) AS Converted,
                        ISNULL(SUM(CASE WHEN q.Status = 'Converted' THEN q.TotalAmount ELSE 0 END), 0) AS ConvertedValue
                   FROM dbo.WN_Users u WITH (NOLOCK)
-                  LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.CreatedById = u.Id AND q.CreatedDate >= @PStart AND ISNULL(q.IsActive, 1) = 1
+                  LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.CreatedById = u.Id AND q.CreatedDate >= @PStart AND (@PEnd IS NULL OR q.CreatedDate < @PEnd) AND ISNULL(q.IsActive, 1) = 1
                  WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
                  GROUP BY u.Id, u.Name, u.UserName, u.Email, u.RoleId
                  ORDER BY COUNT(q.Id) DESC, COALESCE(NULLIF(u.Name, ''), NULLIF(u.UserName, ''), u.Email);",
-                p => p.Add("@PStart", SqlDbType.DateTime2).Value = periodStart);
+                p =>
+                {
+                    p.Add("@PStart", SqlDbType.DateTime2).Value = periodStart;
+                    p.Add("@PEnd", SqlDbType.DateTime2).Value = (object?)periodEnd ?? DBNull.Value;
+                });
 
         public Task<List<List<IDictionary<string, object?>>>> GetSystemAsync() =>
             QueryAsync(@"

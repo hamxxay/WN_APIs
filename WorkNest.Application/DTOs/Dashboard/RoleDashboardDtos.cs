@@ -12,6 +12,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public StaffDashboardDto? Staff { get; set; }
         public SystemHealthDto? System { get; set; }
         public string GeneratedAt { get; set; } = "";
+        /// <summary>Period custom (DASH_01): its first and last day, yyyy-MM-dd; null for month, quarter and year.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
     }
 
     public class SalesDashboardDto

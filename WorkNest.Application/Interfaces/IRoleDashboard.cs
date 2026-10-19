@@ -5,10 +5,13 @@ namespace WorkNest.Application.Interfaces
     /// <summary>Raw result sets for the role-based dashboard sections (see RoleDashboardRepository).</summary>
     public interface IRoleDashboardRepository
     {
-        Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds, DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays);
+        // periodEnd: a custom range (DASH_01), the day after its last day; null = to date (month / quarter / year, as before).
+        Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds, DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays,
+            DateTime? periodEnd = null);
         Task<List<List<IDictionary<string, object?>>>> GetTeamAsync(IReadOnlyCollection<int>? locationIds, DateTime now);
-        Task<List<List<IDictionary<string, object?>>>> GetLocationComparisonAsync(DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> voidStatusIds);
-        Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart);
+        Task<List<List<IDictionary<string, object?>>>> GetLocationComparisonAsync(DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> voidStatusIds,
+            DateTime? periodEnd = null);
+        Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart, DateTime? periodEnd = null);
         Task<List<List<IDictionary<string, object?>>>> GetSystemAsync();
     }
 
@@ -19,6 +22,7 @@ namespace WorkNest.Application.Interfaces
     /// </summary>
     public interface IRoleDashboardService
     {
-        Task<RoleDashboardDto> GetAsync(string role, IReadOnlyCollection<int>? locationIds, string? period);
+        /// <param name="period">month | quarter | year (to date) | custom (<paramref name="from"/> .. <paramref name="to"/>, yyyy-MM-dd).</param>
+        Task<RoleDashboardDto> GetAsync(string role, IReadOnlyCollection<int>? locationIds, string? period, string? from = null, string? to = null);
     }
 }
