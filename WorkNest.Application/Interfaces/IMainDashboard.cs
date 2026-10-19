@@ -42,8 +42,9 @@ namespace WorkNest.Application.Interfaces
     /// </summary>
     public sealed class MainDashboardDatabaseUpdateMissingException : Exception
     {
+        // No ".sql" in the text: the CMS and the app hide messages that mention SQL.
         public const string UserMessage =
-            "Database update needed: run DASH_01_main_dashboard_TEST.sql (on the live database DASH_01_main_dashboard_LIVE.sql).";
+            "Database update needed: run the script DASH_01_main_dashboard_TEST (on the live database DASH_01_main_dashboard_LIVE).";
 
         public MainDashboardDatabaseUpdateMissingException(Exception inner) : base(UserMessage, inner)
         {

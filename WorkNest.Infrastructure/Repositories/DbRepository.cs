@@ -3111,7 +3111,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                        (SELECT COUNT(*) FROM dbo.WN_Bookings nb WITH (NOLOCK)
                          WHERE ISNULL(nb.IsDeleted, 0) = 0 AND nb.SpaceId IN (SELECT Id FROM @Spaces)
                            AND nb.CreatedOn >= m.MStart AND nb.CreatedOn < DATEADD(MONTH, 1, m.MStart)
-                           AND (@PEnd IS NULL OR (nb.CreatedOn >= @PStart AND nb.CreatedOn < @PEnd))
+                           AND (@PEnd IS NULL OR (nb.CreatedOn >= DATEADD(MINUTE, -@UtcShift, CAST(@PStart AS DATETIME2(0)))
+                                                  AND nb.CreatedOn < DATEADD(MINUTE, -@UtcShift, CAST(@PEnd AS DATETIME2(0)))))   -- CreatedOn is UTC
                            AND nb.BookingStatusId NOT IN (3, 4, 6, 86)) AS NewBookings,
                        (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
                            AND (@PEnd IS NULL OR (IssuedOn >= @PStart AND IssuedOn < @PEnd))) AS Invoiced,
@@ -3231,6 +3232,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.Add("@Ahead", SqlDbType.Int).Value = aheadMonths;
             cmd.Parameters.Add("@FromP", SqlDbType.Date).Value = custom ? (object)customFrom!.Value.Date : DBNull.Value;
             cmd.Parameters.Add("@ToP", SqlDbType.Date).Value = custom ? (object)customTo!.Value.Date : DBNull.Value;
+            // Bookings.CreatedOn is stored in UTC: a custom range's Pakistan days start this many minutes earlier in UTC.
+            cmd.Parameters.Add("@UtcShift", SqlDbType.Int).Value = custom ? (int)_clock.TimeZone.GetUtcOffset(customFrom!.Value).TotalMinutes : 0;
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadResultSets(r);
         }

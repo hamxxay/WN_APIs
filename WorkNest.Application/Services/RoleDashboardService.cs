@@ -42,6 +42,9 @@ namespace WorkNest.Application.Services
             period = range.Period;
             var periodStart = range.Start;
             var periodEnd = range.EndExclusive;
+            // Quotations and tour inquiries store their creation time in UTC: a custom range's Pakistan days are shifted
+            // by the business offset. The calendar periods keep their existing comparison (0).
+            var utcShift = range.IsCustom ? (int)_clock.TimeZone.GetUtcOffset(range.Start).TotalMinutes : 0;
 
             var st = await _orderStatus.GetInvoiceStatusesAsync();
             var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue).ToList();
@@ -54,7 +57,7 @@ namespace WorkNest.Application.Services
             };
             if (role == "sales_executive")
             {
-                dto.Sales = await GetSalesAsync(locationIds, periodStart, now, open, periodEnd);
+                dto.Sales = await GetSalesAsync(locationIds, periodStart, now, open, periodEnd, utcShift);
                 return dto;
             }
 
@@ -62,7 +65,7 @@ namespace WorkNest.Application.Services
             if (role == "super_admin")
             {
                 dto.Locations = await GetLocationsAsync(periodStart, now, open, voids, periodEnd);
-                dto.Staff = await GetStaffAsync(periodStart, periodEnd);
+                dto.Staff = await GetStaffAsync(periodStart, periodEnd, utcShift);
                 dto.System = await GetSystemAsync();
             }
             return dto;
@@ -90,9 +93,9 @@ namespace WorkNest.Application.Services
             }).ToList();
 
         private async Task<SalesDashboardDto> GetSalesAsync(IReadOnlyCollection<int>? locationIds, DateTime periodStart, DateTime now, List<int> open,
-            DateTime? periodEnd)
+            DateTime? periodEnd, int utcShift)
         {
-            var s = await _repo.GetSalesAsync(locationIds, periodStart, now, open, RenewalDays, periodEnd);
+            var s = await _repo.GetSalesAsync(locationIds, periodStart, now, open, RenewalDays, periodEnd, utcShift);
             var p = Set(s, 0).FirstOrDefault();
             var inq = Set(s, 3).FirstOrDefault();
             var col = Set(s, 7).FirstOrDefault();
@@ -167,9 +170,9 @@ namespace WorkNest.Application.Services
             }).ToList();
         }
 
-        private async Task<StaffDashboardDto> GetStaffAsync(DateTime periodStart, DateTime? periodEnd)
+        private async Task<StaffDashboardDto> GetStaffAsync(DateTime periodStart, DateTime? periodEnd, int utcShift)
         {
-            var s = await _repo.GetStaffAsync(periodStart, periodEnd);
+            var s = await _repo.GetStaffAsync(periodStart, periodEnd, utcShift);
             return new StaffDashboardDto
             {
                 PerLocation = Set(s, 0).Select(r => new StaffPerLocationDto

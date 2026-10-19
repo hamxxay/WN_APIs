@@ -6,12 +6,13 @@ namespace WorkNest.Application.Interfaces
     public interface IRoleDashboardRepository
     {
         // periodEnd: a custom range (DASH_01), the day after its last day; null = to date (month / quarter / year, as before).
+        // utcShiftMinutes: a custom range, the business UTC offset for the UTC-stored creation times (0 = as before).
         Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds, DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays,
-            DateTime? periodEnd = null);
+            DateTime? periodEnd = null, int utcShiftMinutes = 0);
         Task<List<List<IDictionary<string, object?>>>> GetTeamAsync(IReadOnlyCollection<int>? locationIds, DateTime now);
         Task<List<List<IDictionary<string, object?>>>> GetLocationComparisonAsync(DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> voidStatusIds,
             DateTime? periodEnd = null);
-        Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart, DateTime? periodEnd = null);
+        Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart, DateTime? periodEnd = null, int utcShiftMinutes = 0);
         Task<List<List<IDictionary<string, object?>>>> GetSystemAsync();
     }
 

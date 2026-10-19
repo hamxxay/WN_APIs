@@ -68,8 +68,11 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         /// <param name="periodEnd">A custom range (DASH_01): the day after its last day; null = to date (month / quarter / year).</param>
+        /// <param name="utcShiftMinutes">A custom range: the business UTC offset, so its Pakistan days match the UTC-stored
+        /// quotation and inquiry times (0 = as before).</param>
         public async Task<List<List<IDictionary<string, object?>>>> GetSalesAsync(IReadOnlyCollection<int>? locationIds,
-            DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays, DateTime? periodEnd = null)
+            DateTime periodStart, DateTime now, IEnumerable<int> openInvoiceStatusIds, int renewalDays, DateTime? periodEnd = null,
+            int utcShiftMinutes = 0)
         {
             var ct = await ContactsInScopeAsync("ct", locationIds);
             return await QueryAsync($@"
@@ -87,7 +90,8 @@ namespace WorkNest.Infrastructure.Repositories
                        ISNULL(SUM(CASE WHEN q.Status IN ('Converted') THEN q.TotalAmount ELSE 0 END), 0) AS ConvertedValue
                   FROM dbo.WN_Quotations q WITH (NOLOCK)
                   JOIN @Spaces sp ON sp.Id = q.SpaceId
-                 WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= @PStart AND (@PEnd IS NULL OR q.CreatedDate < @PEnd);
+                 WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= DATEADD(MINUTE, -@UtcShift, @PStart)   -- CreatedDate is UTC
+                   AND (@PEnd IS NULL OR q.CreatedDate < DATEADD(MINUTE, -@UtcShift, @PEnd));
 
                 -- [1] agreements sent but not signed yet (newest agreement per quotation)
                 SELECT TOP 8 a.Id, q.QuotationNumber AS Reference, a.SentDate AS [Date], q.TotalAmount AS Amount,
@@ -118,7 +122,7 @@ namespace WorkNest.Infrastructure.Repositories
                 -- [3] tour inquiries: the branches in scope + those without a branch (BR_01; before it, all of them)
                 -- New = status New, the same rows as the Tour Inquiries New filter and badge (old website bookings included)
                 DECLARE @NewInquiries INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{ct}) + {BranchSql.OldWebsiteNewCount};
-                DECLARE @InquiriesInPeriod INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.CreatedOn >= @PStart AND (@PEnd IS NULL OR ct.CreatedOn < @PEnd){ct});
+                DECLARE @InquiriesInPeriod INT = (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.CreatedOn >= DATEADD(MINUTE, -@UtcShift, @PStart) AND (@PEnd IS NULL OR ct.CreatedOn < DATEADD(MINUTE, -@UtcShift, @PEnd)){ct});   -- CreatedOn is UTC
                 DECLARE @FollowUpsDue INT = 0, @ConvertedInquiries INT = 0;
                 IF OBJECT_ID(N'dbo.WN_ContactFeedback', N'U') IS NOT NULL
                 BEGIN
@@ -191,6 +195,7 @@ namespace WorkNest.Infrastructure.Repositories
                 {
                     p.Add("@PStart", SqlDbType.DateTime2).Value = periodStart;
                     p.Add("@PEnd", SqlDbType.DateTime2).Value = (object?)periodEnd ?? DBNull.Value;
+                    p.Add("@UtcShift", SqlDbType.Int).Value = utcShiftMinutes;
                     p.Add("@Today", SqlDbType.Date).Value = now.Date;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = now;
                     p.Add("@RenewalDays", SqlDbType.Int).Value = renewalDays;
@@ -267,7 +272,7 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = now;
                 });
 
-        public Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart, DateTime? periodEnd = null) =>
+        public Task<List<List<IDictionary<string, object?>>>> GetStaffAsync(DateTime periodStart, DateTime? periodEnd = null, int utcShiftMinutes = 0) =>
             QueryAsync($@"
                 -- user -> locations: the multi-location mapping when present, plus the user's main location
                 DECLARE @UL TABLE (UserId INT, LocationId INT, PRIMARY KEY (UserId, LocationId));
@@ -293,7 +298,8 @@ namespace WorkNest.Infrastructure.Repositories
                        SUM(CASE WHEN q.Status = 'Converted' THEN 1 ELSE 0 END) AS Converted,
                        ISNULL(SUM(CASE WHEN q.Status = 'Converted' THEN q.TotalAmount ELSE 0 END), 0) AS ConvertedValue
                   FROM dbo.WN_Users u WITH (NOLOCK)
-                  LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.CreatedById = u.Id AND q.CreatedDate >= @PStart AND (@PEnd IS NULL OR q.CreatedDate < @PEnd) AND ISNULL(q.IsActive, 1) = 1
+                  LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.CreatedById = u.Id AND q.CreatedDate >= DATEADD(MINUTE, -@UtcShift, @PStart)
+                       AND (@PEnd IS NULL OR q.CreatedDate < DATEADD(MINUTE, -@UtcShift, @PEnd)) AND ISNULL(q.IsActive, 1) = 1   -- CreatedDate is UTC
                  WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
                  GROUP BY u.Id, u.Name, u.UserName, u.Email, u.RoleId
                  ORDER BY COUNT(q.Id) DESC, COALESCE(NULLIF(u.Name, ''), NULLIF(u.UserName, ''), u.Email);",
@@ -301,6 +307,7 @@ namespace WorkNest.Infrastructure.Repositories
                 {
                     p.Add("@PStart", SqlDbType.DateTime2).Value = periodStart;
                     p.Add("@PEnd", SqlDbType.DateTime2).Value = (object?)periodEnd ?? DBNull.Value;
+                    p.Add("@UtcShift", SqlDbType.Int).Value = utcShiftMinutes;
                 });
 
         public Task<List<List<IDictionary<string, object?>>>> GetSystemAsync() =>
