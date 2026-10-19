@@ -15,7 +15,7 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int OutstandingCount { get; set; }
         public decimal OverdueAmount { get; set; }
         public int OverdueCount { get; set; }
-        /// <summary>Selected period: month | quarter | year (calendar, to date).</summary>
+        /// <summary>Selected period: month | quarter | year (calendar, to date) | custom (From .. To).</summary>
         public string Period { get; set; } = "month";
         /// <summary>Invoiced in the selected period so far / the same span of the previous period.</summary>
         public decimal InvoicedThisPeriod { get; set; }
@@ -33,6 +33,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         public List<DashboardBucketDto> TopCustomers { get; set; } = new();
         public List<DashboardBucketDto> LeaseExpiries { get; set; } = new();
         public string GeneratedAt { get; set; } = string.Empty;
+        /// <summary>
+        /// Period custom (DASH_01): its first and last day (yyyy-MM-dd), and its length in days (the comparison is the same
+        /// number of days just before it); null / 0 for month, quarter and year.
+        /// </summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
+        public int RangeDays { get; set; }
     }
 
     public class DashboardMonthDto

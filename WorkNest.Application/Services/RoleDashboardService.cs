@@ -30,36 +30,42 @@ namespace WorkNest.Application.Services
             _whatsApp = whatsApp;
         }
 
-        public async Task<RoleDashboardDto> GetAsync(string role, IReadOnlyCollection<int>? locationIds, string? period)
+        public async Task<RoleDashboardDto> GetAsync(string role, IReadOnlyCollection<int>? locationIds, string? period,
+            string? from = null, string? to = null)
         {
-            period = (period ?? "month").Trim().ToLowerInvariant();
-            if (period is not ("month" or "quarter" or "year")) period = "month";
             var now = _clock.Now;
             var today = now.Date;
-            // Same calendar periods as the overview: this month / quarter / year to date.
-            var periodStart = period switch
-            {
-                "year" => new DateTime(today.Year, 1, 1),
-                "quarter" => new DateTime(today.Year, (today.Month - 1) / 3 * 3 + 1, 1),
-                _ => new DateTime(today.Year, today.Month, 1)
-            };
+            // Same periods as the overview: this month / quarter / year to date, or a custom range (from .. to, both days
+            // included; the controller refuses a bad range first, here it falls back to this month).
+            if (!MainDashboardPeriod.TryParse(period, from, to, today, out var range, out _))
+                range = MainDashboardPeriod.Calendar("month", today);
+            period = range.Period;
+            var periodStart = range.Start;
+            var periodEnd = range.EndExclusive;
+            // Quotations and tour inquiries store their creation time in UTC: a custom range's Pakistan days are shifted
+            // by the business offset. The calendar periods keep their existing comparison (0).
+            var utcShift = range.IsCustom ? (int)_clock.TimeZone.GetUtcOffset(range.Start).TotalMinutes : 0;
 
             var st = await _orderStatus.GetInvoiceStatusesAsync();
             var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue).ToList();
             var voids = st.Cancelled.Append(5).ToList();
 
-            var dto = new RoleDashboardDto { Role = role, Period = period, GeneratedAt = now.ToString("yyyy-MM-ddTHH:mm:ss") };
+            var dto = new RoleDashboardDto
+            {
+                Role = role, Period = period, GeneratedAt = now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                From = range.From?.ToString("yyyy-MM-dd"), To = range.To?.ToString("yyyy-MM-dd")
+            };
             if (role == "sales_executive")
             {
-                dto.Sales = await GetSalesAsync(locationIds, periodStart, now, open);
+                dto.Sales = await GetSalesAsync(locationIds, periodStart, now, open, periodEnd, utcShift);
                 return dto;
             }
 
             dto.Team = await GetTeamAsync(locationIds, now);
             if (role == "super_admin")
             {
-                dto.Locations = await GetLocationsAsync(periodStart, now, open, voids);
-                dto.Staff = await GetStaffAsync(periodStart);
+                dto.Locations = await GetLocationsAsync(periodStart, now, open, voids, periodEnd);
+                dto.Staff = await GetStaffAsync(periodStart, periodEnd, utcShift);
                 dto.System = await GetSystemAsync();
             }
             return dto;
@@ -86,9 +92,10 @@ namespace WorkNest.Application.Services
                 Amount = Val(r, "Amount") != null ? Dec(r, "Amount") : null
             }).ToList();
 
-        private async Task<SalesDashboardDto> GetSalesAsync(IReadOnlyCollection<int>? locationIds, DateTime periodStart, DateTime now, List<int> open)
+        private async Task<SalesDashboardDto> GetSalesAsync(IReadOnlyCollection<int>? locationIds, DateTime periodStart, DateTime now, List<int> open,
+            DateTime? periodEnd, int utcShift)
         {
-            var s = await _repo.GetSalesAsync(locationIds, periodStart, now, open, RenewalDays);
+            var s = await _repo.GetSalesAsync(locationIds, periodStart, now, open, RenewalDays, periodEnd, utcShift);
             var p = Set(s, 0).FirstOrDefault();
             var inq = Set(s, 3).FirstOrDefault();
             var col = Set(s, 7).FirstOrDefault();
@@ -144,9 +151,10 @@ namespace WorkNest.Application.Services
             };
         }
 
-        private async Task<List<LocationComparisonDto>> GetLocationsAsync(DateTime periodStart, DateTime now, List<int> open, List<int> voids)
+        private async Task<List<LocationComparisonDto>> GetLocationsAsync(DateTime periodStart, DateTime now, List<int> open, List<int> voids,
+            DateTime? periodEnd)
         {
-            var s = await _repo.GetLocationComparisonAsync(periodStart, now, open, voids);
+            var s = await _repo.GetLocationComparisonAsync(periodStart, now, open, voids, periodEnd);
             return Set(s, 0).Select(r =>
             {
                 var total = Int(r, "TotalSpaces");
@@ -162,9 +170,9 @@ namespace WorkNest.Application.Services
             }).ToList();
         }
 
-        private async Task<StaffDashboardDto> GetStaffAsync(DateTime periodStart)
+        private async Task<StaffDashboardDto> GetStaffAsync(DateTime periodStart, DateTime? periodEnd, int utcShift)
         {
-            var s = await _repo.GetStaffAsync(periodStart);
+            var s = await _repo.GetStaffAsync(periodStart, periodEnd, utcShift);
             return new StaffDashboardDto
             {
                 PerLocation = Set(s, 0).Select(r => new StaffPerLocationDto

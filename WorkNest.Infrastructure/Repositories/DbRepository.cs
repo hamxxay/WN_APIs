@@ -3014,15 +3014,27 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         /// [2] overdue invoices, [3] leases ending soon, [4] bookings waiting for confirmation,
         /// [5] receivables aging, [6] occupancy by space type, [7] top customers, [8] lease expiries next 6 months.
         /// Live bookings = BookingStatusId 1, 2, 5, 33 (old + WN_BookingStatuses pending / confirmed).
+        /// A custom range (<paramref name="customFrom"/> .. <paramref name="customTo"/>, both days included) replaces the
+        /// period: invoiced / paid / top customers count invoices issued in it, the comparison is the same number of days
+        /// just before it (occupancy and active bookings: that many days ago), the trend shows every month it touches
+        /// (inside the range) and lease expiries look 3 months ahead, as for a month. Without it nothing changes.
         /// </summary>
         public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
-            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null)
+            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null,
+            DateTime? customFrom = null, DateTime? customTo = null)
         {
             // Period: this month / quarter / year (calendar, to date). Comparisons are against the previous period;
             // trend charts cover 6 / 12 / 24 months and lease expiries look 3 / 6 / 12 months ahead.
+            var custom = customFrom.HasValue && customTo.HasValue && customFrom.Value.Date <= customTo.Value.Date;
             var months = period == "year" ? 12 : period == "quarter" ? 3 : 1;
             var seriesMonths = period == "year" ? 24 : period == "quarter" ? 12 : 6;
             var aheadMonths = period == "year" ? 12 : period == "quarter" ? 6 : 3;
+            if (custom)
+            {
+                // Every calendar month the range touches (at most 25 for the longest range, two years); ahead as a month.
+                seriesMonths = Math.Clamp((customTo!.Value.Year - customFrom!.Value.Year) * 12 + customTo.Value.Month - customFrom.Value.Month + 1, 1, 25);
+                aheadMonths = 3;
+            }
             // Status IDs are ints from code (OrderStatus lookups), never user input.
             static string List(IEnumerable<int> ids) { var l = ids.Distinct().ToList(); return l.Count == 0 ? "-1" : string.Join(",", l); }
             var open = List(openInvoiceStatusIds); var paid = List(paidStatusIds); var voids = List(voidStatusIds);
@@ -3032,14 +3044,22 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             await using var c = await Open();
             var sql = $@"
                 DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) wall-clock time from the app clock
-                DECLARE @MonthAgo DATETIME2(0) = DATEADD(MONTH, -@PMonths, @Now);   -- same point, one period ago
+                -- same point, one period ago (a custom range: as many days ago as the range is long)
+                DECLARE @MonthAgo DATETIME2(0) = CASE WHEN @FromP IS NULL THEN DATEADD(MONTH, -@PMonths, @Now)
+                                                      ELSE DATEADD(DAY, -(DATEDIFF(DAY, @FromP, @ToP) + 1), @Now) END;
                 DECLARE @Today DATE = CAST(@Now AS DATE);
                 DECLARE @MonthStart DATE = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
-                DECLARE @PStart DATE = CASE @PMonths
+                DECLARE @PStart DATE = CASE WHEN @FromP IS NOT NULL THEN @FromP ELSE CASE @PMonths
                     WHEN 12 THEN DATEFROMPARTS(YEAR(@Today), 1, 1)
                     WHEN 3  THEN DATEFROMPARTS(YEAR(@Today), ((MONTH(@Today) - 1) / 3) * 3 + 1, 1)
-                    ELSE @MonthStart END;
-                DECLARE @PrevMonthStart DATE = DATEADD(MONTH, -@PMonths, @PStart);
+                    ELSE @MonthStart END END;
+                DECLARE @PEnd DATE = DATEADD(DAY, 1, @ToP);   -- custom range: the day after its last day; NULL = to date
+                -- previous period to date (a custom range: the same number of days just before it)
+                DECLARE @PrevMonthStart DATE = CASE WHEN @FromP IS NULL THEN DATEADD(MONTH, -@PMonths, @PStart)
+                                                    ELSE DATEADD(DAY, -(DATEDIFF(DAY, @FromP, @ToP) + 1), @FromP) END;
+                DECLARE @PrevEnd DATE = CASE WHEN @FromP IS NULL THEN DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevMonthStart)
+                                             ELSE @FromP END;
+                DECLARE @SeriesEnd DATE = CASE WHEN @ToP IS NULL THEN @MonthStart ELSE DATEFROMPARTS(YEAR(@ToP), MONTH(@ToP), 1) END;
                 DECLARE @SoonEnd DATETIME2(0) = DATEADD(DAY, @Days, @Now);
 
                 DECLARE @Spaces TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200));
@@ -3075,28 +3095,33 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open})) AS OutstandingCount,
                     (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueAmount,
                     (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueCount,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart) AS InvoicedThisMonth,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevMonthStart)) AS InvoicedLastMonth,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND StatusId IN ({paid})) AS PaidThisPeriod,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS InvoicedThisMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < @PrevEnd) AS InvoicedLastMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
                     (SELECT COUNT(*) FROM @Live WHERE StatusId IN (2, 33) AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
 
-                -- [1] last 12 months (occupancy measured at month end, or now for the current month)
+                -- [1] last 12 months (occupancy measured at month end, or now for the current month); a custom range:
+                -- the months it touches, money and new bookings inside it
                 ;WITH m AS (
-                    SELECT n, DATEADD(MONTH, -n, @MonthStart) AS MStart
-                      FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12),(13),(14),(15),(16),(17),(18),(19),(20),(21),(22),(23)) v(n)
+                    SELECT n, DATEADD(MONTH, -n, @SeriesEnd) AS MStart
+                      FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11),(12),(13),(14),(15),(16),(17),(18),(19),(20),(21),(22),(23),(24)) v(n)
                      WHERE n < @Series
                 )
                 SELECT CONVERT(VARCHAR(7), m.MStart, 126) AS Month,
                        (SELECT COUNT(*) FROM dbo.WN_Bookings nb WITH (NOLOCK)
                          WHERE ISNULL(nb.IsDeleted, 0) = 0 AND nb.SpaceId IN (SELECT Id FROM @Spaces)
                            AND nb.CreatedOn >= m.MStart AND nb.CreatedOn < DATEADD(MONTH, 1, m.MStart)
+                           AND (@PEnd IS NULL OR (nb.CreatedOn >= DATEADD(MINUTE, -@UtcShift, CAST(@PStart AS DATETIME2(0)))
+                                                  AND nb.CreatedOn < DATEADD(MINUTE, -@UtcShift, CAST(@PEnd AS DATETIME2(0)))))   -- CreatedOn is UTC
                            AND nb.BookingStatusId NOT IN (3, 4, 6, 86)) AS NewBookings,
-                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)) AS Invoiced,
-                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart) AND StatusId IN ({paid})) AS Paid,
+                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
+                           AND (@PEnd IS NULL OR (IssuedOn >= @PStart AND IssuedOn < @PEnd))) AS Invoiced,
+                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
+                           AND (@PEnd IS NULL OR (IssuedOn >= @PStart AND IssuedOn < @PEnd)) AND StatusId IN ({paid})) AS Paid,
                        (SELECT COUNT(DISTINCT SpaceId) FROM @Live
                          WHERE StartOn <= x.At AND EndOn >= x.At) AS Occupied
                   FROM m
-                 CROSS APPLY (SELECT CASE WHEN m.n = 0 THEN @Now ELSE DATEADD(SECOND, -1, CAST(DATEADD(MONTH, 1, m.MStart) AS DATETIME2(0))) END AS At) x
+                 CROSS APPLY (SELECT CASE WHEN m.MStart = @MonthStart THEN @Now ELSE DATEADD(SECOND, -1, CAST(DATEADD(MONTH, 1, m.MStart) AS DATETIME2(0))) END AS At) x
                  ORDER BY m.MStart;
 
                 -- [2] overdue invoices
@@ -3185,7 +3210,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                        WHERE (b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode)
                                           OR (ISNULL(b.UserId, i.UserId) IS NOT NULL AND cu.UserId = ISNULL(b.UserId, i.UserId))
                                           OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
-                         WHERE i.IssuedOn >= @PStart
+                         WHERE i.IssuedOn >= @PStart AND (@PEnd IS NULL OR i.IssuedOn < @PEnd)
                   ) t
                  GROUP BY t.Customer
                  ORDER BY SUM(t.GrandTotal) DESC;
@@ -3205,6 +3230,10 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow ?? _clock.Now;
             cmd.Parameters.Add("@Series", SqlDbType.Int).Value = seriesMonths;
             cmd.Parameters.Add("@Ahead", SqlDbType.Int).Value = aheadMonths;
+            cmd.Parameters.Add("@FromP", SqlDbType.Date).Value = custom ? (object)customFrom!.Value.Date : DBNull.Value;
+            cmd.Parameters.Add("@ToP", SqlDbType.Date).Value = custom ? (object)customTo!.Value.Date : DBNull.Value;
+            // Bookings.CreatedOn is stored in UTC: a custom range's Pakistan days start this many minutes earlier in UTC.
+            cmd.Parameters.Add("@UtcShift", SqlDbType.Int).Value = custom ? (int)_clock.TimeZone.GetUtcOffset(customFrom!.Value).TotalMinutes : 0;
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadResultSets(r);
         }
