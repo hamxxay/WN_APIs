@@ -314,6 +314,14 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAllCustomersAsync(int page, int limit, string? search);
         Task<IEnumerable<IDictionary<string, object?>>> SearchCustomersAsync(string query);
         Task<IDictionary<string, object?>?> GetCustomerByGuidAsync(string guid);
+        /// <summary>
+        /// Everything around one customer for the CMS customer detail page (dbo.WN_Customers_GetOverview, script
+        /// CD_01_customer_detail): [0] summary (no row = no such customer), [1] bookings, [2] fee receipts, [3] payments,
+        /// [4] agreements, [5] security deposits, [6] activity timeline. Null when the procedure does not exist yet
+        /// (SQL error 2812: CD_01 not run).
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>?> GetCustomerOverviewAsync(int customerId, DateTime bizNow,
+            IEnumerable<int> openStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, int top);
         Task<IDictionary<string, object?>?> GetCustomerByUserIdAsync(int userId);
         Task<IDictionary<string, object?>?> GetCustomerByEmailAsync(string email);
         Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null,string? CustomerTypeId = null,int CountryId = 0,string? IdentificationDocumentTypeId = null, string? ntn = null, string? secp = null);

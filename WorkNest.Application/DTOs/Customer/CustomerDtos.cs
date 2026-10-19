@@ -1,5 +1,10 @@
+using WorkNest.Common.Responses;
+
 namespace WorkNest.Application.DTOs.Customer
 {
+    /// <summary>GET api/customer/{id}/overview: the HTTP status (200 / 404 / 503) and the ApiResponse body.</summary>
+    public sealed record CustomerOverviewResult(int StatusCode, ApiResponse Response);
+
     public class CustomerRequest
     {
         public string FirstName { get; set; } = string.Empty;

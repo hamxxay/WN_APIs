@@ -8,6 +8,8 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetAllCustomersAsync(int page, int limit, string search);
         Task<ApiResponse> SearchCustomersAsync(string query);
         Task<ApiResponse> GetCustomerByIdAsync(string id);
+        /// <summary>Customer detail page figures and lists (bookings, receipts, payments, agreements, deposits, timeline).</summary>
+        Task<CustomerOverviewResult> GetCustomerOverviewAsync(int id);
         Task<ApiResponse> CreateCustomerAsync(CustomerRequest request, string? createdBy);
         Task<ApiResponse> UpdateCustomerAsync(string id, CustomerRequest request);
         Task<ApiResponse> DeleteCustomerAsync(string id);

@@ -3618,6 +3618,29 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return row;
         }
 
+        public async Task<List<List<IDictionary<string, object?>>>?> GetCustomerOverviewAsync(int customerId, DateTime bizNow,
+            IEnumerable<int> openStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, int top)
+        {
+            // Status ids are ints from the OrderStatus lookup, never user input.
+            static string Csv(IEnumerable<int> ids) => string.Join(",", ids.Distinct());
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Customers_GetOverview", c);
+                cmd.Parameters.Add("@CustomerId", SqlDbType.Int).Value = customerId;
+                cmd.Parameters.Add("@BizNow", SqlDbType.DateTime2).Value = bizNow;
+                cmd.Parameters.Add("@OpenStatusIds", SqlDbType.NVarChar, 400).Value = Csv(openStatusIds);
+                cmd.Parameters.Add("@PaidStatusIds", SqlDbType.NVarChar, 400).Value = Csv(paidStatusIds);
+                cmd.Parameters.Add("@VoidStatusIds", SqlDbType.NVarChar, 400).Value = Csv(voidStatusIds);
+                cmd.Parameters.Add("@Top", SqlDbType.Int).Value = top;
+                await using var r = await cmd.ExecuteReaderAsync();
+                var sets = new List<List<IDictionary<string, object?>>>();
+                do { sets.Add(await ReadAll(r)); } while (await r.NextResultAsync());
+                return sets;
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: CD_01 not run
+        }
+
         public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? CustomerTypeId = null,int CountryId = 0,string? IdentificationDocumentTypeId = null, string? ntn = null, string? secp = null)
         {
             await using var c = await Open();
