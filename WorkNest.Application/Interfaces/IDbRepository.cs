@@ -285,6 +285,21 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         /// <param name="locationIds">Locations to list; null = all locations.</param>
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOccupiedSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow);
+
+        // Overview chart drill-down (stored procedures dbo.WN_Dash_Overview*, script DASH_02_main_dashboard_drilldown), on the
+        // overview's rules: [0] totals of every match, [1] the first <paramref name="top"/> rows. Null = the procedure is not on
+        // the database yet (DASH_02 not run). locationIds: null = all locations.
+
+        /// <summary>Invoices of one month (<paramref name="monthStart"/>), aging bucket or customer (issued from / to).</summary>
+        Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailInvoicesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
+            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds,
+            DateTime? monthStart, string? bucket, string? customer, DateTime? from, DateTime? to, int top);
+        /// <summary>Bookings made in a month (list "new") or live bookings ending in it from now on (list "ending").</summary>
+        Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
+            string list, DateTime monthStart, int top);
+        /// <summary>Active spaces of a space type with their state now (list "type"), or the spaces in use in a month (list "occupied").</summary>
+        Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
+            string list, string? spaceType, DateTime? monthStart, int top);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
         /// <paramref name="locationIds"/>: location-bound staff's locations (every one they are assigned to) for the items that
         /// have a location (via the space); null = all locations.

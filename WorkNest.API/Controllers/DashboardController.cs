@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WorkNest.Application.DTOs.Dashboard;
 using WorkNest.Application.Interfaces;
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
@@ -47,6 +48,26 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/dashboard/occupied-spaces")]
         public async Task<IActionResult> OccupiedSpaces([FromQuery] int? locationId, [FromQuery] string? locationIds) =>
             Ok(await _dashboard.GetOccupiedSpacesAsync(Scope(locationId, locationIds)));
+
+        /// <summary>
+        /// Chart drill-down of the overview: the records behind one bar / slice / point, on exactly the overview's rules (so
+        /// the totals are the chart's figure). kind = revenue-month (month) | aging-bucket (bucket) | top-customer (customer;
+        /// period, or from + to) | new-bookings (month) | leases-ending (month) | space-type (spaceType) | occupied-month
+        /// (month). month = yyyy-MM; from / to = yyyy-MM-dd (inclusive, both together; they replace the period). Same roles
+        /// and location rules as the overview. Bad parameters: 400. Before the database update DASH_02: 503 with a message.
+        /// Read-only (stored procedures dbo.WN_Dash_OverviewInvoices / Bookings / Spaces).
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpGet("api/dashboard/overview-details/{kind}")]
+        public async Task<IActionResult> OverviewDetails(string kind, [FromQuery] int? locationId, [FromQuery] string? locationIds,
+            [FromQuery] DashboardOverviewDetailsQuery query)
+        {
+            var result = await _dashboard.GetOverviewDetailsAsync(kind, Scope(locationId, locationIds), query);
+            if (result.IsSuccessful) return Ok(result);
+            return result.Message == DashboardOverviewDetails.DbUpdateMessage
+                ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+                : BadRequest(result);
+        }
 
         /// <summary>
         /// Role-based dashboard sections (same location rules as the overview). Sales executive: sales pipeline,
