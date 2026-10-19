@@ -234,6 +234,7 @@ try
     // CEO dashboard (api/ceo/*): stored procedures dbo.WN_Ceo_* (script CEO_01_dashboard_procedures).
     builder.Services.AddScoped<ICeoDashboardRepository, WorkNest.Infrastructure.Repositories.CeoDashboardRepository>();
     builder.Services.AddScoped<ICeoDashboardService, CeoDashboardService>();
+    builder.Services.AddScoped<ICeoDiscountsRepository, WorkNest.Infrastructure.Repositories.CeoDiscountsRepository>().AddScoped<ICeoDiscountsService, CeoDiscountsService>(); // CEO Discounts (api/ceo/discounts, DD_01)
     // Sales Manager dashboard (api/sales-manager/*): stored procedures dbo.WN_SalesMgr_* (scripts SM_01_sales_manager,
     // SM_02_sales_manager_desks: desks, no money, and SM_03_sales_manager_complaints: the Complaints section).
     builder.Services.AddScoped<ISalesManagerDashboardRepository, WorkNest.Infrastructure.Repositories.SalesManagerDashboardRepository>();
