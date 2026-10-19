@@ -126,7 +126,7 @@ namespace WorkNest.Application.Services
                 publicId = pid;
                 role = Roles.General;
                 newUserId = newId;
-                await EnsureCustomerAsync(request.Email, name, null, newId);
+                await UpdateProfileQuietly(request.Email, () => EnsureCustomerAsync(request.Email, name, null, newId));
             }
             else
             {
@@ -177,14 +177,17 @@ namespace WorkNest.Application.Services
                 var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
                 var nameToUse = !string.IsNullOrWhiteSpace(existingName) ? existingName : name;
 
-                await _db.SyncUserAsync(request.Email, nameToUse, null, request.Password, null, request.CompanyId);
-                await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
+                await UpdateProfileQuietly(request.Email, async () =>
+                {
+                    await _db.SyncUserAsync(request.Email, nameToUse, null, request.Password, null, request.CompanyId);
+                    await EnsureCustomerAsync(request.Email, nameToUse, null, userId);
+                });
             }
 
             var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
                 row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
 
-            var resolvedUserId = (row != null && row.TryGetValue("Id", out var rUid) && rUid is not null) 
+            var resolvedUserId = (row != null && row.TryGetValue("Id", out var rUid) && rUid is not null)
                 ? Convert.ToInt32(rUid) 
                 : newUserId;
 
@@ -278,6 +281,22 @@ namespace WorkNest.Application.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to record {EventType} for {Email}", eventType, email);
+            }
+        }
+
+        /// <summary>
+        /// Updates the user / customer rows of an accepted sign-in. A database error there is logged, not a failed sign-in
+        /// (a customer-profile error used to turn a correct password into a 500); the next sign-in tries again.
+        /// </summary>
+        private async Task UpdateProfileQuietly(string email, Func<Task> update)
+        {
+            try
+            {
+                await update();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update the profile on sign-in for {Email}", email);
             }
         }
 
