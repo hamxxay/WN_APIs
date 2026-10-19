@@ -8,7 +8,7 @@ namespace WorkNest.Application.Services
     /// (period=custom&amp;from=yyyy-MM-dd&amp;to=yyyy-MM-dd, both days included, at most <see cref="MaxCustomDays"/> days).
     /// A missing or unknown period is "month" (as before); a custom range with missing or bad dates is refused.
     /// </summary>
-    public sealed class DashboardPeriod
+    public sealed class MainDashboardPeriod
     {
         /// <summary>Longest custom range: two years (the year view's 24-month trend covers the same).</summary>
         public const int MaxCustomDays = 731;
@@ -49,7 +49,7 @@ namespace WorkNest.Application.Services
         /// <summary>Months the lease expiry chart looks ahead from today: 3 / 6 / 12 (as before); a custom range: 3, as a month.</summary>
         public int AheadMonths => Period switch { "year" => 12, "quarter" => 6, _ => 3 };
 
-        private DashboardPeriod(string period, DateTime start, DateTime? endExclusive, int months)
+        private MainDashboardPeriod(string period, DateTime start, DateTime? endExclusive, int months)
         {
             Period = period;
             Start = start;
@@ -58,15 +58,15 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>This month / quarter / year to date by the business date <paramref name="today"/>.</summary>
-        public static DashboardPeriod Calendar(string? period, DateTime today)
+        public static MainDashboardPeriod Calendar(string? period, DateTime today)
         {
             var p = (period ?? "month").Trim().ToLowerInvariant();
             var d = today.Date;
             return p switch
             {
-                "year" => new DashboardPeriod("year", new DateTime(d.Year, 1, 1), null, 12),
-                "quarter" => new DashboardPeriod("quarter", new DateTime(d.Year, (d.Month - 1) / 3 * 3 + 1, 1), null, 3),
-                _ => new DashboardPeriod("month", new DateTime(d.Year, d.Month, 1), null, 1)
+                "year" => new MainDashboardPeriod("year", new DateTime(d.Year, 1, 1), null, 12),
+                "quarter" => new MainDashboardPeriod("quarter", new DateTime(d.Year, (d.Month - 1) / 3 * 3 + 1, 1), null, 3),
+                _ => new MainDashboardPeriod("month", new DateTime(d.Year, d.Month, 1), null, 1)
             };
         }
 
@@ -75,7 +75,7 @@ namespace WorkNest.Application.Services
         /// <see cref="MaxCustomDays"/> days, between 2000 and 2100; otherwise false and a message for the user.
         /// Any other value: the calendar period (unknown = month), as the dashboard always did.
         /// </summary>
-        public static bool TryParse(string? period, string? from, string? to, DateTime today, out DashboardPeriod result, out string? error)
+        public static bool TryParse(string? period, string? from, string? to, DateTime today, out MainDashboardPeriod result, out string? error)
         {
             error = null;
             var p = (period ?? "").Trim().ToLowerInvariant();
@@ -106,7 +106,7 @@ namespace WorkNest.Application.Services
                 error = $"A custom range can be at most {MaxCustomDays} days (two years).";
                 return false;
             }
-            result = new DashboardPeriod("custom", f, t.AddDays(1), 0);
+            result = new MainDashboardPeriod("custom", f, t.AddDays(1), 0);
             return true;
         }
 

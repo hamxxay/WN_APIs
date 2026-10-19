@@ -50,7 +50,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Overview([FromQuery] int? locationId, [FromQuery] string? locationIds, [FromQuery] string? period,
             [FromQuery] string? from, [FromQuery] string? to)
         {
-            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out _, out var error))
+            if (!MainDashboardPeriod.TryParse(period, from, to, _clock.Today, out _, out var error))
                 return BadRequest(ApiResponse.Fail(error!));
             return Ok(await _dashboard.GetOverviewAsync(Scope(locationId, locationIds), period, from, to));
         }
@@ -121,7 +121,7 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? from, [FromQuery] string? to)
         {
             // period as the overview (custom: from and to, yyyy-MM-dd; a bad range answers 400).
-            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out _, out var error))
+            if (!MainDashboardPeriod.TryParse(period, from, to, _clock.Today, out _, out var error))
                 return BadRequest(ApiResponse.Fail(error!));
             var role = User.IsSuperAdmin() ? "super_admin"
                 : User.IsAdminOrSuperAdmin() ? "admin"

@@ -37,8 +37,8 @@ namespace WorkNest.Application.Services
             var today = now.Date;
             // Same periods as the overview: this month / quarter / year to date, or a custom range (from .. to, both days
             // included; the controller refuses a bad range first, here it falls back to this month).
-            if (!DashboardPeriod.TryParse(period, from, to, today, out var range, out _))
-                range = DashboardPeriod.Calendar("month", today);
+            if (!MainDashboardPeriod.TryParse(period, from, to, today, out var range, out _))
+                range = MainDashboardPeriod.Calendar("month", today);
             period = range.Period;
             var periodStart = range.Start;
             var periodEnd = range.EndExclusive;

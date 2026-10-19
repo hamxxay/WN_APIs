@@ -8,7 +8,7 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> GetSummaryAsync();
         /// <param name="locationIds">Locations to total; null = all locations.</param>
         /// <param name="period">month | quarter | year (to date) | custom (<paramref name="from"/> .. <paramref name="to"/>,
-        /// yyyy-MM-dd, see <see cref="WorkNest.Application.Services.DashboardPeriod"/>).</param>
+        /// yyyy-MM-dd, see <see cref="WorkNest.Application.Services.MainDashboardPeriod"/>).</param>
         Task<DashboardOverviewDto> GetOverviewAsync(IReadOnlyCollection<int>? locationIds, string? period = null,
             string? from = null, string? to = null);
         /// <summary>

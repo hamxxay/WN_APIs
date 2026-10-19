@@ -92,8 +92,8 @@ namespace WorkNest.Application.Services
             string? from = null, string? to = null)
         {
             // month / quarter / year as before; custom = from .. to (the controller refuses a bad range first, here it falls back to month).
-            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var range, out _))
-                range = DashboardPeriod.Calendar("month", _clock.Today);
+            if (!MainDashboardPeriod.TryParse(period, from, to, _clock.Today, out var range, out _))
+                range = MainDashboardPeriod.Calendar("month", _clock.Today);
             period = range.Period;
             var st = await _orderStatus.GetInvoiceStatusesAsync();
             // Open = still owed (Unpaid / Partial / Overdue, legacy + OrderStatus); void = legacy 5 + OrderStatus Cancelled.
