@@ -2084,6 +2084,74 @@ namespace WorkNest.Application.Services
             return points;
         }
 
+        private static double? Round2(double? v) =>
+            v is double d && double.IsFinite(d) ? Math.Round(d, 2, MidpointRounding.AwayFromZero) : null;
+
+        /// <summary>Mbps from a rate in bytes per second; null when unknown.</summary>
+        private static double? MbpsOfRate(double? bytesPerSecond) =>
+            bytesPerSecond is double b && double.IsFinite(b) && b >= 0 ? Round2(b * 8 / 1e6) : null;
+
+        private static string IsoMs(double ms) => Iso(DateTimeOffset.FromUnixTimeMilliseconds((long)ms).UtcDateTime);
+
+        /// <summary>A line's latest speed test from GetWansAsync ({ down, up, ping, at (epoch ms) }); null without one.</summary>
+        private static DTOs.Dashboard.NetworkSpeedtestDto? SpeedtestOf(JsonNode? node)
+        {
+            if (node is not JsonObject st) return null;
+            var down = ToNum(st["down"]);
+            var up = ToNum(st["up"]);
+            if (down is not > 0 && up is not > 0) return null;
+            var at = ToNum(st["at"]);
+            return new DTOs.Dashboard.NetworkSpeedtestDto
+            {
+                DownMbps = down is > 0 ? Round2(down) : null,
+                UpMbps = up is > 0 ? Round2(up) : null,
+                PingMs = ToNum(st["ping"]) is > 0 ? Round1(ToNum(st["ping"])) : null,
+                At = at is > 0 ? IsoMs(at.Value) : null,
+            };
+        }
+
+        /// <summary>
+        /// Adds the gateway's own figures (GetWansAsync: the Network Overview line cards) to the main console's lines,
+        /// matched by WAN1 / WAN2 / ...: speed now (only while the line is up), link speed, latest speed test, and the
+        /// last 24 hours of 5-minute traffic as 15-minute averages and totals. Unknown figures stay null.
+        /// </summary>
+        private static void ApplyLiveWans(List<DTOs.Dashboard.NetworkWanDto> consoleLines, JsonObject live, DateTime now)
+        {
+            var dayAgoMs = new DateTimeOffset(now.AddHours(-24), TimeSpan.Zero).ToUnixTimeMilliseconds();
+            foreach (var w in (live["wans"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
+            {
+                var line = consoleLines.FirstOrDefault(l => string.Equals(l.Label, ToStr(w["key"]), StringComparison.OrdinalIgnoreCase));
+                if (line == null) continue;
+                var up = ToBool(w["up"]);
+                line.Live = true;
+                line.DownMbps = up ? MbpsOfRate(ToNum(w["downRate"])) : null;
+                line.UpMbps = up ? MbpsOfRate(ToNum(w["upRate"])) : null;
+                line.LinkMbps = up && ToNum(w["linkSpeed"]) is double link && link > 0 ? link : null;
+                line.Speedtest = SpeedtestOf(w["speedtest"]);
+
+                // 5-minute points in Mbps (bytes x 8 / 300 s / 1e6): data in a point = Mbps x 300 / 8 x 1e6 bytes.
+                var points = (w["history"] as JsonArray ?? new JsonArray()).OfType<JsonObject>()
+                    .Select(p => (T: ToNum(p["t"]), Down: ToNum(p["down"]), Up: ToNum(p["up"])))
+                    .Where(p => p.T is double t && t >= dayAgoMs && (p.Down != null || p.Up != null))
+                    .OrderBy(p => p.T)
+                    .ToList();
+                if (points.Count == 0) continue;
+                line.Down24hBytes = Math.Round(points.Sum(p => p.Down ?? 0) * 300 / 8 * 1e6);
+                line.Up24hBytes = Math.Round(points.Sum(p => p.Up ?? 0) * 300 / 8 * 1e6);
+                line.Traffic = points.GroupBy(p => (long)(p.T!.Value / 900_000)).OrderBy(g => g.Key).Select(g =>
+                {
+                    var downs = g.Where(p => p.Down != null).Select(p => p.Down!.Value).ToList();
+                    var ups = g.Where(p => p.Up != null).Select(p => p.Up!.Value).ToList();
+                    return new DTOs.Dashboard.NetworkTrafficPointDto
+                    {
+                        T = IsoMs(g.Key * 900_000d),
+                        Down = downs.Count > 0 ? Round2(downs.Average()) : null,
+                        Up = ups.Count > 0 ? Round2(ups.Average()) : null,
+                    };
+                }).ToList();
+            }
+        }
+
         public async Task<DTOs.Dashboard.NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait)
         {
             await InitializeAsync();
@@ -2095,6 +2163,21 @@ namespace WorkNest.Application.Services
             var devices = NormaliseDevices().Where(d => hostIds.Contains(ToStr(d["hostId"]))).ToList();
             var isp = NormaliseIsp().Where(i => ids.Contains(ToStr(i["siteId"]))).ToList();
             var now = DateTime.UtcNow;
+
+            // The main console's live data, read in parallel and waited for at most clientsWait: its client list (client
+            // types) and its gateway's WAN ports (line speeds). Both are the cached calls the Clients page and the Network
+            // Overview line cards already make (client list 20 s; devices 20 s, 5-minute traffic 2 min, speed tests 10 min).
+            var consoleSite = ConsoleSiteId();
+            var consoleVisible = consoleSite != null && ids.Contains(consoleSite);
+            var clientsTask = consoleVisible ? NetClients() : null;
+            var wansTask = consoleVisible ? GetWansAsync() : null;
+            if (clientsTask != null && wansTask != null)
+            {
+                var both = Task.WhenAll(clientsTask, wansTask);
+                await Task.WhenAny(both, Task.Delay(clientsWait));
+                foreach (var t in new Task[] { both, clientsTask, wansTask })
+                    _ = t.ContinueWith(x => _ = x.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            }
 
             // ---- clients now, and over time (stored history) ----
             int Sum(string key) => (int)sites.Sum(s => ToNum(s[key]) ?? 0);
@@ -2111,14 +2194,6 @@ namespace WorkNest.Application.Services
                 if (CountsFor(h, ids, everySite) is { } c) samples.Add((h.T, c.Wifi, c.Wired, c.Guest));
             }
             samples.Sort((a, b) => a.T.CompareTo(b.T));
-            var day = samples.Where(s => s.T >= now.AddHours(-24)).ToList();
-            if (day.Count > 0)
-            {
-                var peak = day.OrderByDescending(s => s.Wifi + s.Wired + s.Guest).ThenByDescending(s => s.T).First();
-                clients.Peak24h = peak.Wifi + peak.Wired + peak.Guest;
-                clients.Peak24hAt = Iso(peak.T);
-                clients.Avg24h = RoundInt(day.Average(s => s.Wifi + s.Wired + s.Guest));
-            }
             var historyDto = new DTOs.Dashboard.NetworkHistoryDto();
             if (samples.Count > 0)
             {
@@ -2153,7 +2228,7 @@ namespace WorkNest.Application.Services
             devicesDto.Offline = devicesDto.Total - devicesDto.Online;
 
             // ---- internet lines and latency (cloud ISP metrics, last 24 h) ----
-            var lines = sites.SelectMany(s => s["wans"]!.AsArray().Select(w => new DTOs.Dashboard.NetworkWanDto
+            var lineRows = sites.SelectMany(s => s["wans"]!.AsArray().Select(w => (SiteId: ToStr(s["id"]), Line: new DTOs.Dashboard.NetworkWanDto
             {
                 Site = ToStr(s["name"]),
                 Label = ToStr(w!["label"]),
@@ -2162,7 +2237,25 @@ namespace WorkNest.Application.Services
                 Role = ToNum(w["priority"]) is double p ? (p <= 1 ? "Primary" : "Backup") : "",
                 UptimePct = Round1(ToNum(w["uptime"])),
                 Issues = (int)(ToNum(w["issues"]) ?? 0),
-            })).ToList();
+            }))).ToList();
+            string? speedsMessage = null;
+            if (wansTask == null)
+                speedsMessage = lineRows.Count > 0 ? "Live line speeds are only read from the main UniFi console." : null;
+            else if (!wansTask.IsCompleted)
+                speedsMessage = "Line speeds are still loading. They show at the next refresh.";
+            else if (!wansTask.IsCompletedSuccessfully)
+            {
+                _logger.LogWarning("[unifi dashboard] line speeds unavailable: {Error}", wansTask.Exception?.GetBaseException().Message);
+                speedsMessage = "Line speeds could not be read right now.";
+            }
+            else
+            {
+                ApplyLiveWans(lineRows.Where(r => string.Equals(r.SiteId, consoleSite, StringComparison.OrdinalIgnoreCase)).Select(r => r.Line).ToList(),
+                    wansTask.Result, now);
+            }
+            var lines = lineRows.Select(r => r.Line).ToList();
+            if (speedsMessage == null && lines.Any(l => !l.Live))
+                speedsMessage = lines.All(l => !l.Live) ? "Live line speeds are not reported for this network." : "Some lines have no live speed figures.";
             var uptimes = sites.Select(s => ToNum(s["wanUptime"])).Where(v => v != null).Select(v => v!.Value).ToList();
             var dayAgo = new DateTimeOffset(now.AddHours(-24), TimeSpan.Zero);
             var series = isp.Select(i => (Site: i, Points: i["points"]!.AsArray()
@@ -2177,6 +2270,7 @@ namespace WorkNest.Application.Services
             var internet = new DTOs.Dashboard.NetworkInternetDto
             {
                 Lines = lines,
+                SpeedsMessage = speedsMessage,
                 LinesTotal = lines.Count,
                 LinesUp = lines.Count(l => l.Up),
                 UptimePct = uptimes.Count > 0 ? Round1(uptimes.Min()) : null,
@@ -2218,17 +2312,15 @@ namespace WorkNest.Application.Services
 
             // ---- clients by type: the console's client list (cached; the Clients page uses the same call) ----
             var types = new DTOs.Dashboard.NetworkClientTypesDto();
-            var consoleSite = ConsoleSiteId();
-            if (consoleSite == null || !ids.Contains(consoleSite))
+            if (clientsTask == null)
             {
                 types.Message = "Client types are not available for this network.";
             }
             else
             {
-                var task = NetClients();
-                if (await Task.WhenAny(task, Task.Delay(clientsWait)) != task)
+                var task = clientsTask;
+                if (!task.IsCompleted)
                 {
-                    _ = task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
                     types.Message = "Client types are still loading. They show at the next refresh.";
                 }
                 else if (task.IsFaulted || task.IsCanceled)

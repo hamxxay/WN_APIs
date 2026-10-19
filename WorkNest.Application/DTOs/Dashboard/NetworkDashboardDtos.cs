@@ -49,18 +49,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string Source { get; set; } = "every";
     }
 
-    /// <summary>Clients connected right now, and the busiest moment of the last 24 hours.</summary>
+    /// <summary>Clients connected right now (the history over time is in <see cref="NetworkHistoryDto"/>).</summary>
     public sealed class NetworkClientsDto
     {
         public int Total { get; set; }
         public int Wifi { get; set; }
         public int Wired { get; set; }
         public int Guest { get; set; }
-        /// <summary>Most clients at once in the last 24 hours (stored samples, one a minute); null without history.</summary>
-        public int? Peak24h { get; set; }
-        public string? Peak24hAt { get; set; }
-        /// <summary>Average clients over the last 24 hours; null without history.</summary>
-        public int? Avg24h { get; set; }
     }
 
     /// <summary>UniFi devices (access points, switches, gateways...), online against offline; not-installed placeholders left out.</summary>
@@ -144,6 +139,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// <summary>Highest packet loss in a 5-minute step over the last 24 hours (%).</summary>
         public double? LossMaxPct { get; set; }
         public List<NetworkWanDto> Lines { get; set; } = new();
+        /// <summary>Why some or all lines have no live speed figures (still loading, not readable, other console); null = all have them.</summary>
+        public string? SpeedsMessage { get; set; }
         /// <summary>Latency per site over the last 24 hours, 15-minute steps.</summary>
         public List<NetworkLatencySeriesDto> Latency { get; set; } = new();
     }
@@ -161,6 +158,42 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// <summary>Uptime % over 24 hours.</summary>
         public double? UptimePct { get; set; }
         public int Issues { get; set; }
+        /// <summary>
+        /// True when the gateway's own figures for this line were read (the main console's gateway, the same cached data
+        /// as the Network Overview line cards). The speed fields below are null when unknown, never 0 for "unknown".
+        /// </summary>
+        public bool Live { get; set; }
+        /// <summary>Download right now (Mbps); null when unknown or the line is down.</summary>
+        public double? DownMbps { get; set; }
+        /// <summary>Upload right now (Mbps); null when unknown or the line is down.</summary>
+        public double? UpMbps { get; set; }
+        /// <summary>The port's link speed (Mbps, 1000 = 1 Gbps); null when unknown or the line is down.</summary>
+        public double? LinkMbps { get; set; }
+        /// <summary>The line's latest speed test (gateway status or the 90-day archive); null when none.</summary>
+        public NetworkSpeedtestDto? Speedtest { get; set; }
+        /// <summary>Data downloaded over the last 24 hours (bytes, from 5-minute traffic); null when unknown.</summary>
+        public double? Down24hBytes { get; set; }
+        /// <summary>Data uploaded over the last 24 hours (bytes); null when unknown.</summary>
+        public double? Up24hBytes { get; set; }
+        /// <summary>Traffic over the last 24 hours, 15-minute averages in Mbps (sparkline); empty when unknown.</summary>
+        public List<NetworkTrafficPointDto> Traffic { get; set; } = new();
+    }
+
+    public sealed class NetworkSpeedtestDto
+    {
+        public double? DownMbps { get; set; }
+        public double? UpMbps { get; set; }
+        public double? PingMs { get; set; }
+        /// <summary>When it ran (UTC); null when unknown.</summary>
+        public string? At { get; set; }
+    }
+
+    public sealed class NetworkTrafficPointDto
+    {
+        /// <summary>Start of the 15-minute step (UTC).</summary>
+        public string T { get; set; } = "";
+        public double? Down { get; set; }
+        public double? Up { get; set; }
     }
 
     public sealed class NetworkLatencySeriesDto
