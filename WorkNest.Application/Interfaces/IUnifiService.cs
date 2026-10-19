@@ -1,4 +1,6 @@
 using System.Text.Json.Nodes;
+using WorkNest.Application.DTOs.Dashboard;
+using WorkNest.Application.Helpers;
 
 namespace WorkNest.Application.Interfaces
 {
@@ -67,5 +69,17 @@ namespace WorkNest.Application.Interfaces
         Task<bool> SetLocationIdsAsync(IReadOnlyList<int> locationIds, string? byEmail);
         /// <summary>Latest MAC filter changes, optionally for one SSID or one MAC (max 200).</summary>
         Task<JsonObject> GetMacFilterLogAsync(string? wlanId, string? mac);
+
+        // --- CEO / Sales Manager dashboards (read-only, from the polled state) ---
+        /// <summary>Sites from the last successful cloud poll (id, name, console); empty before the first one.</summary>
+        IReadOnlyList<UnifiSiteRef> GetSites();
+        /// <summary>When the last cloud poll succeeded (UTC; null = never) and whether the latest poll failed.</summary>
+        (DateTime? UpdatedAt, bool Failing) GetPollState();
+        /// <summary>
+        /// Network section figures for these sites: clients now and over time (stored history), devices online / offline
+        /// by type, internet lines and latency, critical / serious issues, and clients by type from the cached client list
+        /// (waits at most <paramref name="clientsWait"/> for it; only for the main console's site).
+        /// </summary>
+        Task<NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait);
     }
 }

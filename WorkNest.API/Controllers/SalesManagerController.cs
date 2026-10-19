@@ -94,6 +94,20 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
+        /// Network (UniFi) section: the same figures as the CEO dashboard's, for the UniFi sites that serve the manager's
+        /// locations (or the one chosen; another location answers 403, as everywhere here). Super admins: every site.
+        /// Read-only; UniFi not set up or not reachable: 200 with available = false and a short message.
+        /// </summary>
+        [HttpGet("api/sales-manager/network")]
+        public async Task<IActionResult> Network([FromQuery] int? locationId, [FromServices] INetworkDashboardService network)
+        {
+            var scope = Scope(locationId, false, out var refusal);
+            if (scope == null) return refusal!;
+            return Ok(ApiResponse.Ok(await network.GetAsync(new NetworkScope(scope.MyLocations, scope.LocationId),
+                HttpContext?.RequestAborted ?? default)));
+        }
+
+        /// <summary>
         /// The caller's scope: a Sales Manager covers their own locations (403 for any other, or when they have none);
         /// a super admin all locations, or the one asked for. Null (with <paramref name="refusal"/>) when refused.
         /// </summary>

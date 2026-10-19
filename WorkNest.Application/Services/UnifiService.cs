@@ -1998,6 +1998,275 @@ namespace WorkNest.Application.Services
         }
 
         // =====================================================================
+        // CEO / Sales Manager dashboards: the network section (read-only, from the polled state)
+        // =====================================================================
+
+        /// <summary>Device types in the order the dashboards list them, with their plural label.</summary>
+        private static readonly (string Type, string Label)[] DeviceTypeLabels =
+        {
+            ("Access point", "Access points"), ("Switch", "Switches"), ("Console / Gateway", "Gateways"),
+            ("Camera / Protect", "Cameras"), ("Access", "Door access"), ("Phone", "Phones"), ("Other", "Other devices"),
+        };
+
+        public IReadOnlyList<Helpers.UnifiSiteRef> GetSites() =>
+            _sites.Select(s => new Helpers.UnifiSiteRef(Str(P(s, "siteId")) ?? "", SiteName(s), Str(P(s, "hostId"))))
+                  .Where(s => s.Id != "")
+                  .ToList();
+
+        public (DateTime? UpdatedAt, bool Failing) GetPollState()
+        {
+            DateTime? at = DateTime.TryParse(_updatedAt, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var d) ? DateTime.SpecifyKind(d, DateTimeKind.Utc) : null;
+            return (at, _error != null);
+        }
+
+        /// <summary>The site the console Network API reads (/api/s/default/...): the main console's "default" site.</summary>
+        private string? ConsoleSiteId()
+        {
+            var consoleId = ConsoleId();
+            if (consoleId == null) return null;
+            var onConsole = _sites.Where(s => Str(P(s, "hostId")) == consoleId).ToList();
+            if (onConsole.Count == 0) return null;
+            var site = onConsole.FirstOrDefault(s => string.Equals(Str(P(s, "meta", "name")), "default", StringComparison.OrdinalIgnoreCase));
+            if (site.ValueKind == JsonValueKind.Undefined) site = onConsole[0];
+            return Str(P(site, "siteId"));
+        }
+
+        /// <summary>A history sample's Wi-Fi / wired / guest for these sites; null when the sample has no figures for them.</summary>
+        private static (int Wifi, int Wired, int Guest)? CountsFor(HistorySample h, HashSet<string> ids, bool everySite)
+        {
+            if (everySite) return (h.Wifi, h.Wired, h.Guest);
+            var mine = h.Sites.Where(kv => ids.Contains(kv.Key)).ToList();
+            if (mine.Count == 0) return null;
+            int At(double[] v, int i) => v.Length > i && double.IsFinite(v[i]) ? (int)v[i] : 0;
+            return (mine.Sum(kv => At(kv.Value, 0)), mine.Sum(kv => At(kv.Value, 1)), mine.Sum(kv => At(kv.Value, 2)));
+        }
+
+        private static int RoundInt(double v) => (int)Math.Round(v, MidpointRounding.AwayFromZero);
+
+        private static double? Round1(double? v) =>
+            v is double d && double.IsFinite(d) ? Math.Round(d, 1, MidpointRounding.AwayFromZero) : null;
+
+        private static DateTime Floor(DateTime t, int minutes)
+        {
+            var step = TimeSpan.FromMinutes(minutes).Ticks;
+            return new DateTime(t.Ticks - t.Ticks % step, DateTimeKind.Utc);
+        }
+
+        /// <summary>Client counts in steps of <paramref name="minutes"/> from <paramref name="from"/> to now (gaps = nulls).</summary>
+        private static List<DTOs.Dashboard.NetworkHistoryPointDto> HistorySteps(
+            List<(DateTime T, int Wifi, int Wired, int Guest)> samples, DateTime from, DateTime now, int minutes)
+        {
+            var start = Floor(from, minutes);
+            var step = TimeSpan.FromMinutes(minutes);
+            var count = Math.Max(0, (int)Math.Ceiling((now - start) / step));
+            var buckets = new List<(DateTime T, int Wifi, int Wired, int Guest)>[count];
+            foreach (var s in samples)
+            {
+                if (s.T < start) continue;
+                var i = (int)((s.T - start) / step);
+                if (i < 0 || i >= count) continue;
+                (buckets[i] ??= new()).Add(s);
+            }
+            var points = new List<DTOs.Dashboard.NetworkHistoryPointDto>(count);
+            for (var i = 0; i < count; i++)
+            {
+                var b = buckets[i];
+                points.Add(new DTOs.Dashboard.NetworkHistoryPointDto
+                {
+                    T = Iso(start + step * i),
+                    Wifi = b == null ? null : RoundInt(b.Average(x => x.Wifi)),
+                    Wired = b == null ? null : RoundInt(b.Average(x => x.Wired)),
+                    Guest = b == null ? null : RoundInt(b.Average(x => x.Guest)),
+                    Peak = b?.Max(x => x.Wifi + x.Wired + x.Guest),
+                });
+            }
+            return points;
+        }
+
+        public async Task<DTOs.Dashboard.NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait)
+        {
+            await InitializeAsync();
+            var ids = new HashSet<string>(siteIds, StringComparer.OrdinalIgnoreCase);
+            var allSites = NormaliseSites();
+            var sites = allSites.Where(s => ids.Contains(ToStr(s["id"]))).ToList();
+            var everySite = allSites.Count > 0 && sites.Count == allSites.Count;
+            var hostIds = new HashSet<string>(sites.Select(s => ToStr(s["hostId"])));
+            var devices = NormaliseDevices().Where(d => hostIds.Contains(ToStr(d["hostId"]))).ToList();
+            var isp = NormaliseIsp().Where(i => ids.Contains(ToStr(i["siteId"]))).ToList();
+            var now = DateTime.UtcNow;
+
+            // ---- clients now, and over time (stored history) ----
+            int Sum(string key) => (int)sites.Sum(s => ToNum(s[key]) ?? 0);
+            var clients = new DTOs.Dashboard.NetworkClientsDto { Wifi = Sum("wifiClients"), Wired = Sum("wiredClients"), Guest = Sum("guestClients") };
+            clients.Total = clients.Wifi + clients.Wired + clients.Guest;
+
+            HistorySample[] history;
+            lock (_historyLock) history = _history.ToArray();
+            var weekFrom = now.AddDays(-7);
+            var samples = new List<(DateTime T, int Wifi, int Wired, int Guest)>();
+            foreach (var h in history)
+            {
+                if (h.T < weekFrom || h.T > now.AddMinutes(5)) continue;
+                if (CountsFor(h, ids, everySite) is { } c) samples.Add((h.T, c.Wifi, c.Wired, c.Guest));
+            }
+            samples.Sort((a, b) => a.T.CompareTo(b.T));
+            var day = samples.Where(s => s.T >= now.AddHours(-24)).ToList();
+            if (day.Count > 0)
+            {
+                var peak = day.OrderByDescending(s => s.Wifi + s.Wired + s.Guest).ThenByDescending(s => s.T).First();
+                clients.Peak24h = peak.Wifi + peak.Wired + peak.Guest;
+                clients.Peak24hAt = Iso(peak.T);
+                clients.Avg24h = RoundInt(day.Average(s => s.Wifi + s.Wired + s.Guest));
+            }
+            var historyDto = new DTOs.Dashboard.NetworkHistoryDto();
+            if (samples.Count > 0)
+            {
+                var first = samples[0].T;
+                historyDto.Day = HistorySteps(samples, first > now.AddHours(-24) ? first : now.AddHours(-24), now, historyDto.DayStepMinutes);
+                historyDto.Week = HistorySteps(samples, first > weekFrom ? first : weekFrom, now, historyDto.WeekStepMinutes);
+            }
+
+            // ---- devices by type (placeholders left out) ----
+            var real = devices.Where(d => !ToBool(d["placeholder"])).ToList();
+            int TypeOrder(string type)
+            {
+                var i = Array.FindIndex(DeviceTypeLabels, x => x.Type == type);
+                return i < 0 ? DeviceTypeLabels.Length : i;
+            }
+            var devicesDto = new DTOs.Dashboard.NetworkDevicesDto
+            {
+                Total = real.Count,
+                Online = real.Count(d => ToStr(d["status"]) == "online"),
+                NotInstalled = devices.Count - real.Count,
+                ByType = real.GroupBy(d => ToStr(d["type"]))
+                    .OrderBy(g => TypeOrder(g.Key)).ThenBy(g => g.Key, LocaleCompare)
+                    .Select(g => new DTOs.Dashboard.NetworkDeviceTypeDto
+                    {
+                        Type = g.Key,
+                        Label = Array.Find(DeviceTypeLabels, x => x.Type == g.Key).Label ?? g.Key,
+                        Online = g.Count(d => ToStr(d["status"]) == "online"),
+                        Offline = g.Count(d => ToStr(d["status"]) != "online"),
+                        OfflineNames = g.Where(d => ToStr(d["status"]) != "online").Select(d => ToStr(d["name"])).Take(10).ToList(),
+                    }).ToList(),
+            };
+            devicesDto.Offline = devicesDto.Total - devicesDto.Online;
+
+            // ---- internet lines and latency (cloud ISP metrics, last 24 h) ----
+            var lines = sites.SelectMany(s => s["wans"]!.AsArray().Select(w => new DTOs.Dashboard.NetworkWanDto
+            {
+                Site = ToStr(s["name"]),
+                Label = ToStr(w!["label"]),
+                Isp = ToStr(w["isp"]),
+                Up = ToBool(w["up"]),
+                Role = ToNum(w["priority"]) is double p ? (p <= 1 ? "Primary" : "Backup") : "",
+                UptimePct = Round1(ToNum(w["uptime"])),
+                Issues = (int)(ToNum(w["issues"]) ?? 0),
+            })).ToList();
+            var uptimes = sites.Select(s => ToNum(s["wanUptime"])).Where(v => v != null).Select(v => v!.Value).ToList();
+            var dayAgo = new DateTimeOffset(now.AddHours(-24), TimeSpan.Zero);
+            var series = isp.Select(i => (Site: i, Points: i["points"]!.AsArray()
+                    .Select(p => (T: ParseDate(ToStr(p!["t"])), Latency: ToNum(p["latency"]), Max: ToNum(p["maxLatency"]), Loss: ToNum(p["loss"])))
+                    .Where(p => p.T >= dayAgo)
+                    .OrderBy(p => p.T)
+                    .ToList()))
+                .ToList();
+            var latencies = series.SelectMany(s => s.Points).Where(p => p.Latency != null).Select(p => p.Latency!.Value).ToList();
+            var latest = series.Select(s => s.Points.LastOrDefault(p => p.Latency != null).Latency).Where(v => v != null).Select(v => v!.Value).ToList();
+            var losses = series.SelectMany(s => s.Points).Where(p => p.Loss != null).Select(p => p.Loss!.Value).ToList();
+            var internet = new DTOs.Dashboard.NetworkInternetDto
+            {
+                Lines = lines,
+                LinesTotal = lines.Count,
+                LinesUp = lines.Count(l => l.Up),
+                UptimePct = uptimes.Count > 0 ? Round1(uptimes.Min()) : null,
+                LatencyMs = latest.Count > 0 ? Round1(latest.Max()) : null,
+                LatencyAvgMs = latencies.Count > 0 ? Round1(latencies.Average()) : null,
+                LossMaxPct = losses.Count > 0 ? Round1(losses.Max()) : null,
+                Latency = series.Where(s => s.Points.Count > 0).Select(s =>
+                {
+                    var step = TimeSpan.FromMinutes(15);
+                    var start = Floor(s.Points[0].T.UtcDateTime, 15);
+                    var groups = s.Points.GroupBy(p => (int)((p.T.UtcDateTime - start) / step)).OrderBy(g => g.Key);
+                    return new DTOs.Dashboard.NetworkLatencySeriesDto
+                    {
+                        SiteId = ToStr(s.Site["siteId"]),
+                        Name = ToStr(s.Site["name"]),
+                        Points = groups.Select(g =>
+                        {
+                            var lat = g.Where(p => p.Latency != null).Select(p => p.Latency!.Value).ToList();
+                            var peaks = g.Select(p => p.Max ?? p.Latency).Where(v => v != null).Select(v => v!.Value).ToList();
+                            var loss = g.Where(p => p.Loss != null).Select(p => p.Loss!.Value).ToList();
+                            return new DTOs.Dashboard.NetworkLatencyPointDto
+                            {
+                                T = Iso(start + step * g.Key),
+                                Avg = lat.Count > 0 ? Round1(lat.Average()) : null,
+                                Peak = peaks.Count > 0 ? Round1(peaks.Max()) : null,
+                                Loss = loss.Count > 0 ? Round1(loss.Max()) : null,
+                            };
+                        }).ToList(),
+                    };
+                }).ToList(),
+            };
+
+            // ---- issues (critical / serious only: offline devices, lines down, loss) ----
+            var alerts = BuildAlerts(sites, devices, isp)
+                .Select(a => a!.AsObject())
+                .Where(a => ToStr(a["level"]) is "critical" or "serious")
+                .Select(a => new DTOs.Dashboard.NetworkAlertDto { Level = ToStr(a["level"]), Text = ToStr(a["text"]), Where = ToStr(a["where"]) })
+                .ToList();
+
+            // ---- clients by type: the console's client list (cached; the Clients page uses the same call) ----
+            var types = new DTOs.Dashboard.NetworkClientTypesDto();
+            var consoleSite = ConsoleSiteId();
+            if (consoleSite == null || !ids.Contains(consoleSite))
+            {
+                types.Message = "Client types are not available for this network.";
+            }
+            else
+            {
+                var task = NetClients();
+                if (await Task.WhenAny(task, Task.Delay(clientsWait)) != task)
+                {
+                    _ = task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                    types.Message = "Client types are still loading. They show at the next refresh.";
+                }
+                else if (task.IsFaulted || task.IsCanceled)
+                {
+                    _logger.LogWarning("[unifi dashboard] client list unavailable: {Error}", task.Exception?.GetBaseException().Message);
+                    types.Message = "Client types could not be read right now.";
+                }
+                else
+                {
+                    var list = task.Result;
+                    types.Available = true;
+                    types.Total = list.Count;
+                    types.Items = list.GroupBy(ClientKind)
+                        .Select(g =>
+                        {
+                            var wired = g.Count(c => Truthy(P(c, "is_wired")));
+                            return new DTOs.Dashboard.NetworkClientTypeDto
+                            {
+                                Kind = g.Key, Label = Kinds[g.Key], Count = g.Count(), Wired = wired, Wifi = g.Count() - wired,
+                            };
+                        })
+                        .OrderByDescending(x => x.Count).ThenBy(x => x.Label, LocaleCompare)
+                        .ToList();
+                }
+            }
+
+            return new DTOs.Dashboard.NetworkDashboardDto
+            {
+                Clients = clients,
+                Devices = devicesDto,
+                ClientTypes = types,
+                History = historyDto,
+                Internet = internet,
+                Alerts = alerts,
+            };
+        }
+
+        // =====================================================================
         // JSON helpers (JavaScript semantics: `?.`, `??`, `||`, truthiness)
         // =====================================================================
 

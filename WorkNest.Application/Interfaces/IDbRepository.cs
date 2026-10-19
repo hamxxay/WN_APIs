@@ -536,6 +536,16 @@ namespace WorkNest.Application.Interfaces
         /// <summary>WN_UNIFI_Settings (key / value). Null when missing or the table isn't created yet.</summary>
         Task<string?> GetUnifiSettingDbAsync(string key);
         Task SetUnifiSettingDbAsync(string key, string? value, string? updatedBy);
+        /// <summary>
+        /// dbo.WN_UNIFI_SiteLocations_GetAll (script NET_01_unifi_site_locations): the locations each UniFi site serves.
+        /// Throws <see cref="UnifiSiteLocationsMissingException"/> before NET_01 has run (SQL error 208 / 2812).
+        /// </summary>
+        Task<IReadOnlyList<(string SiteId, int LocationId)>> GetUnifiSiteLocationsDbAsync();
+        /// <summary>
+        /// dbo.WN_UNIFI_SiteLocations_Set: the site serves exactly these locations (empty = none of its own: the network-wide
+        /// setting applies). Unknown location ids are skipped. Throws <see cref="UnifiSiteLocationsMissingException"/> before NET_01.
+        /// </summary>
+        Task SetUnifiSiteLocationsDbAsync(string siteId, string? siteName, IReadOnlyCollection<int> locationIds, string? updatedBy);
 
         // --- KYC Portal ---
         Task<IEnumerable<WorkNest.Domain.Entities.KYCDocumentType>> GetActiveKycDocumentTypesDbAsync(string? category = null);

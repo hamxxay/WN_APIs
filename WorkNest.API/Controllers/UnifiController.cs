@@ -20,6 +20,7 @@ namespace WorkNest.API.Controllers
     public class UnifiController : ControllerBase
     {
         private static readonly Regex DeviceMacRe = new("^[0-9a-fA-F:.-]+$");
+        private static readonly Regex SiteIdRe = new("^[0-9A-Za-z_-]{1,64}$");
 
         private readonly IUnifiService _unifi;
         private readonly ILogger<UnifiController> _logger;
@@ -252,6 +253,42 @@ namespace WorkNest.API.Controllers
             if (!await _unifi.SetLocationIdsAsync(ids, email))
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "The setting could not be saved. Run WN_UNIFI_Settings.txt to create its table." });
             return Ok(new { locationIds = await _unifi.GetLocationIdsAsync(), allowed = true, canEdit = true });
+        }
+
+        /// <summary>
+        /// Each UniFi site and the WorkNest locations it serves ("Sites and locations" on Network Overview; the CEO and Sales Manager
+        /// dashboards show a site's network under these locations). A site without its own setting uses the network-wide
+        /// one (the location chip); none at all = every location. available = false before NET_01 has run.
+        /// </summary>
+        [HttpGet("api/unifi/site-locations")]
+        public async Task<IActionResult> GetSiteLocations([FromServices] INetworkDashboardService network) =>
+            Ok(await network.GetSiteLocationsAsync(User.IsSuperAdmin()));
+
+        /// <summary>
+        /// Saves the locations one site serves: body { locationIds: [2] }; empty = use the network-wide setting again.
+        /// Super admin only; recorded in WN_AuditLog. 404 for a site not on the network; 503 before NET_01 has run.
+        /// </summary>
+        [HttpPut("api/unifi/site-locations/{siteId}")]
+        [AnyUnifiLocation]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
+        public async Task<IActionResult> SetSiteLocations(string siteId, [FromBody] JsonElement body, [FromServices] INetworkDashboardService network)
+        {
+            if (!SiteIdRe.IsMatch(siteId ?? "")) return NotFound(new { error = "This site is not on the network." });
+            if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("locationIds", out var arr) || arr.ValueKind != JsonValueKind.Array)
+                return BadRequest(new { error = "Choose the locations this site serves." });
+            var ids = arr.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.Number && x.TryGetInt32(out var n) && n > 0)
+                .Select(x => x.GetInt32()).Distinct().Take(100).ToList();
+            var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
+            try
+            {
+                var result = await network.SetSiteLocationsAsync(siteId!, ids, email);
+                return result == null ? NotFound(new { error = "This site is not on the network any more. Refresh the page." }) : Ok(result);
+            }
+            catch (UnifiSiteLocationsMissingException ex)
+            {
+                _logger.LogWarning("Site locations saved before the database update NET_01: {Error}", ex.InnerException?.Message);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = ex.Message });
+            }
         }
 
         /// <summary>Latest MAC filter changes (who, what, when, why), optionally for one SSID (wlanId) or one MAC.</summary>
