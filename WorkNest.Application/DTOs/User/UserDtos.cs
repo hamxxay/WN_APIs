@@ -33,6 +33,8 @@ namespace WorkNest.Application.DTOs.User
         public string? CnicOrPassport { get; set; }
         public string? AvatarUrl { get; set; }
         public string? Notes { get; set; }
+        /// <summary>New WorkNest password (Users page, edit). Empty = keep the current one. Saved by WN_Users_SetPassword (PW_01).</summary>
+        public string? Password { get; set; }
     }
 
     public class UserRoleUpdateRequest
