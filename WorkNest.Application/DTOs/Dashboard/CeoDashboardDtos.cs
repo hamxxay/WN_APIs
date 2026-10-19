@@ -165,17 +165,30 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int Count { get; set; }
     }
 
+    /// <summary>
+    /// Team section: the sales executives only (WN_Users.RoleId 16, active; 19 Oct 2026: no admins or other roles), each
+    /// with their revenue. With a location chosen: the sales executives of that location (WN_Users.LocationId or
+    /// WN_UserLocations) and only their quotations on that location's spaces.
+    /// </summary>
     public class CeoTeamDto
     {
         public List<CeoTeamLocationDto> PerLocation { get; set; } = new();
+        /// <summary>Sales executives, highest revenue first (then converted, quotations, name).</summary>
         public List<CeoTeamPersonDto> People { get; set; } = new();
+        /// <summary>How many sales executives <see cref="People"/> lists.</summary>
+        public int SalesExecutives { get; set; }
+        /// <summary>Their revenue together (the sum of <see cref="CeoTeamPersonDto.Revenue"/>), PKR.</summary>
+        public decimal Revenue { get; set; }
     }
 
+    /// <summary>
+    /// One location: its sales executives and the quotations created in the period on its spaces (by anyone, as the
+    /// sales funnel), how many converted.
+    /// </summary>
     public class CeoTeamLocationDto
     {
         public int LocationId { get; set; }
         public string Name { get; set; } = "";
-        public int Admins { get; set; }
         public int SalesExecutives { get; set; }
         public int Quotations { get; set; }
         public int Converted { get; set; }
@@ -184,12 +197,20 @@ namespace WorkNest.Application.DTOs.Dashboard
     public class CeoTeamPersonDto
     {
         public int UserId { get; set; }
+        /// <summary>WN_Users.Name.</summary>
         public string Name { get; set; } = "";
-        /// <summary>Admin | Sales Executive</summary>
+        /// <summary>WN_Roles.DisplayName of the sales executive role ("" when the role list cannot be read).</summary>
         public string Role { get; set; } = "";
         public string? Locations { get; set; }
         public int Quotations { get; set; }
         public int Converted { get; set; }
+        /// <summary>
+        /// Revenue, PKR: the total (WN_Quotations.TotalAmount, the contract value) of the quotations this person created
+        /// in the period that were converted to a booking (Status Converted) - the dashboard's "converted value", as on
+        /// the super admin staff overview and the sales executive's own dashboard. Same figure as <see cref="ConvertedValue"/>.
+        /// </summary>
+        public decimal Revenue { get; set; }
+        /// <summary>Same as <see cref="Revenue"/> (the name older app builds read).</summary>
         public decimal ConvertedValue { get; set; }
     }
 

@@ -19,6 +19,7 @@ namespace WorkNest.Application.Services
     /// Period: month | quarter | year (to date) or, since CS_01, custom: a day range (from / to on the dashboard and the
     /// rooms; periodFrom / periodTo on the drill-down, where from / to narrow a list), compared with the same number of
     /// days just before it (<see cref="DashboardPeriod"/>). Only a custom range reaches the procedures as @From / @To.
+    /// Team (19 Oct 2026): only the sales executives, each with their revenue (<see cref="TeamOf"/>).
     /// </summary>
     public class CeoDashboardService : ICeoDashboardService
     {
@@ -44,12 +45,15 @@ namespace WorkNest.Application.Services
         private readonly ICeoDashboardRepository _repo;
         private readonly IOrderStatusService _orderStatus;
         private readonly IBusinessClock _clock;
+        private readonly IRoleService? _roles;
 
-        public CeoDashboardService(ICeoDashboardRepository repo, IOrderStatusService orderStatus, IBusinessClock clock)
+        public CeoDashboardService(ICeoDashboardRepository repo, IOrderStatusService orderStatus, IBusinessClock clock,
+            IRoleService? roles = null)
         {
             _repo = repo;
             _orderStatus = orderStatus;
             _clock = clock;
+            _roles = roles;
         }
 
         // ------------------------------------------------------------------ level 1: dashboard
@@ -151,23 +155,51 @@ namespace WorkNest.Application.Services
                 // A location chosen, but the procedure counted every location's inquiries (QA_07 not run).
                 InquiriesAllLocations = Location(locationId) != null && !Flag(sales, "InqByLocation")
             };
-            dto.Team = new CeoTeamDto
-            {
-                PerLocation = Set(s, 11).Select(r => new CeoTeamLocationDto
-                {
-                    LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "", Admins = Int(r, "Admins"),
-                    SalesExecutives = Int(r, "SalesExecutives"), Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted")
-                }).ToList(),
-                People = Set(s, 12).Select(r => new CeoTeamPersonDto
-                {
-                    UserId = Int(r, "UserId"), Name = Str(r, "Name") ?? "",
-                    Role = Int(r, "RoleId") == WorkNest.Common.Constants.Roles.AdminId ? "Admin" : "Sales Executive",
-                    Locations = Str(r, "Locations"), Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"),
-                    ConvertedValue = Dec(r, "ConvertedValue")
-                }).ToList()
-            };
+            dto.Team = TeamOf(Set(s, 11), Set(s, 12), await SalesExecutiveRoleAsync());
             return ApiResponse.Ok(dto);
         }
+
+        /// <summary>
+        /// The Team section (19 Oct 2026): only the sales executives. [12] lists the active admins and sales executives
+        /// (of the chosen location, with their quotations on its spaces); everyone but the sales executives (RoleId 16)
+        /// is left out here, so the CMS and the app get the same list. Revenue = their converted value (the total of the
+        /// quotations they created in the period that were converted). Ranked by revenue, converted, quotations, name.
+        /// The per-location rows keep their sales executive count and the location's quotations (no admin count).
+        /// </summary>
+        public static CeoTeamDto TeamOf(IEnumerable<IDictionary<string, object?>> perLocation, IEnumerable<IDictionary<string, object?>> people,
+            string? salesExecutiveRole)
+        {
+            var list = people
+                .Where(r => Int(r, "RoleId") == WorkNest.Common.Constants.Roles.SalesExecutiveId)
+                .Select(r =>
+                {
+                    var revenue = Dec(r, "ConvertedValue");
+                    return new CeoTeamPersonDto
+                    {
+                        UserId = Int(r, "UserId"), Name = Str(r, "Name") ?? "", Role = salesExecutiveRole ?? "",
+                        Locations = Str(r, "Locations"), Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"),
+                        Revenue = revenue, ConvertedValue = revenue
+                    };
+                })
+                .OrderByDescending(p => p.Revenue).ThenByDescending(p => p.Converted).ThenByDescending(p => p.Quotations)
+                .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ThenBy(p => p.UserId)
+                .ToList();
+            return new CeoTeamDto
+            {
+                PerLocation = perLocation.Select(r => new CeoTeamLocationDto
+                {
+                    LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "", SalesExecutives = Int(r, "SalesExecutives"),
+                    Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted")
+                }).ToList(),
+                People = list,
+                SalesExecutives = list.Count,
+                Revenue = list.Sum(p => p.Revenue)
+            };
+        }
+
+        /// <summary>WN_Roles.DisplayName of the sales executive role; null when there is no role list.</summary>
+        private async Task<string?> SalesExecutiveRoleAsync() =>
+            _roles == null ? null : await _roles.GetDisplayNameAsync(WorkNest.Common.Constants.Roles.SalesExecutiveId);
 
         // ------------------------------------------------------------------ level 2: breakdown
 

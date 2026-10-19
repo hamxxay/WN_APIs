@@ -74,7 +74,11 @@ namespace WorkNest.Application.DTOs.Dashboard
 
     public class SalesManagerTeamDto
     {
-        /// <summary>Admins and sales executives of the locations, ranked by desks sold, converted, quotations, name.</summary>
+        /// <summary>
+        /// The sales executives under the manager (19 Oct 2026: no admins or other roles): active users with the sales
+        /// executive role (WN_Users.RoleId 16) working at the manager's assigned locations (WN_Users.LocationId or
+        /// WN_UserLocations; the chosen location only, when one is chosen). Ranked by desks sold, converted, quotations, name.
+        /// </summary>
         public List<SalesManagerPersonDto> People { get; set; } = new();
         public List<SalesManagerTeamLocationDto> PerLocation { get; set; } = new();
     }
@@ -84,7 +88,7 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int UserId { get; set; }
         /// <summary>WN_Users.Name.</summary>
         public string Name { get; set; } = "";
-        /// <summary>WN_Roles.DisplayName of the person's role (e.g. "Sales Executive", "Admin").</summary>
+        /// <summary>WN_Roles.DisplayName of the person's role (the sales executive role).</summary>
         public string Role { get; set; } = "";
         public string? Locations { get; set; }
         /// <summary>Tour inquiries the person gave feedback on in the period.</summary>

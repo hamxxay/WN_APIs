@@ -110,7 +110,11 @@ namespace WorkNest.Application.Services
                 },
                 Team = new SalesManagerTeamDto
                 {
-                    People = Set(s, 3).Select(r => new SalesManagerPersonDto
+                    // 19 Oct 2026: only the sales executives under the manager. [3] lists the active admins and sales
+                    // executives working at the locations in scope (WN_Users.LocationId or WN_UserLocations = the
+                    // manager's assigned locations, or the one chosen); everyone but the sales executives is left out
+                    // here, so the CMS and the app get the same list. The procedure's ranking is kept.
+                    People = Set(s, 3).Where(IsSalesExecutive).Select(r => new SalesManagerPersonDto
                     {
                         UserId = Int(r, "UserId"), Name = Str(r, "Name") ?? "", Role = Str(r, "RoleName") ?? "",
                         Locations = Str(r, "Locations"), InquiriesHandled = Int(r, "InquiriesHandled"),
@@ -548,6 +552,10 @@ namespace WorkNest.Application.Services
 
         private const string MonthError = "month must be yyyy-MM (e.g. 2026-10).";
         private const string TypeError = "type must be Website, WhatsApp, WalkIn, Reference or NotSet.";
+
+        /// <summary>A team row of a sales executive (WN_Users.RoleId 16); admins and every other role are left out.</summary>
+        private static bool IsSalesExecutive(IDictionary<string, object?> r) =>
+            Int(r, "RoleId") == WorkNest.Common.Constants.Roles.SalesExecutiveId;
 
         private static SalesManagerLeaseDto Lease(IDictionary<string, object?> r) => new()
         {
