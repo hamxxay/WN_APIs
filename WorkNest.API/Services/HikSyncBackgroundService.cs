@@ -18,13 +18,16 @@ namespace WorkNest.API.Services
         private readonly IBusinessClock _clock;
         private readonly HikSyncOptions _options;
         private readonly ILogger<HikSyncBackgroundService> _logger;
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips each loop's work
 
-        public HikSyncBackgroundService(IHikSyncService sync, IBusinessClock clock, HikSyncOptions options, ILogger<HikSyncBackgroundService> logger)
+        public HikSyncBackgroundService(IHikSyncService sync, IBusinessClock clock, HikSyncOptions options, ILogger<HikSyncBackgroundService> logger,
+            IServiceSwitch serviceSwitch)
         {
             _sync = sync;
             _clock = clock;
             _options = options;
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.HikSync, logger);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -37,10 +40,13 @@ namespace WorkNest.API.Services
             _logger.LogInformation("HIK sync started: watcher every 90s, maintenance every 5 min, online check every 2 min, clock sync daily 04:00.");
 
             try { await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken); } catch (OperationCanceledException) { return; }
-            await _sync.RunJobAsync(HikSyncService.JobOnline);
-            await _sync.RunJobAsync(HikSyncService.JobClock);
-            await _sync.RunJobAsync(HikSyncService.JobCredentials);
-            await _sync.RunJobAsync(HikSyncService.JobWatch);
+            if (await _gate.IsOnAsync(stoppingToken))
+            {
+                await _sync.RunJobAsync(HikSyncService.JobOnline);
+                await _sync.RunJobAsync(HikSyncService.JobClock);
+                await _sync.RunJobAsync(HikSyncService.JobCredentials);
+                await _sync.RunJobAsync(HikSyncService.JobWatch);
+            }
 
             await Task.WhenAll(
                 Every(TimeSpan.FromMinutes(2), HikSyncService.JobOnline, stoppingToken),
@@ -56,7 +62,7 @@ namespace WorkNest.API.Services
             {
                 while (await timer.WaitForNextTickAsync(ct))
                 {
-                    try { await _sync.RunJobAsync(job); }
+                    try { if (await _gate.IsOnAsync(ct)) await _sync.RunJobAsync(job); }
                     catch (Exception ex) { _logger.LogError(ex, "HIK sync job {Job} crashed", job); }
                 }
             }
@@ -71,7 +77,7 @@ namespace WorkNest.API.Services
                 var next = now.Date.AddHours(4);
                 if (next <= now) next = next.AddDays(1);
                 try { await Task.Delay(next - now, ct); } catch (OperationCanceledException) { return; }
-                try { await _sync.RunJobAsync(HikSyncService.JobClock); }
+                try { if (await _gate.IsOnAsync(ct)) await _sync.RunJobAsync(HikSyncService.JobClock); }
                 catch (Exception ex) { _logger.LogError(ex, "HIK clock sync crashed"); }
             }
         }

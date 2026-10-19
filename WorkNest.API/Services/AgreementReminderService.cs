@@ -26,13 +26,16 @@ namespace WorkNest.API.Services
         private readonly TimeSpan _failureHoldBack = TimeSpan.FromHours(6);
         private const int SendFromHour = 9;   // 09:00 Pakistan time
         private const int SendUntilHour = 20; // up to 20:00 Pakistan time
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
 
         // AgreementId -> UTC time until which it is not retried after a failure.
         private readonly Dictionary<int, DateTime> _heldBackUntilUtc = new();
 
-        public AgreementReminderService(ILogger<AgreementReminderService> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration, IBusinessClock clock)
+        public AgreementReminderService(ILogger<AgreementReminderService> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration, IBusinessClock clock,
+            IServiceSwitch serviceSwitch)
         {
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.AgreementReminders, logger);
             _scopeFactory = scopeFactory;
             _configuration = configuration;
             _clock = clock;
@@ -68,7 +71,7 @@ namespace WorkNest.API.Services
                 {
                     var options = ReadOptions();
                     int hour = _clock.Now.Hour;
-                    if (options.Enabled && hour >= SendFromHour && hour < SendUntilHour)
+                    if (options.Enabled && await _gate.IsOnAsync(stoppingToken) && hour >= SendFromHour && hour < SendUntilHour)
                         await RunOnceAsync(options, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

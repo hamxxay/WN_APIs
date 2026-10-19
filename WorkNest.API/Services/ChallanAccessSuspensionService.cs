@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 
 namespace WorkNest.API.Services
 {
@@ -19,10 +20,13 @@ namespace WorkNest.API.Services
         private readonly bool _enabled;
         private readonly TimeSpan _checkInterval = TimeSpan.FromHours(1);
         private readonly TimeSpan _startupDelay = TimeSpan.FromMinutes(2);
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
 
-        public ChallanAccessSuspensionService(ILogger<ChallanAccessSuspensionService> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration)
+        public ChallanAccessSuspensionService(ILogger<ChallanAccessSuspensionService> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration,
+            IServiceSwitch serviceSwitch)
         {
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.ChallanAccessSuspension, logger);
             _scopeFactory = scopeFactory;
             _enabled = !string.Equals(configuration["HikAccessSuspension:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
         }
@@ -42,10 +46,13 @@ namespace WorkNest.API.Services
             {
                 try
                 {
-                    using var scope = _scopeFactory.CreateScope();
-                    var suspension = scope.ServiceProvider.GetRequiredService<IHikAccessSuspensionService>();
-                    var applied = await suspension.RunAccessSuspensionCycleAsync(stoppingToken);
-                    _logger.LogInformation("Challan access suspension cycle complete. {Count} booking(s) updated on the machines.", applied);
+                    if (await _gate.IsOnAsync(stoppingToken))
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var suspension = scope.ServiceProvider.GetRequiredService<IHikAccessSuspensionService>();
+                        var applied = await suspension.RunAccessSuspensionCycleAsync(stoppingToken);
+                        _logger.LogInformation("Challan access suspension cycle complete. {Count} booking(s) updated on the machines.", applied);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {

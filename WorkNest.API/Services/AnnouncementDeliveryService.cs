@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.DTOs.Announcement;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 
 namespace WorkNest.API.Services
 {
@@ -20,12 +21,15 @@ namespace WorkNest.API.Services
         private readonly ILogger<AnnouncementDeliveryService> _logger;
         private readonly IServiceProvider _serviceProvider;
         private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(20);
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
 
         public AnnouncementDeliveryService(
             ILogger<AnnouncementDeliveryService> logger,
-            IServiceProvider serviceProvider)
+            IServiceProvider serviceProvider,
+            IServiceSwitch serviceSwitch)
         {
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.AnnouncementDelivery, logger);
             _serviceProvider = serviceProvider;
         }
 
@@ -37,7 +41,8 @@ namespace WorkNest.API.Services
             {
                 try
                 {
-                    await ProcessPendingDeliveriesAsync(stoppingToken);
+                    if (await _gate.IsOnAsync(stoppingToken))
+                        await ProcessPendingDeliveriesAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {
