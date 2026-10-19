@@ -554,6 +554,11 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptUnpaidInvoicesDbAsync(string? search, int? locationId, string? allowedLocationIds, int top);
         Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptAccountsDbAsync(int? companyId);
         /// <summary>amount: the amount received (FR_01 part payments); null = the invoice's whole balance (works before FR_01 too).</summary>
+        /// <summary>
+        /// The invoice's type and what is left to pay on it (net of WHT, never below 0, 2 decimals), by its public id;
+        /// null when there is no such invoice. Used to keep custom invoices (InvoiceTypeId 7) to full payments.
+        /// </summary>
+        Task<(int InvoiceTypeId, decimal Balance)?> GetFeeReceiptInvoiceBalanceDbAsync(Guid invoiceIdGuid);
         Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null);
         Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds);
         Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds);

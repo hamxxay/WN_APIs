@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
 
 namespace WorkNest.API.Services
@@ -23,13 +24,16 @@ namespace WorkNest.API.Services
         private readonly string _connectionString;
         private readonly IServiceProvider _serviceProvider;
         private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(5);
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
 
         public InvoiceDeliveryRetryService(
             ILogger<InvoiceDeliveryRetryService> logger,
             IConfiguration configuration,
-            IServiceProvider serviceProvider)
+            IServiceProvider serviceProvider,
+            IServiceSwitch serviceSwitch)
         {
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.InvoiceDeliveryRetry, logger);
             _connectionString = configuration.GetConnectionString("DefaultConnection") 
                 ?? throw new InvalidOperationException("DefaultConnection string is missing.");
             _serviceProvider = serviceProvider;
@@ -43,7 +47,8 @@ namespace WorkNest.API.Services
             {
                 try
                 {
-                    await ProcessPendingDeliveryQueueAsync(stoppingToken);
+                    if (await _gate.IsOnAsync(stoppingToken))
+                        await ProcessPendingDeliveryQueueAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {

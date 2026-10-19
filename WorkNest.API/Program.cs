@@ -164,7 +164,13 @@ try
                        role == "1" ||
                        role == "2";
             }));
+
+        // Custom invoices (api/custom-invoices/*): a super admin, or an admin a super admin gave the CustomInvoice
+        // permission (dbo.WN_UserPermissions, script CI_01_custom_invoice; cached 30 s per user, cleared on a change).
+        options.AddPolicy(CustomInvoiceAccessPolicy.Name, policy =>
+            policy.RequireAuthenticatedUser().AddRequirements(new CustomInvoiceAccessRequirement()));
     });
+    builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, CustomInvoiceAccessHandler>();
 
     // ── Infrastructure Services ───────────────────────────────────────────────
     builder.Services.AddHttpContextAccessor();
@@ -279,6 +285,15 @@ try
     builder.Services.AddScoped<IKycService, KycService>();
     builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();
     builder.Services.AddSingleton<IUnifiService, UnifiService>();
+    // On/off switch per background service (api/admin/services, super admin): dbo.WN_ServiceSwitches (script
+    // SS_01_service_switches), cached 10 s. Singletons, because the hosted services below check them every cycle.
+    builder.Services.AddSingleton<IServiceSwitchRepository, WorkNest.Infrastructure.Repositories.ServiceSwitchRepository>();
+    builder.Services.AddSingleton<IServiceSwitch, ServiceSwitchService>();
+    // Custom invoices (api/custom-invoices/*, super admin + permitted admins): dbo.WN_CustomInvoice_* and
+    // dbo.WN_UserPermissions_* (script CI_01_custom_invoice); before CI_01 the calls answer 503 "Database update needed".
+    builder.Services.AddScoped<ICustomInvoiceRepository, WorkNest.Infrastructure.Repositories.CustomInvoiceRepository>();
+    builder.Services.AddScoped<ICustomInvoiceAccessService, CustomInvoiceAccessService>();
+    builder.Services.AddScoped<ICustomInvoiceService, CustomInvoiceService>();
 
 
     // ── Background Hosted Services ────────────────────────────────────────────

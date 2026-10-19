@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 
 namespace WorkNest.API.Services
 {
@@ -19,10 +20,13 @@ namespace WorkNest.API.Services
         private readonly bool _enabled;
         private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(5);
         private readonly TimeSpan _startupDelay = TimeSpan.FromSeconds(30);
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
 
-        public BookingAutoConfirmService(ILogger<BookingAutoConfirmService> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration)
+        public BookingAutoConfirmService(ILogger<BookingAutoConfirmService> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration,
+            IServiceSwitch serviceSwitch)
         {
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.BookingAutoConfirm, logger);
             _scopeFactory = scopeFactory;
             _enabled = !string.Equals(configuration["BookingAutoConfirm:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
         }
@@ -42,11 +46,14 @@ namespace WorkNest.API.Services
             {
                 try
                 {
-                    using var scope = _scopeFactory.CreateScope();
-                    var bookings = scope.ServiceProvider.GetRequiredService<IBookingService>();
-                    var confirmed = await bookings.ConfirmPaidBookingsAsync();
-                    if (confirmed.Count > 0)
-                        _logger.LogInformation("Booking auto-confirm: {Count} paid booking(s) confirmed: {Ids}", confirmed.Count, string.Join(", ", confirmed));
+                    if (await _gate.IsOnAsync(stoppingToken))
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var bookings = scope.ServiceProvider.GetRequiredService<IBookingService>();
+                        var confirmed = await bookings.ConfirmPaidBookingsAsync();
+                        if (confirmed.Count > 0)
+                            _logger.LogInformation("Booking auto-confirm: {Count} paid booking(s) confirmed: {Ids}", confirmed.Count, string.Join(", ", confirmed));
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
