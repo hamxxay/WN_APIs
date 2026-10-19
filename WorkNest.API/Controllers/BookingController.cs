@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.Lists;
 using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -69,6 +70,12 @@ namespace WorkNest.API.Controllers
             [FromQuery] int? locationId = null) =>
             Ok(await _bookings.GetSmartAvailableSpacesAsync(categoryCode, startOn, endOn, capacity, shiftType, locationId is > 0 ? locationId : null));
 
+        /// <summary>Choices of the Bookings list Status filter (dbo.WN_BookingStatuses), [{ value, label }].</summary>
+        [HttpGet("api/booking/statuses")]
+        [Authorize(Roles = StaffRoles)]
+        public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
+            ListFilterResults.StatusOptionsAsync(lists, ListFilterRules.Bookings);
+
         [HttpGet("api/booking/my")]
         public async Task<IActionResult> MyBookings()
         {
@@ -105,14 +112,29 @@ namespace WorkNest.API.Controllers
             return BadRequest(new { isSuccessful = false, message = "Invalid spaceId" });
         }
 
+        // status (a WN_BookingStatuses id from api/booking/statuses), from / to (start date, business dates, both
+        // included): only then the LST_01 procedure is used; without them the list is read exactly as before.
         [HttpGet("api/booking")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
+            [FromServices] IListFilterService lists,
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null,
-            [FromQuery] int? locationId = null)
+            [FromQuery] int? locationId = null,
+            [FromQuery] string? status = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
         {
+            var filter = new ListFilter { Status = status, From = from, To = to };
+            if (filter.HasStatusOrDates)
+                return await ListFilterResults.RunAsync(async () =>
+                {
+                    var (rows, count) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit,
+                        (p, l, loc) => lists.GetBookingsAsync(p, l, search, loc, filter));
+                    return Ok(new PaginatedResponse<object> { Data = rows, Total = count });
+                });
+
             var (items, total) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit,
                 (p, l, loc) => _bookings.GetBookingsAsync(p, l, search, loc));
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });

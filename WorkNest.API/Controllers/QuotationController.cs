@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WorkNest.Application.DTOs.Lists;
 using WorkNest.Application.DTOs.Quotation;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
@@ -197,18 +199,39 @@ namespace WorkNest.API.Controllers
             return Ok(ApiResponse.Ok(res));
         }
 
+        // status (a quotation status from api/quotation/statuses), from / to (quotation date, both included): only then
+        // the LST_01 procedure is used; without them the list is read exactly as before.
         [HttpGet("api/quotation")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> GetList(
+            [FromServices] IListFilterService lists,
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null,
-            [FromQuery] int? locationId = null)
+            [FromQuery] int? locationId = null,
+            [FromQuery] string? status = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
         {
+            var filter = new ListFilter { Status = status, From = from, To = to };
+            if (filter.HasStatusOrDates)
+                return await ListFilterResults.RunAsync(async () =>
+                {
+                    var (items, count) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit,
+                        (p, l, loc) => lists.GetQuotationsAsync(p, l, search, loc, filter));
+                    return Ok(new { data = items, total = count, page = page, limit = limit });
+                });
+
             var (rows, total) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit,
                 (p, l, loc) => _quotations.GetQuotationsAsync(p, l, search, loc));
             return Ok(new { data = rows, total = total, page = page, limit = limit });
         }
+
+        /// <summary>Choices of the Quotations list Status filter (the statuses the quotations have), [{ value, label }].</summary>
+        [HttpGet("api/quotation/statuses")]
+        [Authorize(Roles = StaffRoles)]
+        public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
+            ListFilterResults.StatusOptionsAsync(lists, ListFilterRules.Quotations);
 
         [HttpGet("api/quotation/history")]
         [Authorize(Roles = StaffRoles)]

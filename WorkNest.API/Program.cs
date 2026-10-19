@@ -231,6 +231,10 @@ try
     // access itself reuses the attendants, customer-employees and Hikvision enrolment services below.
     builder.Services.AddScoped<IAccessOfficerRepository, WorkNest.Infrastructure.Repositories.AccessOfficerRepository>();
     builder.Services.AddScoped<IAccessOfficerService, AccessOfficerService>();
+    // Admin list filters + Excel export (status / date range / location on api/booking, quotation, invoice, payment,
+    // customer and their .../statuses): new procedures of script LST_01_list_filters, used only when a filter is chosen.
+    builder.Services.AddScoped<IListFilterRepository, WorkNest.Infrastructure.Repositories.ListFilterRepository>();
+    builder.Services.AddScoped<IListFilterService, ListFilterService>();
     // Delete your own account (api/account/delete-check, api/account/delete; Google Play rule): customers only, through
     // dbo.WN_Account_Delete (script QA_04_account_delete); before QA_04 the check answers "not available yet".
     builder.Services.AddScoped<IAccountDeletionRepository, WorkNest.Infrastructure.Repositories.AccountDeletionRepository>();
