@@ -83,8 +83,13 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public decimal BalanceAmount { get; set; }
         /// <summary>Unpaid | Partial | Paid.</summary>
         public string PaymentStatus { get; set; } = "Unpaid";
-        /// <summary>False for withholding-tax invoices (paid in full only) and before the database update FR_01.</summary>
+        /// <summary>
+        /// False for withholding-tax invoices and custom invoices (InvoiceTypeId 7), which are paid in full only, and before
+        /// the database update FR_01.
+        /// </summary>
         public bool AllowPartial { get; set; }
+        /// <summary>A custom invoice (InvoiceTypeId 7, script CI_01): paid in full only, in one receipt.</summary>
+        public bool IsCustom { get; set; }
     }
 
     public class FeeReceiptAccountDto
