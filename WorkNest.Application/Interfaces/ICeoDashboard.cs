@@ -127,7 +127,8 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Script CS_01_ceo_sales_dates (TEST / LIVE).</summary>
         public const string CustomRange = "CS_01";
 
+        /// <remarks>No ".sql" in it: the CMS and the app hide any message that mentions SQL.</remarks>
         public const string CustomRangeMessage =
-            "Database update needed: run CS_01_ceo_sales_dates_TEST.sql (LIVE: CS_01_ceo_sales_dates_LIVE.sql) to use a custom date range.";
+            "Database update needed: run the script CS_01_ceo_sales_dates_TEST (CS_01_ceo_sales_dates_LIVE on the live database) to use a custom date range.";
     }
 }

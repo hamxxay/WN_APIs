@@ -17,6 +17,9 @@ namespace WorkNest.Application.Helpers
         /// <summary>No custom range starts before this day.</summary>
         public static readonly DateTime Earliest = new(2000, 1, 1);
 
+        /// <summary>Pakistan time is UTC+5 all year (no daylight saving).</summary>
+        public const int PakistanUtcOffsetHours = 5;
+
         public const string PeriodError = "period must be month, quarter, year or custom.";
 
         private static readonly CultureInfo En = CultureInfo.InvariantCulture;
@@ -128,6 +131,14 @@ namespace WorkNest.Application.Helpers
                 ? $"{from.ToString("d MMM", En)} - {to.ToString("d MMM yyyy", En)}"
                 : $"{from.ToString("d MMM yyyy", En)} - {to.ToString("d MMM yyyy", En)}";
         }
+
+        /// <summary>
+        /// Custom: the range as UTC times, for columns written with SYSUTCDATETIME (bookings CreatedOn, quotations
+        /// CreatedDate, tour inquiries CreatedOn): from the start of <see cref="From"/> to the end of <see cref="To"/> in
+        /// Pakistan, i.e. 5 hours earlier (to is exclusive). Null for the calendar periods.
+        /// </summary>
+        public DateTime? UtcStart => IsCustom ? From!.Value.AddHours(-PakistanUtcOffsetHours) : null;
+        public DateTime? UtcEnd => IsCustom ? To!.Value.AddDays(1).AddHours(-PakistanUtcOffsetHours) : null;
 
         /// <summary>The range for a records title: "between 1 Oct 2026 and 15 Oct 2026" (custom only).</summary>
         public string BetweenWords() =>

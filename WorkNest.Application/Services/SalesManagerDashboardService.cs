@@ -610,7 +610,9 @@ namespace WorkNest.Application.Services
             if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out var p, out error)) return false;
             if (p.IsCustom)
             {
-                from = p.From; to = p.To!.Value.AddDays(1); label = p.BetweenWords();
+                // These lists filter on columns written in UTC (bookings CreatedOn, quotations CreatedDate, tour
+                // inquiries CreatedOn): the Pakistan days of the range as UTC times, as the dashboard counts them (CS_01).
+                from = p.UtcStart; to = p.UtcEnd; label = p.BetweenWords();
                 return true;
             }
             var period = p.Key;
