@@ -31,19 +31,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/customer/{id}")]
         public async Task<IActionResult> GetById(string id) =>
             Ok(await _customers.GetCustomerByIdAsync(id));
-
-        /// <summary>
-        /// Customer detail page (CMS /admin/customers/:id): summary figures, bookings, fee receipts, payments, agreements,
-        /// security deposits and an activity timeline (quotations and invoices have their own endpoints). Location-bound
-        /// staff get 404 for a customer of other locations (RecordScope on the class); 503 until CD_01 has run.
-        /// </summary>
-        [HttpGet("api/customer/{id:int}/overview")]
-        public async Task<IActionResult> Overview(int id)
-        {
-            var result = await _customers.GetCustomerOverviewAsync(id);
-            return StatusCode(result.StatusCode, result.Response);
-        }
-
+        
         [HttpPost("api/customer")]
         public async Task<IActionResult> Create([FromBody] CustomerRequest request) =>
             StatusCode(201, await _customers.CreateCustomerAsync(request, User.GetEmail()));
