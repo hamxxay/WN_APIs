@@ -14,10 +14,13 @@ namespace WorkNest.API.Controllers
     /// locations a Super Admin assigned (JWT location_id + location_ids, like an admin); tour inquiries by their branch
     /// (BR_02), plus the ones without a branch when no locationId is chosen (as complaints). Super admins may open them
     /// too (all locations). Common query parameters:
-    /// period = month (default) | quarter | year (to date, against the previous period, as the CEO dashboard) and
+    /// period = month (default) | quarter | year (to date, against the previous period, as the CEO dashboard) | custom
+    /// (CS_01: a day range, against the same number of days just before it; dashboard and complaints: from / to,
+    /// breakdown and records: periodFrom / periodTo, yyyy-MM-dd, at most 366 days, not after today) and
     /// locationId (one of the caller's locations; another location answers 403). No money: counts and desks only.
     /// Bad parameters answer 400; before the database update SM_01 (procedures) or SM_02 (desks) has run, 503; the
-    /// complaints endpoints answer 503 until SM_03 has run (the rest keeps working).
+    /// complaints endpoints answer 503 until SM_03 has run (the rest keeps working); a custom period answers 503 until
+    /// CS_01 has run (month / quarter / year keep working).
     /// </summary>
     [ApiController]
     [Authorize(Roles = "sales_manager,super_admin,SuperAdmin")]
@@ -35,8 +38,9 @@ namespace WorkNest.API.Controllers
 
         /// <summary>Level 1: sales funnel, team, tour inquiries, renewals and desks, plus the locations for the picker.</summary>
         [HttpGet("api/sales-manager/dashboard")]
-        public Task<IActionResult> Dashboard([FromQuery] string? period, [FromQuery] int? locationId) =>
-            Run(locationId, false, scope => _sales.GetDashboardAsync(period, scope));
+        public Task<IActionResult> Dashboard([FromQuery] string? period, [FromQuery] int? locationId,
+            [FromQuery] string? from = null, [FromQuery] string? to = null) =>
+            Run(locationId, false, scope => _sales.GetDashboardAsync(period, scope, from, to));
 
         /// <summary>
         /// Level 2: one chart element broken down. metric = funnel-month (month) | staff (userId) | inquiries-type (type)
@@ -69,13 +73,15 @@ namespace WorkNest.API.Controllers
         /// location named in its branch; the ones without a branch (WhatsApp) count only when no locationId is chosen.
         /// </summary>
         [HttpGet("api/sales-manager/complaints")]
-        public Task<IActionResult> Complaints([FromQuery] string? period, [FromQuery] int? locationId) =>
-            Run(locationId, false, scope => _sales.GetComplaintsAsync(period, scope));
+        public Task<IActionResult> Complaints([FromQuery] string? period, [FromQuery] int? locationId,
+            [FromQuery] string? from = null, [FromQuery] string? to = null) =>
+            Run(locationId, false, scope => _sales.GetComplaintsAsync(period, scope, from, to));
 
         /// <summary>
         /// Complaint records, newest first, at most 200 (total = all that match). status = open | in_progress | resolved
         /// | closed | active | resolved_period | new_period | reopened_period; category ("Other" also = none); branch
-        /// ("none" = no branch); month (yyyy-MM, created in it); period (for the *_period statuses); locationId.
+        /// ("none" = no branch); month (yyyy-MM, created in it); period (for the *_period statuses; custom: periodFrom /
+        /// periodTo); locationId.
         /// </summary>
         [HttpGet("api/sales-manager/records/complaints")]
         public Task<IActionResult> ComplaintRecords([FromQuery] SalesManagerComplaintRecordsQuery query)

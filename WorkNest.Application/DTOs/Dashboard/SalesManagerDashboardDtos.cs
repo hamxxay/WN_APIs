@@ -10,9 +10,9 @@ namespace WorkNest.Application.DTOs.Dashboard
     /// <summary>GET api/sales-manager/dashboard</summary>
     public class SalesManagerDashboardDto
     {
-        /// <summary>month | quarter | year</summary>
+        /// <summary>month | quarter | year | custom</summary>
         public string Period { get; set; } = "month";
-        /// <summary>e.g. "October 2026", "Q4 2026", "2026".</summary>
+        /// <summary>e.g. "October 2026", "Q4 2026", "2026", "1 Oct - 15 Oct 2026".</summary>
         public string PeriodLabel { get; set; } = "";
         /// <summary>UTC, ISO 8601 with Z.</summary>
         public string GeneratedAt { get; set; } = "";
@@ -30,6 +30,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// <summary>Tour inquiries of the locations (by branch, see <see cref="InquiriesAllBranches"/>).</summary>
         public SalesManagerInquiriesDto Inquiries { get; set; } = new();
         public SalesManagerRenewalsDto Renewals { get; set; } = new();
+        /// <summary>Custom period (CS_01): the first and last day of the range, yyyy-MM-dd; null for month / quarter / year.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
+        /// <summary>Custom period: the previous range the *Prev figures cover (as many days, just before From); else null.</summary>
+        public string? PreviousFrom { get; set; }
+        public string? PreviousTo { get; set; }
     }
 
     public class SalesManagerFunnelDto
@@ -234,6 +240,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Month { get; set; }
         public string? Type { get; set; }
         public int? UserId { get; set; }
+        /// <summary>period = custom (CS_01): the dashboard's range, yyyy-MM-dd (from / to narrow a list on their own).</summary>
+        public string? PeriodFrom { get; set; }
+        public string? PeriodTo { get; set; }
     }
 
     /// <summary>Query of GET api/sales-manager/records/{kind} (each list uses the parameters it knows).</summary>
@@ -253,6 +262,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Outcome { get; set; }
         /// <summary>records/inquiries: one not-interested reason (case and spaces ignored).</summary>
         public string? Reason { get; set; }
+        /// <summary>period = custom (CS_01): the dashboard's range, yyyy-MM-dd (from / to narrow a list on their own).</summary>
+        public string? PeriodFrom { get; set; }
+        public string? PeriodTo { get; set; }
     }
 
     // ---- Complaints section (SM_03): GET api/sales-manager/complaints and api/sales-manager/records/complaints ----
@@ -264,9 +276,9 @@ namespace WorkNest.Application.DTOs.Dashboard
     /// <summary>GET api/sales-manager/complaints</summary>
     public class SalesManagerComplaintsDto
     {
-        /// <summary>month | quarter | year</summary>
+        /// <summary>month | quarter | year | custom</summary>
         public string Period { get; set; } = "month";
-        /// <summary>e.g. "October 2026", "Q4 2026", "2026".</summary>
+        /// <summary>e.g. "October 2026", "Q4 2026", "2026", "1 Oct - 15 Oct 2026".</summary>
         public string PeriodLabel { get; set; } = "";
         /// <summary>Right now: every complaint in scope by status (not bound to the period).</summary>
         public SalesManagerComplaintStatusDto Status { get; set; } = new();
@@ -290,6 +302,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         public List<SalesManagerComplaintMonthDto> Months { get; set; } = new();
         /// <summary>The 8 oldest open / in progress complaints, oldest first.</summary>
         public List<SalesManagerComplaintDto> OldestActive { get; set; } = new();
+        /// <summary>Custom period (CS_01): the first and last day of the range, yyyy-MM-dd; null for month / quarter / year.</summary>
+        public string? From { get; set; }
+        public string? To { get; set; }
+        /// <summary>Custom period: the previous range the *Prev figures cover (as many days, just before From); else null.</summary>
+        public string? PreviousFrom { get; set; }
+        public string? PreviousTo { get; set; }
     }
 
     public class SalesManagerComplaintStatusDto
@@ -381,7 +399,7 @@ namespace WorkNest.Application.DTOs.Dashboard
     /// <summary>Query of GET api/sales-manager/records/complaints.</summary>
     public class SalesManagerComplaintRecordsQuery
     {
-        /// <summary>Period of the *_period statuses: month (default) | quarter | year.</summary>
+        /// <summary>Period of the *_period statuses: month (default) | quarter | year | custom (PeriodFrom / PeriodTo).</summary>
         public string? Period { get; set; }
         /// <summary>One of the caller's location ids (omitted = all of them, with the complaints without a branch).</summary>
         public string? LocationId { get; set; }
@@ -393,6 +411,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Branch { get; set; }
         /// <summary>yyyy-MM: created in that month.</summary>
         public string? Month { get; set; }
+        /// <summary>period = custom (CS_01): the dashboard's range, yyyy-MM-dd (from / to narrow a list on their own).</summary>
+        public string? PeriodFrom { get; set; }
+        public string? PeriodTo { get; set; }
     }
 
     /// <summary>

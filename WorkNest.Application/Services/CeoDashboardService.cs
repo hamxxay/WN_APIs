@@ -1,6 +1,7 @@
 using System.Globalization;
 using WorkNest.Application.DTOs.Contact;
 using WorkNest.Application.DTOs.Dashboard;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
@@ -15,6 +16,9 @@ namespace WorkNest.Application.Services
     /// Sales Manager dashboard: one location = only its inquiries, all locations = every inquiry. Before QA_07 they count
     /// every location's inquiries and say so (inquiriesAllLocations, "all locations"). Rooms (api/ceo/rooms, CEO_02):
     /// room occupancy and the price each room was sold at against its list / shift price.
+    /// Period: month | quarter | year (to date) or, since CS_01, custom: a day range (from / to on the dashboard and the
+    /// rooms; periodFrom / periodTo on the drill-down, where from / to narrow a list), compared with the same number of
+    /// days just before it (<see cref="DashboardPeriod"/>). Only a custom range reaches the procedures as @From / @To.
     /// </summary>
     public class CeoDashboardService : ICeoDashboardService
     {
@@ -50,11 +54,11 @@ namespace WorkNest.Application.Services
 
         // ------------------------------------------------------------------ level 1: dashboard
 
-        public async Task<ApiResponse> GetDashboardAsync(string? period, int? locationId)
+        public async Task<ApiResponse> GetDashboardAsync(string? period, int? locationId, string? from = null, string? to = null)
         {
-            if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
-            var s = await _repo.GetDashboardAsync(Location(locationId), months, now, await StatusesAsync(), ExpiringDays);
+            var s = await _repo.GetDashboardAsync(Location(locationId), p.Months, now, await StatusesAsync(), ExpiringDays, p.From, p.To);
 
             var money = Set(s, 1).FirstOrDefault();
             var occ = Set(s, 5).FirstOrDefault();
@@ -65,9 +69,13 @@ namespace WorkNest.Application.Services
 
             var dto = new CeoDashboardDto
             {
-                Period = p,
-                PeriodLabel = PeriodLabel(p, now),
+                Period = p.Key,
+                PeriodLabel = p.Label(now),
                 GeneratedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En),
+                From = p.FromText,
+                To = p.ToText,
+                PreviousFrom = p.PreviousFromText,
+                PreviousTo = p.PreviousToText,
                 Locations = Set(s, 0).Select(r => new CeoLocationDto { LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "" }).ToList(),
                 Money = new CeoMoneyDto
                 {
@@ -168,10 +176,20 @@ namespace WorkNest.Application.Services
             var metric = (q.Metric ?? "").Trim().ToLowerInvariant();
             if (metric.Length == 0) return ApiResponse.Fail($"metric is required: {string.Join(", ", Metrics)}.");
             if (!Metrics.Contains(metric)) return ApiResponse.Fail($"Unknown metric '{q.Metric}'. Use {string.Join(", ", Metrics)}.");
-            if (!string.IsNullOrWhiteSpace(q.Period) && !TryPeriod(q.Period, out _, out _)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out _, out var periodError))
+                return ApiResponse.Fail(periodError!);
 
             DateTime? month = null;
-            if (metric is "revenue" or "bookings-month")
+            // revenue (CS_01): the invoices issued from / to (a custom period) instead of one month.
+            DateTime? rangeFrom = null, rangeTo = null;
+            if (metric == "revenue" && string.IsNullOrWhiteSpace(q.Month) && (!string.IsNullOrWhiteSpace(q.From) || !string.IsNullOrWhiteSpace(q.To)))
+            {
+                if (string.IsNullOrWhiteSpace(q.From) || string.IsNullOrWhiteSpace(q.To))
+                    return ApiResponse.Fail("from and to (yyyy-MM-dd) are both required for metric revenue without a month.");
+                if (!TryDays(q.From, q.To, out rangeFrom, out var end, out _, out var rangeError)) return ApiResponse.Fail(rangeError!);
+                rangeTo = end!.Value.AddDays(-1);
+            }
+            else if (metric is "revenue" or "bookings-month")
             {
                 if (string.IsNullOrWhiteSpace(q.Month)) return ApiResponse.Fail($"month (yyyy-MM) is required for metric {metric}.");
                 if (!TryMonth(q.Month, out var m)) return ApiResponse.Fail(MonthError);
@@ -196,7 +214,7 @@ namespace WorkNest.Application.Services
             if (metric == "staff" && q.UserId is null or <= 0) return ApiResponse.Fail("userId is required for metric staff.");
 
             var s = await _repo.GetBreakdownAsync(metric, month, bucket, metric == "occupancy-type" ? q.SpaceTypeId : null,
-                Location(q.LocationId), type, metric == "staff" ? q.UserId : null, _clock.Now, await StatusesAsync());
+                Location(q.LocationId), type, metric == "staff" ? q.UserId : null, _clock.Now, await StatusesAsync(), rangeFrom, rangeTo);
             var head = Set(s, 0).FirstOrDefault();
             var subject = Str(head, "Subject");
             var monthRows = metric is "inquiries-type" or "staff";
@@ -218,8 +236,9 @@ namespace WorkNest.Application.Services
             switch (metric)
             {
                 case "revenue":
+                    var issued = rangeFrom != null ? DashboardPeriod.RangeLabel(rangeFrom.Value, rangeTo!.Value) : month!.Value.ToString("MMMM yyyy", En);
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ("Revenue by location", $"Invoices issued in {month!.Value.ToString("MMMM yyyy", En)}; collected = now paid", "Invoiced", "Collected");
+                        ("Revenue by location", $"Invoices issued in {issued}; collected = now paid", "Invoiced", "Collected");
                     break;
                 case "aging":
                     var bucketLabel = Buckets.First(b => b.Key == bucket).Label;
@@ -257,7 +276,8 @@ namespace WorkNest.Application.Services
         public async Task<ApiResponse> GetRecordsAsync(string kind, CeoRecordsQuery q)
         {
             kind = (kind ?? "").Trim().ToLowerInvariant();
-            if (!string.IsNullOrWhiteSpace(q.Period) && !TryPeriod(q.Period, out _, out _)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out _, out var periodError))
+                return ApiResponse.Fail(periodError!);
             if (!TryRecordLocation(q.LocationId, out var locationId, out var noLocation))
                 return ApiResponse.Fail("locationId must be a location id, or none for records not tied to a location.");
 
@@ -297,9 +317,20 @@ namespace WorkNest.Application.Services
                 status = q.Status.Trim().ToLowerInvariant();
                 if (status is not ("open" or "overdue" or "paid")) return ApiResponse.Fail("status must be open, overdue or paid.");
             }
+            // CS_01: issued from / to (yyyy-MM-dd, both days included), e.g. a custom period's revenue by location.
+            DateTime? from = null, to = null;
+            string? issuedWindow = null;
+            if (month == null && (!string.IsNullOrWhiteSpace(q.From) || !string.IsNullOrWhiteSpace(q.To)))
+            {
+                if (string.IsNullOrWhiteSpace(q.From) || string.IsNullOrWhiteSpace(q.To))
+                    return ApiResponse.Fail("from and to (yyyy-MM-dd) are both required for invoices.");
+                if (!TryDays(q.From, q.To, out from, out var end, out _, out var error)) return ApiResponse.Fail(error!);
+                to = end!.Value.AddDays(-1);
+                issuedWindow = $"issued in {DashboardPeriod.RangeLabel(from!.Value, to.Value)}";
+            }
 
             var s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, q.CustomerId is > 0 ? q.CustomerId : null,
-                status, _clock.Now, await StatusesAsync(), MaxRows);
+                status, _clock.Now, await StatusesAsync(), MaxRows, from, to);
             var rows = Set(s, 1).Select(r => new CeoInvoiceRecordDto
             {
                 InvoiceId = Int(r, "InvoiceId"), InvoiceNumber = Str(r, "InvoiceNumber"), Customer = Str(r, "Customer"),
@@ -313,6 +344,7 @@ namespace WorkNest.Application.Services
             else if (status == "paid") parts.Add("paid");
             if (bucket != null) parts.Add(bucket == "not_due" ? "not due yet" : $"{Buckets.First(b => b.Key == bucket).Label} past due");
             if (month != null) parts.Add($"issued in {month.Value.ToString("MMMM yyyy", En)}");
+            if (issuedWindow != null) parts.Add(issuedWindow);
             if (q.CustomerId is > 0) parts.Add(month == null ? $"{rows.FirstOrDefault()?.Customer ?? "customer"}, last 12 months" : rows.FirstOrDefault()?.Customer ?? "customer");
             if (noLocation) parts.Add("no location");
             else if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
@@ -474,20 +506,22 @@ namespace WorkNest.Application.Services
         /// booking running in the period priced against its expected price (<see cref="PriceSale"/>), with totals
         /// (<see cref="SummarizeRooms"/>). Before CEO_02: available = false and the message, no summary, no rooms.
         /// </summary>
-        public async Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId)
+        public async Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId, string? from = null, string? to = null)
         {
-            if (!TryPeriod(period, out var p, out var months)) return ApiResponse.Fail(PeriodError);
+            if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
             var dto = new CeoRoomReportDto
             {
-                Period = p,
-                PeriodLabel = PeriodLabel(p, now),
-                GeneratedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En)
+                Period = p.Key,
+                PeriodLabel = p.Label(now),
+                GeneratedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss'Z'", En),
+                From = p.FromText,
+                To = p.ToText
             };
             List<List<IDictionary<string, object?>>> s;
             try
             {
-                s = await _repo.GetRoomReportAsync(Location(locationId), months, now);
+                s = await _repo.GetRoomReportAsync(Location(locationId), p.Months, now, p.From, p.To);
             }
             catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_02")
             {
@@ -675,7 +709,6 @@ namespace WorkNest.Application.Services
 
         // ------------------------------------------------------------------ helpers
 
-        private const string PeriodError = "period must be month, quarter or year.";
         private const string MonthError = "month must be yyyy-MM (e.g. 2026-10).";
         private const string BucketError = "bucket must be not_due, 1_30, 31_60, 61_90 or 90_plus.";
         private const string TypeError = "type must be Website, WhatsApp, WalkIn, Reference or NotSet.";
@@ -690,13 +723,6 @@ namespace WorkNest.Application.Services
                 st.Cancelled.Append(5).Distinct().ToList());
         }
 
-        private static bool TryPeriod(string? value, out string period, out int months)
-        {
-            period = string.IsNullOrWhiteSpace(value) ? "month" : value.Trim().ToLowerInvariant();
-            months = period switch { "month" => 1, "quarter" => 3, "year" => 12, _ => 0 };
-            return months > 0;
-        }
-
         /// <summary>Start of the current period (calendar month / quarter / year), as the overview and the procedures.</summary>
         private DateTime PeriodStart(string period)
         {
@@ -708,13 +734,6 @@ namespace WorkNest.Application.Services
                 _ => new DateTime(today.Year, today.Month, 1)
             };
         }
-
-        private static string PeriodLabel(string period, DateTime now) => period switch
-        {
-            "year" => now.Year.ToString(En),
-            "quarter" => $"Q{(now.Month - 1) / 3 + 1} {now.Year}",
-            _ => now.ToString("MMMM yyyy", En)
-        };
 
         private static bool TryMonth(string? value, out DateTime month) =>
             DateTime.TryParseExact((value ?? "").Trim(), "yyyy-MM", En, DateTimeStyles.None, out month);
@@ -736,7 +755,8 @@ namespace WorkNest.Application.Services
 
         /// <summary>
         /// Created-in window for bookings, inquiries and quotations: month (that month), else from / to (yyyy-MM-dd,
-        /// both days included), else the period to date (default this month). <paramref name="label"/> describes it.
+        /// both days included), else the period: to date (default this month), or a custom period's range (periodFrom /
+        /// periodTo, already checked by the caller). <paramref name="label"/> describes it.
         /// </summary>
         private bool TryWindow(CeoRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error)
         {
@@ -749,7 +769,13 @@ namespace WorkNest.Application.Services
             }
             if (!string.IsNullOrWhiteSpace(q.From) || !string.IsNullOrWhiteSpace(q.To))
                 return TryDays(q.From, q.To, out from, out to, out label, out error);
-            TryPeriod(q.Period, out var period, out _);
+            if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out var p, out error)) return false;
+            if (p.IsCustom)
+            {
+                from = p.From; to = p.To!.Value.AddDays(1); label = p.BetweenWords();
+                return true;
+            }
+            var period = p.Key;
             from = PeriodStart(period);
             label = period switch
             {

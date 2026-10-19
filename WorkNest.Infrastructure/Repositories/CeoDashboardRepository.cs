@@ -11,7 +11,10 @@ namespace WorkNest.Infrastructure.Repositories
     /// throws <see cref="CeoDatabaseUpdateMissingException"/>, which the API answers with 503 (the full leases list:
     /// naming QA_07; the room report: naming CEO_02, which api/ceo/rooms answers with available = false). Until QA_07
     /// has run the procedures do not know the tour inquiry location parameters (SQL error 8144 / 8145, too many
-    /// arguments): the call is repeated without them and every location's inquiries count, as before.
+    /// arguments): the call is repeated without them and every location's inquiries count, as before. A custom date
+    /// range (CS_01_ceo_sales_dates: @From / @To) is sent only when one is asked for, so the calendar periods keep
+    /// working with the procedures from before CS_01; with a range, 8144 / 8145 means CS_01 has not run
+    /// (<see cref="CeoDatabaseUpdateMissingException.CustomRangeMissing"/>).
     /// </summary>
     public class CeoDashboardRepository : ICeoDashboardRepository
     {
@@ -67,10 +70,14 @@ namespace WorkNest.Infrastructure.Repositories
         /// <summary>
         /// Runs a procedure with the QA_07 tour inquiry location parameters (<paramref name="extra"/>). A database without
         /// QA_07 answers 8144 / 8145 (too many arguments / not a parameter): run it again without them (as before).
+        /// With a custom range (<paramref name="from"/> / <paramref name="to"/>) there is no such fallback: the CS_01
+        /// procedures have both, so 8144 / 8145 then means CS_01 has not run.
         /// </summary>
         private async Task<List<List<IDictionary<string, object?>>>> RunWithInquiryLocationAsync(string procedure,
-            Action<SqlParameterCollection> bind, Action<SqlParameterCollection> extra)
+            Action<SqlParameterCollection> bind, Action<SqlParameterCollection> extra, DateTime? from = null, DateTime? to = null)
         {
+            if (from != null && to != null)
+                return await RunWithRangeAsync(procedure, p => { bind(p); extra(p); }, from, to);
             try
             {
                 return await RunAsync(procedure, p => { bind(p); extra(p); });
@@ -81,11 +88,35 @@ namespace WorkNest.Infrastructure.Repositories
             }
         }
 
+        /// <summary>
+        /// Runs a procedure, with @From / @To (days, both included) only when both are given (CS_01). Without them the
+        /// call is exactly the one from before CS_01. With them, 8144 / 8145 (too many arguments / not a parameter):
+        /// the procedure is still the one from before CS_01.
+        /// </summary>
+        private async Task<List<List<IDictionary<string, object?>>>> RunWithRangeAsync(string procedure, Action<SqlParameterCollection> bind,
+            DateTime? from, DateTime? to)
+        {
+            if (from == null || to == null) return await RunAsync(procedure, bind);
+            try
+            {
+                return await RunAsync(procedure, p =>
+                {
+                    bind(p);
+                    p.Add("@From", SqlDbType.Date).Value = from.Value.Date;
+                    p.Add("@To", SqlDbType.Date).Value = to.Value.Date;
+                });
+            }
+            catch (SqlException ex) when (ex.Number is 8144 or 8145) // CS_01 not run yet: no @From / @To
+            {
+                throw CeoDatabaseUpdateMissingException.CustomRangeMissing(ex);
+            }
+        }
+
         // QA_07 marks: the sales funnel's InqByLocation, the breakdown head's InqByLocation, the inquiry records' ByLocation
         // and the dashboard's result set [13] (all leases expiring).
 
         public Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
-            CeoInvoiceStatusIds statuses, int expiringDays) =>
+            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null) =>
             RunWithInquiryLocationAsync("dbo.WN_Ceo_Dashboard", p =>
             {
                 p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
@@ -93,10 +124,11 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 AddStatuses(p, statuses);
                 p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
-            }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true);
+            }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true, from, to);
 
         public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, DateTime? monthStart, string? bucket,
-            int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses) =>
+            int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses,
+            DateTime? from = null, DateTime? to = null) =>
             RunWithInquiryLocationAsync("dbo.WN_Ceo_Breakdown", p =>
             {
                 p.Add("@Metric", SqlDbType.NVarChar, 30).Value = metric;
@@ -108,11 +140,12 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@UserId", SqlDbType.Int).Value = Db(userId);
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 AddStatuses(p, statuses);
-            }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true);
+            }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true, from, to);
 
         public Task<List<List<IDictionary<string, object?>>>> GetInvoiceRecordsAsync(DateTime? monthStart, int? locationId, bool noLocation,
-            string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top) =>
-            RunAsync("dbo.WN_Ceo_Records_Invoices", p =>
+            string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top,
+            DateTime? from = null, DateTime? to = null) =>
+            RunWithRangeAsync("dbo.WN_Ceo_Records_Invoices", p =>
             {
                 p.Add("@MonthStart", SqlDbType.Date).Value = Db(monthStart?.Date);
                 p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
@@ -123,7 +156,7 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 AddStatuses(p, statuses);
                 p.Add("@Top", SqlDbType.Int).Value = top;
-            });
+            }, from, to);
 
         public Task<List<List<IDictionary<string, object?>>>> GetSpaceRecordsAsync(int? spaceTypeId, int? locationId, bool noLocation,
             bool? occupied, DateTime businessNow, int top) =>
@@ -195,24 +228,25 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@Top", SqlDbType.Int).Value = top;
                 });
             }
-            catch (CeoDatabaseUpdateMissingException ex) // this procedure comes with QA_07, not CEO_01
+            catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_01") // this procedure comes with QA_07, not CEO_01
             {
                 throw CeoDatabaseUpdateMissingException.LeasesMissing(ex.InnerException);
             }
         }
 
-        public async Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow)
+        public async Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow,
+            DateTime? from = null, DateTime? to = null)
         {
             try
             {
-                return await RunAsync("dbo.WN_Ceo_RoomReport", p =>
+                return await RunWithRangeAsync("dbo.WN_Ceo_RoomReport", p =>
                 {
                     p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
                     p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                });
+                }, from, to);
             }
-            catch (CeoDatabaseUpdateMissingException ex) // this procedure comes with CEO_02, not CEO_01
+            catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_01") // this procedure comes with CEO_02, not CEO_01
             {
                 throw CeoDatabaseUpdateMissingException.RoomReportMissing(ex.InnerException);
             }
