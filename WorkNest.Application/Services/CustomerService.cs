@@ -7,8 +7,22 @@ namespace WorkNest.Application.Services
 {
     public class CustomerService : ICustomerService
     {
+        /// <summary>Shown by the customer detail page (in the affected sections) until CD_01 has run.</summary>
+        public const string OverviewDbUpdateMessage = "Database update needed: run the script CD_01_customer_detail_TEST";
+
+        /// <summary>Rows per list on the customer detail page (bookings, receipts, payments, agreements, deposits, timeline).</summary>
+        private const int OverviewRows = 100;
+
         private readonly IDbRepository _db;
-        public CustomerService(IDbRepository db) => _db = db;
+        private readonly IOrderStatusService _orderStatus;
+        private readonly IBusinessClock _clock;
+
+        public CustomerService(IDbRepository db, IOrderStatusService orderStatus, IBusinessClock clock)
+        {
+            _db = db;
+            _orderStatus = orderStatus;
+            _clock = clock;
+        }
 
         public async Task<ApiResponse> GetAllCustomersAsync(int page, int limit, string search)
         {
@@ -27,6 +41,35 @@ namespace WorkNest.Application.Services
             var result = await _db.GetCustomerByGuidAsync(id);
             if (result is null) return ApiResponse.Fail("Customer not found.");
             return ApiResponse.Ok(result);
+        }
+
+        public async Task<CustomerOverviewResult> GetCustomerOverviewAsync(int id)
+        {
+            if (id <= 0) return new CustomerOverviewResult(404, ApiResponse.Fail("Customer not found."));
+
+            // Same invoice status sets as the CEO dashboard: open = Unpaid / Partial / Challan Expire; void = Cancelled + legacy 5.
+            var st = await _orderStatus.GetInvoiceStatusesAsync();
+            var open = st.Unpaid.Concat(st.Partial).Concat(st.Overdue).Distinct().ToList();
+            var paid = st.Paid.ToList();
+            var voided = st.Cancelled.Append(5).Distinct().ToList();
+
+            var sets = await _db.GetCustomerOverviewAsync(id, _clock.Now, open, paid, voided, OverviewRows);
+            if (sets is null) return new CustomerOverviewResult(503, ApiResponse.Fail(OverviewDbUpdateMessage));
+
+            List<IDictionary<string, object?>> Set(int i) => i < sets.Count ? sets[i] : new List<IDictionary<string, object?>>();
+            var summary = Set(0).FirstOrDefault();
+            if (summary is null) return new CustomerOverviewResult(404, ApiResponse.Fail("Customer not found."));
+
+            return new CustomerOverviewResult(200, ApiResponse.Ok(new
+            {
+                summary,
+                bookings = Set(1),
+                receipts = Set(2),
+                payments = Set(3),
+                agreements = Set(4),
+                deposits = Set(5),
+                timeline = Set(6)
+            }));
         }
 
         private static string? ResolveCompany(string? customerType, string? company)
