@@ -46,14 +46,16 @@ namespace WorkNest.Application.Services
         private readonly IOrderStatusService _orderStatus;
         private readonly IBusinessClock _clock;
         private readonly IRoleService? _roles;
+        private readonly ISpaceTypeService? _spaceTypes;
 
         public CeoDashboardService(ICeoDashboardRepository repo, IOrderStatusService orderStatus, IBusinessClock clock,
-            IRoleService? roles = null)
+            IRoleService? roles = null, ISpaceTypeService? spaceTypes = null)
         {
             _repo = repo;
             _orderStatus = orderStatus;
             _clock = clock;
             _roles = roles;
+            _spaceTypes = spaceTypes;
         }
 
         // ------------------------------------------------------------------ level 1: dashboard
@@ -564,6 +566,8 @@ namespace WorkNest.Application.Services
 
             var rooms = new List<CeoRoomDto>();
             var byId = new Dictionary<int, CeoRoomDto>();
+            // A category's label when the procedure sends one with its rooms (CategoryLabel); else the database's (below).
+            var categoryLabels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             int occupiedDays = 0, periodDays = 0;
             foreach (var r in Set(s, 0))
             {
@@ -576,12 +580,16 @@ namespace WorkNest.Application.Services
                     Location = Str(r, "Location"), SpaceType = Str(r, "SpaceType"), CategoryCode = Str(r, "CategoryCode"),
                     Seats = seats, ListSeatPrice = list, ListRoomPrice = list is { } x ? Money(x * seats) : null,
                     OccupiedNow = Flag(r, "OccupiedNow"),
+                    OccupiedDays = Int(r, "OccupiedDays"),
+                    PeriodDays = Int(r, "PeriodDays"),
                     PeriodOccupancyPct = Pct(Int(r, "OccupiedDays"), Int(r, "PeriodDays"))
                 };
                 if (!byId.TryAdd(room.SpaceId, room)) continue;
                 rooms.Add(room);
-                occupiedDays += Int(r, "OccupiedDays");
-                periodDays += Int(r, "PeriodDays");
+                occupiedDays += room.OccupiedDays;
+                periodDays += room.PeriodDays;
+                if (Str(r, "CategoryLabel") is { } cl && !string.IsNullOrWhiteSpace(cl) && !string.IsNullOrWhiteSpace(room.CategoryCode))
+                    categoryLabels.TryAdd(room.CategoryCode.Trim(), cl.Trim());
             }
             foreach (var r in Set(s, 1))
             {
@@ -601,8 +609,31 @@ namespace WorkNest.Application.Services
             }
 
             dto.Rooms = SortRooms(rooms);
-            dto.Summary = SummarizeRooms(dto.Rooms, occupiedDays, periodDays);
+            await AddSpaceCategoryLabelsAsync(categoryLabels);
+            dto.Summary = SummarizeRooms(dto.Rooms, occupiedDays, periodDays, categoryLabels);
             return ApiResponse.Ok(dto);
+        }
+
+        /// <summary>
+        /// The labels of the space categories (dbo.WN_SpaceCategories: Code, Label) for the codes not labelled yet. A
+        /// failed lookup only leaves them to <see cref="RoomCategoryLabel"/>'s fallback: the report still answers.
+        /// </summary>
+        private async Task AddSpaceCategoryLabelsAsync(Dictionary<string, string> labels)
+        {
+            if (_spaceTypes == null) return;
+            try
+            {
+                foreach (var row in (await _spaceTypes.GetSpaceCategoriesAsync()).OfType<IDictionary<string, object?>>())
+                {
+                    var code = Str(row, "Code")?.Trim();
+                    var label = Str(row, "Label")?.Trim();
+                    if (!string.IsNullOrEmpty(code) && !string.IsNullOrEmpty(label)) labels.TryAdd(code, label);
+                }
+            }
+            catch (Exception)
+            {
+                // Labels only: the report must not fail because of them.
+            }
         }
 
         /// <summary>24/7 | Morning | Evening from a booking's ShiftType (or the procedure's Shift), as dbo.WN_Ceo_RoomReport:
@@ -656,17 +687,70 @@ namespace WorkNest.Application.Services
             return sale;
         }
 
+        /// <summary>The room categories of the report (dbo.WN_Ceo_RoomReport's rooms), in the order byCategory lists them.</summary>
+        public static readonly IReadOnlyList<string> RoomCategories = new[] { "PrivateOffice", "SharedSpace" };
+
+        /// <summary>A category's label when the database gives none: "PrivateOffice" -> "Private Office", "" -> "Other".</summary>
+        public static string RoomCategoryLabel(string code, IReadOnlyDictionary<string, string>? labels = null)
+        {
+            if (labels != null && labels.TryGetValue(code, out var label) && !string.IsNullOrWhiteSpace(label)) return label.Trim();
+            if (string.IsNullOrWhiteSpace(code)) return "Other";
+            // Words of the code: a capital letter after a small one starts a new word.
+            var words = new System.Text.StringBuilder();
+            for (var i = 0; i < code.Length; i++)
+            {
+                if (i > 0 && char.IsUpper(code[i]) && char.IsLower(code[i - 1])) words.Append(' ');
+                words.Append(i == 0 ? char.ToUpperInvariant(code[i]) : code[i]);
+            }
+            return words.ToString().Replace('_', ' ').Trim();
+        }
+
+        /// <summary>A room's category code as byCategory groups it (the report's spelling of a known code; "" when none).</summary>
+        private static string CategoryOf(CeoRoomDto room)
+        {
+            var code = room.CategoryCode?.Trim() ?? "";
+            return RoomCategories.FirstOrDefault(c => string.Equals(c, code, StringComparison.OrdinalIgnoreCase)) ?? code;
+        }
+
+        /// <summary>
+        /// Occupancy per category: always <see cref="RoomCategories"/> (zeros when there are none), then any other code
+        /// the rooms carry. Days occupied from the rooms' own days (room-days), as the totals.
+        /// </summary>
+        public static List<CeoRoomCategorySummaryDto> SummarizeRoomCategories(IReadOnlyCollection<CeoRoomDto> rooms,
+            IReadOnlyDictionary<string, string>? labels = null)
+        {
+            var codes = RoomCategories.Concat(rooms.Select(CategoryOf).Where(c => !RoomCategories.Contains(c)).Distinct(StringComparer.OrdinalIgnoreCase));
+            return codes.Select(code =>
+            {
+                var g = rooms.Where(r => string.Equals(CategoryOf(r), code, StringComparison.OrdinalIgnoreCase)).ToList();
+                var occupied = g.Count(r => r.OccupiedNow);
+                return new CeoRoomCategorySummaryDto
+                {
+                    CategoryCode = code,
+                    Label = RoomCategoryLabel(code, labels),
+                    Rooms = g.Count,
+                    OccupiedNow = occupied,
+                    VacantNow = g.Count - occupied,
+                    OccupancyNowPct = Pct(occupied, g.Count),
+                    PeriodOccupancyPct = Pct(g.Sum(r => r.OccupiedDays), g.Sum(r => r.PeriodDays))
+                };
+            }).ToList();
+        }
+
         /// <summary>
         /// Totals of the rooms and their priced sales: occupancy now (rooms with a confirmed booking now), occupancy in
         /// the period (<paramref name="occupiedDays"/> / <paramref name="periodDays"/>, room-days), under / at / over,
-        /// expected (list) / sold / variance per month, and the same by shift (always 24/7, Morning, Evening).
+        /// expected (list) / sold / variance per month, the same by shift (always 24/7, Morning, Evening), and the
+        /// occupancy per category (<see cref="SummarizeRoomCategories"/>; <paramref name="categoryLabels"/>: code -> label).
         /// </summary>
-        public static CeoRoomSummaryDto SummarizeRooms(IReadOnlyCollection<CeoRoomDto> rooms, int occupiedDays, int periodDays)
+        public static CeoRoomSummaryDto SummarizeRooms(IReadOnlyCollection<CeoRoomDto> rooms, int occupiedDays, int periodDays,
+            IReadOnlyDictionary<string, string>? categoryLabels = null)
         {
             var sales = rooms.SelectMany(r => r.Sales).ToList();
             var occupied = rooms.Count(r => r.OccupiedNow);
             return new CeoRoomSummaryDto
             {
+                ByCategory = SummarizeRoomCategories(rooms, categoryLabels),
                 Rooms = rooms.Count,
                 OccupiedNow = occupied,
                 VacantNow = rooms.Count - occupied,
