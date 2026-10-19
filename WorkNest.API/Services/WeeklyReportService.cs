@@ -31,6 +31,7 @@ namespace WorkNest.API.Services
         private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(15);
         private readonly TimeSpan _startupDelay = TimeSpan.FromMinutes(2);
         private readonly TimeSpan _retryAfter = TimeSpan.FromHours(1);
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
 
         // Weeks this instance knows are done (sent here or by another instance), so it stops asking the database.
         private readonly HashSet<string> _doneWeeks = new();
@@ -38,9 +39,10 @@ namespace WorkNest.API.Services
         private DateTime _holdBackUntilUtc = DateTime.MinValue;
 
         public WeeklyReportService(ILogger<WeeklyReportService> logger, IServiceScopeFactory scopeFactory, IConfiguration configuration,
-            IBusinessClock clock, IHostEnvironment env)
+            IBusinessClock clock, IHostEnvironment env, IServiceSwitch serviceSwitch)
         {
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.WeeklyReport, logger);
             _scopeFactory = scopeFactory;
             _configuration = configuration;
             _clock = clock;
@@ -78,7 +80,7 @@ namespace WorkNest.API.Services
                 try
                 {
                     var options = ReadOptions(_configuration);
-                    if (options.Enabled)
+                    if (options.Enabled && await _gate.IsOnAsync(stoppingToken))
                         await RunOnceAsync(options, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

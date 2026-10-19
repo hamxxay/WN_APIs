@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 
 namespace WorkNest.API.Services
 {
@@ -19,10 +20,12 @@ namespace WorkNest.API.Services
         private readonly TimeSpan _ispInterval = TimeSpan.FromSeconds(300); // EA endpoints are rate limited to 100 req/min
         private readonly TimeSpan _logsInterval = TimeSpan.FromSeconds(300);
         private readonly TimeSpan _startupDelay = TimeSpan.FromSeconds(5);
+        private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips each loop's work
 
-        public UnifiPollingService(ILogger<UnifiPollingService> logger, IUnifiService unifi, IConfiguration configuration)
+        public UnifiPollingService(ILogger<UnifiPollingService> logger, IUnifiService unifi, IConfiguration configuration, IServiceSwitch serviceSwitch)
         {
             _logger = logger;
+            _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.UnifiPolling, logger);
             _unifi = unifi;
             _enabled = !string.Equals(configuration["Unifi:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
         }
@@ -46,7 +49,8 @@ namespace WorkNest.API.Services
             try
             {
                 await _unifi.InitializeAsync(stoppingToken);
-                await Task.WhenAll(_unifi.RefreshCoreAsync(stoppingToken), _unifi.RefreshIspAsync(stoppingToken));
+                if (await _gate.IsOnAsync(stoppingToken))
+                    await Task.WhenAll(_unifi.RefreshCoreAsync(stoppingToken), _unifi.RefreshIspAsync(stoppingToken));
 
                 await Task.WhenAll(
                     RunEveryAsync(TimeSpan.FromSeconds(_unifi.RefreshSeconds), () => _unifi.RefreshCoreAsync(stoppingToken), false, stoppingToken),
@@ -64,20 +68,20 @@ namespace WorkNest.API.Services
         private async Task RunEveryAsync(TimeSpan interval, Func<Task> action, bool runNow, CancellationToken stoppingToken)
         {
             using var timer = new PeriodicTimer(interval);
-            if (runNow) await RunSafeAsync(action);
+            if (runNow) await RunSafeAsync(action, stoppingToken);
             try
             {
                 while (await timer.WaitForNextTickAsync(stoppingToken))
-                    await RunSafeAsync(action);
+                    await RunSafeAsync(action, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
             }
         }
 
-        private async Task RunSafeAsync(Func<Task> action)
+        private async Task RunSafeAsync(Func<Task> action, CancellationToken stoppingToken)
         {
-            try { await action(); }
+            try { if (await _gate.IsOnAsync(stoppingToken)) await action(); }
             catch (Exception ex) { _logger.LogError(ex, "Error occurred during UniFi polling."); }
         }
     }

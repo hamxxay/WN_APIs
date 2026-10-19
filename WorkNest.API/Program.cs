@@ -279,6 +279,10 @@ try
     builder.Services.AddScoped<IKycService, KycService>();
     builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();
     builder.Services.AddSingleton<IUnifiService, UnifiService>();
+    // On/off switch per background service (api/admin/services, super admin): dbo.WN_ServiceSwitches (script
+    // SS_01_service_switches), cached 10 s. Singletons, because the hosted services below check them every cycle.
+    builder.Services.AddSingleton<IServiceSwitchRepository, WorkNest.Infrastructure.Repositories.ServiceSwitchRepository>();
+    builder.Services.AddSingleton<IServiceSwitch, ServiceSwitchService>();
 
 
     // ── Background Hosted Services ────────────────────────────────────────────
