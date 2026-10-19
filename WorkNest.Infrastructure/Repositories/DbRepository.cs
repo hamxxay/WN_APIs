@@ -6870,6 +6870,48 @@ END";
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<IReadOnlyList<(string SiteId, int LocationId)>> GetUnifiSiteLocationsDbAsync()
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_UNIFI_SiteLocations_GetAll", c);
+                var list = new List<(string SiteId, int LocationId)>();
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    if (r["SiteId"] is DBNull || r["LocationId"] is DBNull) continue;
+                    list.Add((Convert.ToString(r["SiteId"]) ?? "", Convert.ToInt32(r["LocationId"])));
+                }
+                return list;
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208) // procedure / table missing: NET_01 not run
+            {
+                throw new UnifiSiteLocationsMissingException(ex);
+            }
+        }
+
+        public async Task SetUnifiSiteLocationsDbAsync(string siteId, string? siteName, IReadOnlyCollection<int> locationIds, string? updatedBy)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_UNIFI_SiteLocations_Set", c);
+                cmd.Parameters.Add("@SiteId", SqlDbType.NVarChar, 64).Value = siteId;
+                cmd.Parameters.Add("@SiteName", SqlDbType.NVarChar, 200).Value =
+                    string.IsNullOrWhiteSpace(siteName) ? DBNull.Value : (siteName.Length > 200 ? siteName[..200] : siteName);
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, 1000).Value =
+                    string.Join(",", locationIds.Where(id => id > 0).Distinct().Select(id => id.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+                cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value =
+                    string.IsNullOrWhiteSpace(updatedBy) ? DBNull.Value : (updatedBy.Length > 200 ? updatedBy[..200] : updatedBy);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (SqlException ex) when (ex.Number is 2812 or 208) // procedure / table missing: NET_01 not run
+            {
+                throw new UnifiSiteLocationsMissingException(ex);
+            }
+        }
+
         public async Task DeleteUnifiSsidDeviceDbAsync(string wlanId, string mac)
         {
             await using var c = await Open();

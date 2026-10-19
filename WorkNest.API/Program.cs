@@ -285,6 +285,9 @@ try
     builder.Services.AddScoped<IKycService, KycService>();
     builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();
     builder.Services.AddSingleton<IUnifiService, UnifiService>();
+    // Network (UniFi) section of the CEO / Sales Manager dashboards (api/ceo/network, api/sales-manager/network) and the
+    // per-site locations (api/unifi/site-locations; dbo.WN_UNIFI_SiteLocations, script NET_01_unifi_site_locations).
+    builder.Services.AddScoped<INetworkDashboardService, NetworkDashboardService>();
     // On/off switch per background service (api/admin/services, super admin): dbo.WN_ServiceSwitches (script
     // SS_01_service_switches), cached 10 s. Singletons, because the hosted services below check them every cycle.
     builder.Services.AddSingleton<IServiceSwitchRepository, WorkNest.Infrastructure.Repositories.ServiceSwitchRepository>();

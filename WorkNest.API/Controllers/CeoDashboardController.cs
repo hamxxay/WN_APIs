@@ -65,6 +65,17 @@ namespace WorkNest.API.Controllers
             [FromQuery] string? from = null, [FromQuery] string? to = null) =>
             Run(() => _ceo.GetRoomReportAsync(period, locationId, from, to));
 
+        /// <summary>
+        /// Network (UniFi): clients online now and over time (stored history), devices online / offline by type, clients
+        /// by type, internet lines and latency, and the critical issues, for the UniFi sites that serve the chosen location
+        /// (every site without one). Read-only: built from what the Network pages already poll. UniFi not set up or not
+        /// reachable: 200 with available = false and a short message (the rest of the dashboard does not depend on it).
+        /// </summary>
+        [HttpGet("api/ceo/network")]
+        public async Task<IActionResult> Network([FromQuery] int? locationId, [FromServices] INetworkDashboardService network) =>
+            Ok(ApiResponse.Ok(await network.GetAsync(new NetworkScope(null, locationId is > 0 ? locationId : null),
+                HttpContext?.RequestAborted ?? default)));
+
         private async Task<IActionResult> Run(Func<Task<ApiResponse>> action)
         {
             try
