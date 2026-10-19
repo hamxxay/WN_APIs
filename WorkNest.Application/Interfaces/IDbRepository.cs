@@ -54,12 +54,6 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null, string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null);
         Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, string? shiftType = "24_7", int? locationId = null);
         Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
-        /// <summary>
-        /// Sets a booking's Security Deposit (Months) and recomputes its stored deposit (dbo.WN_Bookings_UpdateSecurityDeposit,
-        /// SD_01). Returns SecurityDepositMonths / SecurityDepositRequired, or ErrorMessage when refused; an empty result
-        /// while the procedure is not installed yet (the months are then ignored, as before).
-        /// </summary>
-        Task<IDictionary<string, object?>> UpdateBookingSecurityDepositAsync(int id, int securityDepositMonths, int? updatedById);
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
         /// <summary>Signed agreement: agreement SignedDate, booking date and challan dates follow the agreement's date.</summary>
         Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate);
@@ -202,16 +196,11 @@ namespace WorkNest.Application.Interfaces
         Task<int?> InsertFloorAsync(int locationId, string name, short floorNumber, int? createdById);
 
         // --- Space ---
-        // Space types per location (P1_02..P1_04): locationId null = every location (lists) / location 1 (insert) / the
-        // type's own location (update). Before those scripts the procedures have no @LocationId: the calls work as before
-        // (rows without LocationId). A procedure rule (THROW 50000) throws SpaceTypeRuleException with its message.
-        Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync(int? locationId = null);
-        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit, int? locationId = null);
-        Task<(int? Id, string? PublicId, int? LocationId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById, int? locationId = null);
-        Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById, int? locationId = null);
+        Task<IEnumerable<IDictionary<string, object?>>> GetAllSpaceTypesAsync();
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetSpaceTypesAsync(int page, int limit);
+        Task<(int? Id, string? PublicId)> InsertSpaceTypeAsync(string name, string? description, byte? categoryId, short? capacity, bool hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? createdById);
+        Task UpdateSpaceTypeAsync(int id, string? name, string? description, byte? categoryId, short? capacity, bool? hourlyAllowed, int? accountReceivableId, int? rentAccountId, int? servicesIncomeId, int? salesTaxId, int? securityReceivedId, int? updatedById);
         Task DeleteSpaceTypeAsync(int id);
-        /// <summary>dbo.WN_SpaceCategories (Id, Code, Label), by Label.</summary>
-        Task<IEnumerable<IDictionary<string, object?>>> GetSpaceCategoriesAsync();
 
         // --- Space ---
         Task<IEnumerable<IDictionary<string, object?>>> GetSpaceConfigAsync();
@@ -279,12 +268,6 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null);
-        /// <summary>
-        /// The spaces behind the overview's Occupancy KPI, same rule (read-only): [0] TotalSpaces (active spaces),
-        /// [1] one row per active space with a live booking covering <paramref name="businessNow"/>, sorted by location, then room.
-        /// </summary>
-        /// <param name="locationIds">Locations to list; null = all locations.</param>
-        Task<List<List<IDictionary<string, object?>>>> GetDashboardOccupiedSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
         /// <paramref name="locationIds"/>: location-bound staff's locations (every one they are assigned to) for the items that
         /// have a location (via the space); null = all locations.
@@ -530,8 +513,7 @@ namespace WorkNest.Application.Interfaces
         // --- Fee Receipts ---
         Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptUnpaidInvoicesDbAsync(string? search, int? locationId, string? allowedLocationIds, int top);
         Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptAccountsDbAsync(int? companyId);
-        /// <summary>amount: the amount received (FR_01 part payments); null = the invoice's whole balance (works before FR_01 too).</summary>
-        Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null);
+        Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds);
         Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds);
         Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds);
         Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid, string? allowedLocationIds);
