@@ -7,7 +7,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.Lists;
 using WorkNest.Application.DTOs.Payment;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
 
@@ -67,15 +69,32 @@ namespace WorkNest.API.Controllers
         /// <summary>Signed-in user's email from the JWT only (the x-user-email header is no longer trusted).</summary>
         private string? ResolveUserEmail() => User.GetEmail();
 
+        // status (Unpaid / Partial / Paid / Overdue / Cancelled as the list shows it, from api/invoice/statuses), from / to
+        // (issue date, both included): only then the LST_01 procedure is used; without them the list is read as before.
         [HttpGet("api/invoice")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
+            [FromServices] IListFilterService lists,
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null,
             [FromQuery] int? typeId = null,
-            [FromQuery] int? locationId = null)
+            [FromQuery] int? locationId = null,
+            [FromQuery] string? status = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
         {
+            var filter = new ListFilter { Status = status, From = from, To = to };
+            if (filter.HasStatusOrDates)
+                return await ListFilterResults.RunAsync(async () =>
+                {
+                    if (page <= 0) page = 1;
+                    if (limit <= 0) limit = 10;
+                    var (rows, count) = await MultiLocationList.FetchAsync(User.ScopedLocations(locationId), page, limit,
+                        (p, l, loc) => lists.GetInvoicesAsync(p, l, search, typeId, loc, filter));
+                    return Ok(new { isSuccessful = true, data = rows, totalCount = count, page = page, limit = limit });
+                });
+
             try
             {
                 if (page <= 0) page = 1;
@@ -132,6 +151,12 @@ namespace WorkNest.API.Controllers
                 return StatusCode(500, new { isSuccessful = false, message = ex.Message });
             }
         }
+
+        /// <summary>Choices of the Invoices list Status filter (the statuses the list shows), [{ value, label }].</summary>
+        [HttpGet("api/invoice/statuses")]
+        [Authorize(Roles = StaffRoles)]
+        public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
+            ListFilterResults.StatusOptionsAsync(lists, ListFilterRules.Invoices);
 
         /// <summary>
         /// The signed-in customer's bills (app Payments tab): their invoices (paid, unpaid, overdue, with the

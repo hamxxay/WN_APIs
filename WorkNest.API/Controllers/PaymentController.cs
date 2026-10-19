@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WorkNest.Application.DTOs.Lists;
 using WorkNest.Application.DTOs.Payment;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.API.Filters;
 using WorkNest.Common.Responses;
@@ -51,15 +53,30 @@ namespace WorkNest.API.Controllers
             return Ok(await _payments.GetMyPaymentsAsync(userEmail));
         }
 
+        // locationId, status (a payment StatusId from api/payment/statuses), from / to (payment date = paid on, else
+        // created on; business dates, both included): only then the LST_01 procedure is used (location-bound staff stay
+        // limited to their locations); without them the list is read exactly as before.
         [HttpGet("api/payment")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
+            [FromServices] IListFilterService lists,
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
-            [FromQuery] string? search = null)
+            [FromQuery] string? search = null,
+            [FromQuery] int? locationId = null,
+            [FromQuery] string? status = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
         {
             page = Math.Max(1, page);
             limit = Math.Clamp(limit, 1, 100);
+            var filter = new ListFilter { Status = status, From = from, To = to };
+            if (filter.HasStatusOrDates || locationId is > 0)
+                return await ListFilterResults.RunAsync(async () =>
+                {
+                    var (rows, count) = await lists.GetPaymentsAsync(page, limit, search, User.ScopedLocationIds(locationId), filter);
+                    return Ok(new PaginatedResponse<object> { Data = rows, Total = count });
+                });
             if (!User.IsLocationBoundRole())
             {
                 var (items, total) = await _payments.GetPaymentsAsync(page, limit, search);
@@ -71,6 +88,12 @@ namespace WorkNest.API.Controllers
             var mine = all.Where(r => r is IDictionary<string, object?> d && d.TryGetValue("Id", out var id) && id != null && allowed.Contains(Convert.ToInt32(id))).ToList();
             return Ok(new PaginatedResponse<object> { Data = mine.Skip((page - 1) * limit).Take(limit), Total = mine.Count });
         }
+
+        /// <summary>Choices of the Payments list Status filter (the statuses the payments have), [{ value, label }].</summary>
+        [HttpGet("api/payment/statuses")]
+        [Authorize(Roles = StaffRoles)]
+        public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
+            ListFilterResults.StatusOptionsAsync(lists, ListFilterRules.Payments);
 
         [HttpGet("api/payment/{id:int}/summary")]
         [Authorize(Roles = StaffRoles)]
