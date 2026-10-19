@@ -195,6 +195,8 @@ try
     builder.Services.AddScoped<IUserService, UserService>();
     builder.Services.AddScoped<ISpaceService, SpaceService>();
     builder.Services.AddScoped<IBookingService, BookingService>();
+    // Free meeting-room hours of a private office (api/booking/meeting-room/*): dbo.WN_MeetingRooms_* (script MR_01_meeting_rooms).
+    builder.Services.AddScoped<IMeetingRoomService, MeetingRoomService>();
     builder.Services.AddScoped<IPaymentService, PaymentService>();
     builder.Services.AddScoped<ILocationService, LocationService>();
     builder.Services.AddScoped<ISpaceTypeService, SpaceTypeService>();

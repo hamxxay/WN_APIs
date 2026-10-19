@@ -335,6 +335,18 @@ namespace WorkNest.Application.Interfaces
         Task InsertQuotationDetailsAsync(int quotationId, IEnumerable<QuotationDetailDto> details, int? createdById);
         Task GenerateBookingMeetingRoomEntitlementsIfPrivateAsync(int bookingId);
 
+        // --- Free meeting-room hours (dbo.WN_MeetingRooms_*, script MR_01_meeting_rooms) ---
+        // Each throws MeetingRoomsNotInstalledException while the procedures (or a table they use) are missing.
+        /// <summary>The month allowance of the user on <paramref name="date"/>; null = none (creates the month row when missing).</summary>
+        Task<IDictionary<string, object?>?> GetMeetingRoomEntitlementDbAsync(int userId, DateTime date);
+        /// <summary>Rooms the user may book with free hours on <paramref name="date"/>, and their taken times that day.</summary>
+        Task<(List<IDictionary<string, object?>> Rooms, List<IDictionary<string, object?>> Busy)> GetMeetingRoomsForFreeHoursDbAsync(int userId, DateTime date);
+        /// <summary>BookingId, BookingPublicId, ChallanNumber, ChallanValidUntil, ErrorMessage (null = booked).</summary>
+        Task<IDictionary<string, object?>> BookFreeMeetingRoomDbAsync(int userId, int spaceId, DateTime startOn, int durationHours, string? notes);
+        /// <summary>BookingId, Cancelled, NotFound, ErrorMessage.</summary>
+        Task<IDictionary<string, object?>> CancelFreeMeetingRoomDbAsync(int bookingId, int userId, string? cancelReason);
+        Task<List<IDictionary<string, object?>>> GetMyFreeMeetingRoomsDbAsync(int userId);
+
         // --- Attendants & Access Control ---
         Task<(int PersonId, Guid PersonGuid)> AddAttendantSpAsync(string name, string email, string phone, string idType, string idNumber, int customerId);
         Task UpdatePersonAsync(int personId, string name, string email, string phone);

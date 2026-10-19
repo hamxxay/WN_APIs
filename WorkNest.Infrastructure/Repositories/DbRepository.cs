@@ -3839,6 +3839,77 @@ END";
             await cmd.ExecuteNonQueryAsync();
         }
 
+        // --- Free meeting-room hours (dbo.WN_MeetingRooms_*, script MR_01_meeting_rooms) ---
+        // SQL errors 2812 (procedure missing) / 208 (a table it uses missing) = MR_01 not run yet.
+
+        private static async Task<T> MeetingRoomsCall<T>(Func<Task<T>> call)
+        {
+            try { return await call(); }
+            catch (SqlException ex) when (ex.Number is 2812 or 208) { throw new MeetingRoomsNotInstalledException(ex); }
+        }
+
+        public Task<IDictionary<string, object?>?> GetMeetingRoomEntitlementDbAsync(int userId, DateTime date) =>
+            MeetingRoomsCall(async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_MeetingRooms_GetEntitlement", c);
+                cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                cmd.Parameters.Add("@Date", SqlDbType.Date).Value = date.Date;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? ToDict(r) : null;
+            });
+
+        public Task<(List<IDictionary<string, object?>> Rooms, List<IDictionary<string, object?>> Busy)> GetMeetingRoomsForFreeHoursDbAsync(int userId, DateTime date) =>
+            MeetingRoomsCall(async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_MeetingRooms_GetRooms", c);
+                cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                cmd.Parameters.Add("@Date", SqlDbType.Date).Value = date.Date;
+                await using var r = await cmd.ExecuteReaderAsync();
+                var rooms = await ReadAll(r);
+                var busy = await r.NextResultAsync() ? await ReadAll(r) : new List<IDictionary<string, object?>>();
+                return (rooms, busy);
+            });
+
+        public Task<IDictionary<string, object?>> BookFreeMeetingRoomDbAsync(int userId, int spaceId, DateTime startOn, int durationHours, string? notes) =>
+            MeetingRoomsCall(async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_MeetingRooms_BookFree", c);
+                cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                cmd.Parameters.Add("@SpaceId", SqlDbType.Int).Value = spaceId;
+                cmd.Parameters.Add("@StartOn", SqlDbType.DateTime2).Value = startOn;
+                cmd.Parameters.Add("@DurationHours", SqlDbType.Int).Value = durationHours;
+                cmd.Parameters.Add("@Notes", SqlDbType.NVarChar, -1).Value = (object?)notes ?? DBNull.Value;
+                cmd.Parameters.Add("@CreatedById", SqlDbType.Int).Value = userId;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? ToDict(r) : new Dictionary<string, object?>();
+            });
+
+        public Task<IDictionary<string, object?>> CancelFreeMeetingRoomDbAsync(int bookingId, int userId, string? cancelReason) =>
+            MeetingRoomsCall(async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_MeetingRooms_CancelFree", c);
+                cmd.Parameters.Add("@BookingId", SqlDbType.Int).Value = bookingId;
+                cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                cmd.Parameters.Add("@CancelReason", SqlDbType.NVarChar, 400).Value = (object?)cancelReason ?? DBNull.Value;
+                cmd.Parameters.Add("@UpdatedById", SqlDbType.Int).Value = userId;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? ToDict(r) : new Dictionary<string, object?>();
+            });
+
+        public Task<List<IDictionary<string, object?>>> GetMyFreeMeetingRoomsDbAsync(int userId) =>
+            MeetingRoomsCall(async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_MeetingRooms_GetMyFree", c);
+                cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await ReadAll(r);
+            });
+
         // --- AccessCard ---
         public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAccessCardsAsync(int page, int limit, string? search, int? bookingId, int? customerId, int? spaceId, int? status)
         {
