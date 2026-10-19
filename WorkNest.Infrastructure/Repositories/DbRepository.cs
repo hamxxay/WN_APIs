@@ -3270,76 +3270,6 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return await ReadResultSets(r);
         }
 
-        // --- Overview chart drill-down (DASH_02: dbo.WN_Dash_OverviewInvoices / Bookings / Spaces, read-only) ---
-
-        /// <summary>Locations for the DASH_02 procedures: null = every location; an empty list matches none ("-1").</summary>
-        private static object OverviewLocationCsv(IReadOnlyCollection<int>? locationIds)
-        {
-            if (locationIds is null) return DBNull.Value;
-            var ids = locationIds.Distinct().ToList();
-            return ids.Count == 0 ? "-1" : string.Join(",", ids);
-        }
-
-        /// <summary>Runs one DASH_02 procedure and reads every result set; null when it is missing (SQL error 2812: DASH_02 not run).</summary>
-        private async Task<List<List<IDictionary<string, object?>>>?> RunOverviewDetailAsync(string procedure, Action<SqlParameterCollection> bind)
-        {
-            try
-            {
-                await using var c = await Open();
-                await using var cmd = SP(procedure, c);
-                cmd.CommandTimeout = 60;
-                bind(cmd.Parameters);
-                await using var r = await cmd.ExecuteReaderAsync();
-                return await ReadResultSets(r);
-            }
-            catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: DASH_02 not run
-        }
-
-        public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailInvoicesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
-            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds,
-            DateTime? monthStart, string? bucket, string? customer, DateTime? from, DateTime? to, int top)
-        {
-            // Status IDs are ints from code (OrderStatus lookups), never user input.
-            static string Csv(IEnumerable<int> ids) => string.Join(",", ids.Distinct());
-            return RunOverviewDetailAsync("dbo.WN_Dash_OverviewInvoices", p =>
-            {
-                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
-                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                p.Add("@OpenStatusIds", SqlDbType.NVarChar, 400).Value = Csv(openInvoiceStatusIds);
-                p.Add("@PaidStatusIds", SqlDbType.NVarChar, 400).Value = Csv(paidStatusIds);
-                p.Add("@VoidStatusIds", SqlDbType.NVarChar, 400).Value = Csv(voidStatusIds);
-                p.Add("@MonthStart", SqlDbType.Date).Value = (object?)monthStart?.Date ?? DBNull.Value;
-                p.Add("@Bucket", SqlDbType.NVarChar, 20).Value = (object?)bucket ?? DBNull.Value;
-                p.Add("@Customer", SqlDbType.NVarChar, 400).Value = (object?)customer ?? DBNull.Value;
-                p.Add("@From", SqlDbType.Date).Value = (object?)from?.Date ?? DBNull.Value;
-                p.Add("@To", SqlDbType.Date).Value = (object?)to?.Date ?? DBNull.Value;
-                p.Add("@Top", SqlDbType.Int).Value = top;
-            });
-        }
-
-        public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
-            string list, DateTime monthStart, int top) =>
-            RunOverviewDetailAsync("dbo.WN_Dash_OverviewBookings", p =>
-            {
-                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
-                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                p.Add("@List", SqlDbType.NVarChar, 20).Value = list;
-                p.Add("@MonthStart", SqlDbType.Date).Value = monthStart.Date;
-                p.Add("@Top", SqlDbType.Int).Value = top;
-            });
-
-        public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
-            string list, string? spaceType, DateTime? monthStart, int top) =>
-            RunOverviewDetailAsync("dbo.WN_Dash_OverviewSpaces", p =>
-            {
-                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
-                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                p.Add("@List", SqlDbType.NVarChar, 20).Value = list;
-                p.Add("@SpaceType", SqlDbType.NVarChar, -1).Value = (object?)spaceType ?? DBNull.Value;
-                p.Add("@MonthStart", SqlDbType.Date).Value = (object?)monthStart?.Date ?? DBNull.Value;
-                p.Add("@Top", SqlDbType.Int).Value = top;
-            });
-
         /// <summary>
         /// Admin sidebar badges (read-only, polled every 60 s by every open admin tab): one row of scalar counts of
         /// work waiting on staff right now. @Loc limits the counts that have a location (via the space) to that
@@ -7391,6 +7321,76 @@ SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) 
             }
             return (0.00m, false);
         }
+
+        // --- Overview chart drill-down (DASH_02: dbo.WN_Dash_OverviewInvoices / Bookings / Spaces, read-only) ---
+
+        /// <summary>Locations for the DASH_02 procedures: null = every location; an empty list matches none ("-1").</summary>
+        private static object OverviewLocationCsv(IReadOnlyCollection<int>? locationIds)
+        {
+            if (locationIds is null) return DBNull.Value;
+            var ids = locationIds.Distinct().ToList();
+            return ids.Count == 0 ? "-1" : string.Join(",", ids);
+        }
+
+        /// <summary>Runs one DASH_02 procedure and reads every result set; null when it is missing (SQL error 2812: DASH_02 not run).</summary>
+        private async Task<List<List<IDictionary<string, object?>>>?> RunOverviewDetailAsync(string procedure, Action<SqlParameterCollection> bind)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP(procedure, c);
+                cmd.CommandTimeout = 60;
+                bind(cmd.Parameters);
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await ReadResultSets(r);
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: DASH_02 not run
+        }
+
+        public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailInvoicesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
+            IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds,
+            DateTime? monthStart, string? bucket, string? customer, DateTime? from, DateTime? to, int top)
+        {
+            // Status IDs are ints from code (OrderStatus lookups), never user input.
+            static string Csv(IEnumerable<int> ids) => string.Join(",", ids.Distinct());
+            return RunOverviewDetailAsync("dbo.WN_Dash_OverviewInvoices", p =>
+            {
+                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
+                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                p.Add("@OpenStatusIds", SqlDbType.NVarChar, 400).Value = Csv(openInvoiceStatusIds);
+                p.Add("@PaidStatusIds", SqlDbType.NVarChar, 400).Value = Csv(paidStatusIds);
+                p.Add("@VoidStatusIds", SqlDbType.NVarChar, 400).Value = Csv(voidStatusIds);
+                p.Add("@MonthStart", SqlDbType.Date).Value = (object?)monthStart?.Date ?? DBNull.Value;
+                p.Add("@Bucket", SqlDbType.NVarChar, 20).Value = (object?)bucket ?? DBNull.Value;
+                p.Add("@Customer", SqlDbType.NVarChar, 400).Value = (object?)customer ?? DBNull.Value;
+                p.Add("@From", SqlDbType.Date).Value = (object?)from?.Date ?? DBNull.Value;
+                p.Add("@To", SqlDbType.Date).Value = (object?)to?.Date ?? DBNull.Value;
+                p.Add("@Top", SqlDbType.Int).Value = top;
+            });
+        }
+
+        public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
+            string list, DateTime monthStart, int top) =>
+            RunOverviewDetailAsync("dbo.WN_Dash_OverviewBookings", p =>
+            {
+                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
+                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                p.Add("@List", SqlDbType.NVarChar, 20).Value = list;
+                p.Add("@MonthStart", SqlDbType.Date).Value = monthStart.Date;
+                p.Add("@Top", SqlDbType.Int).Value = top;
+            });
+
+        public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
+            string list, string? spaceType, DateTime? monthStart, int top) =>
+            RunOverviewDetailAsync("dbo.WN_Dash_OverviewSpaces", p =>
+            {
+                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
+                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                p.Add("@List", SqlDbType.NVarChar, 20).Value = list;
+                p.Add("@SpaceType", SqlDbType.NVarChar, -1).Value = (object?)spaceType ?? DBNull.Value;
+                p.Add("@MonthStart", SqlDbType.Date).Value = (object?)monthStart?.Date ?? DBNull.Value;
+                p.Add("@Top", SqlDbType.Int).Value = top;
+            });
     }
 }
 
