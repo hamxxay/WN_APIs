@@ -327,7 +327,7 @@ namespace WorkNest.Application.Interfaces
             IEnumerable<int> openStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, int top);
         Task<IDictionary<string, object?>?> GetCustomerByUserIdAsync(int userId);
         Task<IDictionary<string, object?>?> GetCustomerByEmailAsync(string email);
-        Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null,string? CustomerTypeId = null,int CountryId = 0,string? IdentificationDocumentTypeId = null, string? ntn = null, string? secp = null);
+        Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? CustomerTypeId = null, int? CountryId = null, string? IdentificationDocumentTypeId = null, string? ntn = null, string? secp = null);
         Task<IDictionary<string, object?>?> UpdateCustomerAsync(string guid, string? firstName, string? lastName, string? email, string? phone, string? cnic, string? address, int? cityId, string? notes, bool? isActive, string? company = null, string? ntn = null, string? secp = null);
         Task DeleteCustomerAsync(string guid);
 

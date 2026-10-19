@@ -23,6 +23,7 @@ namespace WorkNest.Application.Helpers
         public const int MinMonths = 0;
         public const int MaxMonths = 3;
         public const int DefaultPrivateMonths = 2;
+        public const int DefaultSharedMonths = 0;
 
         public const string InvalidMonthsMessage = "Security deposit must be 0, 1, 2 or 3 months.";
 
@@ -53,14 +54,15 @@ namespace WorkNest.Application.Helpers
         }
 
         /// <summary>
-        /// The months to store: the request's value (checked 0-3) for a private office or a shared space (owner's
-        /// decision, 18 Oct 2026: shared spaces take a deposit too), 2 when none was sent; always 0 for meeting rooms
-        /// whatever was sent.
+        /// The months to store: the request's value (checked 0-3) for a private office or a shared space;
+        /// when none was sent, private offices default to 2 and shared spaces default to 0;
+        /// always 0 for meeting rooms whatever was sent.
         /// </summary>
         public static int ResolveMonths(DepositSpaceKind kind, int? requested)
         {
             EnsureValidMonths(requested);
             if (kind == DepositSpaceKind.MeetingRoom) return 0;
+            if (kind == DepositSpaceKind.SharedSpace) return requested ?? DefaultSharedMonths;
             return requested ?? DefaultPrivateMonths;
         }
 

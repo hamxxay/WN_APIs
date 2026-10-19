@@ -3686,26 +3686,26 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: CD_01 not run
         }
 
-        public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? CustomerTypeId = null,int CountryId = 0,string? IdentificationDocumentTypeId = null, string? ntn = null, string? secp = null)
+        public async Task<IDictionary<string, object?>> CreateCustomerAsync(string firstName, string? lastName, string email, string? phone, string? cnic, string? address, int? cityId, string? notes, string? createdBy, int? userId = null, string? company = null, string? CustomerTypeId = null, int? CountryId = null, string? IdentificationDocumentTypeId = null, string? ntn = null, string? secp = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Customers_Insert", c);
             cmd.Parameters.AddWithValue("@FirstName", firstName);
-            cmd.Parameters.AddWithValue("@LastName", (object?)lastName ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LastName", string.IsNullOrWhiteSpace(lastName) ? DBNull.Value : (object)lastName);
             cmd.Parameters.AddWithValue("@Email", email);
-            cmd.Parameters.AddWithValue("@PhoneNumber", (object?)phone ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CnicOrPassport", (object?)cnic ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Address", (object?)address ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CityId", (object?)cityId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CreatedBy", (object?)createdBy ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Company", (object?)company ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CustomerTypeId", (object?)CustomerTypeId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@CountryId", CountryId);
-            cmd.Parameters.AddWithValue("@IdentificationDocumentTypeId", (object?)IdentificationDocumentTypeId ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@NTN", (object?)ntn ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@SecpRegistrationNo", (object?)secp ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PhoneNumber", string.IsNullOrWhiteSpace(phone) ? DBNull.Value : (object)phone);
+            cmd.Parameters.AddWithValue("@CnicOrPassport", string.IsNullOrWhiteSpace(cnic) ? DBNull.Value : (object)cnic);
+            cmd.Parameters.AddWithValue("@Address", string.IsNullOrWhiteSpace(address) ? DBNull.Value : (object)address);
+            cmd.Parameters.AddWithValue("@CityId", cityId is > 0 ? (object)cityId.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@Notes", string.IsNullOrWhiteSpace(notes) ? DBNull.Value : (object)notes);
+            cmd.Parameters.AddWithValue("@CreatedBy", string.IsNullOrWhiteSpace(createdBy) ? DBNull.Value : (object)createdBy);
+            cmd.Parameters.AddWithValue("@UserId", userId is > 0 ? (object)userId.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@Company", string.IsNullOrWhiteSpace(company) ? DBNull.Value : (object)company);
+            cmd.Parameters.AddWithValue("@CustomerTypeId", string.IsNullOrWhiteSpace(CustomerTypeId) || CustomerTypeId == "0" ? DBNull.Value : (object)CustomerTypeId);
+            cmd.Parameters.AddWithValue("@CountryId", CountryId is > 0 ? (object)CountryId.Value : DBNull.Value);
+            cmd.Parameters.AddWithValue("@IdentificationDocumentTypeId", string.IsNullOrWhiteSpace(IdentificationDocumentTypeId) || IdentificationDocumentTypeId == "0" ? DBNull.Value : (object)IdentificationDocumentTypeId);
+            cmd.Parameters.AddWithValue("@NTN", string.IsNullOrWhiteSpace(ntn) ? DBNull.Value : (object)ntn);
+            cmd.Parameters.AddWithValue("@SecpRegistrationNo", string.IsNullOrWhiteSpace(secp) ? DBNull.Value : (object)secp);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync()) return ToDict(r);
             return new Dictionary<string, object?>();
