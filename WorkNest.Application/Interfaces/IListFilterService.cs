@@ -17,6 +17,12 @@ namespace WorkNest.Application.Interfaces
         Task<(List<IDictionary<string, object?>> Rows, int Total)> GetPaymentsAsync(int page, int limit, string? search, string? locationIds, int? statusId, ListDateRange paymentDateUtc);
         Task<(List<IDictionary<string, object?>> Rows, int Total)> GetCustomersAsync(int page, int limit, string? search, string? locationIds, bool? isActive, ListDateRange createdUtc);
         Task<List<ListStatusOption>> GetStatusOptionsAsync(string list, DateTime today);
+
+        /// <summary>
+        /// One page of the invoices list from the old procedure dbo.WN_GetInvoicesList (no status / dates; newest first),
+        /// read only when dbo.WN_GetInvoicesListFiltered is not on the database yet (the filters are then applied in the API).
+        /// </summary>
+        Task<(List<IDictionary<string, object?>> Rows, int Total)> GetInvoicesUnfilteredAsync(int page, int limit, string? search, int? typeId, int? locationId);
     }
 
     /// <summary>
