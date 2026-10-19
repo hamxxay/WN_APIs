@@ -244,5 +244,25 @@ namespace WorkNest.API.Controllers
         [AllowAnonymous]
         public IActionResult Root() =>
             Ok(new { app = "WorkNest ASP.NET Core API", status = "healthy" });
+
+        /// <summary>
+        /// Chart drill-down of the overview: the records behind one bar / slice / point, on exactly the overview's rules (so
+        /// the totals are the chart's figure). kind = revenue-month (month) | aging-bucket (bucket) | top-customer (customer;
+        /// period, or from + to) | new-bookings (month) | leases-ending (month) | space-type (spaceType) | occupied-month
+        /// (month). month = yyyy-MM; from / to = yyyy-MM-dd (inclusive, both together; they replace the period). Same roles
+        /// and location rules as the overview. Bad parameters: 400. Before the database update DASH_02: 503 with a message.
+        /// Read-only (stored procedures dbo.WN_Dash_OverviewInvoices / Bookings / Spaces).
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpGet("api/dashboard/overview-details/{kind}")]
+        public async Task<IActionResult> OverviewDetails(string kind, [FromQuery] int? locationId, [FromQuery] string? locationIds,
+            [FromQuery] WorkNest.Application.DTOs.Dashboard.DashboardOverviewDetailsQuery query)
+        {
+            var result = await _dashboard.GetOverviewDetailsAsync(kind, Scope(locationId, locationIds), query);
+            if (result.IsSuccessful) return Ok(result);
+            return result.Message == DashboardOverviewDetails.DbUpdateMessage
+                ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+                : BadRequest(result);
+        }
     }
 }

@@ -32,5 +32,13 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Marks every item currently waiting on the given routes as read for this user. False if the table is missing.</summary>
         Task<bool> MarkNavBadgesReadAsync(IReadOnlyCollection<int>? locationIds, string userEmail, IEnumerable<string> routes,
             IReadOnlyCollection<int>? branchLocationIds = null);
+
+        /// <summary>
+        /// The records behind one bar / slice / point of an overview chart (<see cref="DashboardOverviewDetails.Kinds"/>), on
+        /// exactly the overview's rules, so the totals are the chart's figure. Bad parameters: a failed response; before the
+        /// database update DASH_02: a failed response with <see cref="DashboardOverviewDetails.DbUpdateMessage"/>.
+        /// </summary>
+        /// <param name="locationIds">Locations to list; null = all locations.</param>
+        Task<ApiResponse> GetOverviewDetailsAsync(string kind, IReadOnlyCollection<int>? locationIds, DashboardOverviewDetailsQuery query);
     }
 }
