@@ -345,8 +345,8 @@ namespace WorkNest.Application.DTOs.Dashboard
 
     /// <summary>
     /// GET api/ceo/rooms: rooms sold monthly (private offices, shared spaces), their occupancy and the price each was
-    /// sold at against the list price per seat (24/7) or the shift price (Morning / Evening: list less the location's
-    /// shift discount cap). Before the database update CEO_02: Available = false with Message, no summary, no rooms.
+    /// sold at against the list price per seat, for every shift (the shift discount cap is only the most that may be
+    /// taken off). Before the database update CEO_02: Available = false with Message, no summary, no rooms.
     /// </summary>
     public class CeoRoomReportDto
     {
@@ -449,9 +449,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? EndOn { get; set; }
         /// <summary>List price per seat when sold (the booking's pricing row, else today's); null when unknown.</summary>
         public decimal? ListSeatPriceAtSale { get; set; }
-        /// <summary>The location's discount cap for the shift, percent (applied to Morning / Evening only).</summary>
+        /// <summary>The location's discount cap for the shift, percent: the most a salesperson may take off the list (information only).</summary>
         public decimal ShiftDiscountCapPct { get; set; }
-        /// <summary>24/7: the list price per seat; Morning / Evening: list x (1 - cap / 100). Null when unpriced.</summary>
+        /// <summary>The list price per seat, for every shift. Null when unpriced.</summary>
         public decimal? ExpectedSeatPrice { get; set; }
         /// <summary>Expected per seat x seats sold. Null when unpriced.</summary>
         public decimal? ExpectedMonthly { get; set; }
