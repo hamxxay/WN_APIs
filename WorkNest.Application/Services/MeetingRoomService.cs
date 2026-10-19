@@ -8,10 +8,12 @@ namespace WorkNest.Application.Services
     /// <summary>
     /// Free meeting-room hours of the signed-in customer (api/booking/meeting-room/*). The rules live in the database:
     /// dbo.WN_MeetingRooms_GetEntitlement (which private office booking gives the hours; creates the month allowance row
-    /// with dbo.WN_BookingMeetingRoomEntitlements_Generate when missing), dbo.WN_MeetingRooms_BookFree (start in the
-    /// future, room at the private office location, then dbo.WN_Bookings_InsertFreeMeetingRoom: 1-3 hours, remaining
-    /// hours, no overlap), dbo.WN_MeetingRooms_CancelFree (own, confirmed, not started; then
-    /// dbo.WN_Bookings_CancelFreeMeetingRoom). This class only checks the shape of the input and maps the rows.
+    /// with dbo.WN_BookingMeetingRoomEntitlements_Generate when missing), dbo.WN_MeetingRooms_GetRooms and
+    /// dbo.WN_MeetingRooms_BookFree (only rooms at the location of that same office, the one whose hours are charged:
+    /// a customer with offices at two locations books at the earliest-starting one; start in the future; then
+    /// dbo.WN_Bookings_InsertFreeMeetingRoom: 1-3 hours, remaining hours, no overlap), dbo.WN_MeetingRooms_CancelFree
+    /// (own, confirmed, not started; then dbo.WN_Bookings_CancelFreeMeetingRoom). This class only checks the shape of
+    /// the input and maps the rows.
     /// </summary>
     public class MeetingRoomService : IMeetingRoomService
     {
