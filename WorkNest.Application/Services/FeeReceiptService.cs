@@ -98,6 +98,12 @@ namespace WorkNest.Application.Services
             if (amountError != null)
                 return BadRequest(amountError);
 
+            // A custom invoice (InvoiceTypeId 7) is paid in full, in one receipt, like a WHT invoice. Full mode already
+            // takes the whole balance (worked out by the database when saving); a part payment must be exactly the balance.
+            if (amount.HasValue && await _db.GetFeeReceiptInvoiceBalanceDbAsync(invoiceGuid) is { } invoice
+                && invoice.InvoiceTypeId == CustomInvoiceTypeId && Math.Round(amount.Value, 2) != Math.Round(invoice.Balance, 2))
+                return BadRequest(CustomInvoiceFullPaymentMessage(invoice.Balance));
+
             string? allowedCsv = isSuperAdmin ? null : ToCsv(allowedLocationIds);
 
             try
@@ -203,6 +209,13 @@ namespace WorkNest.Application.Services
 
         private static FeeReceiptResult BadRequest(string message) => FeeReceiptResult.Fail(FeeReceiptOutcome.BadRequest, message);
 
+        /// <summary>WN_Invoices.InvoiceTypeId of a custom invoice (CustomInvoiceService.InvoiceTypeId).</summary>
+        public const int CustomInvoiceTypeId = CustomInvoiceService.InvoiceTypeId;
+
+        /// <summary>400 for a custom invoice receipt that is not the whole balance.</summary>
+        public static string CustomInvoiceFullPaymentMessage(decimal balance) =>
+            $"A custom invoice must be paid in full: PKR {Math.Round(balance, 2).ToString("N2", System.Globalization.CultureInfo.InvariantCulture)}.";
+
         /// <summary>
         /// The amount to send for a receipt: null for Full (the database takes the whole balance at the moment of saving,
         /// never a figure the browser had), the amount for Partial. Partial: more than 0, at most 2 decimals; the upper
@@ -239,8 +252,11 @@ namespace WorkNest.Application.Services
             return s.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
         }
 
-        private static FeeReceiptUnpaidInvoiceDto MapToUnpaidInvoiceDto(IDictionary<string, object?> r)
+        public static FeeReceiptUnpaidInvoiceDto MapToUnpaidInvoiceDto(IDictionary<string, object?> r)
         {
+            // InvoiceTypeId: 0 when the procedure does not return it (older database).
+            var invoiceTypeId = GetInt(r, "InvoiceTypeId");
+            var isCustom = invoiceTypeId == CustomInvoiceTypeId;
             return new FeeReceiptUnpaidInvoiceDto
             {
                 InvoiceId = GetInt(r, "InvoiceId"),
@@ -263,7 +279,8 @@ namespace WorkNest.Application.Services
                 SecurityDepositAmount = GetDecimal(r, "SecurityDepositAmount"),
                 GrandTotal = GetDecimal(r, "GrandTotal"),
                 NetReceivableAmount = GetDecimal(r, "NetReceivableAmount"),
-                InvoiceTypeId = GetInt(r, "InvoiceTypeId"),
+                InvoiceTypeId = invoiceTypeId,
+                IsCustom = isCustom,
                 CurrencyCode = GetString(r, "CurrencyCode", "PKR"),
                 BookingId = GetIntOrNull(r, "BookingId"),
                 UserId = GetInt(r, "UserId"),
@@ -280,7 +297,8 @@ namespace WorkNest.Application.Services
                     ? GetDecimal(r, "BalanceAmount")
                     : Math.Max(0, Math.Round(GetDecimal(r, "NetReceivableAmount") - GetDecimal(r, "PaidTotal"), 2)),
                 PaymentStatus = GetString(r, "PaymentStatus", "Unpaid"),
-                AllowPartial = GetBool(r, "AllowPartial")
+                // Custom invoices are paid in full only, whatever the procedure says (LIVE answers 1 for type 7).
+                AllowPartial = GetBool(r, "AllowPartial") && !isCustom
             };
         }
 

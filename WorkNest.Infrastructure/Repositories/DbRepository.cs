@@ -7304,6 +7304,26 @@ END";
             return await ReadAll(r);
         }
 
+        public async Task<(int InvoiceTypeId, decimal Balance)?> GetFeeReceiptInvoiceBalanceDbAsync(Guid invoiceIdGuid)
+        {
+            await using var c = await Open();
+            // Same balance as the FR_01 column WN_Invoices.BalanceAmount: GrandTotal less WHT (WHTAmount, or the WHT rate of a
+            // type 6 invoice) less PaidTotal, 2 decimals, never below 0.
+            await using var cmd = new SqlCommand(@"
+                SELECT TOP 1 ISNULL(i.InvoiceTypeId, 1) AS InvoiceTypeId,
+                       CAST(CASE WHEN x.Payable - ROUND(ISNULL(i.PaidTotal, 0), 2) > 0 THEN x.Payable - ROUND(ISNULL(i.PaidTotal, 0), 2) ELSE 0 END
+                            AS DECIMAL(18,2)) AS Balance
+                  FROM dbo.WN_Invoices i WITH (NOLOCK)
+                 CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.WHTAmount, 0) > 0 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(i.WHTAmount, 2)
+                                               WHEN i.InvoiceTypeId = 6 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(ROUND(ISNULL(i.GrandTotal, 0), 2) * ISNULL(i.WHTRate, 0) / 100.0, 2)
+                                               ELSE ROUND(ISNULL(i.GrandTotal, 0), 2) END AS DECIMAL(18,2)) AS Payable) x
+                 WHERE i.PublicId = @PublicId;", c);
+            cmd.Parameters.Add("@PublicId", SqlDbType.UniqueIdentifier).Value = invoiceIdGuid;
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return null;
+            return (Convert.ToInt32(r["InvoiceTypeId"]), Convert.ToDecimal(r["Balance"]));
+        }
+
         public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null)
         {
             await using var c = await Open();
