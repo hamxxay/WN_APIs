@@ -530,6 +530,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int PeriodDays { get; set; }
         /// <summary>Confirmed bookings running in the period, by start; empty = vacant all period.</summary>
         public List<CeoRoomSaleDto> Sales { get; set; } = new();
+        /// <summary>CP_02: yyyy-MM-dd start of the next confirmed booking that starts after the period (and after now); null when none.</summary>
+        public string? UpcomingStartOn { get; set; }
     }
 
     public class CeoRoomSaleDto
@@ -559,7 +561,11 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal? VarianceMonthly { get; set; }
         /// <summary>Sold per seat / expected per seat - 1, percent (two decimals). Null when unpriced.</summary>
         public decimal? VariancePct { get; set; }
-        /// <summary>under | at | over (more than 0.5% below / above the expected price); null when unpriced.</summary>
+        /// <summary>under | at | over (more than 0.5% below / above the expected price; a fixed PKR discount below it is under); null when unpriced.</summary>
         public string? Pricing { get; set; }
+        /// <summary>CP_02: the booking's fixed PKR discount a month, already taken off SoldMonthly (0 when none).</summary>
+        public decimal FixedMonthly { get; set; }
+        /// <summary>CP_02: the booking's discount is a fixed PKR amount (DiscountType Amount / Fixed).</summary>
+        public bool FixedDiscount { get; set; }
     }
 }

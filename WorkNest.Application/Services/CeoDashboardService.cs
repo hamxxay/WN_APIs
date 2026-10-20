@@ -622,7 +622,8 @@ namespace WorkNest.Application.Services
                     OccupiedNow = Flag(r, "OccupiedNow"),
                     OccupiedDays = Int(r, "OccupiedDays"),
                     PeriodDays = Int(r, "PeriodDays"),
-                    PeriodOccupancyPct = Pct(Int(r, "OccupiedDays"), Int(r, "PeriodDays"))
+                    PeriodOccupancyPct = Pct(Int(r, "OccupiedDays"), Int(r, "PeriodDays")),
+                    UpcomingStartOn = Has(r, "UpcomingStartOn") ? Day(r, "UpcomingStartOn") : null   // CP_02
                 };
                 if (!byId.TryAdd(room.SpaceId, room)) continue;
                 rooms.Add(room);
@@ -644,7 +645,10 @@ namespace WorkNest.Application.Services
                     SeatsSold = Int(r, "SeatsSold"), StartOn = Day(r, "StartOn"), EndOn = Day(r, "EndOn"),
                     ListSeatPriceAtSale = Val(r, "ListSeatPriceAtSale") is { } ls ? Convert.ToDecimal(ls, En) : null,
                     ShiftDiscountCapPct = Val(r, "ShiftDiscountCapPct") is { } cp ? Convert.ToDecimal(cp, En) : 0m,
-                    SoldMonthly = sold
+                    SoldMonthly = sold,
+                    // CP_02: the fixed PKR discount a month (already off SoldMonthly) and whether the booking has one.
+                    FixedMonthly = Has(r, "FixedMonthly") ? Dec(r, "FixedMonthly") : 0m,
+                    FixedDiscount = Has(r, "FixedDiscount") && Flag(r, "FixedDiscount")
                 }, room.Seats, room.ListSeatPrice));
             }
 
@@ -693,7 +697,9 @@ namespace WorkNest.Application.Services
         /// price at sale, else today's (<paramref name="roomListSeatPrice"/>); expected per seat = the list (24/7) or
         /// list x (1 - shift discount cap / 100) (Morning / Evening); variance per month = (sold per seat - expected per
         /// seat) x seats; under / over = more than <see cref="PricingBand"/> below / above the expected per seat, else
-        /// at. No list price known (or nothing expected): not compared, the expected / variance figures and Pricing null.
+        /// at; a booking with a fixed PKR discount (<see cref="CeoRoomSaleDto.FixedDiscount"/>) sold below the expected
+        /// price is under even within the band (owner rule: fixed discounts count as under, CP_02). No list price known
+        /// (or nothing expected): not compared, the expected / variance figures and Pricing null.
         /// </summary>
         public static CeoRoomSaleDto PriceSale(CeoRoomSaleDto sale, int roomSeats, decimal? roomListSeatPrice)
         {
@@ -724,6 +730,7 @@ namespace WorkNest.Application.Services
             sale.VarianceMonthly = Money((soldSeat - expected) * seats);
             sale.VariancePct = Money(ratio * 100m);
             sale.Pricing = ratio < -PricingBand ? "under" : ratio > PricingBand ? "over" : "at";
+            if (sale.Pricing == "at" && sale.FixedDiscount && sale.VarianceMonthly < 0m) sale.Pricing = "under";   // CP_02
             return sale;
         }
 
