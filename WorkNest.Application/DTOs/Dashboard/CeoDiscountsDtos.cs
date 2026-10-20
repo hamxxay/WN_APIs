@@ -155,7 +155,7 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? SellerRole { get; set; }
     }
 
-    /// <summary>An invoice issued in the period with a discount (records/invoices).</summary>
+    /// <summary>An invoice with a discount whose billing period starts in the period (records/invoices).</summary>
     public class CeoDiscountInvoiceDto
     {
         public int InvoiceId { get; set; }
@@ -167,6 +167,10 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Room { get; set; }
         /// <summary>yyyy-MM-dd</summary>
         public string? IssuedOn { get; set; }
+        /// <summary>CP_02: yyyy-MM-dd first day of the billing period (as the invoice is placed in the period); null before CP_02.</summary>
+        public string? PeriodStart { get; set; }
+        /// <summary>CP_02: yyyy-MM-dd last day of the billing period; null when the invoice has none.</summary>
+        public string? PeriodEnd { get; set; }
         /// <summary>Before the discount.</summary>
         public decimal SubTotal { get; set; }
         public decimal Discount { get; set; }

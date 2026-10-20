@@ -19,8 +19,10 @@ namespace WorkNest.Application.Services
     ///   % = discount / the expected rent (the rent before the fixed discount on a room without a list price);
     ///   seller = who made the booking's converted quotation (as the Team section's revenue), else who created the
     ///   booking; a customer who booked it themselves is no seller;
-    ///   invoices = WN_Invoices.DiscountTotal of the invoices issued in the period that are not void (the invoice total
-    ///   is net of it), shown on its own: it is the same booking discounts as billed.
+    ///   invoices = WN_Invoices.DiscountTotal of the invoices whose billing period starts in the period (CP_01) that are
+    ///   not void (the invoice total is net of it), shown on its own, with their billing period (CP_02).
+    /// Bookings = the ones running in the period: ending after its start and starting before its end (CP_02, calendar
+    /// periods too). "A month" figures add up the monthly discount of every booking running in the period.
     /// Same period rules and parameters as the other CEO endpoints (<see cref="DashboardPeriod"/>). Before DD_01 the
     /// dashboard part answers available = false with the message, the records 503.
     /// </summary>
@@ -109,7 +111,7 @@ namespace WorkNest.Application.Services
                 var parts = new List<string>();
                 if (noLocation) parts.Add("no location");
                 else if (locationId != null) parts.Add(LocationName(locationId.Value, data) ?? $"location #{locationId}");
-                parts.Add($"issued {periodWords}");
+                parts.Add($"billing period starting {periodWords}");   // CP_01 / CP_02: by billing period, not issue date
                 var subTotal = inv.Sum(i => i.SubTotal);
                 var discount = inv.Sum(i => i.Discount);
                 return ApiResponse.Ok(new CeoDiscountRecordsDto<CeoDiscountInvoiceDto>
@@ -204,6 +206,10 @@ namespace WorkNest.Application.Services
         /// One booking row of dbo.WN_Ceo_Discounts priced as the Rooms section prices it
         /// (<see cref="CeoDashboardService.PriceSale"/>), plus its fixed PKR discount: below the price (under only) +
         /// fixed = the discount a month, as a share of the expected rent (else of the rent before the fixed discount).
+        /// CP_02 (the procedure sends FixedMonthly and BookingDiscountPercentage): the procedure's SoldMonthly is after
+        /// the fixed discount, so the price comparison is made on the rent before it (SoldMonthly + FixedMonthly) and
+        /// the fixed amount is counted once, on top; a fixed discount within the 0.5% band still counts as under (as the
+        /// Rooms section). Older procedure: the rent as sent, the fixed amount only for a booking without a percentage.
         /// A customer as the seller (they booked it themselves) is no seller.
         /// </summary>
         public static CeoDiscountBookingDto PriceBooking(IDictionary<string, object?> r, DateTime? periodStart = null, DateTime? periodEnd = null)
@@ -213,6 +219,12 @@ namespace WorkNest.Application.Services
             var pct = DecRaw(r, "DiscountPct");
             // The Rooms section's sold a month: the procedure's figure, else the rent less the percentage.
             var rent = Val(r, "SoldMonthly") is { } sm ? Convert.ToDecimal(sm, En) : DecRaw(r, "MonthlyRent") * (1 - pct / 100m);
+            // CP_02: the fixed PKR a month the procedure took off SoldMonthly; compare the rent before it.
+            var cp02 = r.ContainsKey("FixedMonthly");
+            var procFixed = cp02 ? Money(DecRaw(r, "FixedMonthly")) : 0m;
+            if (cp02) rent += procFixed;
+            var bookingPct = r.ContainsKey("BookingDiscountPercentage") ? DecRaw(r, "BookingDiscountPercentage") : pct;
+            var fixedType = SecurityDepositRules.IsFixedDiscount(Str(r, "DiscountType")) && (DecRaw(r, "DiscountAmount") > 0m || DecRaw(r, "DiscountValue") > 0m);
             var sale = CeoDashboardService.PriceSale(new CeoRoomSaleDto
             {
                 BookingId = Int(r, "BookingId"),
@@ -223,10 +235,12 @@ namespace WorkNest.Application.Services
                 EndOn = Day(r, "EndOn"),
                 ListSeatPriceAtSale = Val(r, "ListSeatPriceAtSale") is { } ls ? Convert.ToDecimal(ls, En) : null,
                 ShiftDiscountCapPct = DecRaw(r, "ShiftDiscountCapPct"),
-                SoldMonthly = rent
+                SoldMonthly = rent,
+                // CP_02: a fixed discount the procedure kept in a percentage (below the band) still counts as under.
+                FixedDiscount = cp02 && procFixed == 0m && fixedType
             }, roomSeats, roomList);
 
-            var fixedMonthly = FixedMonthly(Str(r, "DiscountType"), pct, DecRaw(r, "DiscountAmount"), DecRaw(r, "DiscountValue"), sale.SoldMonthly);
+            var fixedMonthly = cp02 ? procFixed : FixedMonthly(Str(r, "DiscountType"), pct, DecRaw(r, "DiscountAmount"), DecRaw(r, "DiscountValue"), sale.SoldMonthly);
             var below = sale.Pricing == "under" ? Money(-(sale.VarianceMonthly ?? 0m)) : 0m;
             var discount = below + fixedMonthly;
             var baseMonthly = sale.ExpectedMonthly ?? sale.SoldMonthly;
@@ -257,13 +271,14 @@ namespace WorkNest.Application.Services
                 ExpectedMonthly = sale.ExpectedMonthly,
                 RentMonthly = sale.SoldMonthly,
                 SoldMonthly = Money(sale.SoldMonthly - fixedMonthly),
-                Pricing = sale.Pricing,
+                // CP_02: as the Rooms section, a fixed discount at the price is under.
+                Pricing = cp02 && fixedMonthly > 0m && sale.Pricing == "at" ? "under" : sale.Pricing,
                 BelowPriceMonthly = below,
                 FixedMonthly = fixedMonthly,
                 DiscountMonthly = discount,
                 DiscountPct = Pct(discount, baseMonthly),
                 BaseMonthly = baseMonthly,
-                BookingDiscountPct = Math.Round(pct, 2),
+                BookingDiscountPct = Math.Round(bookingPct, 2),
                 SellerId = sellerId,
                 Seller = sellerId == null ? null : Str(r, "Seller") ?? $"User #{sellerId}",
                 SellerRole = sellerId == null ? null : Str(r, "SellerRole")
@@ -280,6 +295,8 @@ namespace WorkNest.Application.Services
             Location = Str(r, "Location"),
             Room = Str(r, "Room"),
             IssuedOn = Day(r, "IssuedOn"),
+            PeriodStart = r.ContainsKey("PeriodStart") ? Day(r, "PeriodStart") : null,   // CP_02
+            PeriodEnd = r.ContainsKey("PeriodEnd") ? Day(r, "PeriodEnd") : null,
             SubTotal = Money(DecRaw(r, "SubTotal")),
             Discount = Money(DecRaw(r, "DiscountTotal")),
             Total = Money(DecRaw(r, "GrandTotal")),
