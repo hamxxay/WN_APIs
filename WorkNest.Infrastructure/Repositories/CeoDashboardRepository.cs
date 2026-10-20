@@ -212,6 +212,26 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Top", SqlDbType.Int).Value = top;
             });
 
+        public async Task<List<List<IDictionary<string, object?>>>> GetSalesRecordsAsync(DateTime? from, DateTime? to, int? locationId,
+            int? sellerId, int top)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Records_Sales", p =>
+                {
+                    p.Add("@From", SqlDbType.DateTime2).Value = Db(from);
+                    p.Add("@To", SqlDbType.DateTime2).Value = Db(to);
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@SellerId", SqlDbType.Int).Value = Db(sellerId);
+                    p.Add("@Top", SqlDbType.Int).Value = top;
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_01") // this procedure comes with CP_02, not CEO_01
+            {
+                throw CeoDatabaseUpdateMissingException.SalesRecordsMissing(ex.InnerException);
+            }
+        }
+
         public async Task<List<List<IDictionary<string, object?>>>> GetLeaseRecordsAsync(int? locationId, bool noLocation, DateTime? from,
             DateTime? to, int expiringDays, DateTime businessNow, int top)
         {

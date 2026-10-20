@@ -55,6 +55,13 @@ namespace WorkNest.Application.Interfaces
             int? locationId, int top);
 
         /// <summary>
+        /// CP_02: the new bookings created in the window (as the Sales funnel's Bookings stage) at their contract value, with
+        /// their seller; <paramref name="sellerId"/> = only those this user sold (dbo.WN_Ceo_Records_Sales). Before CP_02:
+        /// <see cref="CeoDatabaseUpdateMissingException"/> naming CP_02.
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>> GetSalesRecordsAsync(DateTime? from, DateTime? to, int? locationId, int? sellerId, int top);
+
+        /// <summary>
         /// Confirmed leases ending in the window (default: the next <paramref name="expiringDays"/> days), soonest first
         /// (dbo.WN_Ceo_Records_Leases, QA_07; before it: <see cref="CeoDatabaseUpdateMissingException"/> naming QA_07).
         /// </summary>
@@ -118,6 +125,10 @@ namespace WorkNest.Application.Interfaces
 
         /// <summary>dbo.WN_Ceo_RoomReport is missing: CEO_02 has not run.</summary>
         public static CeoDatabaseUpdateMissingException RoomReportMissing(Exception? inner) => new(inner, "CEO_02", RoomsMessage);
+
+        /// <summary>dbo.WN_Ceo_Records_Sales is missing: CP_02 has not run.</summary>
+        public static CeoDatabaseUpdateMissingException SalesRecordsMissing(Exception? inner) =>
+            new(inner, "CP_02", "The sales list needs the database update CP_02.");
 
         /// <summary>A procedure does not know @From / @To (SQL error 8144 / 8145): CS_01 has not run.</summary>
         public static CeoDatabaseUpdateMissingException CustomRangeMissing(Exception? inner) =>

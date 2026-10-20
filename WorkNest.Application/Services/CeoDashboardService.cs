@@ -137,8 +137,8 @@ namespace WorkNest.Application.Services
 
             var quotations = Int(sales, "Quotations");
             var bookings = Int(sales, "Bookings");
-            // Conversion = quotations created in the period that were booked / quotations created in it (SM_04 column);
-            // before SM_04 ran: the per-location "converted" counts of the same quotations.
+            // Conversion = quotations created in the period that were booked / quotations created in it (SM_04 column;
+            // CP_02: booked = Converted with a live booking); before SM_04 ran: the per-location "converted" counts.
             var quotationsBooked = Has(sales, "QuotationsBooked") ? Int(sales, "QuotationsBooked")
                 : Math.Min(Set(s, 11).Sum(r => Int(r, "Converted")), quotations);
             var byType = Set(s, 10).ToDictionary(r => Str(r, "InquiryType") ?? "NotSet", r => Int(r, "Inquiries"), StringComparer.OrdinalIgnoreCase);
@@ -159,7 +159,11 @@ namespace WorkNest.Application.Services
                         .Select(kv => new CeoInquiryTypeCountDto { Type = kv.Key, Label = kv.Key, Count = kv.Value }))
                     .ToList(),
                 QuotationValue = Dec(sales, "QuotationValue"),
-                BookingValue = Dec(sales, "BookingValue"),
+                // CP_02: BookedValue = the contract value of the period's bookings; before it: their first invoices.
+                BookingValue = Has(sales, "BookedValue") ? Dec(sales, "BookedValue") : Dec(sales, "BookingValue"),
+                BookingValueBasis = Has(sales, "BookedValue") ? "contract" : "firstInvoice",
+                BookingsFromQuotations = Has(sales, "BookingsFromQuotations") ? Int(sales, "BookingsFromQuotations") : null,
+                InquiriesNoBranch = Val(sales, "InquiriesNoBranch") is { } noBranch ? Convert.ToInt32(noBranch, En) : null,
                 // A location chosen, but the procedure counted every location's inquiries (QA_07 not run).
                 InquiriesAllLocations = Location(locationId) != null && !Flag(sales, "InqByLocation")
             };
@@ -170,9 +174,11 @@ namespace WorkNest.Application.Services
         /// <summary>
         /// The Team section (19 Oct 2026): only the sales executives. [12] lists the active admins and sales executives
         /// (of the chosen location, with their quotations on its spaces); everyone but the sales executives (RoleId 16)
-        /// is left out here, so the CMS and the app get the same list. Revenue = their converted value (the total of the
-        /// quotations they created in the period that were converted). Ranked by revenue, converted, quotations, name.
-        /// The per-location rows keep their sales executive count and the location's quotations (no admin count).
+        /// is left out here, so the CMS and the app get the same list. Revenue (CP_02, SoldValue) = the contract value of
+        /// the new bookings they sold in the period (their quotation, else the booking they created); before CP_02 their
+        /// converted value (the quotations they created in the period that were converted). Ranked by revenue,
+        /// converted, quotations, name. The per-location rows keep their sales executive count and the location's
+        /// quotations (CP_02: the sales executives' quotations only, SalesExecutivesOnly).
         /// </summary>
         public static CeoTeamDto TeamOf(IEnumerable<IDictionary<string, object?>> perLocation, IEnumerable<IDictionary<string, object?>> people,
             string? salesExecutiveRole)
@@ -181,12 +187,13 @@ namespace WorkNest.Application.Services
                 .Where(r => Int(r, "RoleId") == WorkNest.Common.Constants.Roles.SalesExecutiveId)
                 .Select(r =>
                 {
-                    var revenue = Dec(r, "ConvertedValue");
+                    var sold = Has(r, "SoldValue");
+                    var revenue = sold ? Dec(r, "SoldValue") : Dec(r, "ConvertedValue");
                     return new CeoTeamPersonDto
                     {
                         UserId = Int(r, "UserId"), Name = Str(r, "Name") ?? "", Role = salesExecutiveRole ?? "",
                         Locations = Str(r, "Locations"), Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"),
-                        Revenue = revenue, ConvertedValue = revenue
+                        Revenue = revenue, ConvertedValue = revenue, Bookings = sold ? Int(r, "SoldBookings") : null
                     };
                 })
                 .OrderByDescending(p => p.Revenue).ThenByDescending(p => p.Converted).ThenByDescending(p => p.Quotations)
@@ -197,11 +204,13 @@ namespace WorkNest.Application.Services
                 PerLocation = perLocation.Select(r => new CeoTeamLocationDto
                 {
                     LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "", SalesExecutives = Int(r, "SalesExecutives"),
-                    Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted")
+                    Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"),
+                    SalesExecutivesOnly = Flag(r, "SalesExecutivesOnly")
                 }).ToList(),
                 People = list,
                 SalesExecutives = list.Count,
-                Revenue = list.Sum(p => p.Revenue)
+                Revenue = list.Sum(p => p.Revenue),
+                RevenueBasis = people.Any(r => Has(r, "SoldValue")) ? "bookings" : "quotations"
             };
         }
 
@@ -305,7 +314,7 @@ namespace WorkNest.Application.Services
                     break;
                 default: // staff
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ($"Quotations: {subject ?? $"User #{q.UserId}"}", "Last 6 months", "Quotations", "Converted");
+                        ($"Quotations: {subject ?? $"User #{q.UserId}"}", "Last 6 months; converted = booked, booking still live", "Quotations", "Converted");
                     break;
             }
             return ApiResponse.Ok(dto);
@@ -325,7 +334,9 @@ namespace WorkNest.Application.Services
             {
                 "invoices" => await InvoicesAsync(q, locationId, noLocation),
                 "spaces" => await SpacesAsync(q, locationId, noLocation),
-                "bookings" => await BookingsAsync(q, locationId, noLocation),
+                "bookings" => q.Sales == true || q.SellerId is > 0
+                    ? noLocation ? ApiResponse.Fail("locationId=none is not available for the sales list.") : await SalesAsync(q, locationId)
+                    : await BookingsAsync(q, locationId, noLocation),
                 "inquiries" => noLocation
                     ? ApiResponse.Fail("locationId=none is not available for inquiries.")
                     : await InquiriesAsync(q, locationId),
@@ -462,7 +473,7 @@ namespace WorkNest.Application.Services
                 type = InquiryType(q.Type);
                 if (type == null) return ApiResponse.Fail(TypeError);
             }
-            if (!TryWindow(q, out var from, out var to, out var window, out var error)) return ApiResponse.Fail(error!);
+            if (!TryWindow(q, out var from, out var to, out var window, out var error, pakistanDays: true)) return ApiResponse.Fail(error!);
 
             var s = await _repo.GetInquiryRecordsAsync(from, to, type, locationId, MaxRows);
             var rows = Set(s, 1).Select(r => new CeoInquiryRecordDto
@@ -518,7 +529,7 @@ namespace WorkNest.Application.Services
             var stage = (q.Stage ?? "").Trim().ToLowerInvariant();
             if (stage.Length == 0) stage = "quotations";
             if (stage is not ("quotations" or "accepted" or "converted")) return ApiResponse.Fail("stage must be quotations, accepted or converted.");
-            if (!TryWindow(q, out var from, out var to, out var window, out var error)) return ApiResponse.Fail(error!);
+            if (!TryWindow(q, out var from, out var to, out var window, out var error, pakistanDays: true)) return ApiResponse.Fail(error!);
             var userId = q.UserId is > 0 ? q.UserId : null;
 
             var s = await _repo.GetQuotationRecordsAsync(from, to, userId, stage, locationId, MaxRows);
@@ -535,6 +546,47 @@ namespace WorkNest.Application.Services
             if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
             var title = stage switch { "accepted" => "Accepted quotations", "converted" => "Converted quotations", _ => "Quotations" };
             return Records(title, parts, Total(s), rows);
+        }
+
+        /// <summary>
+        /// CP_02, the sales list (records/bookings with sales=true or a sellerId): the new bookings made in the window
+        /// (as the Sales funnel's Bookings stage) at their contract value, with their seller; with sellerId only the
+        /// ones that person sold (a sales executive's revenue). Before CP_02: the new bookings list (no seller) or, for
+        /// a seller, their converted quotations (the old revenue), so nothing breaks.
+        /// </summary>
+        private async Task<ApiResponse> SalesAsync(CeoRecordsQuery q, int? locationId)
+        {
+            if (!TryWindow(q, out var from, out var to, out var window, out var error)) return ApiResponse.Fail(error!);
+            var sellerId = q.SellerId is > 0 ? q.SellerId : null;
+            List<List<IDictionary<string, object?>>> s;
+            try
+            {
+                s = await _repo.GetSalesRecordsAsync(from, to, locationId, sellerId, MaxRows);
+            }
+            catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CP_02")
+            {
+                return sellerId != null
+                    ? await QuotationsAsync(new CeoRecordsQuery
+                    {
+                        Period = q.Period, PeriodFrom = q.PeriodFrom, PeriodTo = q.PeriodTo, Month = q.Month, From = q.From, To = q.To,
+                        LocationId = q.LocationId, UserId = sellerId, Stage = "converted"
+                    }, locationId)
+                    : await BookingsAsync(q, locationId, false);
+            }
+            var rows = Set(s, 1).Select(r => new CeoBookingRecordDto
+            {
+                BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"), Location = Str(r, "Location"),
+                StartOn = Day(r, "StartOn"), EndOn = Day(r, "EndOn"), Status = Str(r, "Status"), TotalAmount = Dec(r, "TotalAmount"),
+                SellerId = Val(r, "SellerId") is { } id ? Convert.ToInt32(id, En) : null, Seller = Str(r, "Seller"),
+                FromQuotation = Val(r, "FromQuotation") is { } fq ? Convert.ToBoolean(fq, En) : null
+            }).ToList();
+
+            var parts = new List<string>();
+            if (sellerId != null) parts.Add($"sold by {rows.FirstOrDefault()?.Seller ?? $"user #{sellerId}"}");
+            parts.Add($"made {window}");
+            parts.Add("contract value");
+            if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
+            return Records("New bookings", parts, Total(s), rows);
         }
 
         // ------------------------------------------------------------------ rooms (CEO_02)
@@ -883,9 +935,26 @@ namespace WorkNest.Application.Services
         /// Created-in window for bookings, inquiries and quotations: month (that month), else from / to (yyyy-MM-dd,
         /// both days included), else the period: to date (default this month), or a custom period's range (periodFrom /
         /// periodTo, already checked by the caller). <paramref name="label"/> describes it.
+        /// CP_02: <paramref name="pakistanDays"/> (quotations, tour inquiries; their columns are UTC) = the month, the days
+        /// and the calendar period start at Pakistan midnight, 5 hours before UTC midnight, as the dashboard counts them
+        /// (a custom period's range is already in UTC).
         /// </summary>
-        private bool TryWindow(CeoRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error)
+        private bool TryWindow(CeoRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error,
+            bool pakistanDays = false)
         {
+            if (!TryWindowDays(q, out from, out to, out label, out error, out var utc)) return false;
+            if (pakistanDays && !utc)
+            {
+                from = from?.AddHours(-DashboardPeriod.PakistanUtcOffsetHours);
+                to = to?.AddHours(-DashboardPeriod.PakistanUtcOffsetHours);
+            }
+            return true;
+        }
+
+        /// <summary>The window of <see cref="TryWindow"/> in days; <paramref name="utc"/> = already UTC (a custom period).</summary>
+        private bool TryWindowDays(CeoRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error, out bool utc)
+        {
+            utc = false;
             from = null; to = null; label = ""; error = null;
             if (!string.IsNullOrWhiteSpace(q.Month))
             {
@@ -901,6 +970,7 @@ namespace WorkNest.Application.Services
                 // These lists filter on columns written in UTC (bookings CreatedOn, quotations CreatedDate, tour
                 // inquiries CreatedOn): the Pakistan days of the range as UTC times, as the dashboard counts them (CS_01).
                 from = p.UtcStart; to = p.UtcEnd; label = p.BetweenWords();
+                utc = true;
                 return true;
             }
             var period = p.Key;
