@@ -2472,6 +2472,11 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_SpaceConfig_Insert", c);
+
+            decimal pricePerHour = req.PricePerHour ?? (req.BillingPeriodId == 1 ? req.Price : 0);
+            decimal pricePerDay = req.PricePerDay ?? (req.BillingPeriodId == 2 ? req.Price : 0);
+            decimal pricePerMonth = req.PricePerMonth ?? (req.BillingPeriodId == 4 || req.BillingPeriodId == null || (pricePerHour == 0 && pricePerDay == 0) ? req.Price : 0);
+
             cmd.Parameters.AddWithValue("@SpaceCategory", (object?)req.SpaceCategory ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@TotalSpaces", req.TotalSpaces);
             cmd.Parameters.AddWithValue("@CodePrefix", req.CodePrefix ?? string.Empty);
@@ -2480,12 +2485,20 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@ClosingTime", (object?)req.ClosingTime ?? "20:00");
             cmd.Parameters.AddWithValue("@SecurityDeposit", req.SecurityDeposit);
             cmd.Parameters.AddWithValue("@FloorId", (object?)req.FloorId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerHour", pricePerHour);
+            cmd.Parameters.AddWithValue("@PricePerDay", pricePerDay);
+            cmd.Parameters.AddWithValue("@PricePerMonth", pricePerMonth);
             cmd.Parameters.AddWithValue("@Price", req.Price);
             cmd.Parameters.AddWithValue("@BillingPeriodId", (object?)req.BillingPeriodId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)req.Amenities ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@LocationId", (object?)req.LocationId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SpaceTypeId", (object?)req.SpaceTypeId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CreatedBy", (object?)createdBy ?? (object?)req.CreatedBy ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId", (object?)req.RentAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)req.SecurityReceivedId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)req.AccountReceivableId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)req.ServicesIncomeId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SalesTaxId", (object?)req.SalesTaxId ?? DBNull.Value);
 
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync() && r["NewId"] != DBNull.Value)
@@ -2499,6 +2512,11 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_SpaceConfig_Update", c);
+
+            decimal pricePerHour = req.PricePerHour ?? (req.BillingPeriodId == 1 ? req.Price : 0);
+            decimal pricePerDay = req.PricePerDay ?? (req.BillingPeriodId == 2 ? req.Price : 0);
+            decimal pricePerMonth = req.PricePerMonth ?? (req.BillingPeriodId == 4 || req.BillingPeriodId == null || (pricePerHour == 0 && pricePerDay == 0) ? req.Price : 0);
+
             cmd.Parameters.AddWithValue("@Id", id);
             cmd.Parameters.AddWithValue("@TotalSpaces", req.TotalSpaces);
             cmd.Parameters.AddWithValue("@CodePrefix", req.CodePrefix ?? string.Empty);
@@ -2507,10 +2525,20 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@ClosingTime", (object?)req.ClosingTime ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@SecurityDeposit", req.SecurityDeposit);
             cmd.Parameters.AddWithValue("@FloorId", (object?)req.FloorId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@PricePerHour", pricePerHour);
+            cmd.Parameters.AddWithValue("@PricePerDay", pricePerDay);
+            cmd.Parameters.AddWithValue("@PricePerMonth", pricePerMonth);
             cmd.Parameters.AddWithValue("@Price", req.Price);
             cmd.Parameters.AddWithValue("@BillingPeriodId", (object?)req.BillingPeriodId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Amenities", (object?)req.Amenities ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)req.LocationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SpaceTypeId", (object?)req.SpaceTypeId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UpdatedBy", (object?)updatedBy ?? (object?)req.UpdatedBy ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@RentAccountId", (object?)req.RentAccountId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SecurityReceivedId", (object?)req.SecurityReceivedId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@AccountReceivableId", (object?)req.AccountReceivableId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ServicesIncomeId", (object?)req.ServicesIncomeId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@SalesTaxId", (object?)req.SalesTaxId ?? DBNull.Value);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -2575,16 +2603,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             if (configId == 0)
                 return new Dictionary<string, object?> { ["ErrorMessage"] = "No active config found." };
 
-            Guid? locationGuid = null;
-            Guid? spaceTypeGuid = null;
+            int actualLocationId = 0;
+            int actualSpaceTypeId = 0;
             int configMinCode = 0;
             int configTotalSpaces = 0;
 
             await using (var configCmd = new Microsoft.Data.SqlClient.SqlCommand(
-                "SELECT sc.MinCode, sc.TotalSpaces, l.IdGUID AS LocationGuid, st.IdGUID AS SpaceTypeGuid " +
+                "SELECT sc.MinCode, sc.TotalSpaces, sc.LocationId, sc.SpaceTypeId " +
                 "FROM dbo.WN_SpaceConfig sc " +
-                "JOIN dbo.WN_Locations l ON l.Id = sc.LocationId " +
-                "JOIN dbo.WN_SpaceTypes st ON st.Id = sc.SpaceTypeId " +
                 "WHERE sc.Id = @ConfigId AND sc.Status = 1", c))
             {
                 configCmd.Parameters.AddWithValue("@ConfigId", configId);
@@ -2593,8 +2619,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 {
                     configMinCode = Convert.ToInt32(configReader["MinCode"]);
                     configTotalSpaces = Convert.ToInt32(configReader["TotalSpaces"]);
-                    locationGuid = configReader["LocationGuid"] is Guid lg ? lg : null;
-                    spaceTypeGuid = configReader["SpaceTypeGuid"] is Guid stg ? stg : null;
+                    actualLocationId = configReader["LocationId"] is int lid ? lid : Convert.ToInt32(configReader["LocationId"]);
+                    actualSpaceTypeId = configReader["SpaceTypeId"] is int stid ? stid : Convert.ToInt32(configReader["SpaceTypeId"]);
                 }
             }
 
@@ -2607,19 +2633,16 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 result = await r.ReadAsync() ? ToDict(r) : null;
             }
 
-            if (locationGuid.HasValue && spaceTypeGuid.HasValue)
+            if (actualLocationId > 0 && actualSpaceTypeId > 0)
             {
                 await using var fix = new Microsoft.Data.SqlClient.SqlCommand(
                     "UPDATE s SET " +
                     "    IsActive = ISNULL(s.IsActive, 1)," +
                     "    Status   = ISNULL(s.Status, 1) " +
                     "FROM dbo.WN_Spaces s " +
-                    "WHERE (s.LocationId = @LocationGuid OR s.LocationId = @LocationId) " +
-                    "  AND (s.SpaceTypeId = @SpaceTypeGuid OR s.SpaceTypeId = @SpaceTypeId);", c);
-                fix.Parameters.AddWithValue("@LocationGuid", locationGuid.Value);
-                fix.Parameters.AddWithValue("@SpaceTypeGuid", spaceTypeGuid.Value);
-                fix.Parameters.AddWithValue("@LocationId", locationId);
-                fix.Parameters.AddWithValue("@SpaceTypeId", spaceTypeId);
+                    "WHERE s.LocationId = @LocationId AND s.SpaceTypeId = @SpaceTypeId;", c);
+                fix.Parameters.AddWithValue("@LocationId", actualLocationId);
+                fix.Parameters.AddWithValue("@SpaceTypeId", actualSpaceTypeId);
                 await fix.ExecuteNonQueryAsync();
             }
 

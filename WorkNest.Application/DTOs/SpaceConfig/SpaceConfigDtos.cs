@@ -32,10 +32,18 @@ namespace WorkNest.Application.DTOs.SpaceConfig
         public decimal SecurityDeposit { get; set; }
         public int? FloorId { get; set; }
         public decimal Price { get; set; }
+        public decimal? PricePerHour { get; set; }
+        public decimal? PricePerDay { get; set; }
+        public decimal? PricePerMonth { get; set; }
         public byte? BillingPeriodId { get; set; }
         public string? Amenities { get; set; }
         public int? LocationId { get; set; }
         public int? SpaceTypeId { get; set; }
+        public int? RentAccountId { get; set; }
+        public int? SecurityReceivedId { get; set; }
+        public int? AccountReceivableId { get; set; }
+        public int? ServicesIncomeId { get; set; }
+        public int? SalesTaxId { get; set; }
         public string? CreatedBy { get; set; }
         public string? UpdatedBy { get; set; }
     }
