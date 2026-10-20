@@ -88,6 +88,21 @@ namespace WorkNest.Application.Interfaces
         /// <remarks>CS_01: <paramref name="from"/> / <paramref name="to"/> (days included) = a custom range instead of the period.</remarks>
         Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow,
             DateTime? from = null, DateTime? to = null);
+
+        /// <summary>
+        /// CP_02: money received in the period (dbo.WN_Ceo_Received, same period parameters as the dashboard): [0] Received,
+        /// ReceivedPrev, Count, CountPrev, FromReceipts, FromPayments; [1] the last 12 months (Month, Received, Count).
+        /// Null when the procedure is not on the database yet (before CP_02).
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>?> GetReceivedAsync(int? locationId, int periodMonths, DateTime businessNow,
+            DateTime? from = null, DateTime? to = null) => Task.FromResult<List<List<IDictionary<string, object?>>>?>(null);
+
+        /// <summary>
+        /// CP_02: money received from <paramref name="from"/> to <paramref name="to"/> (days, both included), newest first
+        /// (dbo.WN_Ceo_Records_Receipts): [0] Total, Amount; [1] the first <paramref name="top"/> rows. Null before CP_02.
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>?> GetReceiptRecordsAsync(DateTime? from, DateTime? to, int? locationId,
+            bool noLocation, int top) => Task.FromResult<List<List<IDictionary<string, object?>>>?>(null);
     }
 
     /// <summary>
@@ -119,6 +134,7 @@ namespace WorkNest.Application.Interfaces
         public const string LeasesMessage = "The full list of leases expiring needs the database update QA_07.";
         public const string RoomsMessage = "Run CEO_02_room_report on the database to see the room report.";
         public const string CustomRangeMessage = DashboardDatabaseUpdate.CustomRangeMessage;
+        public const string ReceivedMessage = "The Received list needs the database update CP_02.";
 
         /// <summary>The database update (script) that is missing, e.g. CEO_01 or QA_07.</summary>
         public string Update { get; }
@@ -150,6 +166,9 @@ namespace WorkNest.Application.Interfaces
         /// <summary>A procedure does not know @From / @To (SQL error 8144 / 8145): CS_01 has not run.</summary>
         public static CeoDatabaseUpdateMissingException CustomRangeMissing(Exception? inner) =>
             new(inner, DashboardDatabaseUpdate.CustomRange, CustomRangeMessage);
+
+        /// <summary>dbo.WN_Ceo_Records_Receipts is missing: CP_02 has not run.</summary>
+        public static CeoDatabaseUpdateMissingException ReceivedMissing(Exception? inner) => new(inner, "CP_02", ReceivedMessage);
     }
 
     /// <summary>The database update that lets the CEO and Sales Manager dashboards take a custom date range.</summary>

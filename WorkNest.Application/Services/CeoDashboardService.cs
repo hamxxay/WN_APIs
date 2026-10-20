@@ -71,7 +71,10 @@ namespace WorkNest.Application.Services
         {
             if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
+            // CP_02: money received (dbo.WN_Ceo_Received) runs beside the dashboard; null before CP_02.
+            var receivedTask = _repo.GetReceivedAsync(Location(locationId), p.Months, now, p.From, p.To);
             var s = await _repo.GetDashboardAsync(Location(locationId), p.Months, now, await StatusesAsync(), ExpiringDays, p.From, p.To);
+            var received = await receivedTask;
 
             var money = Set(s, 1).FirstOrDefault();
             var occ = Set(s, 5).FirstOrDefault();
@@ -163,6 +166,7 @@ namespace WorkNest.Application.Services
                 }
             };
             dto.Money.CollectionRate = dto.Money.Invoiced > 0 ? Math.Round(dto.Money.Collected * 100m / dto.Money.Invoiced, 1) : 0m;
+            ApplyReceived(dto.Money, received);
 
             var quotations = Int(sales, "Quotations");
             var bookings = Int(sales, "Bookings");
@@ -241,6 +245,24 @@ namespace WorkNest.Application.Services
                 Revenue = list.Sum(p => p.Revenue),
                 RevenueBasis = people.Any(r => Has(r, "SoldValue")) ? "bookings" : "quotations"
             };
+        }
+
+        /// <summary>
+        /// CP_02: money received (dbo.WN_Ceo_Received [0] and [1]) onto the money section; left null when the procedure
+        /// is not on the database yet.
+        /// </summary>
+        public static void ApplyReceived(CeoMoneyDto money, List<List<IDictionary<string, object?>>>? received)
+        {
+            var r = received == null ? null : Set(received, 0).FirstOrDefault();
+            if (r == null) return;
+            money.Received = Dec(r, "Received");
+            money.ReceivedPrev = Dec(r, "ReceivedPrev");
+            money.ReceivedCount = Int(r, "Count");
+            money.ReceivedCountPrev = Int(r, "CountPrev");
+            money.ReceivedFromReceipts = Has(r, "FromReceipts") ? Dec(r, "FromReceipts") : null;
+            money.ReceivedFromPayments = Has(r, "FromPayments") ? Dec(r, "FromPayments") : null;
+            money.ReceivedSeries = Set(received!, 1).Select(m => new CeoReceivedMonthDto
+                { Month = Str(m, "Month") ?? "", Received = Dec(m, "Received"), Count = Int(m, "Count") }).ToList();
         }
 
         /// <summary>WN_Roles.DisplayName of the sales executive role; null when there is no role list.</summary>
@@ -402,7 +424,8 @@ namespace WorkNest.Application.Services
                     ? ApiResponse.Fail("locationId=none is not available for quotations.")
                     : await QuotationsAsync(q, locationId),
                 "leases" => await LeasesAsync(q, locationId, noLocation),
-                _ => ApiResponse.Fail($"Unknown records list '{kind}'. Use invoices, spaces, bookings, inquiries, quotations or leases.")
+                "receipts" => await ReceiptsAsync(q, locationId, noLocation),   // CP_02
+                _ => ApiResponse.Fail($"Unknown records list '{kind}'. Use invoices, spaces, bookings, inquiries, quotations, leases or receipts.")
             };
         }
 
@@ -612,6 +635,66 @@ namespace WorkNest.Application.Services
             if (noLocation) parts.Add("no location");
             else if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
             return Records("Leases", parts, Total(s), rows);
+        }
+
+        /// <summary>
+        /// CP_02: money received (fee receipts and paid payments), newest first, by the day it came in: month (that month),
+        /// else from / to (yyyy-MM-dd, both days included), else the period to date (calendar: its first day to today;
+        /// custom: periodFrom to periodTo), as the dashboard's Received. Before CP_02: 503 naming CP_02.
+        /// </summary>
+        private async Task<ApiResponse> ReceiptsAsync(CeoRecordsQuery q, int? locationId, bool noLocation)
+        {
+            DateTime? from, to;
+            string window;
+            if (!string.IsNullOrWhiteSpace(q.Month))
+            {
+                if (!TryMonth(q.Month, out var m)) return ApiResponse.Fail(MonthError);
+                from = m; to = m.AddMonths(1).AddDays(-1); window = $"in {m.ToString("MMMM yyyy", En)}";
+            }
+            else if (!string.IsNullOrWhiteSpace(q.From) || !string.IsNullOrWhiteSpace(q.To))
+            {
+                if (!TryDays(q.From, q.To, out from, out var end, out window, out var error)) return ApiResponse.Fail(error!);
+                to = end?.AddDays(-1);
+            }
+            else
+            {
+                if (!DashboardPeriod.TryParse(q.Period, q.PeriodFrom, q.PeriodTo, _clock.Today, out var p, out var error))
+                    return ApiResponse.Fail(error!);
+                if (p.IsCustom) { from = p.From; to = p.To; window = $"from {p.FromText} to {p.ToText}"; }
+                else
+                {
+                    from = PeriodStart(p.Key); to = _clock.Today;
+                    window = p.Key switch
+                    {
+                        "year" => $"in {from.Value.Year}",
+                        "quarter" => $"in Q{(from.Value.Month - 1) / 3 + 1} {from.Value.Year}",
+                        _ => $"in {from.Value.ToString("MMMM yyyy", En)}"
+                    };
+                }
+            }
+
+            var s = await _repo.GetReceiptRecordsAsync(from, to, locationId, noLocation, MaxRows)
+                ?? throw CeoDatabaseUpdateMissingException.ReceivedMissing(null);
+            var rows = Set(s, 1).Select(r => new CeoReceiptRecordDto
+            {
+                Kind = Str(r, "Kind") ?? "", RefId = Int(r, "RefId"), Reference = Str(r, "Reference"), ReceivedOn = Day(r, "ReceivedOn"),
+                Customer = Str(r, "Customer"), Location = Str(r, "Location"),
+                InvoiceId = Val(r, "InvoiceId") is { } inv ? Convert.ToInt32(inv, En) : null, InvoiceNumber = Str(r, "InvoiceNumber"),
+                BookingId = Val(r, "BookingId") is { } b ? Convert.ToInt32(b, En) : null,
+                Amount = Dec(r, "Amount"), Method = Str(r, "Method")
+            }).ToList();
+
+            var parts = new List<string> { window };
+            if (noLocation) parts.Add("no location");
+            else if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
+            var head = Set(s, 0).FirstOrDefault();
+            return ApiResponse.Ok(new CeoReceiptRecordsDto
+            {
+                Title = $"Money received: {string.Join(", ", parts)}",
+                Total = Int(head, "Total"),
+                Amount = Dec(head, "Amount"),
+                Rows = rows
+            });
         }
 
         private async Task<ApiResponse> QuotationsAsync(CeoRecordsQuery q, int? locationId)

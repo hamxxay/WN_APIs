@@ -58,6 +58,8 @@ namespace WorkNest.API.Controllers
         /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet) | collected (CP_02:
         /// something paid, the invoices behind Collected; before CP_02 the paid ones) | deposit (CP_02: with a security deposit).
         /// spaces (CP_02): category = PrivateOffice | SharedSpace, rooms = true (rooms only); occupied = a confirmed booking now.
+        /// receipts (CP_02): money received (fee receipts and paid payments) by the day it came in: month, or from / to,
+        /// else the period to date; the answer also has amount (the sum of every matching row).
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>
