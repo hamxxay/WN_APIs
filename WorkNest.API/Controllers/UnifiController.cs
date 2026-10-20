@@ -93,7 +93,8 @@ namespace WorkNest.API.Controllers
             Run(() => _unifi.GetTopUsageAsync(Clamp(days, 1, 30, 7)));
 
         /// <summary>
-        /// Starts a speed test on one WAN port (wan=WAN1/WAN2/...).
+        /// Starts a speed test on one WAN port (wan=WAN1/WAN2/...). The CEO runs the same test from the CEO dashboard
+        /// (api/ceo/network/speedtest).
         /// </summary>
         [HttpPost("api/unifi/speedtest")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // uses the line's full bandwidth for ~30s
