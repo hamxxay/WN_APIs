@@ -22,6 +22,7 @@ namespace WorkNest.Domain.Enums
     public enum InvoiceStatus : byte
     {
         Unpaid = 61,
-        Paid   = 62
+        Paid   = 62,
+        Deleted = 40
     }
 }

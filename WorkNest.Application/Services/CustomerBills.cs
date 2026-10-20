@@ -45,9 +45,11 @@ namespace WorkNest.Application.Services
             return d;
         }
 
-        /// <summary>A voided invoice: legacy 5 or OrderStatus 'Cancelled' (same rule as WN_Billing_GetDueBookings).</summary>
+        /// <summary>A voided invoice: legacy 5 (Cancelled), 40 (Deleted) or OrderStatus 'Cancelled'/'Deleted'.</summary>
         public static bool IsVoidInvoice(int statusId, string? orderStatusDescription) =>
-            statusId == 5 || string.Equals((orderStatusDescription ?? string.Empty).Trim(), "Cancelled", StringComparison.OrdinalIgnoreCase);
+            statusId is 5 or 40 ||
+            string.Equals((orderStatusDescription ?? string.Empty).Trim(), "Cancelled", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals((orderStatusDescription ?? string.Empty).Trim(), "Deleted", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Invoice statuses WN_HIK_AccessSuspension_Run treats as unpaid: legacy 1 / 4, 'Un Paid', 'Challan Expire'.</summary>
         public static bool CountsForSuspension(int statusId, string? orderStatusDescription)

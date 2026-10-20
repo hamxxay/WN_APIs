@@ -111,6 +111,9 @@ namespace WorkNest.Application.Helpers
             var matching = new List<(IDictionary<string, object?> Row, string ListStatus)>();
             foreach (var row in rows)
             {
+                var statusIdVal = Field(row, "StatusId");
+                if (statusIdVal != null && Convert.ToInt32(statusIdVal) == (int)InvoiceStatus.Deleted) continue;
+
                 var issued = DateValue(Field(row, "IssuedOn"));
                 if (issueDate.Start.HasValue && (issued == null || issued.Value < issueDate.Start.Value)) continue;
                 if (issueDate.End.HasValue && (issued == null || issued.Value >= issueDate.End.Value)) continue;

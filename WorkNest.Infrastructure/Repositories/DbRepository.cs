@@ -4540,7 +4540,8 @@ END";
                     ))
                     OR (@UserId > 0 AND i.UserId = @UserId)
                 )
-                AND (@StatusId IS NULL OR @StatusId <= 0 OR i.StatusId = @StatusId)";
+                AND (@StatusId IS NULL OR @StatusId <= 0 OR i.StatusId = @StatusId)
+                AND (@StatusId = 40 OR i.StatusId <> 40)";
 
             string countSql = $"SELECT COUNT(1) FROM dbo.WN_Invoices i WITH (NOLOCK) {whereClause}";
             await using var countCmd = new SqlCommand(countSql, c);

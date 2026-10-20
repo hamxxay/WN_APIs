@@ -628,6 +628,66 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        /// <summary>
+        /// Soft deletes an invoice by setting StatusId to 40 (InvoiceStatus.Deleted).
+        /// </summary>
+        [HttpDelete("api/invoice/{id:int}")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> SoftDelete(int id)
+        {
+            if (id <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid invoice ID." });
+
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                using var cmd = new SqlCommand(@"
+                    UPDATE dbo.WN_Invoices 
+                    SET StatusId = 40, UpdatedOn = SYSUTCDATETIME() 
+                    WHERE Id = @Id;
+                    SELECT @@ROWCOUNT;", conn);
+                cmd.Parameters.AddWithValue("@Id", id);
+
+                var affected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+                if (affected == 0)
+                    return NotFound(new { isSuccessful = false, message = "Invoice not found." });
+
+                return Ok(new { isSuccessful = true, message = "Invoice deleted successfully." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Soft deletes an invoice by public GUID by setting StatusId to 40 (InvoiceStatus.Deleted).
+        /// </summary>
+        [HttpDelete("api/invoice/{publicId:guid}")]
+        [Authorize(Roles = StaffRoles)]
+        public async Task<IActionResult> SoftDeleteByGuid(Guid publicId)
+        {
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                using var cmd = new SqlCommand(@"
+                    UPDATE dbo.WN_Invoices 
+                    SET StatusId = 40, UpdatedOn = SYSUTCDATETIME() 
+                    WHERE PublicId = @PublicId;
+                    SELECT @@ROWCOUNT;", conn);
+                cmd.Parameters.AddWithValue("@PublicId", publicId);
+
+                var affected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+                if (affected == 0)
+                    return NotFound(new { isSuccessful = false, message = "Invoice not found." });
+
+                return Ok(new { isSuccessful = true, message = "Invoice deleted successfully." });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
         // Record Payment on Invoices & Billing (cash, cheque, bank transfer; part or full). dbo.WN_RecordInvoicePayment
         // (INV_FIX_A) updates PaidTotal + status, re-activates the booking's access cards and writes the WN_Payments row.
         // [RecordScope] on the class keeps location-bound staff to invoices of their locations ("id").
