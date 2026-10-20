@@ -190,6 +190,11 @@ namespace WorkNest.Application.DTOs.Dashboard
         public List<NetworkWanDto> Lines { get; set; } = new();
         /// <summary>Why some or all lines have no live speed figures (still loading, not readable, other console); null = all have them.</summary>
         public string? SpeedsMessage { get; set; }
+        /// <summary>
+        /// The gateway's figures were still being read when the dashboard stopped waiting (see <see cref="SpeedsMessage"/>):
+        /// the page reloads the section shortly to pick them up.
+        /// </summary>
+        public bool SpeedsPending { get; set; }
         /// <summary>Latency per site over the last 24 hours, 15-minute steps.</summary>
         public List<NetworkLatencySeriesDto> Latency { get; set; } = new();
     }
