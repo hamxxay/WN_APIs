@@ -36,6 +36,55 @@ namespace WorkNest.Application.DTOs.Dashboard
         public NetworkInternetDto? Internet { get; set; }
         /// <summary>Critical and serious issues only (device offline, internet line down, packet loss...).</summary>
         public List<NetworkAlertDto> Alerts { get; set; } = new();
+        /// <summary>
+        /// The 5 clients (devices) that used the most data over <see cref="TopClientsRangeLabel"/>, most first (the Clients
+        /// page's "Top data users", same cached reads). Empty = no usage recorded yet; null = not available (another
+        /// console's site, still loading after the wait, or unreadable), with <see cref="TopClientsMessage"/> saying why.
+        /// </summary>
+        public List<NetworkTopClientDto>? TopClients { get; set; }
+        /// <summary>The range behind <see cref="TopClients"/>: "Today" (UniFi's daily report, so since midnight, site time).</summary>
+        public string? TopClientsRangeLabel { get; set; }
+        /// <summary>The range in days (1 = today).</summary>
+        public int? TopClientsRangeDays { get; set; }
+        /// <summary>A short plain sentence when <see cref="TopClients"/> is null.</summary>
+        public string? TopClientsMessage { get; set; }
+    }
+
+    /// <summary>One of the top data users (bytes; times UTC ISO 8601 with Z).</summary>
+    public sealed class NetworkTopClientDto
+    {
+        public int Rank { get; set; }
+        /// <summary>Alias, else UniFi name, else hostname, else a made-up name ("Apple phone · 3f:a1"), as the Clients page names it.</summary>
+        public string Name { get; set; } = "";
+        /// <summary>phone | computer | tablet | printer | tv | camera | access | network | iot | other</summary>
+        public string Kind { get; set; } = "";
+        /// <summary>Mobile, Laptop / PC, Unknown, ... as the Clients page labels it.</summary>
+        public string KindLabel { get; set; } = "";
+        /// <summary>aa:bb:cc:dd:ee:ff</summary>
+        public string Mac { get; set; } = "";
+        public string Ip { get; set; } = "";
+        public string Hostname { get; set; } = "";
+        /// <summary>Maker as UniFi reports it ("" when unknown).</summary>
+        public string Vendor { get; set; } = "";
+        public double DownloadBytes { get; set; }
+        public double UploadBytes { get; set; }
+        public double TotalBytes { get; set; }
+        /// <summary>Connected right now.</summary>
+        public bool Online { get; set; }
+        /// <summary>Last seen on the network (UTC); null when unknown.</summary>
+        public string? LastSeen { get; set; }
+        public bool Wired { get; set; }
+        public bool Guest { get; set; }
+        /// <summary>Network (VLAN) name ("" when unknown).</summary>
+        public string Network { get; set; } = "";
+        /// <summary>Wi-Fi name; "" for wired clients or when unknown.</summary>
+        public string Ssid { get; set; } = "";
+        /// <summary>The access point (Wi-Fi) or switch (wired) it connects through; "" when unknown.</summary>
+        public string Uplink { get; set; } = "";
+        /// <summary>Switch port for wired clients; null when unknown.</summary>
+        public string? Port { get; set; }
+        /// <summary>One line for the dashboard: "WorkNest via AP Lobby", "Wired · USW 24 port 5", ...</summary>
+        public string Connection { get; set; } = "";
     }
 
     public sealed class NetworkSiteDto

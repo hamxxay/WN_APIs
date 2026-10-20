@@ -78,7 +78,8 @@ namespace WorkNest.Application.Interfaces
         /// <summary>
         /// Network section figures for these sites: clients now and over time (stored history), devices online / offline
         /// by type, internet lines and latency, critical / serious issues, and clients by type from the cached client list
-        /// (waits at most <paramref name="clientsWait"/> for it; only for the main console's site).
+        /// and today's top 5 data users from the Clients page's cached reads (waits at most <paramref name="clientsWait"/> for
+        /// them, in parallel; only for the main console's site).
         /// </summary>
         Task<NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait);
     }
