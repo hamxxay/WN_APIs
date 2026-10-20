@@ -47,7 +47,7 @@ namespace WorkNest.Application.Services
         };
 
         private static readonly string[] Metrics =
-            { "revenue", "aging", "occupancy-type", "occupancy-location", "bookings-month", "inquiries-type", "staff" };
+            { "revenue", "aging", "occupancy-type", "occupancy-location", "occupancy-category", "bookings-month", "inquiries-type", "staff" };
 
         private readonly ICeoDashboardRepository _repo;
         private readonly IOrderStatusService _orderStatus;
@@ -77,6 +77,10 @@ namespace WorkNest.Application.Services
             var occ = Set(s, 5).FirstOrDefault();
             var sales = Set(s, 9).FirstOrDefault();
             var totalSpaces = Int(occ, "TotalSpaces");
+            // CP_02: rooms (Private Office / Shared Space) with a confirmed booking, per category; the past (one period ago,
+            // each month end) of the rooms that existed then. Before CP_02 every space against today's total.
+            var totalSpacesPrev = Has(occ, "TotalSpacesPrev") ? Int(occ, "TotalSpacesPrev") : totalSpaces;
+            var categoryLabels = OccupancyCategoryLabels(Set(s, 6));
             // [13] all leases expiring (QA_07); before it only the list of the first 50 is known.
             var leaseTotals = Set(s, 13).FirstOrDefault();
 
@@ -124,16 +128,31 @@ namespace WorkNest.Application.Services
                     TotalSpaces = totalSpaces,
                     OccupiedSpaces = Int(occ, "OccupiedSpaces"),
                     OccupancyPct = Pct(Int(occ, "OccupiedSpaces"), totalSpaces),
-                    OccupancyPctPrev = Pct(Int(occ, "OccupiedSpacesPrev"), totalSpaces),
+                    OccupancyPctPrev = Pct(Int(occ, "OccupiedSpacesPrev"), totalSpacesPrev),
                     ActiveBookings = Int(occ, "ActiveBookings"),
                     NewBookings = Int(occ, "NewBookings"),
                     NewBookingsPrev = Int(occ, "NewBookingsPrev"),
+                    TotalSeats = Has(occ, "TotalSeats") ? Int(occ, "TotalSeats") : null,
+                    SeatsSold = Has(occ, "SeatsSold") ? Int(occ, "SeatsSold") : null,
+                    SeatOccupancyPct = Has(occ, "TotalSeats") ? Pct(Int(occ, "SeatsSold"), Int(occ, "TotalSeats")) : null,
+                    Categories = OccupancyCategories(occ, Set(s, 6), categoryLabels),
                     Months = Set(s, 2).Select(r => new CeoOccupancyMonthDto
-                        { Month = Str(r, "Month") ?? "", OccupancyPct = Pct(Int(r, "Occupied"), totalSpaces), NewBookings = Int(r, "NewBookings") }).ToList(),
-                    ByType = Set(s, 6).Select(r => new CeoSpaceTypeOccupancyDto
+                    {
+                        Month = Str(r, "Month") ?? "",
+                        OccupancyPct = Pct(Int(r, "Occupied"), Has(r, "TotalSpaces") ? Int(r, "TotalSpaces") : totalSpaces),
+                        NewBookings = Int(r, "NewBookings"),
+                        Categories = OccupancyMonthCategories(r, categoryLabels)
+                    }).ToList(),
+                    // CP_02: [6] is by room category (Categories above), no longer by space type.
+                    ByType = Set(s, 6).Where(r => !Has(r, "CategoryCode")).Select(r => new CeoSpaceTypeOccupancyDto
                         { SpaceTypeId = Int(r, "SpaceTypeId"), Name = Str(r, "Name") ?? "", Total = Int(r, "Total"), Occupied = Int(r, "Occupied") }).ToList(),
                     ByLocation = Set(s, 7).Select(r => new CeoLocationOccupancyDto
-                        { LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "", Total = Int(r, "Total"), Occupied = Int(r, "Occupied") }).ToList(),
+                    {
+                        LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "", Total = Int(r, "Total"), Occupied = Int(r, "Occupied"),
+                        Seats = Has(r, "Seats") ? Int(r, "Seats") : null,
+                        SeatsSold = Has(r, "SeatsSold") ? Int(r, "SeatsSold") : null,
+                        Categories = OccupancyLocationCategories(r, categoryLabels)
+                    }).ToList(),
                     LeasesExpiring = Set(s, 8).Select(r => new CeoLeaseExpiringDto
                     {
                         BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"),
@@ -264,6 +283,7 @@ namespace WorkNest.Application.Services
                 return ApiResponse.Fail("spaceTypeId is required for metric occupancy-type.");
             if (metric == "occupancy-location" && q.LocationId is null or <= 0)
                 return ApiResponse.Fail("locationId is required for metric occupancy-location.");
+            if (metric == "occupancy-category") return await OccupancyCategoryAsync(q);
             string? type = null;
             if (metric == "inquiries-type")
             {
@@ -309,8 +329,11 @@ namespace WorkNest.Application.Services
                         ($"Occupancy: {subject ?? "Other"}", "Occupied and total spaces by location, right now", "Occupied", "Total spaces");
                     break;
                 case "occupancy-location":
-                    (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ($"Occupancy: {subject ?? "Location"}", "Occupied and total spaces by space type, right now", "Occupied", "Total spaces");
+                    // CP_02: rows per room category (Key = PrivateOffice | SharedSpace); before it per space type.
+                    var byCategory = dto.Rows.Count > 0 && dto.Rows.All(x => RoomCategory(x.Key) != null);
+                    (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) = byCategory
+                        ? ($"Occupancy: {subject ?? "Location"}", "Rooms with a confirmed booking now, by room category", "Occupied", "Rooms")
+                        : ($"Occupancy: {subject ?? "Location"}", "Occupied and total spaces by space type, right now", "Occupied", "Total spaces");
                     break;
                 case "bookings-month":
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
@@ -328,6 +351,31 @@ namespace WorkNest.Application.Services
                     break;
             }
             return ApiResponse.Ok(dto);
+        }
+
+        /// <summary>
+        /// CP_02, metric occupancy-category (category = PrivateOffice | SharedSpace): rooms of the category with a confirmed
+        /// booking now and all its rooms, per location (row 'none' = rooms not tied to a location).
+        /// </summary>
+        private async Task<ApiResponse> OccupancyCategoryAsync(CeoBreakdownQuery q)
+        {
+            var category = RoomCategory(q.Category);
+            if (category == null) return ApiResponse.Fail("category (PrivateOffice or SharedSpace) is required for metric occupancy-category.");
+            var s = await _repo.GetOccupancyCategoryBreakdownAsync(category, Location(q.LocationId), _clock.Now);
+            var subject = Str(Set(s, 0).FirstOrDefault(), "Subject");
+            return ApiResponse.Ok(new CeoBreakdownDto
+            {
+                Title = $"Occupancy: {(string.IsNullOrWhiteSpace(subject) ? RoomCategoryLabel(category) : subject)}",
+                Subtitle = "Rooms with a confirmed booking now, by location",
+                ValueLabel = "Occupied",
+                Value2Label = "Rooms",
+                Rows = Set(s, 1).Select(r => new CeoBreakdownRowDto
+                {
+                    Key = Str(r, "Key") ?? "", Label = Str(r, "Label") ?? Str(r, "Key") ?? "",
+                    Value = Dec(r, "Value"), Value2 = Val(r, "Value2") != null ? Dec(r, "Value2") : null,
+                    Count = Val(r, "Count") is { } c ? Convert.ToInt32(c) : null
+                }).ToList()
+            });
         }
 
         // ------------------------------------------------------------------ level 3: records
@@ -439,16 +487,28 @@ namespace WorkNest.Application.Services
         private async Task<ApiResponse> SpacesAsync(CeoRecordsQuery q, int? locationId, bool noLocation)
         {
             var spaceTypeId = q.SpaceTypeId is >= 0 ? q.SpaceTypeId : null;
-            var s = await _repo.GetSpaceRecordsAsync(spaceTypeId, locationId, noLocation, q.Occupied, _clock.Now, MaxRows);
+            // CP_02: a room category (PrivateOffice | SharedSpace) and / or rooms only (the dashboard's occupancy).
+            string? category = null;
+            if (!string.IsNullOrWhiteSpace(q.Category))
+            {
+                category = RoomCategory(q.Category);
+                if (category == null) return ApiResponse.Fail("category must be PrivateOffice or SharedSpace.");
+            }
+            var s = await _repo.GetSpaceRecordsAsync(spaceTypeId, locationId, noLocation, q.Occupied, _clock.Now, MaxRows,
+                category, q.Rooms == true);
             var rows = Set(s, 1).Select(r => new CeoSpaceRecordDto
             {
                 SpaceId = Int(r, "SpaceId"), Name = Str(r, "Name"), SpaceType = Str(r, "SpaceType"), Location = Str(r, "Location"),
                 Capacity = Val(r, "Capacity") is { } c ? Convert.ToInt32(c) : null,
                 Occupied = Val(r, "Occupied") is { } o && Convert.ToBoolean(o),
-                Customer = Str(r, "Customer"), BookingEndOn = Day(r, "BookingEndOn")
+                Customer = Str(r, "Customer"), BookingEndOn = Day(r, "BookingEndOn"),
+                Category = Str(r, "Category"), CategoryCode = Str(r, "CategoryCode"),
+                SeatsSold = Has(r, "SeatsSold") ? Int(r, "SeatsSold") : null
             }).ToList();
 
             var parts = new List<string>();
+            if (category != null) parts.Add(rows.FirstOrDefault()?.Category ?? RoomCategoryLabel(category));
+            else if (q.Rooms == true) parts.Add("rooms");
             if (spaceTypeId != null && rows.FirstOrDefault()?.SpaceType is { } t) parts.Add(t);
             if (noLocation) parts.Add("no location");
             else if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
@@ -467,7 +527,7 @@ namespace WorkNest.Application.Services
             {
                 case "": break;
                 case "all": statusIds = "*"; break;
-                case "active": case "running": statusIds = "1,2,5,33"; running = true; break;
+                case "active": case "running": statusIds = "2,33"; running = true; break;   // CP_02: confirmed only, as the occupancy
                 case "pending": statusIds = "1,5"; break;
                 case "confirmed": statusIds = "2,33"; break;
                 case "cancelled": statusIds = "3,4,6,86"; break;
@@ -956,6 +1016,73 @@ namespace WorkNest.Application.Services
         private static int? Location(int? locationId) => locationId is > 0 ? locationId : null;
 
         /// <summary>Records: a location id, "none" (not tied to a location), or nothing / 0 (all locations).</summary>
+        // ------------------------------------------------------------------ occupancy per room category (CP_02)
+
+        /// <summary>Category code -> label (WN_SpaceCategories.Label) from result set [6] (CP_02: one row per category).</summary>
+        private static Dictionary<string, string> OccupancyCategoryLabels(List<IDictionary<string, object?>> byCategory)
+        {
+            var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var r in byCategory)
+                if (Str(r, "CategoryCode") is { Length: > 0 } code && Str(r, "Name") is { Length: > 0 } name) labels[code] = name;
+            return labels;
+        }
+
+        /// <summary>
+        /// Private Office then Shared Space now: rooms, occupied, seats from [6]; one period ago from [5]'s
+        /// PrivateOffice... / SharedSpace... columns. Empty before CP_02.
+        /// </summary>
+        private static List<CeoOccupancyCategoryDto> OccupancyCategories(IDictionary<string, object?>? occ,
+            List<IDictionary<string, object?>> byCategory, IReadOnlyDictionary<string, string> labels)
+        {
+            if (!Has(occ, "PrivateOfficeTotal")) return new();
+            return RoomCategories.Select(code =>
+            {
+                var row = byCategory.FirstOrDefault(r => string.Equals(Str(r, "CategoryCode"), code, StringComparison.OrdinalIgnoreCase));
+                var rooms = row != null ? Int(row, "Total") : Int(occ, code + "Total");
+                var occupied = row != null ? Int(row, "Occupied") : Int(occ, code + "Occupied");
+                var seats = row != null ? Int(row, "Seats") : Int(occ, code + "Seats");
+                var sold = row != null ? Int(row, "SeatsSold") : Int(occ, code + "SeatsSold");
+                var roomsPrev = Int(occ, code + "TotalPrev");
+                var occupiedPrev = Int(occ, code + "OccupiedPrev");
+                return new CeoOccupancyCategoryDto
+                {
+                    CategoryCode = code, Label = RoomCategoryLabel(code, labels),
+                    Rooms = rooms, Occupied = occupied, OccupancyPct = Pct(occupied, rooms),
+                    RoomsPrev = roomsPrev, OccupiedPrev = occupiedPrev, OccupancyPctPrev = Pct(occupiedPrev, roomsPrev),
+                    Seats = seats, SeatsSold = sold, SeatOccupancyPct = Pct(sold, seats)
+                };
+            }).ToList();
+        }
+
+        /// <summary>A month of [2] per category (PrivateOfficeOccupied / PrivateOfficeTotal, ...); empty before CP_02.</summary>
+        private static List<CeoOccupancyCategoryMonthDto> OccupancyMonthCategories(IDictionary<string, object?> r,
+            IReadOnlyDictionary<string, string> labels) =>
+            !Has(r, "PrivateOfficeTotal") ? new() : RoomCategories.Select(code => new CeoOccupancyCategoryMonthDto
+            {
+                CategoryCode = code, Label = RoomCategoryLabel(code, labels),
+                Rooms = Int(r, code + "Total"), Occupied = Int(r, code + "Occupied"),
+                OccupancyPct = Pct(Int(r, code + "Occupied"), Int(r, code + "Total"))
+            }).ToList();
+
+        /// <summary>A location of [7] per category; empty before CP_02.</summary>
+        private static List<CeoLocationCategoryOccupancyDto> OccupancyLocationCategories(IDictionary<string, object?> r,
+            IReadOnlyDictionary<string, string> labels) =>
+            !Has(r, "PrivateOfficeTotal") ? new() : RoomCategories.Select(code => new CeoLocationCategoryOccupancyDto
+            {
+                CategoryCode = code, Label = RoomCategoryLabel(code, labels),
+                Rooms = Int(r, code + "Total"), Occupied = Int(r, code + "Occupied"),
+                OccupancyPct = Pct(Int(r, code + "Occupied"), Int(r, code + "Total")),
+                Seats = Int(r, code + "Seats"), SeatsSold = Int(r, code + "SeatsSold"),
+                SeatOccupancyPct = Pct(Int(r, code + "SeatsSold"), Int(r, code + "Seats"))
+            }).ToList();
+
+        /// <summary>PrivateOffice | SharedSpace in the spelling the procedures use, from any case; null when not a room category.</summary>
+        private static string? RoomCategory(string? value)
+        {
+            var v = (value ?? "").Trim().Replace(" ", "").Replace("_", "").Replace("-", "");
+            return RoomCategories.FirstOrDefault(c => string.Equals(c, v, StringComparison.OrdinalIgnoreCase));
+        }
+
         private static bool TryRecordLocation(string? value, out int? locationId, out bool noLocation)
         {
             locationId = null;
