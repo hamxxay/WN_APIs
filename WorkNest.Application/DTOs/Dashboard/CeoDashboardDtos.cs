@@ -83,6 +83,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int Invoices { get; set; }
     }
 
+    /// <summary>
+    /// Occupancy (CP_02, 20 Oct 2026): ROOMS (space category PrivateOffice or SharedSpace; meeting rooms etc. left out)
+    /// with a CONFIRMED booking (2, 33) right now, shown per category (<see cref="Categories"/>), never as one mixed figure.
+    /// TotalSpaces / OccupiedSpaces / OccupancyPct(Prev) are both categories together (kept for older clients); before
+    /// CP_02 they are every active space with a confirmed or pending booking, and Categories is empty.
+    /// </summary>
     public class CeoOccupancyDto
     {
         public int TotalSpaces { get; set; }
@@ -92,8 +98,15 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int ActiveBookings { get; set; }
         public int NewBookings { get; set; }
         public int NewBookingsPrev { get; set; }
+        /// <summary>CP_02: seats of the rooms / seats sold of the confirmed bookings running now (both categories); null before CP_02.</summary>
+        public int? TotalSeats { get; set; }
+        public int? SeatsSold { get; set; }
+        public decimal? SeatOccupancyPct { get; set; }
+        /// <summary>CP_02: Private Office, then Shared Space (always both, zeros when none); empty before CP_02.</summary>
+        public List<CeoOccupancyCategoryDto> Categories { get; set; } = new();
         /// <summary>Last 12 months, oldest first.</summary>
         public List<CeoOccupancyMonthDto> Months { get; set; } = new();
+        /// <summary>By space type: only before CP_02 (since CP_02 the procedure gives <see cref="Categories"/> instead; empty).</summary>
         public List<CeoSpaceTypeOccupancyDto> ByType { get; set; } = new();
         public List<CeoLocationOccupancyDto> ByLocation { get; set; } = new();
         /// <summary>Confirmed leases ending in the next 90 days, soonest first (the first 50).</summary>
@@ -109,8 +122,54 @@ namespace WorkNest.Application.DTOs.Dashboard
     public class CeoOccupancyMonthDto
     {
         public string Month { get; set; } = "";
+        /// <summary>Occupancy at the month end (this month: now); CP_02: of the rooms that existed then, both categories.</summary>
         public decimal OccupancyPct { get; set; }
         public int NewBookings { get; set; }
+        /// <summary>CP_02: per category at the month end, Private Office then Shared Space; empty before CP_02.</summary>
+        public List<CeoOccupancyCategoryMonthDto> Categories { get; set; } = new();
+    }
+
+    /// <summary>One room category's occupancy now (CP_02).</summary>
+    public class CeoOccupancyCategoryDto
+    {
+        /// <summary>WN_SpaceCategories.Code: PrivateOffice | SharedSpace.</summary>
+        public string CategoryCode { get; set; } = "";
+        /// <summary>WN_SpaceCategories.Label (e.g. "Private Office").</summary>
+        public string Label { get; set; } = "";
+        public int Rooms { get; set; }
+        /// <summary>Rooms with a confirmed booking right now.</summary>
+        public int Occupied { get; set; }
+        public decimal OccupancyPct { get; set; }
+        /// <summary>One period ago (same moment), of the rooms that existed then.</summary>
+        public int RoomsPrev { get; set; }
+        public int OccupiedPrev { get; set; }
+        public decimal OccupancyPctPrev { get; set; }
+        public int Seats { get; set; }
+        public int SeatsSold { get; set; }
+        public decimal SeatOccupancyPct { get; set; }
+    }
+
+    /// <summary>One room category at a month end (CP_02): rooms that existed then and how many had a confirmed booking.</summary>
+    public class CeoOccupancyCategoryMonthDto
+    {
+        public string CategoryCode { get; set; } = "";
+        public string Label { get; set; } = "";
+        public int Rooms { get; set; }
+        public int Occupied { get; set; }
+        public decimal OccupancyPct { get; set; }
+    }
+
+    /// <summary>One room category at one location, now (CP_02).</summary>
+    public class CeoLocationCategoryOccupancyDto
+    {
+        public string CategoryCode { get; set; } = "";
+        public string Label { get; set; } = "";
+        public int Rooms { get; set; }
+        public int Occupied { get; set; }
+        public decimal OccupancyPct { get; set; }
+        public int Seats { get; set; }
+        public int SeatsSold { get; set; }
+        public decimal SeatOccupancyPct { get; set; }
     }
 
     public class CeoSpaceTypeOccupancyDto
@@ -123,10 +182,16 @@ namespace WorkNest.Application.DTOs.Dashboard
 
     public class CeoLocationOccupancyDto
     {
+        /// <summary>0 = "No location" (CP_02: rooms not tied to a shown location; records with locationId=none).</summary>
         public int LocationId { get; set; }
         public string Name { get; set; } = "";
         public int Total { get; set; }
         public int Occupied { get; set; }
+        /// <summary>CP_02: seats / seats sold now (both categories); null before CP_02.</summary>
+        public int? Seats { get; set; }
+        public int? SeatsSold { get; set; }
+        /// <summary>CP_02: Private Office, then Shared Space at this location; empty before CP_02.</summary>
+        public List<CeoLocationCategoryOccupancyDto> Categories { get; set; } = new();
     }
 
     public class CeoLeaseExpiringDto
@@ -136,6 +201,7 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Space { get; set; }
         public string? Location { get; set; }
         public string? EndOn { get; set; }
+        /// <summary>CP_02: the monthly rent after the % and fixed PKR discounts (before CP_02: the list rent).</summary>
         public decimal MonthlyAmount { get; set; }
     }
 
@@ -257,6 +323,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? PeriodTo { get; set; }
         public string? Bucket { get; set; }
         public int? SpaceTypeId { get; set; }
+        /// <summary>CP_02, metric occupancy-category: PrivateOffice | SharedSpace.</summary>
+        public string? Category { get; set; }
         public string? Type { get; set; }
         public int? UserId { get; set; }
     }
@@ -282,6 +350,10 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int? CustomerId { get; set; }
         public string? Status { get; set; }
         public int? SpaceTypeId { get; set; }
+        /// <summary>CP_02, spaces: only rooms of this category (PrivateOffice | SharedSpace).</summary>
+        public string? Category { get; set; }
+        /// <summary>CP_02, spaces: true = only rooms (Private Office and Shared Space), as the dashboard's occupancy.</summary>
+        public bool? Rooms { get; set; }
         public bool? Occupied { get; set; }
         public string? Type { get; set; }
         public int? UserId { get; set; }
@@ -318,6 +390,11 @@ namespace WorkNest.Application.DTOs.Dashboard
         public bool Occupied { get; set; }
         public string? Customer { get; set; }
         public string? BookingEndOn { get; set; }
+        /// <summary>CP_02: the room category (label / code; null for a space without one or before CP_02).</summary>
+        public string? Category { get; set; }
+        public string? CategoryCode { get; set; }
+        /// <summary>CP_02: seats of the confirmed bookings running now (at most the room's seats); null before CP_02.</summary>
+        public int? SeatsSold { get; set; }
     }
 
     public class CeoBookingRecordDto
