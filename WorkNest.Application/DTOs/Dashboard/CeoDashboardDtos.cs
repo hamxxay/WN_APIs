@@ -33,11 +33,27 @@ namespace WorkNest.Application.DTOs.Dashboard
 
     public class CeoMoneyDto
     {
-        /// <summary>Invoiced / collected in the period by billing period (CP_01: the month the period starts, not the issue date).</summary>
+        /// <summary>
+        /// Invoiced / collected in the period by billing period (CP_01: the month the period starts, not the issue date).
+        /// CP_02: invoiced = GrandTotal less the refundable security deposit (<see cref="SecurityDeposits"/> apart);
+        /// collected = paid so far on those invoices (partial payments count, a Paid invoice in full, an invoice with only
+        /// its WHT left counts as settled), less the deposit's share. A calendar period counts whole billing months up to
+        /// this one, against the same months one period earlier (<see cref="InvoicedPrevFrom"/> / <see cref="InvoicedPrevTo"/>).
+        /// </summary>
         public decimal Invoiced { get; set; }
         public decimal InvoicedPrev { get; set; }
         public decimal Collected { get; set; }
         public decimal CollectedPrev { get; set; }
+        /// <summary>
+        /// CP_02: security deposits billed on the period's invoices (left out of Invoiced, the 12 months and the top
+        /// customers), the previous period's, and how many invoices carry one; null before the database update CP_02.
+        /// </summary>
+        public decimal? SecurityDeposits { get; set; }
+        public decimal? SecurityDepositsPrev { get; set; }
+        public int? SecurityDepositsCount { get; set; }
+        /// <summary>CP_02: the billing period starts InvoicedPrev / CollectedPrev cover (yyyy-MM-dd, both days included); null before CP_02.</summary>
+        public string? InvoicedPrevFrom { get; set; }
+        public string? InvoicedPrevTo { get; set; }
         /// <summary>Open invoices owed now (CP_01: without the ones billed in advance).</summary>
         public decimal Outstanding { get; set; }
         public int OutstandingCount { get; set; }
@@ -49,7 +65,7 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// </summary>
         public decimal? BilledInAdvance { get; set; }
         public int? BilledInAdvanceCount { get; set; }
-        /// <summary>Collected / invoiced in the period, percent (one decimal).</summary>
+        /// <summary>Collected / invoiced in the period, percent (one decimal): the share of the period's billing paid so far.</summary>
         public decimal CollectionRate { get; set; }
         /// <summary>Last 12 months, oldest first.</summary>
         public List<CeoMoneyMonthDto> Months { get; set; } = new();
@@ -267,6 +283,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string Title { get; set; } = "";
         public int Total { get; set; }
         public List<T> Rows { get; set; } = new();
+        /// <summary>CP_02, invoices only: the totals of every matching invoice; null otherwise.</summary>
+        public CeoInvoiceTotalsDto? InvoiceTotals { get; set; }
     }
 
     /// <summary>Query of GET api/ceo/records/{kind} (each list uses the parameters it knows).</summary>
@@ -301,11 +319,31 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? DueOn { get; set; }
         public decimal Total { get; set; }
         public decimal Paid { get; set; }
+        /// <summary>Owed now: GrandTotal - WHT - paid (CP_02; WHT is withheld by the customer), 0 for a paid invoice.</summary>
         public decimal Balance { get; set; }
         public string? Status { get; set; }
         /// <summary>CP_01: the billing period, yyyy-MM-dd (end null when unknown); null before the database update CP_01.</summary>
         public string? PeriodStart { get; set; }
         public string? PeriodEnd { get; set; }
+        /// <summary>
+        /// CP_02 (null before it): WHT withheld; the security deposit inside Total; billed = Total less the deposit (what
+        /// Invoiced counts); collected = paid so far less the deposit's share (what Collected counts).
+        /// </summary>
+        public decimal? Wht { get; set; }
+        public decimal? Deposit { get; set; }
+        public decimal? Billed { get; set; }
+        public decimal? Collected { get; set; }
+    }
+
+    /// <summary>CP_02: records/invoices totals of every matching invoice (not only the rows sent); null before CP_02.</summary>
+    public class CeoInvoiceTotalsDto
+    {
+        /// <summary>Billed without security deposits (as Invoiced).</summary>
+        public decimal Billed { get; set; }
+        /// <summary>Paid so far without the deposits' share (as Collected).</summary>
+        public decimal Collected { get; set; }
+        /// <summary>Owed now (GrandTotal - WHT - paid of the invoices with something left to pay).</summary>
+        public decimal Balance { get; set; }
     }
 
     public class CeoSpaceRecordDto

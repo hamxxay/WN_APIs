@@ -23,6 +23,10 @@ namespace WorkNest.Application.Services
     /// Invoices by billing period (CP_01, 20 Oct 2026): the procedures place an invoice in the month its billing period
     /// starts (not the month it was issued); unpaid invoices for a period not started yet (and not past due) are "billed
     /// in advance", apart from Outstanding (billedInAdvance; null before CP_01). Records: status advance, periodStart / periodEnd.
+    /// Money (CP_02): invoiced leaves out the security deposits (securityDeposits apart); collected = paid so far on the
+    /// period's invoices; whole billing months against the same months one period earlier; only invoices with something
+    /// left to pay count as outstanding / overdue / billed in advance. Records: balance = GrandTotal - WHT - paid (0 when
+    /// paid), status collected, invoiceTotals.
     /// </summary>
     public class CeoDashboardService : ICeoDashboardService
     {
@@ -99,6 +103,12 @@ namespace WorkNest.Application.Services
                     // CP_01: unpaid invoices for a billing period not started yet (not in Outstanding); null before CP_01.
                     BilledInAdvance = Has(money, "BilledInAdvance") ? Dec(money, "BilledInAdvance") : null,
                     BilledInAdvanceCount = Has(money, "BilledInAdvanceCount") ? Int(money, "BilledInAdvanceCount") : null,
+                    // CP_02: security deposits billed (kept out of Invoiced) and the previous invoice window; null before CP_02.
+                    SecurityDeposits = Has(money, "SecurityDeposits") ? Dec(money, "SecurityDeposits") : null,
+                    SecurityDepositsPrev = Has(money, "SecurityDepositsPrev") ? Dec(money, "SecurityDepositsPrev") : null,
+                    SecurityDepositsCount = Has(money, "SecurityDepositsCount") ? Int(money, "SecurityDepositsCount") : null,
+                    InvoicedPrevFrom = Day(money, "InvoicePrevFrom"),
+                    InvoicedPrevTo = Day(money, "InvoicePrevTo"),
                     Months = Set(s, 2).Select(r => new CeoMoneyMonthDto
                         { Month = Str(r, "Month") ?? "", Invoiced = Dec(r, "Invoiced"), Collected = Dec(r, "Collected") }).ToList(),
                     Aging = Set(s, 3).Select(r => new CeoAgingBucketDto
@@ -278,12 +288,12 @@ namespace WorkNest.Application.Services
                 case "revenue":
                     var billed = rangeFrom != null ? DashboardPeriod.RangeLabel(rangeFrom.Value, rangeTo!.Value) : month!.Value.ToString("MMMM yyyy", En);
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ("Revenue by location", $"Invoices by billing period, {billed}; collected = now paid", "Invoiced", "Collected");
+                        ("Revenue by location", $"Invoices by billing period, {billed}, without security deposits; collected = paid so far", "Invoiced", "Collected");
                     break;
                 case "aging":
                     var bucketLabel = Buckets.First(b => b.Key == bucket).Label;
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ("Outstanding by location", bucket == "not_due" ? "Open invoices not due yet" : $"Open invoices {bucketLabel} past due", "Outstanding", null);
+                        ("Outstanding by location", bucket == "not_due" ? "Unpaid invoices not due yet" : $"Unpaid invoices {bucketLabel} past due", "Outstanding", null);
                     break;
                 case "occupancy-type":
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
@@ -356,7 +366,10 @@ namespace WorkNest.Application.Services
             {
                 status = q.Status.Trim().ToLowerInvariant();
                 // advance (CP_01): unpaid, for a billing period not started yet (open leaves them out).
-                if (status is not ("open" or "overdue" or "paid" or "advance")) return ApiResponse.Fail("status must be open, overdue, paid or advance.");
+                // collected (CP_02): something paid (what Collected counts: partial payments too); deposit (CP_02): with a
+                // security deposit (what Security deposits counts).
+                if (status is not ("open" or "overdue" or "paid" or "advance" or "collected" or "deposit"))
+                    return ApiResponse.Fail("status must be open, overdue, paid, advance, collected or deposit.");
             }
             // CS_01: billing period starting from / to (yyyy-MM-dd, both days included; CP_01), e.g. a custom period's revenue by location.
             DateTime? from = null, to = null;
@@ -370,15 +383,26 @@ namespace WorkNest.Application.Services
                 periodWindow = $"billing period {DashboardPeriod.RangeLabel(from!.Value, to.Value)}";
             }
 
-            var s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, q.CustomerId is > 0 ? q.CustomerId : null,
-                status, _clock.Now, await StatusesAsync(), MaxRows, from, to);
+            var statuses = await StatusesAsync();
+            var customerId = q.CustomerId is > 0 ? q.CustomerId : null;
+            var s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, customerId, status, _clock.Now, statuses, MaxRows, from, to);
+            var head = Set(s, 0).FirstOrDefault();
+            // A database before CP_02 knows no status collected (no totals in [0]): the paid invoices instead, as before.
+            if (status == "collected" && !Has(head, "Billed"))
+            {
+                status = "paid";
+                s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, customerId, status, _clock.Now, statuses, MaxRows, from, to);
+                head = Set(s, 0).FirstOrDefault();
+            }
             var rows = Set(s, 1).Select(r => new CeoInvoiceRecordDto
             {
                 InvoiceId = Int(r, "InvoiceId"), InvoiceNumber = Str(r, "InvoiceNumber"), Customer = Str(r, "Customer"),
                 Location = Str(r, "Location"), IssuedOn = Day(r, "IssuedOn"), DueOn = Day(r, "DueOn"),
                 Total = Dec(r, "Total"), Paid = Dec(r, "Paid"), Balance = Dec(r, "Balance"), Status = Str(r, "Status"),
                 // CP_01 columns; null before it (Day answers null for a missing column).
-                PeriodStart = Day(r, "PeriodStart"), PeriodEnd = Day(r, "PeriodEnd")
+                PeriodStart = Day(r, "PeriodStart"), PeriodEnd = Day(r, "PeriodEnd"),
+                // CP_02 columns; null before it.
+                Wht = DecOrNull(r, "Wht"), Deposit = DecOrNull(r, "Deposit"), Billed = DecOrNull(r, "Billed"), Collected = DecOrNull(r, "Collected")
             }).ToList();
 
             var parts = new List<string>();
@@ -386,13 +410,19 @@ namespace WorkNest.Application.Services
             else if (status == "open") parts.Add("unpaid");
             else if (status == "paid") parts.Add("paid");
             else if (status == "advance") parts.Add("billed in advance");
+            else if (status == "collected") parts.Add("with payments");
+            else if (status == "deposit") parts.Add("with a security deposit");
             if (bucket != null) parts.Add(bucket == "not_due" ? "not due yet" : $"{Buckets.First(b => b.Key == bucket).Label} past due");
             if (month != null) parts.Add($"billing period {month.Value.ToString("MMMM yyyy", En)}");
             if (periodWindow != null) parts.Add(periodWindow);
             if (q.CustomerId is > 0) parts.Add(month == null ? $"{rows.FirstOrDefault()?.Customer ?? "customer"}, last 12 months" : rows.FirstOrDefault()?.Customer ?? "customer");
             if (noLocation) parts.Add("no location");
             else if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
-            return Records("Invoices", parts, Total(s), rows);
+            var result = Records("Invoices", parts, Total(s), rows);
+            // CP_02: the totals of every matching invoice (the list holds at most MaxRows).
+            if (Has(head, "Billed") && result.Data is CeoRecordsDto<CeoInvoiceRecordDto> dto)
+                dto.InvoiceTotals = new CeoInvoiceTotalsDto { Billed = Dec(head, "Billed"), Collected = Dec(head, "Collected"), Balance = Dec(head, "Balance") };
+            return result;
         }
 
         private async Task<ApiResponse> SpacesAsync(CeoRecordsQuery q, int? locationId, bool noLocation)
@@ -977,6 +1007,8 @@ namespace WorkNest.Application.Services
         private static object? Val(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) ? v : null;
         private static int Int(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : 0;
         private static decimal Dec(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Math.Round(Convert.ToDecimal(v), 2) : 0m;
+        /// <summary>A money column; null when it is missing or NULL (e.g. a procedure from before CP_02).</summary>
+        private static decimal? DecOrNull(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Math.Round(Convert.ToDecimal(v), 2) : null;
         private static string? Str(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToString(v, En) : null;
         /// <summary>A bit column; false when it is missing (e.g. a procedure from before QA_07).</summary>
         private static bool Flag(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v && Convert.ToBoolean(v, En);
