@@ -159,9 +159,12 @@ namespace WorkNest.Application.DTOs.Dashboard
     {
         /// <summary>inquiries, quotations, accepted, bookings: created in the period.</summary>
         public List<CeoFunnelStageDto> Funnel { get; set; } = new();
-        /// <summary>Quotations created in the period that were booked / quotations created in it, percent (one decimal); never above 100.</summary>
+        /// <summary>
+        /// Quotations created in the period that were booked / quotations created in it, percent (one decimal); never above
+        /// 100. CP_02: booked = Converted and the booking is live (not deleted, not rejected / cancelled / no show).
+        /// </summary>
         public decimal ConversionRate { get; set; }
-        /// <summary>Quotations created in the period that were booked (converted).</summary>
+        /// <summary>Quotations created in the period that were booked (converted; CP_02: with a live booking).</summary>
         public int QuotationsBooked { get; set; }
         /// <summary>Website, WhatsApp, WalkIn, Reference, NotSet (always all five).</summary>
         public List<CeoInquiryTypeCountDto> InquiriesByType { get; set; } = new();
@@ -172,7 +175,24 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// </summary>
         public bool InquiriesAllLocations { get; set; }
         public decimal QuotationValue { get; set; }
+        /// <summary>
+        /// Value of the bookings made in the period (the Bookings stage). CP_02: their contract value (the rent of the whole
+        /// lease after the discount, as the booking summary shows it); before CP_02: the first invoice (challan) of each
+        /// booking, else its total. <see cref="BookingValueBasis"/> says which.
+        /// </summary>
         public decimal BookingValue { get; set; }
+        /// <summary>contract (CP_02) | firstInvoice (before CP_02).</summary>
+        public string BookingValueBasis { get; set; } = "firstInvoice";
+        /// <summary>
+        /// CP_02: of the period's bookings (the Bookings stage), those made from a quotation (converted); the rest were
+        /// booked directly. Null before CP_02.
+        /// </summary>
+        public int? BookingsFromQuotations { get; set; }
+        /// <summary>
+        /// CP_02: one location chosen (inquiries by branch): the tour inquiries of the period that have no branch, so are
+        /// counted at no location (not in the figures). Null with all locations or before CP_02.
+        /// </summary>
+        public int? InquiriesNoBranch { get; set; }
     }
 
     public class CeoFunnelStageDto
@@ -203,11 +223,17 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int SalesExecutives { get; set; }
         /// <summary>Their revenue together (the sum of <see cref="CeoTeamPersonDto.Revenue"/>), PKR.</summary>
         public decimal Revenue { get; set; }
+        /// <summary>
+        /// What Revenue is: bookings (CP_02: the contract value of the new bookings each person sold in the period) or
+        /// quotations (before CP_02: the value of their quotations created in the period that were converted).
+        /// </summary>
+        public string RevenueBasis { get; set; } = "quotations";
     }
 
     /// <summary>
-    /// One location: its sales executives and the quotations created in the period on its spaces (by anyone, as the
-    /// sales funnel), how many converted.
+    /// One location: its sales executives and the quotations created in the period on its spaces, how many converted
+    /// (with a live booking). CP_02: only the quotations sales executives created (<see cref="SalesExecutivesOnly"/>);
+    /// before it, by anyone (as the sales funnel).
     /// </summary>
     public class CeoTeamLocationDto
     {
@@ -216,6 +242,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int SalesExecutives { get; set; }
         public int Quotations { get; set; }
         public int Converted { get; set; }
+        /// <summary>CP_02: Quotations / Converted count only the sales executives' quotations (false before CP_02: anyone's).</summary>
+        public bool SalesExecutivesOnly { get; set; }
     }
 
     public class CeoTeamPersonDto
@@ -229,13 +257,15 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int Quotations { get; set; }
         public int Converted { get; set; }
         /// <summary>
-        /// Revenue, PKR: the total (WN_Quotations.TotalAmount, the contract value) of the quotations this person created
-        /// in the period that were converted to a booking (Status Converted) - the dashboard's "converted value", as on
-        /// the super admin staff overview and the sales executive's own dashboard. Same figure as <see cref="ConvertedValue"/>.
+        /// Revenue, PKR. CP_02: the contract value of the new bookings (created in the period, live) this person sold:
+        /// seller = who made the booking's quotation, else who created the booking (as the Discounts section).
+        /// Before CP_02: the total of the quotations this person created in the period that were converted.
         /// </summary>
         public decimal Revenue { get; set; }
         /// <summary>Same as <see cref="Revenue"/> (the name older app builds read).</summary>
         public decimal ConvertedValue { get; set; }
+        /// <summary>CP_02: how many new bookings make up <see cref="Revenue"/>; null before CP_02.</summary>
+        public int? Bookings { get; set; }
     }
 
     /// <summary>GET api/ceo/breakdown: drill-down level 2.</summary>
@@ -304,6 +334,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Type { get; set; }
         public int? UserId { get; set; }
         public string? Stage { get; set; }
+        /// <summary>
+        /// CP_02, bookings: true = the sales list (the period's new bookings at their contract value, with the seller),
+        /// as the Sales funnel's Booked value; implied by <see cref="SellerId"/>.
+        /// </summary>
+        public bool? Sales { get; set; }
+        /// <summary>CP_02, bookings: only the new bookings this user sold (a sales executive's revenue).</summary>
+        public int? SellerId { get; set; }
         /// <summary>period = custom (CS_01): the dashboard's range, yyyy-MM-dd (from / to narrow a list on their own).</summary>
         public string? PeriodFrom { get; set; }
         public string? PeriodTo { get; set; }
@@ -368,6 +405,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? EndOn { get; set; }
         public string? Status { get; set; }
         public decimal TotalAmount { get; set; }
+        /// <summary>
+        /// CP_02, the sales list (records/bookings?sales=true): who sold the booking (their quotation, else who created the
+        /// booking) and whether it came from a quotation; null on the other booking lists.
+        /// </summary>
+        public int? SellerId { get; set; }
+        public string? Seller { get; set; }
+        public bool? FromQuotation { get; set; }
     }
 
     public class CeoInquiryRecordDto
