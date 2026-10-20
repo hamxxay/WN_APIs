@@ -94,11 +94,14 @@ namespace WorkNest.Application.Services
             return null;
         }
 
+        private static bool IsCompanyCustomer(string? customerType) =>
+            string.Equals(customerType, "Company", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(customerType, "Business", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(customerType, "AOP", StringComparison.OrdinalIgnoreCase);
+
         private static string? ValidateCompanyNtn(CustomerRequest request)
         {
-            var isCompany = string.Equals(request.CustomerType, "Company", StringComparison.OrdinalIgnoreCase) ||
-                            string.Equals(request.CustomerType, "AOP", StringComparison.OrdinalIgnoreCase);
-            if (!isCompany) return null;
+            if (!IsCompanyCustomer(request.CustomerType)) return null;
 
             if (string.IsNullOrWhiteSpace(request.Company))
                 return "Company / Business Name is required for company customers.";
@@ -106,9 +109,9 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(request.Ntn))
                 return "NTN (National Tax Number) is required when Entity Type is Company.";
 
-            var cleanNtn = request.Ntn.Trim().Replace("-", "");
-            if (cleanNtn.Length != 8 || !cleanNtn.All(char.IsDigit))
-                return "Please enter a valid 8-digit NTN (e.g. 1234567-8).";
+            var cleanNtn = request.Ntn.Trim();
+            if (cleanNtn.Length > 50)
+                return "NTN cannot exceed 50 characters.";
 
             return null;
         }
@@ -118,9 +121,15 @@ namespace WorkNest.Application.Services
             var ntnErr = ValidateCompanyNtn(request);
             if (ntnErr is not null)
                 return ApiResponse.Fail(ntnErr);
-            var cnicErr = Cnic.Validate(request.CnicOrPassport);
-            if (cnicErr is not null)
-                return ApiResponse.Fail(cnicErr);
+
+            var isCompany = IsCompanyCustomer(request.CustomerType);
+            if (!isCompany)
+            {
+                var cnicErr = Cnic.Validate(request.CnicOrPassport);
+                if (cnicErr is not null)
+                    return ApiResponse.Fail(cnicErr);
+            }
+
             var phoneErr = Phone.Validate(request.PhoneNumber);
             if (phoneErr is not null)
                 return ApiResponse.Fail(phoneErr);
@@ -161,9 +170,15 @@ namespace WorkNest.Application.Services
             var ntnErr = ValidateCompanyNtn(request);
             if (ntnErr is not null)
                 return ApiResponse.Fail(ntnErr);
-            var cnicErr = Cnic.Validate(request.CnicOrPassport);
-            if (cnicErr is not null)
-                return ApiResponse.Fail(cnicErr);
+
+            var isCompany = IsCompanyCustomer(request.CustomerType);
+            if (!isCompany)
+            {
+                var cnicErr = Cnic.Validate(request.CnicOrPassport);
+                if (cnicErr is not null)
+                    return ApiResponse.Fail(cnicErr);
+            }
+
             var phoneErr = Phone.Validate(request.PhoneNumber);
             if (phoneErr is not null)
                 return ApiResponse.Fail(phoneErr);
