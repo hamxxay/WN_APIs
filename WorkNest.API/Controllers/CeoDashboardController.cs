@@ -55,7 +55,8 @@ namespace WorkNest.API.Controllers
         /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
         /// match). kind = invoices | spaces | bookings | inquiries | quotations | leases (QA_07: confirmed leases ending in
         /// the next 90 days, or month / from / to). invoices: from / to = billing period starting in that range (CS_01 / CP_01);
-        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet).
+        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet) | collected (CP_02:
+        /// something paid, the invoices behind Collected; before CP_02 the paid ones) | deposit (CP_02: with a security deposit).
         /// spaces (CP_02): category = PrivateOffice | SharedSpace, rooms = true (rooms only); occupied = a confirmed booking now.
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]

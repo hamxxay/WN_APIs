@@ -23,6 +23,10 @@ namespace WorkNest.Application.Services
     /// Invoices by billing period (CP_01, 20 Oct 2026): the procedures place an invoice in the month its billing period
     /// starts (not the month it was issued); unpaid invoices for a period not started yet (and not past due) are "billed
     /// in advance", apart from Outstanding (billedInAdvance; null before CP_01). Records: status advance, periodStart / periodEnd.
+    /// Money (CP_02): invoiced leaves out the security deposits (securityDeposits apart); collected = paid so far on the
+    /// period's invoices; whole billing months against the same months one period earlier; only invoices with something
+    /// left to pay count as outstanding / overdue / billed in advance. Records: balance = GrandTotal - WHT - paid (0 when
+    /// paid), status collected, invoiceTotals.
     /// </summary>
     public class CeoDashboardService : ICeoDashboardService
     {
@@ -103,6 +107,12 @@ namespace WorkNest.Application.Services
                     // CP_01: unpaid invoices for a billing period not started yet (not in Outstanding); null before CP_01.
                     BilledInAdvance = Has(money, "BilledInAdvance") ? Dec(money, "BilledInAdvance") : null,
                     BilledInAdvanceCount = Has(money, "BilledInAdvanceCount") ? Int(money, "BilledInAdvanceCount") : null,
+                    // CP_02: security deposits billed (kept out of Invoiced) and the previous invoice window; null before CP_02.
+                    SecurityDeposits = Has(money, "SecurityDeposits") ? Dec(money, "SecurityDeposits") : null,
+                    SecurityDepositsPrev = Has(money, "SecurityDepositsPrev") ? Dec(money, "SecurityDepositsPrev") : null,
+                    SecurityDepositsCount = Has(money, "SecurityDepositsCount") ? Int(money, "SecurityDepositsCount") : null,
+                    InvoicedPrevFrom = Day(money, "InvoicePrevFrom"),
+                    InvoicedPrevTo = Day(money, "InvoicePrevTo"),
                     Months = Set(s, 2).Select(r => new CeoMoneyMonthDto
                         { Month = Str(r, "Month") ?? "", Invoiced = Dec(r, "Invoiced"), Collected = Dec(r, "Collected") }).ToList(),
                     Aging = Set(s, 3).Select(r => new CeoAgingBucketDto
@@ -156,8 +166,8 @@ namespace WorkNest.Application.Services
 
             var quotations = Int(sales, "Quotations");
             var bookings = Int(sales, "Bookings");
-            // Conversion = quotations created in the period that were booked / quotations created in it (SM_04 column);
-            // before SM_04 ran: the per-location "converted" counts of the same quotations.
+            // Conversion = quotations created in the period that were booked / quotations created in it (SM_04 column;
+            // CP_02: booked = Converted with a live booking); before SM_04 ran: the per-location "converted" counts.
             var quotationsBooked = Has(sales, "QuotationsBooked") ? Int(sales, "QuotationsBooked")
                 : Math.Min(Set(s, 11).Sum(r => Int(r, "Converted")), quotations);
             var byType = Set(s, 10).ToDictionary(r => Str(r, "InquiryType") ?? "NotSet", r => Int(r, "Inquiries"), StringComparer.OrdinalIgnoreCase);
@@ -178,7 +188,11 @@ namespace WorkNest.Application.Services
                         .Select(kv => new CeoInquiryTypeCountDto { Type = kv.Key, Label = kv.Key, Count = kv.Value }))
                     .ToList(),
                 QuotationValue = Dec(sales, "QuotationValue"),
-                BookingValue = Dec(sales, "BookingValue"),
+                // CP_02: BookedValue = the contract value of the period's bookings; before it: their first invoices.
+                BookingValue = Has(sales, "BookedValue") ? Dec(sales, "BookedValue") : Dec(sales, "BookingValue"),
+                BookingValueBasis = Has(sales, "BookedValue") ? "contract" : "firstInvoice",
+                BookingsFromQuotations = Has(sales, "BookingsFromQuotations") ? Int(sales, "BookingsFromQuotations") : null,
+                InquiriesNoBranch = Val(sales, "InquiriesNoBranch") is { } noBranch ? Convert.ToInt32(noBranch, En) : null,
                 // A location chosen, but the procedure counted every location's inquiries (QA_07 not run).
                 InquiriesAllLocations = Location(locationId) != null && !Flag(sales, "InqByLocation")
             };
@@ -189,9 +203,11 @@ namespace WorkNest.Application.Services
         /// <summary>
         /// The Team section (19 Oct 2026): only the sales executives. [12] lists the active admins and sales executives
         /// (of the chosen location, with their quotations on its spaces); everyone but the sales executives (RoleId 16)
-        /// is left out here, so the CMS and the app get the same list. Revenue = their converted value (the total of the
-        /// quotations they created in the period that were converted). Ranked by revenue, converted, quotations, name.
-        /// The per-location rows keep their sales executive count and the location's quotations (no admin count).
+        /// is left out here, so the CMS and the app get the same list. Revenue (CP_02, SoldValue) = the contract value of
+        /// the new bookings they sold in the period (their quotation, else the booking they created); before CP_02 their
+        /// converted value (the quotations they created in the period that were converted). Ranked by revenue,
+        /// converted, quotations, name. The per-location rows keep their sales executive count and the location's
+        /// quotations (CP_02: the sales executives' quotations only, SalesExecutivesOnly).
         /// </summary>
         public static CeoTeamDto TeamOf(IEnumerable<IDictionary<string, object?>> perLocation, IEnumerable<IDictionary<string, object?>> people,
             string? salesExecutiveRole)
@@ -200,12 +216,13 @@ namespace WorkNest.Application.Services
                 .Where(r => Int(r, "RoleId") == WorkNest.Common.Constants.Roles.SalesExecutiveId)
                 .Select(r =>
                 {
-                    var revenue = Dec(r, "ConvertedValue");
+                    var sold = Has(r, "SoldValue");
+                    var revenue = sold ? Dec(r, "SoldValue") : Dec(r, "ConvertedValue");
                     return new CeoTeamPersonDto
                     {
                         UserId = Int(r, "UserId"), Name = Str(r, "Name") ?? "", Role = salesExecutiveRole ?? "",
                         Locations = Str(r, "Locations"), Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"),
-                        Revenue = revenue, ConvertedValue = revenue
+                        Revenue = revenue, ConvertedValue = revenue, Bookings = sold ? Int(r, "SoldBookings") : null
                     };
                 })
                 .OrderByDescending(p => p.Revenue).ThenByDescending(p => p.Converted).ThenByDescending(p => p.Quotations)
@@ -216,11 +233,13 @@ namespace WorkNest.Application.Services
                 PerLocation = perLocation.Select(r => new CeoTeamLocationDto
                 {
                     LocationId = Int(r, "LocationId"), Name = Str(r, "Name") ?? "", SalesExecutives = Int(r, "SalesExecutives"),
-                    Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted")
+                    Quotations = Int(r, "Quotations"), Converted = Int(r, "Converted"),
+                    SalesExecutivesOnly = Flag(r, "SalesExecutivesOnly")
                 }).ToList(),
                 People = list,
                 SalesExecutives = list.Count,
-                Revenue = list.Sum(p => p.Revenue)
+                Revenue = list.Sum(p => p.Revenue),
+                RevenueBasis = people.Any(r => Has(r, "SoldValue")) ? "bookings" : "quotations"
             };
         }
 
@@ -298,12 +317,12 @@ namespace WorkNest.Application.Services
                 case "revenue":
                     var billed = rangeFrom != null ? DashboardPeriod.RangeLabel(rangeFrom.Value, rangeTo!.Value) : month!.Value.ToString("MMMM yyyy", En);
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ("Revenue by location", $"Invoices by billing period, {billed}; collected = now paid", "Invoiced", "Collected");
+                        ("Revenue by location", $"Invoices by billing period, {billed}, without security deposits; collected = paid so far", "Invoiced", "Collected");
                     break;
                 case "aging":
                     var bucketLabel = Buckets.First(b => b.Key == bucket).Label;
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ("Outstanding by location", bucket == "not_due" ? "Open invoices not due yet" : $"Open invoices {bucketLabel} past due", "Outstanding", null);
+                        ("Outstanding by location", bucket == "not_due" ? "Unpaid invoices not due yet" : $"Unpaid invoices {bucketLabel} past due", "Outstanding", null);
                     break;
                 case "occupancy-type":
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
@@ -328,7 +347,7 @@ namespace WorkNest.Application.Services
                     break;
                 default: // staff
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ($"Quotations: {subject ?? $"User #{q.UserId}"}", "Last 6 months", "Quotations", "Converted");
+                        ($"Quotations: {subject ?? $"User #{q.UserId}"}", "Last 6 months; converted = booked, booking still live", "Quotations", "Converted");
                     break;
             }
             return ApiResponse.Ok(dto);
@@ -373,7 +392,9 @@ namespace WorkNest.Application.Services
             {
                 "invoices" => await InvoicesAsync(q, locationId, noLocation),
                 "spaces" => await SpacesAsync(q, locationId, noLocation),
-                "bookings" => await BookingsAsync(q, locationId, noLocation),
+                "bookings" => q.Sales == true || q.SellerId is > 0
+                    ? noLocation ? ApiResponse.Fail("locationId=none is not available for the sales list.") : await SalesAsync(q, locationId)
+                    : await BookingsAsync(q, locationId, noLocation),
                 "inquiries" => noLocation
                     ? ApiResponse.Fail("locationId=none is not available for inquiries.")
                     : await InquiriesAsync(q, locationId),
@@ -404,7 +425,10 @@ namespace WorkNest.Application.Services
             {
                 status = q.Status.Trim().ToLowerInvariant();
                 // advance (CP_01): unpaid, for a billing period not started yet (open leaves them out).
-                if (status is not ("open" or "overdue" or "paid" or "advance")) return ApiResponse.Fail("status must be open, overdue, paid or advance.");
+                // collected (CP_02): something paid (what Collected counts: partial payments too); deposit (CP_02): with a
+                // security deposit (what Security deposits counts).
+                if (status is not ("open" or "overdue" or "paid" or "advance" or "collected" or "deposit"))
+                    return ApiResponse.Fail("status must be open, overdue, paid, advance, collected or deposit.");
             }
             // CS_01: billing period starting from / to (yyyy-MM-dd, both days included; CP_01), e.g. a custom period's revenue by location.
             DateTime? from = null, to = null;
@@ -418,15 +442,26 @@ namespace WorkNest.Application.Services
                 periodWindow = $"billing period {DashboardPeriod.RangeLabel(from!.Value, to.Value)}";
             }
 
-            var s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, q.CustomerId is > 0 ? q.CustomerId : null,
-                status, _clock.Now, await StatusesAsync(), MaxRows, from, to);
+            var statuses = await StatusesAsync();
+            var customerId = q.CustomerId is > 0 ? q.CustomerId : null;
+            var s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, customerId, status, _clock.Now, statuses, MaxRows, from, to);
+            var head = Set(s, 0).FirstOrDefault();
+            // A database before CP_02 knows no status collected (no totals in [0]): the paid invoices instead, as before.
+            if (status == "collected" && !Has(head, "Billed"))
+            {
+                status = "paid";
+                s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, customerId, status, _clock.Now, statuses, MaxRows, from, to);
+                head = Set(s, 0).FirstOrDefault();
+            }
             var rows = Set(s, 1).Select(r => new CeoInvoiceRecordDto
             {
                 InvoiceId = Int(r, "InvoiceId"), InvoiceNumber = Str(r, "InvoiceNumber"), Customer = Str(r, "Customer"),
                 Location = Str(r, "Location"), IssuedOn = Day(r, "IssuedOn"), DueOn = Day(r, "DueOn"),
                 Total = Dec(r, "Total"), Paid = Dec(r, "Paid"), Balance = Dec(r, "Balance"), Status = Str(r, "Status"),
                 // CP_01 columns; null before it (Day answers null for a missing column).
-                PeriodStart = Day(r, "PeriodStart"), PeriodEnd = Day(r, "PeriodEnd")
+                PeriodStart = Day(r, "PeriodStart"), PeriodEnd = Day(r, "PeriodEnd"),
+                // CP_02 columns; null before it.
+                Wht = DecOrNull(r, "Wht"), Deposit = DecOrNull(r, "Deposit"), Billed = DecOrNull(r, "Billed"), Collected = DecOrNull(r, "Collected")
             }).ToList();
 
             var parts = new List<string>();
@@ -434,13 +469,19 @@ namespace WorkNest.Application.Services
             else if (status == "open") parts.Add("unpaid");
             else if (status == "paid") parts.Add("paid");
             else if (status == "advance") parts.Add("billed in advance");
+            else if (status == "collected") parts.Add("with payments");
+            else if (status == "deposit") parts.Add("with a security deposit");
             if (bucket != null) parts.Add(bucket == "not_due" ? "not due yet" : $"{Buckets.First(b => b.Key == bucket).Label} past due");
             if (month != null) parts.Add($"billing period {month.Value.ToString("MMMM yyyy", En)}");
             if (periodWindow != null) parts.Add(periodWindow);
             if (q.CustomerId is > 0) parts.Add(month == null ? $"{rows.FirstOrDefault()?.Customer ?? "customer"}, last 12 months" : rows.FirstOrDefault()?.Customer ?? "customer");
             if (noLocation) parts.Add("no location");
             else if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
-            return Records("Invoices", parts, Total(s), rows);
+            var result = Records("Invoices", parts, Total(s), rows);
+            // CP_02: the totals of every matching invoice (the list holds at most MaxRows).
+            if (Has(head, "Billed") && result.Data is CeoRecordsDto<CeoInvoiceRecordDto> dto)
+                dto.InvoiceTotals = new CeoInvoiceTotalsDto { Billed = Dec(head, "Billed"), Collected = Dec(head, "Collected"), Balance = Dec(head, "Balance") };
+            return result;
         }
 
         private async Task<ApiResponse> SpacesAsync(CeoRecordsQuery q, int? locationId, bool noLocation)
@@ -522,7 +563,7 @@ namespace WorkNest.Application.Services
                 type = InquiryType(q.Type);
                 if (type == null) return ApiResponse.Fail(TypeError);
             }
-            if (!TryWindow(q, out var from, out var to, out var window, out var error)) return ApiResponse.Fail(error!);
+            if (!TryWindow(q, out var from, out var to, out var window, out var error, pakistanDays: true)) return ApiResponse.Fail(error!);
 
             var s = await _repo.GetInquiryRecordsAsync(from, to, type, locationId, MaxRows);
             var rows = Set(s, 1).Select(r => new CeoInquiryRecordDto
@@ -578,7 +619,7 @@ namespace WorkNest.Application.Services
             var stage = (q.Stage ?? "").Trim().ToLowerInvariant();
             if (stage.Length == 0) stage = "quotations";
             if (stage is not ("quotations" or "accepted" or "converted")) return ApiResponse.Fail("stage must be quotations, accepted or converted.");
-            if (!TryWindow(q, out var from, out var to, out var window, out var error)) return ApiResponse.Fail(error!);
+            if (!TryWindow(q, out var from, out var to, out var window, out var error, pakistanDays: true)) return ApiResponse.Fail(error!);
             var userId = q.UserId is > 0 ? q.UserId : null;
 
             var s = await _repo.GetQuotationRecordsAsync(from, to, userId, stage, locationId, MaxRows);
@@ -595,6 +636,47 @@ namespace WorkNest.Application.Services
             if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
             var title = stage switch { "accepted" => "Accepted quotations", "converted" => "Converted quotations", _ => "Quotations" };
             return Records(title, parts, Total(s), rows);
+        }
+
+        /// <summary>
+        /// CP_02, the sales list (records/bookings with sales=true or a sellerId): the new bookings made in the window
+        /// (as the Sales funnel's Bookings stage) at their contract value, with their seller; with sellerId only the
+        /// ones that person sold (a sales executive's revenue). Before CP_02: the new bookings list (no seller) or, for
+        /// a seller, their converted quotations (the old revenue), so nothing breaks.
+        /// </summary>
+        private async Task<ApiResponse> SalesAsync(CeoRecordsQuery q, int? locationId)
+        {
+            if (!TryWindow(q, out var from, out var to, out var window, out var error)) return ApiResponse.Fail(error!);
+            var sellerId = q.SellerId is > 0 ? q.SellerId : null;
+            List<List<IDictionary<string, object?>>> s;
+            try
+            {
+                s = await _repo.GetSalesRecordsAsync(from, to, locationId, sellerId, MaxRows);
+            }
+            catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CP_02")
+            {
+                return sellerId != null
+                    ? await QuotationsAsync(new CeoRecordsQuery
+                    {
+                        Period = q.Period, PeriodFrom = q.PeriodFrom, PeriodTo = q.PeriodTo, Month = q.Month, From = q.From, To = q.To,
+                        LocationId = q.LocationId, UserId = sellerId, Stage = "converted"
+                    }, locationId)
+                    : await BookingsAsync(q, locationId, false);
+            }
+            var rows = Set(s, 1).Select(r => new CeoBookingRecordDto
+            {
+                BookingId = Int(r, "BookingId"), Customer = Str(r, "Customer"), Space = Str(r, "Space"), Location = Str(r, "Location"),
+                StartOn = Day(r, "StartOn"), EndOn = Day(r, "EndOn"), Status = Str(r, "Status"), TotalAmount = Dec(r, "TotalAmount"),
+                SellerId = Val(r, "SellerId") is { } id ? Convert.ToInt32(id, En) : null, Seller = Str(r, "Seller"),
+                FromQuotation = Val(r, "FromQuotation") is { } fq ? Convert.ToBoolean(fq, En) : null
+            }).ToList();
+
+            var parts = new List<string>();
+            if (sellerId != null) parts.Add($"sold by {rows.FirstOrDefault()?.Seller ?? $"user #{sellerId}"}");
+            parts.Add($"made {window}");
+            parts.Add("contract value");
+            if (locationId != null && rows.FirstOrDefault()?.Location is { } loc) parts.Add(loc);
+            return Records("New bookings", parts, Total(s), rows);
         }
 
         // ------------------------------------------------------------------ rooms (CEO_02)
@@ -652,7 +734,8 @@ namespace WorkNest.Application.Services
                     OccupiedNow = Flag(r, "OccupiedNow"),
                     OccupiedDays = Int(r, "OccupiedDays"),
                     PeriodDays = Int(r, "PeriodDays"),
-                    PeriodOccupancyPct = Pct(Int(r, "OccupiedDays"), Int(r, "PeriodDays"))
+                    PeriodOccupancyPct = Pct(Int(r, "OccupiedDays"), Int(r, "PeriodDays")),
+                    UpcomingStartOn = Has(r, "UpcomingStartOn") ? Day(r, "UpcomingStartOn") : null   // CP_02
                 };
                 if (!byId.TryAdd(room.SpaceId, room)) continue;
                 rooms.Add(room);
@@ -674,7 +757,10 @@ namespace WorkNest.Application.Services
                     SeatsSold = Int(r, "SeatsSold"), StartOn = Day(r, "StartOn"), EndOn = Day(r, "EndOn"),
                     ListSeatPriceAtSale = Val(r, "ListSeatPriceAtSale") is { } ls ? Convert.ToDecimal(ls, En) : null,
                     ShiftDiscountCapPct = Val(r, "ShiftDiscountCapPct") is { } cp ? Convert.ToDecimal(cp, En) : 0m,
-                    SoldMonthly = sold
+                    SoldMonthly = sold,
+                    // CP_02: the fixed PKR discount a month (already off SoldMonthly) and whether the booking has one.
+                    FixedMonthly = Has(r, "FixedMonthly") ? Dec(r, "FixedMonthly") : 0m,
+                    FixedDiscount = Has(r, "FixedDiscount") && Flag(r, "FixedDiscount")
                 }, room.Seats, room.ListSeatPrice));
             }
 
@@ -723,7 +809,9 @@ namespace WorkNest.Application.Services
         /// price at sale, else today's (<paramref name="roomListSeatPrice"/>); expected per seat = the list (24/7) or
         /// list x (1 - shift discount cap / 100) (Morning / Evening); variance per month = (sold per seat - expected per
         /// seat) x seats; under / over = more than <see cref="PricingBand"/> below / above the expected per seat, else
-        /// at. No list price known (or nothing expected): not compared, the expected / variance figures and Pricing null.
+        /// at; a booking with a fixed PKR discount (<see cref="CeoRoomSaleDto.FixedDiscount"/>) sold below the expected
+        /// price is under even within the band (owner rule: fixed discounts count as under, CP_02). No list price known
+        /// (or nothing expected): not compared, the expected / variance figures and Pricing null.
         /// </summary>
         public static CeoRoomSaleDto PriceSale(CeoRoomSaleDto sale, int roomSeats, decimal? roomListSeatPrice)
         {
@@ -754,6 +842,7 @@ namespace WorkNest.Application.Services
             sale.VarianceMonthly = Money((soldSeat - expected) * seats);
             sale.VariancePct = Money(ratio * 100m);
             sale.Pricing = ratio < -PricingBand ? "under" : ratio > PricingBand ? "over" : "at";
+            if (sale.Pricing == "at" && sale.FixedDiscount && sale.VarianceMonthly < 0m) sale.Pricing = "under";   // CP_02
             return sale;
         }
 
@@ -1010,9 +1099,26 @@ namespace WorkNest.Application.Services
         /// Created-in window for bookings, inquiries and quotations: month (that month), else from / to (yyyy-MM-dd,
         /// both days included), else the period: to date (default this month), or a custom period's range (periodFrom /
         /// periodTo, already checked by the caller). <paramref name="label"/> describes it.
+        /// CP_02: <paramref name="pakistanDays"/> (quotations, tour inquiries; their columns are UTC) = the month, the days
+        /// and the calendar period start at Pakistan midnight, 5 hours before UTC midnight, as the dashboard counts them
+        /// (a custom period's range is already in UTC).
         /// </summary>
-        private bool TryWindow(CeoRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error)
+        private bool TryWindow(CeoRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error,
+            bool pakistanDays = false)
         {
+            if (!TryWindowDays(q, out from, out to, out label, out error, out var utc)) return false;
+            if (pakistanDays && !utc)
+            {
+                from = from?.AddHours(-DashboardPeriod.PakistanUtcOffsetHours);
+                to = to?.AddHours(-DashboardPeriod.PakistanUtcOffsetHours);
+            }
+            return true;
+        }
+
+        /// <summary>The window of <see cref="TryWindow"/> in days; <paramref name="utc"/> = already UTC (a custom period).</summary>
+        private bool TryWindowDays(CeoRecordsQuery q, out DateTime? from, out DateTime? to, out string label, out string? error, out bool utc)
+        {
+            utc = false;
             from = null; to = null; label = ""; error = null;
             if (!string.IsNullOrWhiteSpace(q.Month))
             {
@@ -1028,6 +1134,7 @@ namespace WorkNest.Application.Services
                 // These lists filter on columns written in UTC (bookings CreatedOn, quotations CreatedDate, tour
                 // inquiries CreatedOn): the Pakistan days of the range as UTC times, as the dashboard counts them (CS_01).
                 from = p.UtcStart; to = p.UtcEnd; label = p.BetweenWords();
+                utc = true;
                 return true;
             }
             var period = p.Key;
@@ -1104,6 +1211,8 @@ namespace WorkNest.Application.Services
         private static object? Val(IDictionary<string, object?>? r, string key) => r != null && r.TryGetValue(key, out var v) ? v : null;
         private static int Int(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : 0;
         private static decimal Dec(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Math.Round(Convert.ToDecimal(v), 2) : 0m;
+        /// <summary>A money column; null when it is missing or NULL (e.g. a procedure from before CP_02).</summary>
+        private static decimal? DecOrNull(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Math.Round(Convert.ToDecimal(v), 2) : null;
         private static string? Str(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v ? Convert.ToString(v, En) : null;
         /// <summary>A bit column; false when it is missing (e.g. a procedure from before QA_07).</summary>
         private static bool Flag(IDictionary<string, object?>? r, string key) => Val(r, key) is { } v && Convert.ToBoolean(v, En);

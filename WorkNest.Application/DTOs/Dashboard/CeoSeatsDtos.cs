@@ -73,7 +73,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal? ListSeatPriceSold { get; set; }
         /// <summary>Average list price per seat over every seat with a list price; null when none.</summary>
         public decimal? ListSeatPriceAll { get; set; }
-        /// <summary>(Sold per seat / list per seat of the sold seats - 1) x 100, rooms with a list price only; null when none.</summary>
+        /// <summary>(Sold per seat / list per seat of the sold seats - 1) x 100, rooms with a list price only; null when none.
+        /// CP_02: sold / expected rent of the bookings now - 1, where Morning / Evening seats are expected at the list less
+        /// the location's shift discount cap (as the Rooms section).</summary>
         public decimal? RevenueVsListPct { get; set; }
         /// <summary>Empty seats x their room's list price per seat (rooms with a list price): rent the empty seats could earn a month.</summary>
         public decimal RentNotEarned { get; set; }
@@ -136,6 +138,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal? ListSeatPrice { get; set; }
         public decimal SoldMonthly { get; set; }
         public decimal RevenuePerSeat { get; set; }
+        /// <summary>CP_02: rent of the bookings running now at the list price (24/7 seats x list; Morning / Evening seats x list
+        /// less the shift discount cap); null without a list price or before CP_02.</summary>
+        public decimal? ExpectedMonthly { get; set; }
         /// <summary>Empty seats x list price per seat; null when the room has no list price.</summary>
         public decimal? RentNotEarned { get; set; }
         public decimal PeriodSeatOccupancyPct { get; set; }

@@ -23,6 +23,11 @@ namespace WorkNest.Application.Interfaces
         Task RefreshIspAsync(CancellationToken ct = default);
         /// <summary>Keep the console event log cached so client/device history opens instantly.</summary>
         Task WarmLogsAsync();
+        /// <summary>
+        /// Keep the CEO / Sales Manager dashboards' console reads cached (gateway WAN ports, client list, today's top data
+        /// users) so a dashboard never waits on a cold read. Never throws; skipped while the previous warm still runs.
+        /// </summary>
+        Task WarmDashboardAsync();
 
         // --- Dashboard payloads ---
         Task<JsonObject> GetSummaryAsync();

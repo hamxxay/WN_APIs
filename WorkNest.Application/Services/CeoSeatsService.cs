@@ -12,12 +12,14 @@ namespace WorkNest.Application.Services
     /// the Rooms section shows (private offices and shared spaces sold by the month, WN_Spaces.Status = 1).
     /// <list type="bullet">
     /// <item>Seats of a room = WN_Spaces.Capacity (1 when not set). Booking seats = its Capacity when above 0, else the room's.</item>
+    /// <item>CP_02: booking seats = its Capacity, else its quotation's, else the room's; at most the room's seats.</item>
     /// <item>Shift rule (<see cref="SeatsSold"/>): a seat is sold when any shift on it is sold. Seats sold in a room = 24/7 seats
     /// + the larger of Morning and Evening seats (a Morning and an Evening booking share the same desks), at most the room's
     /// seats. Seats sold for one of Morning / Evening only count as sold and are shown as "one shift free".</item>
     /// <item>Revenue per seat = monthly rent of the confirmed bookings running now after the booking discount (as the Rooms
     /// section) / seats sold, against the average list price per seat of the sold seats (WN_Spaces.Price, else the active
-    /// monthly seat price, as RM_01).</item>
+    /// monthly seat price, as RM_01); CP_02: against the rent expected at the list price (Morning / Evening at the list
+    /// less the shift discount cap, as the Rooms section).</item>
     /// <item>Rent not earned = empty seats x their room's list price per seat ("vacancy cost a month").</item>
     /// </list>
     /// "Now" figures are for right now (Pakistan time) and follow the location only; the period figures (seat-days and
@@ -146,6 +148,7 @@ namespace WorkNest.Application.Services
                 ListSeatPrice = list,
                 SoldMonthly = soldMonthly,
                 RevenuePerSeat = sold > 0 ? Money(soldMonthly / sold) : 0m,
+                ExpectedMonthly = Val(r, "ExpectedMonthlyNow") is { } ex ? Money(Convert.ToDecimal(ex, En)) : null,   // CP_02
                 RentNotEarned = list is { } l ? Money(empty * l) : null,
                 PeriodSeatDaysSold = seatDays,
                 PeriodDaysWithBooking = daysWithBooking,
@@ -170,7 +173,12 @@ namespace WorkNest.Application.Services
             decimal? listSold = pricedSoldSeats > 0 ? Money(pricedSold.Sum(r => r.SeatsSold * r.ListSeatPrice!.Value) / pricedSoldSeats) : null;
             decimal? listAll = pricedSeats > 0 ? Money(priced.Sum(r => r.Seats * r.ListSeatPrice!.Value) / pricedSeats) : null;
             decimal? vsList = null;
-            if (pricedSoldSeats > 0 && listSold is > 0)
+            // CP_02: sold against the rent expected at the list price (shift seats at the shift price) when every priced
+            // room sold has it; else (before CP_02) sold per seat against the list per seat.
+            var expected = pricedSold.Sum(r => r.ExpectedMonthly ?? 0m);
+            if (pricedSold.Count > 0 && pricedSold.All(r => r.ExpectedMonthly is > 0))
+                vsList = Math.Round((pricedSold.Sum(r => r.SoldMonthly) / expected - 1) * 100m, 1, MidpointRounding.AwayFromZero);
+            else if (pricedSoldSeats > 0 && listSold is > 0)
                 vsList = Math.Round((pricedSold.Sum(r => r.SoldMonthly) / pricedSoldSeats / listSold.Value - 1) * 100m, 1, MidpointRounding.AwayFromZero);
             var roomPct = Pct(occupied, rooms.Count);
             var seatPct = Pct(sold, seats);

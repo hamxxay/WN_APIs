@@ -9,7 +9,8 @@ namespace WorkNest.API.Services
     /// <summary>
     /// Background service that keeps the UniFi dashboard state fresh (same timers as "Unifi UI" server.js):
     /// sites / devices / client counts every Unifi:RefreshSeconds (default 60, records a history sample),
-    /// ISP metrics every 5 minutes, and the console event log warmed every 50 seconds.
+    /// ISP metrics every 5 minutes, the console event log warmed every 5 minutes, and the CEO / Sales Manager dashboards'
+    /// console reads (line speeds, client list, top data users) warmed about every 2 minutes.
     /// Does nothing when Unifi:ApiKey is not set. Disable with "Unifi:Enabled": false in appsettings.
     /// </summary>
     public class UnifiPollingService : BackgroundService
@@ -19,6 +20,7 @@ namespace WorkNest.API.Services
         private readonly bool _enabled;
         private readonly TimeSpan _ispInterval = TimeSpan.FromSeconds(300); // EA endpoints are rate limited to 100 req/min
         private readonly TimeSpan _logsInterval = TimeSpan.FromSeconds(300);
+        private readonly TimeSpan _dashboardInterval;
         private readonly TimeSpan _startupDelay = TimeSpan.FromSeconds(5);
         private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips each loop's work
 
@@ -28,6 +30,7 @@ namespace WorkNest.API.Services
             _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.UnifiPolling, logger);
             _unifi = unifi;
             _enabled = !string.Equals(configuration["Unifi:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
+            _dashboardInterval = TimeSpan.FromSeconds(Math.Max(120, unifi.RefreshSeconds * 2));
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -56,13 +59,22 @@ namespace WorkNest.API.Services
                     RunEveryAsync(TimeSpan.FromSeconds(_unifi.RefreshSeconds), () => _unifi.RefreshCoreAsync(stoppingToken), false, stoppingToken),
                     RunEveryAsync(_ispInterval, () => _unifi.RefreshIspAsync(stoppingToken), false, stoppingToken),
                     // Keep the event log warm so client/device history opens instantly.
-                    RunEveryAsync(_logsInterval, _unifi.WarmLogsAsync, true, stoppingToken));
+                    RunEveryAsync(_logsInterval, _unifi.WarmLogsAsync, true, stoppingToken),
+                    // Keep the dashboards' console reads warm (a cold one takes minutes, a dashboard waits 6 s). Not awaited:
+                    // the timer keeps its pace and WarmDashboardAsync skips a round while the previous warm still runs.
+                    RunEveryAsync(_dashboardInterval, WarmDashboard, true, stoppingToken));
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
             }
 
             _logger.LogInformation("WorkNest UniFi Polling Service stopping.");
+        }
+
+        private Task WarmDashboard()
+        {
+            _ = _unifi.WarmDashboardAsync(); // never throws
+            return Task.CompletedTask;
         }
 
         private async Task RunEveryAsync(TimeSpan interval, Func<Task> action, bool runNow, CancellationToken stoppingToken)
