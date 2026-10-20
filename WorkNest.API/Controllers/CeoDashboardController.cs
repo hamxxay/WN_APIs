@@ -40,7 +40,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Level 2: one chart element broken down. metric = revenue (month) | aging (bucket) | occupancy-type
         /// (spaceTypeId) | occupancy-location (locationId) | bookings-month (month) | inquiries-type (type) | staff (userId).
-        /// revenue takes from / to (issued in that range, CS_01) instead of a month for a custom period.
+        /// revenue takes from / to (billing period starting in that range, CS_01 / CP_01) instead of a month for a custom period.
         /// </summary>
         [HttpGet("api/ceo/breakdown")]
         public Task<IActionResult> Breakdown([FromQuery] CeoBreakdownQuery query) =>
@@ -49,7 +49,8 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
         /// match). kind = invoices | spaces | bookings | inquiries | quotations | leases (QA_07: confirmed leases ending in
-        /// the next 90 days, or month / from / to). invoices: from / to = issued in that range (CS_01).
+        /// the next 90 days, or month / from / to). invoices: from / to = billing period starting in that range (CS_01 / CP_01);
+        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet).
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>

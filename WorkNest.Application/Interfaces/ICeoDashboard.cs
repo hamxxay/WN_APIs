@@ -30,7 +30,10 @@ namespace WorkNest.Application.Interfaces
             int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses,
             DateTime? from = null, DateTime? to = null);
 
-        /// <remarks>CS_01: <paramref name="from"/> / <paramref name="to"/> (days included) = issued in that range.</remarks>
+        /// <remarks>
+        /// CS_01: <paramref name="from"/> / <paramref name="to"/> (days included) = billing period starting in that range (CP_01;
+        /// before it: issued in it). <paramref name="status"/>: open | overdue | paid | advance (CP_01: billed in advance).
+        /// </remarks>
         Task<List<List<IDictionary<string, object?>>>> GetInvoiceRecordsAsync(DateTime? monthStart, int? locationId, bool noLocation,
             string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top,
             DateTime? from = null, DateTime? to = null);
