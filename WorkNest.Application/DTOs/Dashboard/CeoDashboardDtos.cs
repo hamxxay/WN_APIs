@@ -465,8 +465,10 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal Billed { get; set; }
         /// <summary>Paid so far without the deposits' share (as Collected).</summary>
         public decimal Collected { get; set; }
-        /// <summary>Owed now (GrandTotal - WHT - paid of the invoices with something left to pay).</summary>
+        /// <summary>Owed now (GrandTotal - WHT - paid of the invoices with something left to pay; unpaid deposits included).</summary>
         public decimal Balance { get; set; }
+        /// <summary>CP_02: the security deposits billed on these invoices (null when the procedure does not send them).</summary>
+        public decimal? Deposits { get; set; }
     }
 
     public class CeoSpaceRecordDto

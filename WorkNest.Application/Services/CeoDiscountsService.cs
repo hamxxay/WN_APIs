@@ -208,8 +208,9 @@ namespace WorkNest.Application.Services
         /// fixed = the discount a month, as a share of the expected rent (else of the rent before the fixed discount).
         /// CP_02 (the procedure sends FixedMonthly and BookingDiscountPercentage): the procedure's SoldMonthly is after
         /// the fixed discount, so the price comparison is made on the rent before it (SoldMonthly + FixedMonthly) and
-        /// the fixed amount is counted once, on top; a fixed discount within the 0.5% band still counts as under (as the
-        /// Rooms section). Older procedure: the rent as sent, the fixed amount only for a booking without a percentage.
+        /// the fixed amount is counted once, on top. The pricing shown (under / at / over) is the Rooms section's: the
+        /// rent after the fixed discount against the price, a fixed discount within the 0.5% band counting as under.
+        /// Older procedure: the rent as sent, the fixed amount only for a booking without a percentage.
         /// A customer as the seller (they booked it themselves) is no seller.
         /// </summary>
         public static CeoDiscountBookingDto PriceBooking(IDictionary<string, object?> r, DateTime? periodStart = null, DateTime? periodEnd = null)
@@ -225,7 +226,7 @@ namespace WorkNest.Application.Services
             if (cp02) rent += procFixed;
             var bookingPct = r.ContainsKey("BookingDiscountPercentage") ? DecRaw(r, "BookingDiscountPercentage") : pct;
             var fixedType = SecurityDepositRules.IsFixedDiscount(Str(r, "DiscountType")) && (DecRaw(r, "DiscountAmount") > 0m || DecRaw(r, "DiscountValue") > 0m);
-            var sale = CeoDashboardService.PriceSale(new CeoRoomSaleDto
+            CeoRoomSaleDto Price(decimal soldMonthly, bool fixedDiscount) => CeoDashboardService.PriceSale(new CeoRoomSaleDto
             {
                 BookingId = Int(r, "BookingId"),
                 Customer = Str(r, "Customer"),
@@ -235,10 +236,15 @@ namespace WorkNest.Application.Services
                 EndOn = Day(r, "EndOn"),
                 ListSeatPriceAtSale = Val(r, "ListSeatPriceAtSale") is { } ls ? Convert.ToDecimal(ls, En) : null,
                 ShiftDiscountCapPct = DecRaw(r, "ShiftDiscountCapPct"),
-                SoldMonthly = rent,
-                // CP_02: a fixed discount the procedure kept in a percentage (below the band) still counts as under.
-                FixedDiscount = cp02 && procFixed == 0m && fixedType
+                SoldMonthly = soldMonthly,
+                FixedDiscount = fixedDiscount
             }, roomSeats, roomList);
+            // The money split: the rent before the fixed discount against the price (CP_02: a fixed discount the
+            // procedure kept in a percentage, below the band, still counts as under).
+            var sale = Price(rent, cp02 && procFixed == 0m && fixedType);
+            // CP_02: the pricing shown is the Rooms section's: the rent after the fixed discount against the price,
+            // with the booking's fixed-discount flag (a fixed discount at the price is under).
+            var shown = cp02 ? Price(rent - procFixed, fixedType) : sale;
 
             var fixedMonthly = cp02 ? procFixed : FixedMonthly(Str(r, "DiscountType"), pct, DecRaw(r, "DiscountAmount"), DecRaw(r, "DiscountValue"), sale.SoldMonthly);
             var below = sale.Pricing == "under" ? Money(-(sale.VarianceMonthly ?? 0m)) : 0m;
@@ -271,8 +277,8 @@ namespace WorkNest.Application.Services
                 ExpectedMonthly = sale.ExpectedMonthly,
                 RentMonthly = sale.SoldMonthly,
                 SoldMonthly = Money(sale.SoldMonthly - fixedMonthly),
-                // CP_02: as the Rooms section, a fixed discount at the price is under.
-                Pricing = cp02 && fixedMonthly > 0m && sale.Pricing == "at" ? "under" : sale.Pricing,
+                // CP_02: as the Rooms section (after the fixed discount; a fixed discount at the price is under).
+                Pricing = shown.Pricing,
                 BelowPriceMonthly = below,
                 FixedMonthly = fixedMonthly,
                 DiscountMonthly = discount,

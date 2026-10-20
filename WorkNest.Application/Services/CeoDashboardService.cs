@@ -338,8 +338,11 @@ namespace WorkNest.Application.Services
             {
                 case "revenue":
                     var billed = rangeFrom != null ? DashboardPeriod.RangeLabel(rangeFrom.Value, rangeTo!.Value) : month!.Value.ToString("MMMM yyyy", En);
-                    (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ("Revenue by location", $"Invoices by billing period, {billed}, without security deposits; collected = paid so far", "Invoiced", "Collected");
+                    // CP_02 marks its [0] with NoDeposits (invoiced without security deposits, collected = paid so far);
+                    // before it the procedure adds deposits in and collected = the invoices now paid.
+                    (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) = Has(head, "NoDeposits")
+                        ? ("Revenue by location", $"Invoices by billing period, {billed}, without security deposits; collected = paid so far", "Invoiced", "Collected")
+                        : ("Revenue by location", $"Invoices by billing period, {billed}; collected = now paid", "Invoiced", "Collected");
                     break;
                 case "aging":
                     var bucketLabel = Buckets.First(b => b.Key == bucket).Label;
@@ -503,7 +506,11 @@ namespace WorkNest.Application.Services
             var result = Records("Invoices", parts, Total(s), rows);
             // CP_02: the totals of every matching invoice (the list holds at most MaxRows).
             if (Has(head, "Billed") && result.Data is CeoRecordsDto<CeoInvoiceRecordDto> dto)
-                dto.InvoiceTotals = new CeoInvoiceTotalsDto { Billed = Dec(head, "Billed"), Collected = Dec(head, "Collected"), Balance = Dec(head, "Balance") };
+                dto.InvoiceTotals = new CeoInvoiceTotalsDto
+                {
+                    Billed = Dec(head, "Billed"), Collected = Dec(head, "Collected"), Balance = Dec(head, "Balance"),
+                    Deposits = Has(head, "Deposits") ? Dec(head, "Deposits") : null
+                };
             return result;
         }
 
