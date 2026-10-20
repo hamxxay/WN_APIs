@@ -44,6 +44,8 @@ namespace WorkNest.API.Controllers
         /// Level 2: one chart element broken down. metric = revenue (month) | aging (bucket) | occupancy-type
         /// (spaceTypeId) | occupancy-location (locationId) | bookings-month (month) | inquiries-type (type) | staff (userId).
         /// revenue takes from / to (billing period starting in that range, CS_01 / CP_01) instead of a month for a custom period.
+        /// CP_02: occupancy-category (category = PrivateOffice | SharedSpace): rooms of the category with a confirmed booking now,
+        /// by location; occupancy-location rows are per room category.
         /// </summary>
         [HttpGet("api/ceo/breakdown")]
         public Task<IActionResult> Breakdown([FromQuery] CeoBreakdownQuery query) =>
@@ -53,9 +55,11 @@ namespace WorkNest.API.Controllers
         /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
         /// match). kind = invoices | spaces | bookings | inquiries | quotations | leases (QA_07: confirmed leases ending in
         /// the next 90 days, or month / from / to). invoices: from / to = billing period starting in that range (CS_01 / CP_01);
-        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet). receipts (CP_02):
-        /// money received (fee receipts and paid payments) by the day it came in: month, or from / to, else the period to
-        /// date; the answer also has amount (the sum of every matching row).
+        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet) | collected (CP_02:
+        /// something paid, the invoices behind Collected; before CP_02 the paid ones) | deposit (CP_02: with a security deposit).
+        /// spaces (CP_02): category = PrivateOffice | SharedSpace, rooms = true (rooms only); occupied = a confirmed booking now.
+        /// receipts (CP_02): money received (fee receipts and paid payments) by the day it came in: month, or from / to,
+        /// else the period to date; the answer also has amount (the sum of every matching row).
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>

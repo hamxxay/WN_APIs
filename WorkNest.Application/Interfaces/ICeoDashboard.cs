@@ -38,8 +38,20 @@ namespace WorkNest.Application.Interfaces
             string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top,
             DateTime? from = null, DateTime? to = null);
 
+        /// <remarks>
+        /// CP_02: <paramref name="categoryCode"/> (PrivateOffice | SharedSpace) / <paramref name="roomsOnly"/> are sent only
+        /// when asked for; before CP_02 they give <see cref="CeoDatabaseUpdateMissingException"/> naming CP_02.
+        /// </remarks>
         Task<List<List<IDictionary<string, object?>>>> GetSpaceRecordsAsync(int? spaceTypeId, int? locationId, bool noLocation,
-            bool? occupied, DateTime businessNow, int top);
+            bool? occupied, DateTime businessNow, int top, string? categoryCode = null, bool roomsOnly = false);
+
+        /// <summary>
+        /// CP_02: dbo.WN_Ceo_Breakdown metric occupancy-category (@CategoryCode = PrivateOffice | SharedSpace): occupied /
+        /// total rooms of the category per location, right now. Before CP_02: <see cref="CeoDatabaseUpdateMissingException"/>
+        /// naming CP_02.
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>> GetOccupancyCategoryBreakdownAsync(string categoryCode, int? locationId,
+            DateTime businessNow);
 
         Task<List<List<IDictionary<string, object?>>>> GetBookingRecordsAsync(DateTime? from, DateTime? to, int? locationId, bool noLocation,
             string? statusIds, bool runningOnly, DateTime businessNow, int top);
@@ -53,6 +65,13 @@ namespace WorkNest.Application.Interfaces
 
         Task<List<List<IDictionary<string, object?>>>> GetQuotationRecordsAsync(DateTime? from, DateTime? to, int? userId, string? stage,
             int? locationId, int top);
+
+        /// <summary>
+        /// CP_02: the new bookings created in the window (as the Sales funnel's Bookings stage) at their contract value, with
+        /// their seller; <paramref name="sellerId"/> = only those this user sold (dbo.WN_Ceo_Records_Sales). Before CP_02:
+        /// <see cref="CeoDatabaseUpdateMissingException"/> naming CP_02.
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>> GetSalesRecordsAsync(DateTime? from, DateTime? to, int? locationId, int? sellerId, int top);
 
         /// <summary>
         /// Confirmed leases ending in the window (default: the next <paramref name="expiringDays"/> days), soonest first
@@ -134,6 +153,15 @@ namespace WorkNest.Application.Interfaces
 
         /// <summary>dbo.WN_Ceo_RoomReport is missing: CEO_02 has not run.</summary>
         public static CeoDatabaseUpdateMissingException RoomReportMissing(Exception? inner) => new(inner, "CEO_02", RoomsMessage);
+
+        public const string OccupancyMessage = "Occupancy by room category needs the database update CP_02.";
+
+        /// <summary>A procedure does not know the CP_02 room category parameters (SQL error 8144 / 8145): CP_02 has not run.</summary>
+        public static CeoDatabaseUpdateMissingException OccupancyCategoryMissing(Exception? inner) => new(inner, "CP_02", OccupancyMessage);
+
+        /// <summary>dbo.WN_Ceo_Records_Sales is missing: CP_02 has not run.</summary>
+        public static CeoDatabaseUpdateMissingException SalesRecordsMissing(Exception? inner) =>
+            new(inner, "CP_02", "The sales list needs the database update CP_02.");
 
         /// <summary>A procedure does not know @From / @To (SQL error 8144 / 8145): CS_01 has not run.</summary>
         public static CeoDatabaseUpdateMissingException CustomRangeMissing(Exception? inner) =>
