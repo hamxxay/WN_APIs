@@ -53,7 +53,9 @@ namespace WorkNest.API.Controllers
         /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
         /// match). kind = invoices | spaces | bookings | inquiries | quotations | leases (QA_07: confirmed leases ending in
         /// the next 90 days, or month / from / to). invoices: from / to = billing period starting in that range (CS_01 / CP_01);
-        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet).
+        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet). receipts (CP_02):
+        /// money received (fee receipts and paid payments) by the day it came in: month, or from / to, else the period to
+        /// date; the answer also has amount (the sum of every matching row).
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>

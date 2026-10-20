@@ -8,11 +8,13 @@ namespace WorkNest.Application.Services
     /// Revenue &amp; occupancy forecast for the next N calendar months (default 3, at most 12), starting with the
     /// month after the current one, built only from leases already in the system (live bookings 1, 2, 5, 33, not
     /// deleted, on active spaces). Rules:
-    /// - Expected rent: each lease's monthly rent (less a percentage discount; no tax / service charge), prorated by
+    /// - Expected rent: each lease's monthly rent (less a percentage discount and, CP_02, a fixed PKR discount a month
+    ///   as the room report (RM_02); no tax / service charge), prorated by
     ///   the days it is active in the month on a 30-day month (InvoiceCalculationEngine.ProrationDaysPerMonth).
     ///   This is the rent the leases earn in the month, whether or not it has been invoiced yet; invoices are never
     ///   added on top, so an advance invoice already issued for the month is not counted twice.
-    ///   ConfirmedRent is the part from running leases (2, 33); the rest is from bookings waiting for confirmation.
+    ///   ConfirmedRent is the part from running leases (2, 33); the rest (PendingRent, CP_02) is from bookings waiting
+    ///   for confirmation. The CEO dashboard shows ConfirmedRent as "Expected" and PendingRent as "pending confirmation".
     /// - Occupancy: distinct spaces with a live lease on the month's last day / active spaces now.
     /// - Leases ending: running leases whose end date is in the month (no renewal assumed).
     ///   Leases starting: live leases whose start date is in the month; PendingStarting = those not confirmed yet.
@@ -61,6 +63,7 @@ namespace WorkNest.Application.Services
                     LeasesStarting = g.Sum(r => Int(r, "LeasesStarting")),
                     PendingStarting = g.Sum(r => Int(r, "PendingStarting"))
                 };
+                m.PendingRent = m.ExpectedRent - m.ConfirmedRent;   // CP_02
                 m.OccupancyPct = Pct(m.OccupiedSpaces, m.TotalSpaces);
                 return m;
             }

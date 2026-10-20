@@ -251,5 +251,56 @@ namespace WorkNest.Infrastructure.Repositories
                 throw CeoDatabaseUpdateMissingException.RoomReportMissing(ex.InnerException);
             }
         }
+
+        // CP_02: money received (fee receipts + paid payments by their day). Both procedures come with CP_02; before it
+        // (SQL error 2812 -> CeoDatabaseUpdateMissingException) the answer is null, so the dashboard still loads.
+
+        public async Task<List<List<IDictionary<string, object?>>>?> GetReceivedAsync(int? locationId, int periodMonths, DateTime businessNow,
+            DateTime? from = null, DateTime? to = null)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Received", p =>
+                {
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                    p.Add("@From", SqlDbType.Date).Value = Db(from?.Date);
+                    p.Add("@To", SqlDbType.Date).Value = Db(to?.Date);
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException)
+            {
+                return null;
+            }
+            catch (SqlException ex) when (ex.Number == 208) // a table it reads (WN_FeeReceipts) is not on this database
+            {
+                return null;
+            }
+        }
+
+        public async Task<List<List<IDictionary<string, object?>>>?> GetReceiptRecordsAsync(DateTime? from, DateTime? to, int? locationId,
+            bool noLocation, int top)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Records_Receipts", p =>
+                {
+                    p.Add("@From", SqlDbType.Date).Value = Db(from?.Date);
+                    p.Add("@To", SqlDbType.Date).Value = Db(to?.Date);
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@NoLocation", SqlDbType.Bit).Value = noLocation;
+                    p.Add("@Top", SqlDbType.Int).Value = top;
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException)
+            {
+                return null;
+            }
+            catch (SqlException ex) when (ex.Number == 208) // a table it reads (WN_FeeReceipts) is not on this database
+            {
+                return null;
+            }
+        }
     }
 }

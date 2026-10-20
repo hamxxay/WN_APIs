@@ -49,6 +49,20 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// </summary>
         public decimal? BilledInAdvance { get; set; }
         public int? BilledInAdvanceCount { get; set; }
+        /// <summary>
+        /// CP_02: money actually received in the period, to date (active fee receipts by receipt date + paid payments by
+        /// paid date, whatever invoice; a payment for an invoice with an active fee receipt counts once), same location
+        /// rule; previous = the same days one period earlier. Null before CP_02 (dbo.WN_Ceo_Received).
+        /// </summary>
+        public decimal? Received { get; set; }
+        public decimal? ReceivedPrev { get; set; }
+        public int? ReceivedCount { get; set; }
+        public int? ReceivedCountPrev { get; set; }
+        /// <summary>CP_02: the part of Received from fee receipts / from payments.</summary>
+        public decimal? ReceivedFromReceipts { get; set; }
+        public decimal? ReceivedFromPayments { get; set; }
+        /// <summary>CP_02: money received by month, the same 12 months as Months (oldest first); null before CP_02.</summary>
+        public List<CeoReceivedMonthDto>? ReceivedSeries { get; set; }
         /// <summary>Collected / invoiced in the period, percent (one decimal).</summary>
         public decimal CollectionRate { get; set; }
         /// <summary>Last 12 months, oldest first.</summary>
@@ -523,5 +537,40 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal? VariancePct { get; set; }
         /// <summary>under | at | over (more than 0.5% below / above the expected price); null when unpriced.</summary>
         public string? Pricing { get; set; }
+    }
+
+    /// <summary>CP_02: money received in one month (by the day it came in).</summary>
+    public class CeoReceivedMonthDto
+    {
+        public string Month { get; set; } = "";
+        public decimal Received { get; set; }
+        public int Count { get; set; }
+    }
+
+    /// <summary>CP_02: records/receipts: the list, plus the sum of every matching row (not only the first 200).</summary>
+    public class CeoReceiptRecordsDto : CeoRecordsDto<CeoReceiptRecordDto>
+    {
+        public decimal Amount { get; set; }
+    }
+
+    /// <summary>CP_02: one fee receipt or paid payment (dbo.WN_Ceo_Records_Receipts).</summary>
+    public class CeoReceiptRecordDto
+    {
+        /// <summary>receipt (WN_FeeReceipts) | payment (WN_Payments)</summary>
+        public string Kind { get; set; } = "";
+        /// <summary>WN_FeeReceipts.Id or WN_Payments.Id.</summary>
+        public int RefId { get; set; }
+        /// <summary>Receipt code, or the payment's transaction / gateway reference ("Payment #id" when none).</summary>
+        public string? Reference { get; set; }
+        /// <summary>yyyy-MM-dd, the Pakistan day the money came in.</summary>
+        public string? ReceivedOn { get; set; }
+        public string? Customer { get; set; }
+        public string? Location { get; set; }
+        public int? InvoiceId { get; set; }
+        public string? InvoiceNumber { get; set; }
+        public int? BookingId { get; set; }
+        public decimal Amount { get; set; }
+        /// <summary>Receipt payment type (Cash, Bank, Cheque...) or the payment method label.</summary>
+        public string? Method { get; set; }
     }
 }
