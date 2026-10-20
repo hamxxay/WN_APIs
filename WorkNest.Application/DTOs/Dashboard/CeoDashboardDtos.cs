@@ -33,14 +33,22 @@ namespace WorkNest.Application.DTOs.Dashboard
 
     public class CeoMoneyDto
     {
+        /// <summary>Invoiced / collected in the period by billing period (CP_01: the month the period starts, not the issue date).</summary>
         public decimal Invoiced { get; set; }
         public decimal InvoicedPrev { get; set; }
         public decimal Collected { get; set; }
         public decimal CollectedPrev { get; set; }
+        /// <summary>Open invoices owed now (CP_01: without the ones billed in advance).</summary>
         public decimal Outstanding { get; set; }
         public int OutstandingCount { get; set; }
         public decimal Overdue { get; set; }
         public int OverdueCount { get; set; }
+        /// <summary>
+        /// CP_01: unpaid invoices for a billing period that has not started yet and not past due (GrandTotal - WHT -
+        /// paid, as Outstanding, and not in it); null before the database update CP_01 has run.
+        /// </summary>
+        public decimal? BilledInAdvance { get; set; }
+        public int? BilledInAdvanceCount { get; set; }
         /// <summary>Collected / invoiced in the period, percent (one decimal).</summary>
         public decimal CollectionRate { get; set; }
         /// <summary>Last 12 months, oldest first.</summary>
@@ -241,7 +249,7 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string? Period { get; set; }
         public int? LocationId { get; set; }
         public string? Month { get; set; }
-        /// <summary>Metric revenue (CS_01): invoices issued from / to (yyyy-MM-dd, both days included) instead of a month.</summary>
+        /// <summary>Metric revenue (CS_01): invoices whose billing period starts from / to (yyyy-MM-dd, both days included; CP_01) instead of a month.</summary>
         public string? From { get; set; }
         public string? To { get; set; }
         /// <summary>period = custom (CS_01): the dashboard's range, yyyy-MM-dd (from / to narrow a list on their own).</summary>
@@ -295,6 +303,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal Paid { get; set; }
         public decimal Balance { get; set; }
         public string? Status { get; set; }
+        /// <summary>CP_01: the billing period, yyyy-MM-dd (end null when unknown); null before the database update CP_01.</summary>
+        public string? PeriodStart { get; set; }
+        public string? PeriodEnd { get; set; }
     }
 
     public class CeoSpaceRecordDto
