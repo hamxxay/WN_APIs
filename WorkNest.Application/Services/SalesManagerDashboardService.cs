@@ -281,10 +281,11 @@ namespace WorkNest.Application.Services
             {
                 case "": break;
                 case "all": statusIds = "*"; break;
-                case "active": case "running": statusIds = "1,2,5,33"; running = true; break;
-                case "pending": statusIds = "1,5"; break;
-                case "confirmed": statusIds = "2,33"; break;
-                case "cancelled": statusIds = "3,4,6,86"; break;
+                // WN_BookingStatuses codes: the procedure takes the ids from the table (no status numbers here).
+                case "active": case "running": statusIds = "Pending,Confirmed"; running = true; break;
+                case "pending": statusIds = "Pending"; break;
+                case "confirmed": statusIds = "Confirmed"; break;
+                case "cancelled": statusIds = "Rejected,NoShow,Cancelled"; break;
                 default:
                     if (int.TryParse(status, NumberStyles.Integer, En, out var id) && id > 0) statusIds = id.ToString(En);
                     else return ApiResponse.Fail("status must be all, active, pending, confirmed, cancelled or a booking status id.");
