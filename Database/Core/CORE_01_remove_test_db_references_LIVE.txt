@@ -1,0 +1,70 @@
+-- ============================================================================================
+-- LIVE fix: procedures / views / functions / triggers that name the TEST database (SAC400.dbo.xxx) instead of their own
+-- database. On live they fail with "Invalid object name 'SAC400.dbo.WN_Invoices'" (seen in the live API log from the
+-- challan access suspension job: dbo.WN_HIK_AccessSuspension_Run; also _Extend, _GetByBookingDetail, _SetApplied).
+--
+-- For every such WorkNest object (WN_*, TR_WN_*) in THIS database, the SAC400 prefix is removed (SAC400.dbo.X / [SAC400].[dbo].X -> dbo.X) and
+-- the object is created again from its own current code, nothing else changed. Objects without a SAC400 reference are
+-- not touched.
+--
+-- Run against the LIVE database (WorkNestAEO) as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter.
+-- One transaction: if any object fails to compile, nothing is changed and the error names it. Safe to run again
+-- (the second run finds nothing to fix). The result lists every object fixed.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+
+IF DB_NAME() = N'SAC400'
+    THROW 50001, N'This is the test database (SAC400): its own SAC400 references are valid. Run this on the live database.', 1;
+
+DECLARE @Fix TABLE (Ord INT IDENTITY(1, 1), ObjectId INT, ObjectName NVARCHAR(300), TypeDesc NVARCHAR(60),
+                    Kind NVARCHAR(20), Definition NVARCHAR(MAX), Refs INT);
+
+INSERT INTO @Fix (ObjectId, ObjectName, TypeDesc, Kind, Definition, Refs)
+SELECT o.object_id,
+       QUOTENAME(SCHEMA_NAME(o.schema_id)) + N'.' + QUOTENAME(o.name),
+       o.type_desc,
+       CASE o.type WHEN 'P' THEN N'PROCEDURE' WHEN 'V' THEN N'VIEW' WHEN 'TR' THEN N'TRIGGER' ELSE N'FUNCTION' END,
+       m.definition,
+       (LEN(m.definition) - LEN(REPLACE(REPLACE(REPLACE(m.definition, N'[SAC400].', N'#'), N'SAC400.', N'#'), N'#', N''))) -- rough count
+  FROM sys.sql_modules m
+  JOIN sys.objects o ON o.object_id = m.object_id
+ WHERE o.type IN ('P', 'V', 'TR', 'FN', 'IF', 'TF')
+   AND (o.name LIKE N'WN[_]%' OR o.name LIKE N'TR[_]WN[_]%')   -- WorkNest objects only (accounting objects may use SAC400 on purpose)
+   AND (m.definition LIKE N'%SAC400.dbo.%' OR m.definition LIKE N'%SAC400..%'
+        OR m.definition LIKE N'%[[]SAC400].[[]dbo].%' OR m.definition LIKE N'%[[]SAC400].dbo.%');
+
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @i INT = 1, @n INT = (SELECT COUNT(*) FROM @Fix), @Name NVARCHAR(300), @Kind NVARCHAR(20), @Def NVARCHAR(MAX);
+    WHILE @i <= @n
+    BEGIN
+        SELECT @Name = ObjectName, @Kind = Kind, @Def = Definition FROM @Fix WHERE Ord = @i;
+
+        SET @Def = REPLACE(@Def, N'[SAC400].[dbo].', N'[dbo].');
+        SET @Def = REPLACE(@Def, N'[SAC400].dbo.', N'dbo.');
+        SET @Def = REPLACE(@Def, N'SAC400.dbo.', N'dbo.');
+        SET @Def = REPLACE(@Def, N'SAC400..', N'dbo.');
+
+        -- Same object, same code, without the test-database prefix (dropped and created again in this transaction).
+        EXEC(N'DROP ' + @Kind + N' ' + @Name + N';');
+        EXEC(@Def);
+
+        SET @i += 1;
+    END;
+
+    COMMIT TRANSACTION;
+
+    IF @n = 0
+        SELECT N'Nothing to fix: no object in ' + DB_NAME() + N' refers to SAC400.' AS Result;
+    ELSE
+        SELECT ObjectName, TypeDesc, N'Fixed: SAC400 prefix removed' AS Result FROM @Fix ORDER BY Ord;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    DECLARE @Err NVARCHAR(2000) = N'Nothing was changed. Failed on ' + ISNULL(@Name, N'?') + N': ' + ERROR_MESSAGE();
+    THROW 50002, @Err, 1;
+END CATCH;
