@@ -107,6 +107,7 @@ namespace WorkNest.API.Services
 
             using var scope = _serviceProvider.CreateScope();
             var emailService = scope.ServiceProvider.GetRequiredService<IEmailService>();
+            var oneBill = scope.ServiceProvider.GetRequiredService<IOneBillService>();
 
             foreach (var item in pendingItems)
             {
@@ -163,12 +164,16 @@ namespace WorkNest.API.Services
                         throw new InvalidOperationException($"Invoice {item.InvoiceId} data or target email missing.");
                     }
 
+                    // One Bill location (e.g. F-7): make sure the invoice is on EzPay, so the PDF and email carry its number.
+                    var oneBillNumber = await oneBill.EnsureAsync(item.InvoiceId, stoppingToken);
+
                     byte[]? pdfBytes = null;
                     try
                     {
                         var pdfDto = await BuildPdfDtoAsync(item.InvoiceId, conn);
                         if (pdfDto != null)
                         {
+                            pdfDto.OneBillNumber = oneBillNumber;
                             pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(pdfDto);
                         }
                     }
@@ -190,7 +195,8 @@ namespace WorkNest.API.Services
                         currentCycleAmount: subTotal,
                         taxAmount: taxTotal,
                         discountAmount: discountTotal,
-                        pdfBytes: pdfBytes
+                        pdfBytes: pdfBytes,
+                        oneBillNumber: oneBillNumber
                     );
 
                     // Success update

@@ -69,6 +69,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public string VendorNtn { get; set; } = "7492018-3";
         public string VendorLogoPath { get; set; } = @"F:\WorkNest_FE\public\images\Logo.png";
         public string OnlinePaymentUrl { get; set; } = string.Empty;
+
+        /// <summary>1-Link consumer number to pay this invoice with 1Bill (One Bill locations only; dbo.WN_Invoices.OneBillNumber).</summary>
+        public string? OneBillNumber { get; set; }
     }
 
     public class StatementInvoiceLineItemDto
@@ -280,6 +283,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     c.Item().Row(row => { row.ConstantItem(110).Text("Invoice Number:").FontColor("#000000"); row.RelativeItem().Text(data.InvoiceNumber).FontColor("#000000"); });
                     c.Item().Row(row => { row.ConstantItem(110).Text("Invoice Date:").FontColor("#000000"); row.RelativeItem().Text($"{data.InvoiceDate:dd MMM yyyy}").FontColor("#000000"); });
                     c.Item().Row(row => { row.ConstantItem(110).Text("Due Date:").FontColor("#000000"); row.RelativeItem().Text($"{data.DueDate:dd MMM yyyy}").FontColor("#000000"); });
+                    if (!string.IsNullOrWhiteSpace(data.OneBillNumber))
+                        c.Item().Row(row => { row.ConstantItem(110).Text("1Bill Consumer No:").Bold().FontColor("#000000"); row.RelativeItem().Text(data.OneBillNumber).Bold().FontColor("#000000"); });
                 });
             });
 
@@ -437,6 +442,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#000000");
                 tc.Spacing(2);
                 int itemNum = 1;
+                if (!string.IsNullOrWhiteSpace(data.OneBillNumber))
+                    tc.Item().Text($"{itemNum++}. Pay with 1Bill from any bank app, ATM or bank branch using consumer number {data.OneBillNumber}.").Bold().FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. Please deposit this payment in the following bank ").FontSize(7.5f).FontColor("#000000");
 
                 bool isF7 = data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase));

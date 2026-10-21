@@ -35,10 +35,13 @@ namespace WorkNest.API.Controllers
         private readonly IConfiguration _config;
         private readonly IEmailService _email;
         private readonly IBusinessClock _clock;
+        private readonly IOneBillService _oneBill;
 
-        public InvoiceController(IPaymentService payments, IBookingService bookings, IDbRepository db, IPdfService pdf, IConfiguration config, IEmailService email, IBusinessClock clock)
+        public InvoiceController(IPaymentService payments, IBookingService bookings, IDbRepository db, IPdfService pdf, IConfiguration config, IEmailService email, IBusinessClock clock,
+            IOneBillService oneBill)
         {
             _clock = clock;
+            _oneBill = oneBill;
             _payments = payments;
             _bookings = bookings;
             _db = db;
@@ -173,7 +176,11 @@ namespace WorkNest.API.Controllers
                 return Unauthorized(new { isSuccessful = false, message = "Sign in required." });
             try
             {
-                return Ok(WorkNest.Common.Responses.ApiResponse.Ok(await _bookings.GetMyBillsAsync(email)));
+                var bills = await _bookings.GetMyBillsAsync(email);
+                // One Bill number (One Bill locations) on the invoices still to pay.
+                foreach (var bill in bills.Items.Where(b => b.Kind == "invoice" && b.InvoiceId > 0 && b.Balance >= 1m))
+                    bill.OneBillNumber = await _oneBill.GetNumberAsync(bill.InvoiceId!.Value);
+                return Ok(WorkNest.Common.Responses.ApiResponse.Ok(bills));
             }
             catch (Exception)
             {
@@ -562,6 +569,7 @@ namespace WorkNest.API.Controllers
                 : null;
             }
 
+            dto.OneBillNumber = await _oneBill.GetNumberAsync(id);
             return dto;
         }
 
@@ -626,6 +634,8 @@ namespace WorkNest.API.Controllers
                     invoice["StatusLabel"] = label is null or DBNull ? null : label.ToString();
                 }
 
+                // Only once the invoice exists on EzPay (the raw column is set as soon as it is being sent).
+                invoice["OneBillNumber"] = await _oneBill.GetNumberAsync(id);
                 invoice["lines"] = lines;
                 return Ok(new { isSuccessful = true, data = invoice });
             }
@@ -929,6 +939,10 @@ namespace WorkNest.API.Controllers
                 stCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
                 await stCmd.ExecuteNonQueryAsync();
 
+                // One Bill location (e.g. F-7): create the invoice on EzPay now, so the PDF and email below carry its
+                // One Bill number. Null for other locations, or when EzPay failed (the One Bill sync retries it).
+                var oneBillNumber = await _oneBill.EnsureAsync(newInvoiceId);
+
                 string emailNotice = "";
                 if (req.SendEmail)
                 {
@@ -978,7 +992,8 @@ namespace WorkNest.API.Controllers
                                 currentCycleAmount: subTotal,
                                 taxAmount: taxTotal,
                                 discountAmount: discountTotal,
-                                pdfBytes: pdfBytes
+                                pdfBytes: pdfBytes,
+                                oneBillNumber: oneBillNumber
                             );
                             emailNotice = $" Email dispatched with PDF attached to {targetEmail}.";
                         }
@@ -996,7 +1011,8 @@ namespace WorkNest.API.Controllers
                     message = "Custom invoice created successfully." + emailNotice,
                     invoiceId = newInvoiceId,
                     invoiceNumber = invoiceNumber,
-                    grandTotal = grandTotal
+                    grandTotal = grandTotal,
+                    oneBillNumber = oneBillNumber
                 });
             }
             catch (Exception ex)
@@ -1088,6 +1104,9 @@ namespace WorkNest.API.Controllers
             if (string.IsNullOrWhiteSpace(targetEmail))
                 return (false, "Customer email is missing for this invoice.");
 
+            // One Bill location: make sure the invoice is on EzPay before the PDF / email are made.
+            var oneBillNumber = await _oneBill.EnsureAsync(id);
+
             byte[]? pdfBytes = null;
             try
             {
@@ -1132,7 +1151,8 @@ namespace WorkNest.API.Controllers
                     securityDeposit: securityDeposit,
                     taxAmount: taxTotal,
                     discountAmount: discountTotal,
-                    pdfBytes: pdfBytes
+                    pdfBytes: pdfBytes,
+                    oneBillNumber: oneBillNumber
                 );
 
                 return (true, $"Invoice email sent successfully to {targetEmail} with Statement PDF attached.");

@@ -1,0 +1,229 @@
+-- ============================================================================================
+-- One Bill (EzPay / 1-Link): invoices of a location that has a 1-Link biller code are also created on EzPay, and the
+-- 1-Link consumer number ("One Bill number") customers pay with is kept on the invoice.
+-- Run as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. No GO / USE needed.
+-- One transaction: if anything fails, nothing is changed. Safe to run again (columns added only when missing,
+-- CREATE OR ALTER for the procedures; the F-7 codes are only set while still empty).
+--
+-- Adds:
+--   WN_Locations.OneBillBillerCode / OneBillPrefix / OneBillFrom  - which location uses One Bill, and from when.
+--   WN_Invoices.OneBill*  / EzPay*                                  - the One Bill number and the EzPay result.
+--   WN_OneBill_ClaimInvoice, WN_OneBill_SetResult, WN_OneBill_GetPending, WN_OneBill_GetByInvoice.
+--
+-- A location uses One Bill when both OneBillBillerCode and OneBillPrefix are set. For an invoice of that location:
+--   ref sent to EzPay (concat_vendor_invoice_one_bill_ref) = OneBillBillerCode + invoice Id padded to 8 digits
+--   One Bill number the customer pays                      = OneBillPrefix     + invoice Id padded to 8 digits
+--   e.g. invoice 4162 at F-7: ref 103400004162, One Bill number 101340103400004162.
+-- Only invoices created on/after OneBillFrom (UTC, like WN_Invoices.CreatedOn) are sent (older invoices are left alone).
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 1. Locations: 1-Link biller code, 1-Link prefix, start date.
+    IF COL_LENGTH('dbo.WN_Locations', 'OneBillBillerCode') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Locations ADD OneBillBillerCode VARCHAR(10) NULL;');
+    IF COL_LENGTH('dbo.WN_Locations', 'OneBillPrefix') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Locations ADD OneBillPrefix VARCHAR(20) NULL;');
+    IF COL_LENGTH('dbo.WN_Locations', 'OneBillFrom') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Locations ADD OneBillFrom DATETIME NULL;');
+
+    -- 2. Invoices: One Bill number and the EzPay result.
+    --    OneBillStatus: NULL = not sent, 1 = being sent, 2 = created on EzPay, 3 = failed (retried until OneBillAttempts = 5).
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillRef') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD OneBillRef VARCHAR(20) NULL;');
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillNumber') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD OneBillNumber VARCHAR(30) NULL;');
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillStatus') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD OneBillStatus TINYINT NULL;');
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillAttempts') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD OneBillAttempts INT NOT NULL CONSTRAINT DF_WN_Invoices_OneBillAttempts DEFAULT (0);');
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillError') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD OneBillError NVARCHAR(500) NULL;');
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillClaimedOn') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD OneBillClaimedOn DATETIME NULL;');
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillCreatedOn') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD OneBillCreatedOn DATETIME NULL;');
+    IF COL_LENGTH('dbo.WN_Invoices', 'EzPayInvoiceId') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD EzPayInvoiceId BIGINT NULL;');
+    IF COL_LENGTH('dbo.WN_Invoices', 'EzPayTranAuthId') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD EzPayTranAuthId BIGINT NULL;');
+    -- No index on OneBillRef: it is the invoice Id with the biller code in front, so it is unique already (and a filtered
+    -- index would make older procedures that write WN_Invoices fail when they were created with QUOTED_IDENTIFIER OFF).
+
+    -- 3. F-7 (WN_Locations.Id = 2): biller code 1034, 1-Link prefix 1013401034, from now on. Only set while empty.
+    --    OneBillFrom is UTC, like WN_Invoices.CreatedOn (WN_Invoices_Insert writes SYSUTCDATETIME()).
+    EXEC(N'UPDATE dbo.WN_Locations
+              SET OneBillBillerCode = ''1034'', OneBillPrefix = ''1013401034'', OneBillFrom = SYSUTCDATETIME()
+            WHERE Id = 2 AND OneBillBillerCode IS NULL AND OneBillPrefix IS NULL;');
+
+    -- 4. Claims an invoice for sending to EzPay and answers its data.
+    --    Outcome: Claimed (send it; the row has the data), Done (already created; OneBillNumber), Busy (being sent
+    --    elsewhere), NotApplicable (no One Bill location, too old, paid, deleted, zero, or attempts used up).
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_ClaimInvoice
+    @InvoiceId    INT,
+    @MaxAttempts  INT = 5,
+    @StaleMinutes INT = 10
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Outcome VARCHAR(20), @Status TINYINT, @Attempts INT, @ClaimedOn DATETIME, @Number VARCHAR(30),
+            @BillerCode VARCHAR(10), @Prefix VARCHAR(20), @From DATETIME, @CreatedOn DATETIME,
+            @StatusId INT, @Grand DECIMAL(18, 2), @Paid DECIMAL(18, 2), @LocationId INT;
+
+    BEGIN TRANSACTION;
+
+    SELECT @Status = i.OneBillStatus, @Attempts = i.OneBillAttempts, @ClaimedOn = i.OneBillClaimedOn,
+           @Number = i.OneBillNumber, @CreatedOn = i.CreatedOn, @StatusId = i.StatusId,
+           @Grand = ISNULL(i.GrandTotal, 0), @Paid = ISNULL(i.PaidTotal, 0),
+           @LocationId = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+      FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+      LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = i.Id
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+     WHERE i.Id = @InvoiceId;
+
+    SELECT @BillerCode = NULLIF(LTRIM(RTRIM(l.OneBillBillerCode)), ''''), @Prefix = NULLIF(LTRIM(RTRIM(l.OneBillPrefix)), ''''),
+           @From = l.OneBillFrom
+      FROM dbo.WN_Locations l WITH (NOLOCK)
+     WHERE l.Id = @LocationId;
+
+    IF @@ROWCOUNT = 0 OR @BillerCode IS NULL OR @Prefix IS NULL OR @CreatedOn IS NULL
+       OR (@From IS NOT NULL AND @CreatedOn < @From) OR @InvoiceId > 99999999
+        SET @Outcome = ''NotApplicable'';
+    ELSE IF @Status = 2
+        SET @Outcome = ''Done'';
+    ELSE IF ISNULL(@StatusId, 0) = 40 OR @Grand <= 0 OR @Paid >= @Grand OR @Attempts >= @MaxAttempts
+        SET @Outcome = ''NotApplicable'';
+    ELSE IF @Status = 1 AND @ClaimedOn > DATEADD(MINUTE, -@StaleMinutes, GETDATE())
+        SET @Outcome = ''Busy'';
+    ELSE
+    BEGIN
+        SET @Outcome = ''Claimed'';
+        UPDATE dbo.WN_Invoices
+           SET OneBillStatus = 1,
+               OneBillClaimedOn = GETDATE(),
+               OneBillAttempts = OneBillAttempts + 1,
+               OneBillRef = @BillerCode + RIGHT(REPLICATE(''0'', 8) + CAST(@InvoiceId AS VARCHAR(8)), 8),
+               OneBillNumber = @Prefix + RIGHT(REPLICATE(''0'', 8) + CAST(@InvoiceId AS VARCHAR(8)), 8)
+         WHERE Id = @InvoiceId;
+    END;
+
+    COMMIT TRANSACTION;
+
+    IF @Outcome <> ''Claimed''
+    BEGIN
+        SELECT @Outcome AS Outcome, @InvoiceId AS InvoiceId, CASE WHEN @Outcome = ''Done'' THEN @Number END AS OneBillNumber;
+        RETURN;
+    END;
+
+    SELECT TOP 1
+        @Outcome AS Outcome,
+        i.Id AS InvoiceId,
+        i.InvoiceNumber,
+        i.OneBillRef,
+        i.OneBillNumber,
+        CAST(i.GrandTotal - ISNULL(i.PaidTotal, 0) AS DECIMAL(18, 2)) AS Amount,
+        i.DueOn,
+        i.BillingPeriodStart,
+        i.BillingPeriodEnd,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Code)), ''''), NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''''), ''C'' + CAST(i.UserId AS VARCHAR(12))) AS RegistrationNumber,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))), ''''),
+                 NULLIF(LTRIM(RTRIM(u.Name)), ''''), ''WorkNest Customer'') AS CustomerName,
+        COALESCE(NULLIF(LTRIM(RTRIM(u.Email)), ''''), NULLIF(LTRIM(RTRIM(c.Email)), '''')) AS Email,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.PhoneNumber)), ''''), NULLIF(LTRIM(RTRIM(u.PhoneNumber)), '''')) AS Phone,
+        l.Name AS LocationName
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+      OUTER APPLY (SELECT TOP 1 cc.Code, cc.Company, cc.FirstName, cc.LastName, cc.Email, cc.PhoneNumber
+                     FROM dbo.WN_Customers cc WITH (NOLOCK)
+                    WHERE ((b.CustomerCode IS NOT NULL AND b.CustomerCode <> '''' AND cc.Code = b.CustomerCode)
+                           OR (i.UserId > 0 AND cc.UserId = i.UserId))
+                      AND (cc.IsActive = 1 OR cc.IsActive IS NULL)
+                    ORDER BY CASE WHEN cc.Code = b.CustomerCode THEN 0 ELSE 1 END) c
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = @LocationId
+     WHERE i.Id = @InvoiceId;
+END');
+
+    -- 5. Saves the EzPay answer for a claimed invoice. A failure keeps the error and is retried (up to 5 attempts).
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_SetResult
+    @InvoiceId       INT,
+    @Success         BIT,
+    @EzPayInvoiceId  BIGINT        = NULL,
+    @EzPayTranAuthId BIGINT        = NULL,
+    @Error           NVARCHAR(500) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @Updated INT;
+    BEGIN TRANSACTION;
+
+    IF @Success = 1
+        UPDATE dbo.WN_Invoices
+           SET OneBillStatus = 2, OneBillCreatedOn = GETDATE(), OneBillError = NULL,
+               EzPayInvoiceId = @EzPayInvoiceId, EzPayTranAuthId = @EzPayTranAuthId
+         WHERE Id = @InvoiceId AND OneBillStatus = 1;
+    ELSE
+        UPDATE dbo.WN_Invoices
+           SET OneBillStatus = 3, OneBillError = LEFT(@Error, 500)
+         WHERE Id = @InvoiceId AND OneBillStatus = 1;
+    SET @Updated = @@ROWCOUNT;
+
+    COMMIT TRANSACTION;
+    SELECT @Updated AS Updated;
+END');
+
+    -- 6. Invoices still to send: at a One Bill location, created on/after its start, unpaid, not deleted, not yet
+    --    created, attempts left, and not being sent right now.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_GetPending
+    @Top          INT = 50,
+    @MaxAttempts  INT = 5,
+    @StaleMinutes INT = 10
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP (@Top) i.Id AS InvoiceId
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = i.Id
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+      JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+     WHERE NULLIF(LTRIM(RTRIM(l.OneBillBillerCode)), '''') IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(l.OneBillPrefix)), '''') IS NOT NULL
+       AND (l.OneBillFrom IS NULL OR i.CreatedOn >= l.OneBillFrom)
+       AND ISNULL(i.StatusId, 0) <> 40
+       AND ISNULL(i.GrandTotal, 0) > 0
+       AND ISNULL(i.PaidTotal, 0) < i.GrandTotal
+       AND i.OneBillAttempts < @MaxAttempts
+       AND (i.OneBillStatus IS NULL OR i.OneBillStatus = 3
+            OR (i.OneBillStatus = 1 AND i.OneBillClaimedOn <= DATEADD(MINUTE, -@StaleMinutes, GETDATE())))
+     ORDER BY i.Id;
+END');
+
+    -- 7. The One Bill number of an invoice (only once it exists on EzPay), for the invoice PDF / email / screens.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_GetByInvoice
+    @InvoiceId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT i.Id AS InvoiceId,
+           CASE WHEN i.OneBillStatus = 2 THEN i.OneBillNumber END AS OneBillNumber,
+           i.OneBillStatus,
+           i.OneBillError
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+     WHERE i.Id = @InvoiceId;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT 'One Bill installed: WN_Locations / WN_Invoices columns and 4 WN_OneBill_* procedures.' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
