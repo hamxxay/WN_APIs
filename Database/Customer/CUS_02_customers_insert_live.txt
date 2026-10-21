@@ -1,0 +1,117 @@
+-- ============================================================================================
+-- Fix for "Procedure or function WN_Customers_Insert has too many arguments specified" on live
+-- (creating a customer in the CMS, and the first Google sign-in of a new customer).
+--
+-- The API sends 16 parameters to dbo.WN_Customers_Insert (DbRepository.CreateCustomerAsync); the live procedure
+-- is an older version with fewer. This installs the same procedure as the test database (SAC400).
+--
+-- Customer code: on the test database WN_Customers.Code is a computed column ('WN' + Id padded to 5 digits, e.g.
+-- WN00088). Where Code is a plain column (live), the procedure fills it right after the insert with that same formula.
+-- The script stops if an existing code could clash with a code made that way (a WN code above the highest Id).
+--
+-- Needs the WN_Customers columns NTN, SecpRegistrationNo, CustomerTypeId, CountryId, IdentificationDocumentTypeId:
+-- run CUS_01_customers_match_test.txt first if they are missing (this script stops and says so).
+--
+-- Run against the LIVE database as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. No GO / USE needed.
+-- One transaction: if anything fails, nothing is changed. Safe to run again (CREATE OR ALTER).
+-- Before running, keep the current version if you want to compare: EXEC sp_helptext 'dbo.WN_Customers_Insert';
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    DECLARE @Missing NVARCHAR(400) = STUFF((
+        SELECT N', ' + c.Name
+          FROM (VALUES (N'NTN'), (N'SecpRegistrationNo'), (N'CustomerTypeId'), (N'CountryId'), (N'IdentificationDocumentTypeId')) c(Name)
+         WHERE COL_LENGTH('dbo.WN_Customers', c.Name) IS NULL
+           FOR XML PATH('')), 1, 2, N'');
+    IF @Missing IS NOT NULL
+        THROW 50001, N'dbo.WN_Customers is missing columns needed by the new procedure. Run CUS_01_customers_match_test.txt first.', 1;
+
+    DECLARE @CodeIsComputed BIT = ISNULL(COLUMNPROPERTY(OBJECT_ID('dbo.WN_Customers'), 'Code', 'IsComputed'), 0);
+    IF @CodeIsComputed = 0
+    BEGIN
+        DECLARE @MaxId INT, @Clashes INT;
+        EXEC sp_executesql N'SELECT @m = ISNULL(MAX(Id), 0) FROM dbo.WN_Customers;', N'@m INT OUTPUT', @m = @MaxId OUTPUT;
+        EXEC sp_executesql N'SELECT @n = COUNT(*) FROM dbo.WN_Customers
+                              WHERE Code LIKE ''WN[0-9][0-9][0-9][0-9][0-9]'' AND TRY_CAST(SUBSTRING(Code, 3, 5) AS INT) > @max;',
+             N'@max INT, @n INT OUTPUT', @max = @MaxId, @n = @Clashes OUTPUT;
+        IF @Clashes > 0
+            THROW 50002, N'Some existing customer codes are higher than the highest customer Id, so new codes could clash. Nothing changed: send these rows to the developer: SELECT Id, Code FROM dbo.WN_Customers ORDER BY Id DESC;', 1;
+    END;
+
+    -- The code line of the procedure: nothing when Code is computed, else fill it with the test formula.
+    DECLARE @CodeLine NVARCHAR(400) = CASE WHEN @CodeIsComputed = 1 THEN N'' ELSE
+        N'UPDATE dbo.WN_Customers SET Code = ''WN'' + RIGHT(''00000'' + CONVERT(VARCHAR(10), @NewId), 5) WHERE Id = @NewId AND (Code IS NULL OR Code = '''');' END;
+
+    BEGIN TRANSACTION;
+
+    DECLARE @Sql NVARCHAR(MAX) = N'CREATE OR ALTER PROCEDURE dbo.WN_Customers_Insert
+    @FirstName                   NVARCHAR(100),
+    @LastName                    NVARCHAR(100)  = NULL,
+    @Email                       NVARCHAR(255),
+    @PhoneNumber                 NVARCHAR(50)   = NULL,
+    @CnicOrPassport              NVARCHAR(50)   = NULL,
+    @Address                     NVARCHAR(500)  = NULL,
+    @CityId                      INT            = NULL,
+    @Notes                       NVARCHAR(1000) = NULL,
+    @CreatedBy                   NVARCHAR(255)  = NULL,
+    @UserId                      INT            = NULL,
+    @Company                     NVARCHAR(255)  = NULL,
+    @NTN                         NVARCHAR(100)  = NULL,
+    @SecpRegistrationNo          NVARCHAR(100)  = NULL,
+    @CustomerTypeId              NVARCHAR(225)  = NULL,
+    @CountryId                   INT            = NULL,
+    @IdentificationDocumentTypeId NVARCHAR(225) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Treat 0 or negative foreign keys / IDs as NULL
+    IF @CountryId IS NULL OR @CountryId <= 0 SET @CountryId = NULL;
+    IF @CityId IS NULL OR @CityId <= 0 SET @CityId = NULL;
+    IF @UserId IS NULL OR @UserId <= 0 SET @UserId = NULL;
+
+    -- Treat empty strings and ''0'' as NULL for string / optional fields
+    IF @CustomerTypeId IS NULL OR LTRIM(RTRIM(@CustomerTypeId)) IN ('''', ''0'') SET @CustomerTypeId = NULL;
+    IF @IdentificationDocumentTypeId IS NULL OR LTRIM(RTRIM(@IdentificationDocumentTypeId)) IN ('''', ''0'') SET @IdentificationDocumentTypeId = NULL;
+    IF LTRIM(RTRIM(@Company)) = '''' SET @Company = NULL;
+    IF LTRIM(RTRIM(@LastName)) = '''' SET @LastName = NULL;
+    IF LTRIM(RTRIM(@PhoneNumber)) = '''' SET @PhoneNumber = NULL;
+    IF LTRIM(RTRIM(@CnicOrPassport)) = '''' SET @CnicOrPassport = NULL;
+    IF LTRIM(RTRIM(@Address)) = '''' SET @Address = NULL;
+    IF LTRIM(RTRIM(@Notes)) = '''' SET @Notes = NULL;
+    IF LTRIM(RTRIM(@CreatedBy)) = '''' SET @CreatedBy = NULL;
+    IF LTRIM(RTRIM(@NTN)) = '''' SET @NTN = NULL;
+    IF LTRIM(RTRIM(@SecpRegistrationNo)) = '''' SET @SecpRegistrationNo = NULL;
+
+    INSERT INTO dbo.WN_Customers
+    (
+        FirstName, LastName, Company, Email, PhoneNumber, CnicOrPassport, Address, CityId, Notes, CreatedBy, UserId,
+        NTN, SecpRegistrationNo, CustomerTypeId, CountryId, IdentificationDocumentTypeId
+    )
+    VALUES
+    (
+        @FirstName, @LastName, @Company, @Email, @PhoneNumber, @CnicOrPassport, @Address, @CityId, @Notes, @CreatedBy, @UserId,
+        @NTN, @SecpRegistrationNo, TRY_CAST(@CustomerTypeId AS INT), @CountryId, TRY_CAST(@IdentificationDocumentTypeId AS INT)
+    );
+
+    DECLARE @NewId INT = CAST(SCOPE_IDENTITY() AS INT);
+    ' + @CodeLine + N'
+
+    SELECT @NewId AS ID;
+END;';
+    EXEC(@Sql);
+
+    COMMIT TRANSACTION;
+
+    -- Check: 16 parameters, as the API sends.
+    SELECT COUNT(*) AS ParameterCount,
+           CASE WHEN @CodeIsComputed = 1 THEN N'Code is computed (as on test).' ELSE N'Code is filled by the procedure (WN + Id).' END AS CustomerCode,
+           N'dbo.WN_Customers_Insert updated (expected 16 parameters).' AS Result
+      FROM sys.parameters WHERE object_id = OBJECT_ID('dbo.WN_Customers_Insert');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
