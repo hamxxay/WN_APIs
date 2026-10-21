@@ -1,0 +1,65 @@
+-- ============================================================================================
+-- Bookings shown as "Unknown" (Sales dashboard > Bookings, and elsewhere) become Confirmed.
+--
+-- "Unknown" = WN_Bookings.BookingStatusId is not a status in dbo.WN_BookingStatuses (3 Rejected, 5 Pending, 6 No Show,
+-- 33 Confirmed, 86 Cancelled) and not an old value the screens still read (1 Pending, 2 Confirmed, 4 Cancelled):
+-- usually NULL or 0 on bookings that were entered directly (e.g. the I-8 tenants moved in on 1 Oct 2026).
+--
+-- STEP 1 (as is, @Apply = 0): lists the bookings that would change. Nothing is changed.
+-- STEP 2: check the list, set @Apply = 1 below and run again: they become Confirmed (33) in one transaction.
+--
+-- Note: confirmed bookings are picked up by automatic monthly invoicing (WN_Billing_GetDueBookings: statuses 1, 2, 5,
+-- 33), so their next invoices are made when their current invoice period is about to end.
+--
+-- Run against the LIVE database as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET NOCOUNT ON;
+
+DECLARE @Apply BIT = 0;   -- <<< 0 = only list; 1 = make them Confirmed
+
+DECLARE @Rows TABLE (BookingId INT PRIMARY KEY);
+INSERT INTO @Rows (BookingId)
+SELECT b.Id
+  FROM dbo.WN_Bookings b
+ WHERE ISNULL(b.IsDeleted, 0) = 0
+   AND (b.BookingStatusId IS NULL
+        OR (b.BookingStatusId NOT IN (1, 2, 4)
+            AND NOT EXISTS (SELECT 1 FROM dbo.WN_BookingStatuses bs WHERE bs.Id = b.BookingStatusId)));
+
+-- The bookings concerned, as they are now.
+SELECT b.Id AS BookingId, b.BookingStatusId AS CurrentStatusId, s.Name AS Space, l.Name AS Location,
+       COALESCE(NULLIF(c.Company, N''), u.Name) AS Customer,
+       CONVERT(VARCHAR(10), b.StartOn, 23) AS StartOn, CONVERT(VARCHAR(10), b.EndOn, 23) AS EndOn,
+       CASE WHEN @Apply = 1 THEN N'-> Confirmed' ELSE N'would become Confirmed (set @Apply = 1)' END AS Change
+  FROM @Rows r
+  JOIN dbo.WN_Bookings b ON b.Id = r.BookingId
+  LEFT JOIN dbo.WN_Spaces s ON s.Id = b.SpaceId
+  LEFT JOIN dbo.WN_Locations l ON l.Id = s.LocationId
+  LEFT JOIN dbo.WN_Users u ON u.Id = b.UserId
+  OUTER APPLY (SELECT TOP 1 x.Company FROM dbo.WN_Customers x
+                WHERE (b.CustomerCode <> N'' AND x.Code = b.CustomerCode) OR x.UserId = b.UserId) c
+ ORDER BY b.Id;
+
+IF @Apply = 1
+BEGIN
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        UPDATE b
+           SET b.BookingStatusId = 33   -- Confirmed (dbo.WN_BookingStatuses)
+          FROM dbo.WN_Bookings b
+          JOIN @Rows r ON r.BookingId = b.Id;
+
+        DECLARE @Changed INT = @@ROWCOUNT;
+        COMMIT TRANSACTION;
+
+        SELECT @Changed AS BookingsConfirmed, N'Done: these bookings are now Confirmed.' AS Result;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END
+ELSE
+    SELECT (SELECT COUNT(*) FROM @Rows) AS BookingsThatWouldChange, N'Nothing changed. Set @Apply = 1 to confirm them.' AS Result;
