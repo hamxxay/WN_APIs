@@ -162,6 +162,12 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         /// <summary>The invoice's balance today (changes with later receipts; not for printing).</summary>
         public decimal? InvoiceBalanceNow { get; set; }
         public string? InvoicePaymentStatus { get; set; }
+        // RC_02 monthly receipts: one receipt per calendar month of a multi-month invoice. Receipt 1 is saved by staff;
+        // months 2..N are created at the start of each month. Older receipts (NULL columns) are month 1 of 1.
+        /// <summary>1st of the month this receipt is for; null on receipts saved before RC_02.</summary>
+        public DateTime? BillingMonth { get; set; }
+        public int MonthNo { get; set; } = 1;
+        public int MonthCount { get; set; } = 1;
     }
 
     /// <summary>How a fee receipt call ended; the controller maps it to the HTTP status.</summary>

@@ -1,0 +1,271 @@
+-- ============================================================================================
+-- Fee Receipts per month: dbo.WN_FeeReceipt_MonthPlan(@InvoiceId) splits a multi-month invoice (the first / advance
+-- invoice that bills several months at once) into one row per calendar month, so one fee receipt can be issued per month.
+-- Run as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. No GO / USE needed.
+-- One transaction: if anything fails, nothing is changed. Safe to run again (CREATE OR ALTER). Changes no data.
+--
+-- Adds:
+--   dbo.WN_FeeReceipt_MonthPlan(@InvoiceId INT) - table-valued function, one row per receipt month:
+--     MonthNo / MonthCount           1..n, n = number of receipts for the invoice.
+--     BillingMonth                   1st day of the calendar month the receipt is for.
+--     PeriodFrom / PeriodTo          the days that month covers.
+--     RentGross, Discount, Service, Tax, Deposit, WHT
+--     Payable                        what the customer pays for that month = RentGross - Discount + Tax + Deposit
+--                                    (WHT is withheld by the customer, so it is not in Payable).
+--     Revenue                        Payable + WHT - Deposit.
+--   SUM(Payable) = GrandTotal - WHTAmount, SUM(WHT) = WHTAmount, SUM(Deposit) = SecurityDepositAmount,
+--   SUM(Revenue) = GrandTotal - SecurityDepositAmount - exactly, for every invoice (to the cent: a few older invoices
+--   carry 4 decimals in GrandTotal / TaxTotal; the plan uses those totals rounded to 2 decimals).
+--
+-- How the months are worked out (from WN_Invoices; SubTotal / RoomRentExclTax are NOT used, they are not reliable):
+--   T (customer pays) = GrandTotal - WHTAmount
+--   X (tax)           = TaxOnServiceCharges (TaxTotal when that is 0); if that cannot reproduce the months, TaxTotal
+--                       (older invoices charged a blended tax on line 1 that only TaxTotal holds)
+--   gross rent Rg     = T - X - SecurityDepositAmount + DiscountTotal      (rent incl. service charges, before discount)
+--   Months ("segments"):
+--     line 1 says "(d days prorated + k Month(s))" -> month 1 = BillingPeriodStart .. end of that month (d days),
+--                                                     then k whole calendar months up to BillingPeriodEnd.
+--     otherwise                                    -> months anchored on BillingPeriodStart's day (Nov 6 - Dec 5, ...;
+--                                                     calendar months when it starts on the 1st).
+--   Monthly rent M:  prorated     M = Rg / (d / div + k), div = 30 (current engine) or the days of the first month
+--                                     (old invoices) - whichever gives a whole number;
+--                    not prorated M = Rg / number of months.
+--   Every whole month: RentGross = M; Discount = M * p% (percentage discount) or DiscountTotal / units (fixed);
+--                      Service = ServiceCharges / units; Tax = X / units; WHT = net / (1 - rate) - net, net = M - Discount.
+--                      units = months charged service by the engine (the prorated first month counts only when it
+--                      starts before the 15th). Fixed discount / service / tax per month are cut to the cent.
+--   d is taken from the description (current engine: 31 - start day; old invoices: real days left in the month).
+--   Month 1 takes the rest of every total (rent, discount, service, tax, WHT) plus the whole security deposit,
+--   so the months always add up to the invoice exactly.
+--
+-- ONE row (MonthNo = 1, MonthCount = 1, the whole invoice; BillingMonth = month of BillingPeriodStart, else IssuedOn) for:
+--   custom invoices (IsCustom = 1 or InvoiceTypeId = 7), capacity overage surcharges, meeting rooms, invoices without
+--   BillingPeriodStart / BillingPeriodEnd, periods that are one month or less, and any invoice whose amounts the rules
+--   above cannot reproduce exactly (no whole monthly rent, period not made of whole months, a negative month 1, ...).
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    EXEC(N'CREATE OR ALTER FUNCTION dbo.WN_FeeReceipt_MonthPlan (@InvoiceId INT)
+RETURNS @Plan TABLE (
+    MonthNo      INT,
+    MonthCount   INT,
+    BillingMonth DATE,
+    PeriodFrom   DATE,
+    PeriodTo     DATE,
+    RentGross    DECIMAL(18, 2),
+    Discount     DECIMAL(18, 2),
+    Service      DECIMAL(18, 2),
+    Tax          DECIMAL(18, 2),
+    Deposit      DECIMAL(18, 2),
+    WHT          DECIMAL(18, 2),
+    Payable      DECIMAL(18, 2),
+    Revenue      DECIMAL(18, 2)
+)
+AS
+BEGIN
+    DECLARE @PS DATE, @PE DATE, @IssuedOn DATE, @N INT, @IsCustom BIT, @TypeId INT, @BookingId INT,
+            @G DECIMAL(19, 4), @Wraw DECIMAL(19, 4), @Rate DECIMAL(18, 6), @Dep DECIMAL(18, 2), @D DECIMAL(18, 2),
+            @S DECIMAL(18, 2), @X1 DECIMAL(19, 4), @X2 DECIMAL(19, 4), @Line1 NVARCHAR(500);
+
+    SELECT @PS = CONVERT(DATE, i.BillingPeriodStart), @PE = CONVERT(DATE, i.BillingPeriodEnd), @IssuedOn = i.IssuedOn,
+           @N = i.AdvanceRentMonths, @IsCustom = ISNULL(i.IsCustom, 0), @TypeId = i.InvoiceTypeId, @BookingId = i.BookingId,
+           @G = ISNULL(i.GrandTotal, 0), @Wraw = ISNULL(i.WHTAmount, 0), @Rate = ISNULL(i.WHTRate, 0) / 100.0,
+           @Dep = ISNULL(i.SecurityDepositAmount, 0), @D = ISNULL(i.DiscountTotal, 0), @S = ISNULL(i.ServiceCharges, 0),
+           @X1 = CASE WHEN ISNULL(i.TaxOnServiceCharges, 0) <> 0 THEN i.TaxOnServiceCharges ELSE ISNULL(i.TaxTotal, 0) END,
+           @X2 = ISNULL(i.TaxTotal, 0)
+    FROM dbo.WN_Invoices i
+    WHERE i.Id = @InvoiceId;
+
+    IF @@ROWCOUNT = 0 RETURN;
+
+    SELECT TOP (1) @Line1 = l.Description
+    FROM dbo.WN_InvoiceLines l
+    WHERE l.InvoiceId = @InvoiceId
+    ORDER BY l.SortOrder, l.Id;
+
+    -- Amounts are worked out from the unrounded totals (some older invoices carry 4 decimals) and then rounded.
+    -- Tax X is taken as T - Deposit - (Rg - Discount), so Payable always adds up to T to the cent.
+    -- Tax: TaxOnServiceCharges (TaxTotal when 0); when that cannot reproduce the months, TaxTotal is tried
+    -- (older invoices charged a blended tax on line 1, which only TaxTotal holds).
+    DECLARE @T  DECIMAL(18, 2) = ROUND(@G, 2) - ROUND(@Wraw, 2),            -- customer payable
+            @W  DECIMAL(18, 2) = ROUND(@Wraw, 2),                           -- WHT
+            @Rg DECIMAL(18, 2) = ROUND(@G - @Wraw - @X1 - @Dep + @D, 2),   -- gross rent (incl. service charges, before discount)
+            @X  DECIMAL(18, 2), @RgTry DECIMAL(18, 2), @Try INT;
+    SET @X = @T - @Dep - @Rg + @D;
+
+    -- ---- Can it be split? -------------------------------------------------------------------------------
+    DECLARE @Split BIT = 1;
+    IF @IsCustom = 1 OR @TypeId = 7 OR @PS IS NULL OR @PE IS NULL OR @PE < @PS
+       OR DATEFROMPARTS(YEAR(@PS), MONTH(@PS), 1) = DATEFROMPARTS(YEAR(@PE), MONTH(@PE), 1)
+       OR @Rg <= 0 OR @T < 0 OR @Dep < 0 OR @D < 0 OR @S < 0 OR @X < 0 OR @W < 0
+        SET @Split = 0;
+    IF @Split = 1 AND EXISTS (SELECT 1 FROM dbo.WN_InvoiceLines l WHERE l.InvoiceId = @InvoiceId
+                                AND (l.Description LIKE N''Capacity Overage Surcharge%''
+                                     OR l.Description LIKE N''Meeting Room Booking Rent%''))
+        SET @Split = 0;
+    IF @Split = 1 AND EXISTS (SELECT 1 FROM dbo.WN_Bookings b
+                                JOIN dbo.WN_Spaces s ON s.Id = b.SpaceId
+                                JOIN dbo.WN_SpaceTypes st ON st.Id = s.SpaceTypeId
+                              WHERE b.Id = @BookingId AND (st.Name LIKE N''%Meeting%'' OR st.Description LIKE N''%Meeting%''))
+        SET @Split = 0;
+
+    -- ---- Months --------------------------------------------------------------------------------------
+    DECLARE @Segs TABLE (No INT PRIMARY KEY, FromD DATE, ToD DATE);
+    DECLARE @Prorated BIT = 0, @Days INT, @F INT, @Count INT = 0, @Units INT, @M DECIMAL(18, 2), @Exact DECIMAL(38, 10),
+            @Div INT, @Pos INT, @Txt NVARCHAR(500), @i INT;
+
+    IF @Split = 1 AND @Line1 LIKE N''%([0-9]% days prorated + [0-9]% Month(s))%''
+    BEGIN
+        -- "(d days prorated + k Month(s))": d before " days prorated", k after "+ ".
+        SET @Pos = CHARINDEX(N'' days prorated + '', @Line1);
+        SET @Txt = REVERSE(LEFT(@Line1, @Pos - 1));
+        SET @Txt = REVERSE(LEFT(@Txt, CHARINDEX(N''('', @Txt + N''('') - 1));
+        SET @Days = TRY_CONVERT(INT, @Txt);
+        SET @Txt = SUBSTRING(@Line1, @Pos + LEN(N'' days prorated +'') + 1, 20);
+        SET @F = TRY_CONVERT(INT, LEFT(@Txt, CHARINDEX(N'' '', @Txt + N'' '') - 1));
+
+        -- d is days charged for the stub (start .. end of its month; the current engine counts 31 - start day,
+        -- older invoices the real days), so it is only checked loosely; the whole monthly rent below is the real test.
+        IF @Days IS NULL OR @F IS NULL OR @Days < 0 OR @F <= 0
+           OR @Days > DATEDIFF(DAY, @PS, EOMONTH(@PS)) + 1
+           OR @PE <> EOMONTH(@PE) OR DATEDIFF(MONTH, @PS, @PE) <> @F
+            SET @Split = 0;
+        ELSE
+        BEGIN
+            SET @Prorated = 1;
+            INSERT INTO @Segs VALUES (1, @PS, EOMONTH(@PS));
+            SET @i = 1;
+            WHILE @i <= @F
+            BEGIN
+                INSERT INTO @Segs VALUES (@i + 1, DATEADD(DAY, 1, EOMONTH(@PS, @i - 1)), EOMONTH(@PS, @i));
+                SET @i += 1;
+            END
+            SET @Count = @F + 1;
+            -- Monthly rent: Rg = M * (d / div + F) with M a whole number. Current engine div = 30, old invoices the
+            -- stub month''s days. Tried with tax candidate 1, then candidate 2 (TaxTotal) when it differs.
+            SET @M = NULL;
+            SET @Try = 1;
+            WHILE @Try <= 4 AND @M IS NULL
+            BEGIN
+                IF @Try <= 2 OR @X2 <> @X1
+                BEGIN
+                    SET @RgTry = ROUND(@G - @Wraw - CASE WHEN @Try <= 2 THEN @X1 ELSE @X2 END - @Dep + @D, 2);
+                    SET @Div = CASE WHEN @Try % 2 = 1 THEN 30 ELSE DAY(EOMONTH(@PS)) END;
+                    SET @Exact = CONVERT(DECIMAL(38, 10), @RgTry) * @Div / (@Days + @F * @Div);
+                    IF @RgTry > 0 AND ABS(@Exact - ROUND(@Exact, 0)) <= 0.01
+                    BEGIN
+                        SET @M  = ROUND(@Exact, 0);
+                        SET @Rg = @RgTry;
+                        SET @X  = @T - @Dep - @Rg + @D;
+                    END
+                END
+                SET @Try += 1;
+            END
+            IF @M IS NULL SET @Split = 0;
+            -- Service / tax / fixed discount: the engine charges the stub a unit only when it starts before the 15th.
+            SET @Units = CASE WHEN DAY(@PS) < 15 THEN @F + 1 ELSE @F END;
+        END
+    END
+    ELSE IF @Split = 1
+    BEGIN
+        -- Months anchored on the start day: PS + (i-1) months .. PS + i months - 1 day; the last ends on PE
+        -- (some old invoices end on PS + n months instead of the day before).
+        SET @i = 1;
+        WHILE @i <= 120 AND DATEADD(DAY, -1, DATEADD(MONTH, @i, @PS)) < @PE AND DATEADD(MONTH, @i, @PS) < @PE
+            SET @i += 1;
+        IF DATEADD(DAY, -1, DATEADD(MONTH, @i, @PS)) = @PE OR DATEADD(MONTH, @i, @PS) = @PE
+        BEGIN
+            SET @Count = @i;
+            SET @i = 1;
+            WHILE @i <= @Count
+            BEGIN
+                INSERT INTO @Segs VALUES (@i, DATEADD(MONTH, @i - 1, @PS),
+                                          CASE WHEN @i = @Count THEN @PE ELSE DATEADD(DAY, -1, DATEADD(MONTH, @i, @PS)) END);
+                SET @i += 1;
+            END
+            SET @F = @Count - 1;
+            SET @Units = @Count;
+            -- Prefer the tax candidate that gives a whole monthly rent; otherwise candidate 1, rent rounded to the cent.
+            IF @X2 <> @X1
+            BEGIN
+                SET @RgTry = ROUND(@G - @Wraw - @X2 - @Dep + @D, 2);
+                SET @Exact = CONVERT(DECIMAL(38, 10), @Rg) / @Count;
+                IF ABS(@Exact - ROUND(@Exact, 0)) > 0.01 AND @RgTry > 0
+                   AND ABS(CONVERT(DECIMAL(38, 10), @RgTry) / @Count - ROUND(CONVERT(DECIMAL(38, 10), @RgTry) / @Count, 0)) <= 0.01
+                BEGIN
+                    SET @Rg = @RgTry;
+                    SET @X  = @T - @Dep - @Rg + @D;
+                END
+            END
+            SET @M = ROUND(@Rg / @Count, 2);
+        END
+        ELSE
+            SET @Split = 0;
+        IF @Count < 2 SET @Split = 0;
+    END
+
+    -- ---- Per whole month -----------------------------------------------------------------------------
+    DECLARE @mDisc DECIMAL(18, 2) = 0, @mServ DECIMAL(18, 2) = 0, @mTax DECIMAL(18, 2) = 0, @mWht DECIMAL(18, 2) = 0,
+            @p DECIMAL(18, 2), @Net DECIMAL(18, 2);
+
+    IF @Split = 1
+    BEGIN
+        IF @Units IS NULL OR @Units <= 0 SET @Split = 0;
+    END
+
+    IF @Split = 1
+    BEGIN
+        IF @D > 0
+        BEGIN
+            SET @p = ROUND(@D * 100 / @Rg, 2);          -- percentage discount when Rg * p% gives DiscountTotal exactly
+            IF ROUND(@Rg * @p / 100, 2) = @D
+                SET @mDisc = ROUND(@M * @p / 100, 2);
+            ELSE
+                SET @mDisc = ROUND(@D / @Units, 2, 1);
+        END
+        -- Cut to the cent (not rounded up), so month 1 never goes negative on an uneven division.
+        SET @mServ = ROUND(@S / @Units, 2, 1);
+        SET @mTax  = ROUND(@X / @Units, 2, 1);
+        SET @Net   = @M - @mDisc;
+        IF @Rate > 0 AND @Rate < 1
+            SET @mWht = ROUND(@Net / (1 - @Rate), 2) - @Net;
+
+        -- Month 1 gets the remainder of every total; it must not go negative.
+        IF @Rg - @F * @M < 0 OR @D - @F * @mDisc < 0 OR @S - @F * @mServ < 0 OR @X - @F * @mTax < 0
+           OR @W - @F * @mWht < 0 OR (@Rg - @F * @M) - (@D - @F * @mDisc) < 0 OR @Net < 0
+            SET @Split = 0;
+    END
+
+    IF @Split = 0
+    BEGIN
+        INSERT INTO @Plan
+        VALUES (1, 1, DATEFROMPARTS(YEAR(ISNULL(@PS, @IssuedOn)), MONTH(ISNULL(@PS, @IssuedOn)), 1), @PS, @PE,
+                @Rg, @D, @S, @X, @Dep, @W, @T, @T + @W - @Dep);
+        RETURN;
+    END
+
+    INSERT INTO @Plan
+    SELECT s.No, @Count, DATEFROMPARTS(YEAR(s.FromD), MONTH(s.FromD), 1), s.FromD, s.ToD,
+           v.Rent, v.Disc, v.Serv, v.Tax, v.Dep, v.Wht,
+           v.Rent - v.Disc + v.Tax + v.Dep,
+           v.Rent - v.Disc + v.Tax + v.Wht
+    FROM @Segs s
+    CROSS APPLY (SELECT CASE WHEN s.No = 1 THEN @Rg - @F * @M     ELSE @M     END AS Rent,
+                        CASE WHEN s.No = 1 THEN @D  - @F * @mDisc ELSE @mDisc END AS Disc,
+                        CASE WHEN s.No = 1 THEN @S  - @F * @mServ ELSE @mServ END AS Serv,
+                        CASE WHEN s.No = 1 THEN @X  - @F * @mTax  ELSE @mTax  END AS Tax,
+                        CASE WHEN s.No = 1 THEN @Dep              ELSE 0      END AS Dep,
+                        CASE WHEN s.No = 1 THEN @W  - @F * @mWht  ELSE @mWht  END AS Wht) v;
+
+    RETURN;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT 'dbo.WN_FeeReceipt_MonthPlan created/updated.' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

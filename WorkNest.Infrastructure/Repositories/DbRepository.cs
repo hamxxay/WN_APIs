@@ -7433,7 +7433,7 @@ END";
             }
         }
 
-        public async Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds)
+        public async Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview, int? VoidedCount)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_FeeReceipts_Void", c);
@@ -7453,7 +7453,9 @@ END";
                     int? rid = dict.TryGetValue("ReceiptId", out var id) && id is not null ? Convert.ToInt32(id) : null;
                     bool restored = dict.TryGetValue("InvoiceRestored", out var ir) && ir is not null && Convert.ToBoolean(ir);
                     bool cards = dict.TryGetValue("AccessCardsNeedReview", out var ac) && ac is not null && Convert.ToBoolean(ac);
-                    return (ok, msg, rid, restored, cards);
+                    // RC_02: the receipt plus the later monthly receipts of the same invoice; missing before RC_02.
+                    int? voided = dict.TryGetValue("VoidedCount", out var vc) && vc is not null ? Convert.ToInt32(vc) : null;
+                    return (ok, msg, rid, restored, cards, voided);
                 }
             }
             catch (SqlException ex) when (ex.Number == 50000)
@@ -7461,7 +7463,7 @@ END";
                 throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(ex.Message, ex.State, ex);
             }
             // The procedure always returns a row on success; no row means the void was not confirmed.
-            return (false, "The fee receipt could not be voided. Please try again.", receiptId, false, false);
+            return (false, "The fee receipt could not be voided. Please try again.", receiptId, false, false, null);
         }
 
         public async Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds)
@@ -7498,6 +7500,15 @@ END";
             cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> CreateDueMonthlyFeeReceiptsDbAsync(DateTime today)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_CreateDueMonthly", c);
+            cmd.Parameters.Add("@Today", SqlDbType.Date).Value = today.Date;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
         }
 
         public async Task<(decimal TaxPercentage, bool TaxApplicable)> GetSupportTaxRateAsync(int? locationId = null, int? spaceId = null)

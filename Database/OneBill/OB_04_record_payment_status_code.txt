@@ -1,0 +1,150 @@
+-- ============================================================================================
+-- OB_04: dbo.WN_OneBill_RecordPayment with the @StatusCode interface (ezpay* parameters, @StatusCode OUTPUT, app lock),
+-- plus what it needs to be safe with EzPay, which sends a notification again whenever it gets no answer:
+--   * every path commits or rolls back (before, a non-200 path left the transaction open: error 266, lock held);
+--   * the same notification twice is not recorded twice (it was: one payment marked the invoice paid twice);
+--   * a payment on an invoice that is already fully paid, or with no matching invoice, is kept for review, not recorded.
+-- The bill number is matched on WN_Invoices.OneBillNumber (the 1-Link consumer number) or OneBillRef (what we send EzPay).
+-- @StatusCode: 200 recorded on the invoice; 201 the same notification was already recorded (nothing done);
+--              202 invoice already fully paid (not recorded); 104 no invoice has this bill number (not recorded);
+--              105 amount missing or not above zero; 103 database error (rolled back, EzPay should send it again).
+-- The API answers EzPay success for 200 and 201 only.
+-- Every notification is kept in dbo.WN_OneBill_Payments (OB_03), whatever its outcome.
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter). One transaction. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID('dbo.WN_OneBill_Payments', 'U') IS NULL
+        THROW 50001, N'dbo.WN_OneBill_Payments is missing: run OB_03_one_bill_payments.txt first. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_RecordPayment
+    @ezpayRefNo      NVARCHAR(30),
+    @ezpayRcvdAmount DECIMAL(18, 2),
+    @ezpayRcvdDate   DATE          = NULL,
+    @ezpayRcvdTime   TIME          = NULL,
+    @ezpayRcvdVia    NVARCHAR(50)  = NULL,
+    @StatusCode      INT OUTPUT,             -- 200 recorded, 201 already recorded, 202 invoice already paid, 104 no invoice, 105 bad amount, 103 db error
+    @RawBody         NVARCHAR(MAX) = NULL,
+    @RemoteIp        VARCHAR(64)   = NULL
+AS
+BEGIN
+    SET XACT_ABORT, NOCOUNT ON;
+
+    DECLARE @Outcome VARCHAR(20), @Message NVARCHAR(500), @InvoiceId INT, @InvoiceNumber NVARCHAR(50), @Matches INT,
+            @Due DECIMAL(18, 4), @Paid DECIMAL(18, 4), @PaidTotalAfter DECIMAL(18, 4), @StatusAfter INT,
+            @Ref NVARCHAR(100), @Notes NVARCHAR(MAX), @NotificationId INT, @returnCode INT;
+    DECLARE @Result TABLE (IsSuccessful INT, [Message] NVARCHAR(MAX), PaidTotal DECIMAL(18, 4), StatusId INT);
+
+    SET @StatusCode = 200;
+    SET @ezpayRefNo = LTRIM(RTRIM(@ezpayRefNo));
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- One notification at a time (EzPay can send the same one again while the first is still running).
+        EXEC @returnCode = sp_getapplock @Resource = ''WN_OneBill_RecordPayment'', @LockMode = ''Exclusive'', @LockOwner = ''Transaction'';
+        IF @returnCode < 0
+            THROW 50020, N''Could not lock WN_OneBill_RecordPayment.'', 1;
+
+        IF ISNULL(@ezpayRcvdAmount, 0) <= 0
+        BEGIN
+            SELECT @StatusCode = 105, @Outcome = ''Invalid'', @Message = ''Amount missing or not above zero.'';
+        END
+        ELSE IF EXISTS (SELECT 1 FROM dbo.WN_OneBill_Payments p
+                         WHERE p.BillNo = @ezpayRefNo AND p.RcvdAmount = @ezpayRcvdAmount AND p.Outcome = ''Applied''
+                           AND ISNULL(p.RcvdDate, ''19000101'') = ISNULL(@ezpayRcvdDate, ''19000101'')
+                           AND ISNULL(p.RcvdTime, ''00:00:00'') = ISNULL(CAST(@ezpayRcvdTime AS TIME(0)), ''00:00:00''))
+        BEGIN
+            -- Same notification as one already recorded: nothing to do (EzPay just did not get our first answer).
+            SELECT TOP 1 @InvoiceId = p.InvoiceId, @PaidTotalAfter = p.PaidTotalAfter, @StatusAfter = p.InvoiceStatusAfter
+              FROM dbo.WN_OneBill_Payments p
+             WHERE p.BillNo = @ezpayRefNo AND p.RcvdAmount = @ezpayRcvdAmount AND p.Outcome = ''Applied''
+             ORDER BY p.Id;
+            SELECT @StatusCode = 201, @Outcome = ''Duplicate'', @Message = ''Same notification as one already recorded; not recorded again.'';
+        END
+        ELSE
+        BEGIN
+            -- The invoice: the 1-Link consumer number (OneBillNumber) or our ref (OneBillRef).
+            SELECT @Matches = COUNT(*), @InvoiceId = MIN(i.Id)
+              FROM dbo.WN_Invoices i
+             WHERE i.OneBillNumber = @ezpayRefNo OR i.OneBillRef = @ezpayRefNo;
+
+            IF ISNULL(@Matches, 0) <> 1
+                SELECT @InvoiceId = NULL, @StatusCode = 104, @Outcome = ''Unmatched'',
+                       @Message = CASE WHEN ISNULL(@Matches, 0) = 0 THEN ''No invoice has this bill number.'' ELSE ''More than one invoice has this bill number.'' END;
+            ELSE
+            BEGIN
+                SELECT @InvoiceNumber = i.InvoiceNumber,
+                       @Due  = ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0),
+                       @Paid = ISNULL(i.PaidTotal, 0)
+                  FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+                 WHERE i.Id = @InvoiceId;
+
+                IF @Paid >= @Due
+                    SELECT @StatusCode = 202, @Outcome = ''AlreadyPaid'',
+                           @Message = ''Invoice '' + @InvoiceNumber + '' was already fully paid; payment not recorded (check for a double payment).'';
+                ELSE
+                BEGIN
+                    SET @Ref = N''1BILL-'' + @ezpayRefNo
+                             + ISNULL(N''-'' + CONVERT(NVARCHAR(8), @ezpayRcvdDate, 112), N'''')
+                             + ISNULL(N''-'' + REPLACE(CONVERT(NVARCHAR(8), @ezpayRcvdTime, 108), N'':'', N''''), N'''');
+                    SET @Notes = N''Paid with 1Bill (EzPay)''
+                             + ISNULL(N'' via '' + NULLIF(LTRIM(RTRIM(@ezpayRcvdVia)), N''''), N'''')
+                             + ISNULL(N'' on '' + CONVERT(NVARCHAR(10), @ezpayRcvdDate, 23), N'''')
+                             + ISNULL(N'' '' + CONVERT(NVARCHAR(8), @ezpayRcvdTime, 108), N'''')
+                             + N'', bill no '' + @ezpayRefNo + N''.'';
+
+                    INSERT INTO @Result (IsSuccessful, [Message], PaidTotal, StatusId)
+                    EXEC dbo.WN_RecordInvoicePayment
+                         @InvoiceId = @InvoiceId, @PaidAmount = @ezpayRcvdAmount, @PaymentMethod = N''1Bill'',
+                         @TransactionRef = @Ref, @Notes = @Notes;
+
+                    SELECT TOP 1 @PaidTotalAfter = PaidTotal, @StatusAfter = StatusId FROM @Result;
+                    IF @PaidTotalAfter IS NULL OR @PaidTotalAfter < @Paid + @ezpayRcvdAmount
+                        THROW 50010, N''WN_RecordInvoicePayment did not record the payment.'', 1;   -- all rolled back, 103
+
+                    SET @Outcome = ''Applied'';
+                    SET @Message = ''Payment of '' + CONVERT(VARCHAR(30), @ezpayRcvdAmount) + '' recorded on invoice '' + @InvoiceNumber
+                        + CASE WHEN @PaidTotalAfter < @Due THEN '' (part payment).''
+                               WHEN @PaidTotalAfter > @Due THEN '' (more than the amount due).''
+                               ELSE ''.'' END;
+
+                    -- A payment proves the invoice is on EzPay, even if our call had been recorded as failed.
+                    UPDATE dbo.WN_Invoices
+                       SET OneBillStatus = 2, OneBillCreatedOn = ISNULL(OneBillCreatedOn, GETDATE()), OneBillError = NULL
+                     WHERE Id = @InvoiceId AND ISNULL(OneBillStatus, 0) <> 2;
+                END;
+            END;
+        END;
+
+        -- Every notification is kept, whatever its outcome (rows that were not recorded are for review).
+        INSERT INTO dbo.WN_OneBill_Payments
+            (BillNo, RcvdAmount, RcvdDate, RcvdTime, RcvdVia, RawBody, RemoteIp, InvoiceId, Outcome, [Message], PaidTotalAfter, InvoiceStatusAfter)
+        VALUES
+            (LEFT(@ezpayRefNo, 30), ISNULL(@ezpayRcvdAmount, 0), @ezpayRcvdDate, CAST(@ezpayRcvdTime AS TIME(0)), @ezpayRcvdVia, @RawBody, @RemoteIp,
+             @InvoiceId, @Outcome, LEFT(@Message, 500), @PaidTotalAfter, @StatusAfter);
+        SET @NotificationId = SCOPE_IDENTITY();
+
+        COMMIT TRANSACTION;
+
+        SELECT @NotificationId AS NotificationId, @StatusCode AS StatusCode, @Outcome AS Outcome, @Message AS Message,
+               @InvoiceId AS InvoiceId, @InvoiceNumber AS InvoiceNumber, @PaidTotalAfter AS PaidTotal, @StatusAfter AS StatusId;
+    END TRY
+    BEGIN CATCH
+        SET @StatusCode = 103;   -- database error: nothing kept, EzPay should send it again
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT 'OB_04 installed: WN_OneBill_RecordPayment with @StatusCode.' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
