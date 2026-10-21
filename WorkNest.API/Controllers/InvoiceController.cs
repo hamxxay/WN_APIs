@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Threading.Tasks;
@@ -229,6 +229,13 @@ namespace WorkNest.API.Controllers
             {
                 var email = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
                 if (string.IsNullOrWhiteSpace(email) || !await db.IsInvoiceOwnedByDbAsync(id, email))
+                    return NotFound(new { isSuccessful = false, message = "Invoice not found." });
+
+                using var chkConn = await OpenConnectionAsync();
+                using var chkCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", chkConn);
+                chkCmd.Parameters.AddWithValue("@Id", id);
+                var appStatus = (await chkCmd.ExecuteScalarAsync())?.ToString();
+                if (string.Equals(appStatus, "PendingApproval", StringComparison.OrdinalIgnoreCase))
                     return NotFound(new { isSuccessful = false, message = "Invoice not found." });
             }
             try
@@ -998,6 +1005,145 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        private async Task SetAuditContextAsync(SqlConnection conn)
+        {
+            var email = ResolveUserEmail();
+            int? userId = null;
+            var idClaim = User.FindFirst("id")?.Value ?? User.FindFirst("userId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(idClaim, out var parsedId) && parsedId > 0) userId = parsedId;
+
+            try
+            {
+                using var setCtx = new SqlCommand(@"
+                    DECLARE @ResolvedId INT = @UserId;
+                    IF @ResolvedId IS NULL AND @UserEmail IS NOT NULL
+                        SELECT TOP 1 @ResolvedId = Id FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @UserEmail;
+                    IF @ResolvedId IS NOT NULL
+                        EXEC sp_set_session_context @key = N'AppUserId', @value = @ResolvedId;
+                    IF @UserEmail IS NOT NULL
+                        EXEC sp_set_session_context @key = N'AppUserEmail', @value = @UserEmail;
+                    EXEC sp_set_session_context @key = N'SourceApp', @value = N'WebAPI';", conn);
+                setCtx.Parameters.Add("@UserId", SqlDbType.Int).Value = (object?)userId ?? DBNull.Value;
+                setCtx.Parameters.Add("@UserEmail", SqlDbType.NVarChar, 256).Value = (object?)email ?? DBNull.Value;
+                await setCtx.ExecuteNonQueryAsync();
+            }
+            catch { /* session context is best-effort */ }
+        }
+
+        private async Task<int?> ResolveUserIdAsync(SqlConnection conn)
+        {
+            var idClaim = User.FindFirst("id")?.Value ?? User.FindFirst("userId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(idClaim, out var parsedId) && parsedId > 0) return parsedId;
+
+            var email = ResolveUserEmail();
+            if (!string.IsNullOrWhiteSpace(email))
+            {
+                using var cmd = new SqlCommand("SELECT TOP 1 Id FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @Email", conn);
+                cmd.Parameters.AddWithValue("@Email", email);
+                var r = await cmd.ExecuteScalarAsync();
+                if (r is int id) return id;
+            }
+            return null;
+        }
+
+        private async Task<(bool Success, string Message)> SendInvoiceEmailCoreAsync(int id, SqlConnection conn)
+        {
+            string invoiceNumber = "";
+            string targetEmail = "";
+            string customerName = "";
+            string spaceName = "WorkNest Workspace";
+            decimal grandTotal = 0, subTotal = 0, taxTotal = 0, discountTotal = 0, securityDeposit = 0;
+            DateTime issuedOn = _clock.Today, dueOn = _clock.Today;
+            bool found = false;
+
+            using (var cmd = new SqlCommand("dbo.WN_GetInvoiceEmailData", conn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@InvoiceId", id);
+
+                using var reader = await cmd.ExecuteReaderAsync();
+                if (await reader.ReadAsync())
+                {
+                    found = true;
+                    invoiceNumber = reader.GetString(reader.GetOrdinal("InvoiceNumber"));
+                    targetEmail = reader.IsDBNull(reader.GetOrdinal("TargetEmail")) ? "" : reader.GetString(reader.GetOrdinal("TargetEmail"));
+                    customerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? "Valued Customer" : reader.GetString(reader.GetOrdinal("CustomerName"));
+                    spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "WorkNest Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));
+                    grandTotal = reader.GetDecimal(reader.GetOrdinal("GrandTotal"));
+                    subTotal = reader.GetDecimal(reader.GetOrdinal("SubTotal"));
+                    taxTotal = reader.GetDecimal(reader.GetOrdinal("TaxTotal"));
+                    discountTotal = reader.GetDecimal(reader.GetOrdinal("DiscountTotal"));
+                    issuedOn = reader.GetDateTime(reader.GetOrdinal("IssuedOn"));
+                    dueOn = reader.GetDateTime(reader.GetOrdinal("DueOn"));
+                    decimal secDep = HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount"))
+                        ? reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"))
+                        : 0m;
+                    securityDeposit = secDep;
+                }
+            }
+
+            if (!found)
+                return (false, "Invoice not found.");
+
+            if (string.IsNullOrWhiteSpace(targetEmail))
+                return (false, "Customer email is missing for this invoice.");
+
+            byte[]? pdfBytes = null;
+            try
+            {
+                var pdfDto = await BuildStatementInvoicePdfDtoAsync(id, conn);
+                if (pdfDto != null)
+                {
+                    pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(pdfDto);
+                    if (securityDeposit <= 0 && pdfDto.SecurityDepositAmount > 0)
+                    {
+                        securityDeposit = pdfDto.SecurityDepositAmount;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"[PDF Error] BuildStatementInvoicePdfDtoAsync returned null for invoice {id}.");
+                }
+            }
+            catch (Exception pdfEx)
+            {
+                Console.WriteLine($"[PDF Error] StatementInvoicePdfGenerator failed for invoice {id}: {pdfEx}");
+            }
+
+            if (pdfBytes == null || pdfBytes.Length == 0)
+            {
+                await QueueInvoiceDeliveryFailureAsync(id, null, targetEmail, "Failed to generate Invoice PDF attachment.", conn);
+                return (false, "Failed to generate Invoice PDF attachment.");
+            }
+
+            try
+            {
+                await _email.SendChallanEmailAsync(
+                    toEmail: targetEmail,
+                    customerName: customerName,
+                    challanNumber: invoiceNumber,
+                    spaceName: spaceName,
+                    billingPeriod: "Invoice Billing",
+                    totalPayable: grandTotal,
+                    startOn: issuedOn,
+                    endOn: dueOn,
+                    totalContractAmount: grandTotal,
+                    currentCycleAmount: subTotal,
+                    securityDeposit: securityDeposit,
+                    taxAmount: taxTotal,
+                    discountAmount: discountTotal,
+                    pdfBytes: pdfBytes
+                );
+
+                return (true, $"Invoice email sent successfully to {targetEmail} with Statement PDF attached.");
+            }
+            catch (Exception emailEx)
+            {
+                await QueueInvoiceDeliveryFailureAsync(id, null, targetEmail, emailEx.Message, conn);
+                return (false, emailEx.Message);
+            }
+        }
+
         [EnableRateLimiting("pdf")]
         [HttpPost("api/invoice/{id:int}/send-email")]
         [Authorize(Roles = StaffRoles)]
@@ -1007,101 +1153,190 @@ namespace WorkNest.API.Controllers
             {
                 using var conn = await OpenConnectionAsync();
 
-                string invoiceNumber = "";
-                string targetEmail = "";
-                string customerName = "";
-                string spaceName = "WorkNest Workspace";
-                decimal grandTotal = 0, subTotal = 0, taxTotal = 0, discountTotal = 0, securityDeposit = 0;
-                DateTime issuedOn = _clock.Today, dueOn = _clock.Today;
-                bool found = false;
-
-                using (var cmd = new SqlCommand("dbo.WN_GetInvoiceEmailData", conn))
+                // Guard: check if invoice is PendingApproval
+                using (var chkCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", conn))
                 {
+                    chkCmd.Parameters.AddWithValue("@Id", id);
+                    var statusVal = (await chkCmd.ExecuteScalarAsync())?.ToString();
+                    if (string.Equals(statusVal, "PendingApproval", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return BadRequest(new { isSuccessful = false, message = "This recurring invoice is pending approval and cannot be emailed until approved." });
+                    }
+                }
+
+                var res = await SendInvoiceEmailCoreAsync(id, conn);
+                if (!res.Success)
+                {
+                    return Ok(new { isSuccessful = false, message = $"Invoice email delivery failed ({res.Message}). Queued for background retry." });
+                }
+
+                return Ok(new { isSuccessful = true, message = res.Message });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Sales executive approval queue: lists PendingApproval recurring invoices for the caller's assigned location(s).
+        /// SuperAdmin may review any location or all locations.
+        /// </summary>
+        [HttpGet("api/invoice/approval-queue")]
+        [Authorize(Roles = "sales_executive,SalesExecutive,admin,Admin,super_admin,SuperAdmin")]
+        public async Task<IActionResult> GetApprovalQueue([FromQuery] int? locationId = null)
+        {
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                var allowedLocations = User.ScopedLocations(locationId);
+
+                if (User.IsLocationBoundRole() && (allowedLocations.Count == 0 || allowedLocations.Contains(-1)))
+                {
+                    return Ok(new { isSuccessful = true, data = new List<object>() });
+                }
+
+                var results = new List<Dictionary<string, object?>>();
+                var locsToQuery = User.IsLocationBoundRole() ? allowedLocations : new List<int?> { locationId };
+
+                foreach (var loc in locsToQuery)
+                {
+                    using var cmd = new SqlCommand("dbo.WN_Invoices_GetApprovalQueue", conn);
                     cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.AddWithValue("@InvoiceId", id);
+                    cmd.Parameters.AddWithValue("@LocationId", (object?)loc ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("@UserId", DBNull.Value);
 
-                    using (var reader = await cmd.ExecuteReaderAsync())
+                    using var reader = await cmd.ExecuteReaderAsync();
+                    while (await reader.ReadAsync())
                     {
-                        if (await reader.ReadAsync())
+                        var row = new Dictionary<string, object?>();
+                        for (int i = 0; i < reader.FieldCount; i++)
                         {
-                            found = true;
-                            invoiceNumber = reader.GetString(reader.GetOrdinal("InvoiceNumber"));
-                            targetEmail = reader.IsDBNull(reader.GetOrdinal("TargetEmail")) ? "" : reader.GetString(reader.GetOrdinal("TargetEmail"));
-                            customerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? "Valued Customer" : reader.GetString(reader.GetOrdinal("CustomerName"));
-                            spaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? "WorkNest Workspace" : reader.GetString(reader.GetOrdinal("SpaceName"));
-                            grandTotal = reader.GetDecimal(reader.GetOrdinal("GrandTotal"));
-                            subTotal = reader.GetDecimal(reader.GetOrdinal("SubTotal"));
-                            taxTotal = reader.GetDecimal(reader.GetOrdinal("TaxTotal"));
-                            discountTotal = reader.GetDecimal(reader.GetOrdinal("DiscountTotal"));
-                            issuedOn = reader.GetDateTime(reader.GetOrdinal("IssuedOn"));
-                            dueOn = reader.GetDateTime(reader.GetOrdinal("DueOn"));
-                            decimal secDep = HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount"))
-                                ? reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"))
-                                : 0m;
-                            securityDeposit = secDep;
+                            row[reader.GetName(i)] = reader.IsDBNull(i) ? null : WorkNest.Application.Services.DbDateTimeKinds.Normalize(reader.GetName(i), reader.GetValue(i));
+                        }
+                        int invId = Convert.ToInt32(row["Id"]);
+                        if (!results.Any(x => Convert.ToInt32(x["Id"]) == invId))
+                        {
+                            results.Add(row);
                         }
                     }
                 }
 
-                if (!found)
-                    return NotFound(new { isSuccessful = false, message = "Invoice not found." });
+                return Ok(new { isSuccessful = true, data = results });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
 
-                if (string.IsNullOrWhiteSpace(targetEmail))
-                    return BadRequest(new { isSuccessful = false, message = "Customer email is missing for this invoice." });
+        /// <summary>
+        /// Records that the logged-in user viewed the invoice details. Must be called before approval.
+        /// </summary>
+        [HttpPost("api/invoice/{id:int}/view")]
+        [Authorize(Roles = "sales_executive,SalesExecutive,admin,Admin,super_admin,SuperAdmin")]
+        [RecordScope(RecordKind.Invoice, "id")]
+        public async Task<IActionResult> RecordInvoiceViewed(int id)
+        {
+            if (id <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid invoice ID." });
 
-                byte[]? pdfBytes = null;
-                try
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Invoice, id.ToString()))
+                return StatusCode(403, new { isSuccessful = false, message = "Location mismatch. You cannot view invoices outside your assigned location." });
+
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                var userId = await ResolveUserIdAsync(conn);
+                if (userId == null)
+                    return Unauthorized(new { isSuccessful = false, message = "User record not found." });
+
+                await SetAuditContextAsync(conn);
+
+                using var cmd = new SqlCommand("dbo.WN_Invoices_RecordViewed", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@InvoiceId", id);
+                cmd.Parameters.AddWithValue("@UserId", userId.Value);
+
+                var affected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+                return Ok(new { isSuccessful = true, message = "Invoice marked as viewed.", viewed = affected > 0 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Approves exactly one PendingApproval invoice.
+        /// Rejects if not viewed, not PendingApproval, viewed by another user, or caller's location does not match.
+        /// Super admins receive 403 Forbidden on approve (queue review only).
+        /// Dispatches the email immediately upon approval.
+        /// </summary>
+        [HttpPost("api/invoice/{id:int}/approve")]
+        [Authorize(Roles = "sales_executive,SalesExecutive,admin,Admin,super_admin,SuperAdmin")]
+        [RecordScope(RecordKind.Invoice, "id")]
+        public async Task<IActionResult> ApproveInvoice(int id)
+        {
+            if (id <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid invoice ID." });
+
+            // Super admins may view the queue only (403 on approve)
+            if (User.IsSuperAdmin())
+            {
+                return StatusCode(403, new { isSuccessful = false, message = "Super admins may review the approval queue, but approvals must be performed by the assigned location sales executive or admin." });
+            }
+
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Invoice, id.ToString()))
+                return StatusCode(403, new { isSuccessful = false, message = "Location mismatch. You cannot approve invoices outside your assigned location." });
+
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                var userId = await ResolveUserIdAsync(conn);
+                if (userId == null)
+                    return Unauthorized(new { isSuccessful = false, message = "User record not found." });
+
+                await SetAuditContextAsync(conn);
+
+                using var cmd = new SqlCommand("dbo.WN_Invoices_ApproveSingle", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@InvoiceId", id);
+                cmd.Parameters.AddWithValue("@UserId", userId.Value);
+
+                var rowsAffected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+                if (rowsAffected == 0)
                 {
-                    var pdfDto = await BuildStatementInvoicePdfDtoAsync(id, conn);
-                    if (pdfDto != null)
-                    {
-                        pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(pdfDto);
-                        if (securityDeposit <= 0 && pdfDto.SecurityDepositAmount > 0)
-                        {
-                            securityDeposit = pdfDto.SecurityDepositAmount;
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[PDF Error] BuildStatementInvoicePdfDtoAsync returned null for invoice {id}.");
-                    }
-                }
-                catch (Exception pdfEx)
-                {
-                    Console.WriteLine($"[PDF Error] StatementInvoicePdfGenerator failed for invoice {id}: {pdfEx}");
+                    // Query specific failure reason
+                    using var checkCmd = new SqlCommand("SELECT ApprovalStatus, ViewedAt, ViewedBy FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", conn);
+                    checkCmd.Parameters.AddWithValue("@Id", id);
+                    using var r = await checkCmd.ExecuteReaderAsync();
+                    if (!await r.ReadAsync())
+                        return NotFound(new { isSuccessful = false, message = "Invoice not found." });
+
+                    var status = r.IsDBNull(0) ? null : r.GetString(0);
+                    var viewedAt = r.IsDBNull(1) ? (DateTime?)null : r.GetDateTime(1);
+                    var viewedBy = r.IsDBNull(2) ? (int?)null : r.GetInt32(2);
+
+                    if (status != "PendingApproval")
+                        return BadRequest(new { isSuccessful = false, message = $"Invoice cannot be approved because its approval status is '{status ?? "Approved"}' (not PendingApproval)." });
+                    if (!viewedAt.HasValue)
+                        return BadRequest(new { isSuccessful = false, message = "Invoice cannot be approved because it has not been viewed yet. Please open and inspect the invoice details before approving." });
+                    if (viewedBy != userId.Value)
+                        return BadRequest(new { isSuccessful = false, message = "Invoice was inspected by a different user. You must personally open and inspect the invoice details before approving." });
+
+                    return BadRequest(new { isSuccessful = false, message = "Invoice could not be approved." });
                 }
 
-                if (pdfBytes == null || pdfBytes.Length == 0)
-                {
-                    return StatusCode(500, new { isSuccessful = false, message = "Failed to generate Invoice PDF attachment. Please ensure dbo.WN_GetStatementInvoicePdfData is updated in the database." });
-                }
+                // Call existing send-email path for this invoice
+                var sendResult = await SendInvoiceEmailCoreAsync(id, conn);
 
-                try
+                return Ok(new
                 {
-                    await _email.SendChallanEmailAsync(
-                        toEmail: targetEmail,
-                        customerName: customerName,
-                        challanNumber: invoiceNumber,
-                        spaceName: spaceName,
-                        billingPeriod: "Invoice Billing",
-                        totalPayable: grandTotal,
-                        startOn: issuedOn,
-                        endOn: dueOn,
-                        totalContractAmount: grandTotal,
-                        currentCycleAmount: subTotal,
-                        securityDeposit: securityDeposit,
-                        taxAmount: taxTotal,
-                        discountAmount: discountTotal,
-                        pdfBytes: pdfBytes
-                    );
-
-                    return Ok(new { isSuccessful = true, message = $"Invoice email sent successfully to {targetEmail} with Statement PDF attached." });
-                }
-                catch (Exception emailEx)
-                {
-                    await QueueInvoiceDeliveryFailureAsync(id, null, targetEmail, emailEx.Message, conn);
-                    return Ok(new { isSuccessful = false, message = $"Invoice email delivery failed ({emailEx.Message}). Queued for background retry." });
-                }
+                    isSuccessful = true,
+                    message = sendResult.Success
+                        ? "Invoice approved and email sent successfully."
+                        : $"Invoice approved, but email delivery failed ({sendResult.Message}). Queued for background retry."
+                });
             }
             catch (Exception ex)
             {

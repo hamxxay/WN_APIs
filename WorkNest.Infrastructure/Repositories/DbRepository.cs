@@ -1802,7 +1802,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
                  WHERE u.Email = @Email
                    AND (b.Id IS NULL OR ISNULL(b.IsDeleted, 0) = 0)
-                    AND ISNULL(i.StatusId, 0) <> 40
+                   AND ISNULL(i.StatusId, 0) <> 40
+                   AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')
                  ORDER BY i.Id DESC;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
@@ -4566,7 +4567,8 @@ END";
                     OR (@UserId > 0 AND i.UserId = @UserId)
                 )
                 AND (@StatusId IS NULL OR @StatusId <= 0 OR i.StatusId = @StatusId)
-                AND ISNULL(i.StatusId, 0) <> 40";
+                AND ISNULL(i.StatusId, 0) <> 40
+                AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')";
 
             string countSql = $"SELECT COUNT(1) FROM dbo.WN_Invoices i WITH (NOLOCK) {whereClause}";
             await using var countCmd = new SqlCommand(countSql, c);

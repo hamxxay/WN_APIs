@@ -79,7 +79,9 @@ namespace WorkNest.API.Services
                    SET NextRetryAt = DATEADD(minute, 10, SYSUTCDATETIME())
                 OUTPUT inserted.Id, inserted.InvoiceId, inserted.BookingId, inserted.TargetEmail, inserted.Attempts INTO @Claimed
                   FROM dbo.WN_InvoiceDeliveryQueue q WITH (ROWLOCK, READPAST, UPDLOCK)
+                  INNER JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = q.InvoiceId
                  WHERE q.Status = 'Pending'
+                   AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')
                    AND (q.NextRetryAt IS NULL OR q.NextRetryAt <= SYSUTCDATETIME());
                 SELECT Id, InvoiceId, BookingId, TargetEmail, Attempts FROM @Claimed;";
 
@@ -144,6 +146,15 @@ namespace WorkNest.API.Services
                             discountTotal = r.GetDecimal(r.GetOrdinal("DiscountTotal"));
                             issuedOn = r.GetDateTime(r.GetOrdinal("IssuedOn"));
                             dueOn = r.GetDateTime(r.GetOrdinal("DueOn"));
+                            if (HasColumn(r, "ApprovalStatus") && !r.IsDBNull(r.GetOrdinal("ApprovalStatus")))
+                            {
+                                var appStatus = r.GetString(r.GetOrdinal("ApprovalStatus"));
+                                if (string.Equals(appStatus, "PendingApproval", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    _logger.LogWarning("Invoice {InvoiceId} is still PendingApproval. Skipping email retry.", item.InvoiceId);
+                                    continue;
+                                }
+                            }
                         }
                     }
 
