@@ -301,6 +301,10 @@ namespace WorkNest.API.Services
                     dto.SupportChargeAmount = reader.GetDecimal(reader.GetOrdinal("SupportChargeAmount"));
                 if (HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount")))
                     dto.SecurityDepositAmount = reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"));
+                if (HasColumn(reader, "LocationId") && !reader.IsDBNull(reader.GetOrdinal("LocationId")))
+                    dto.LocationId = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("LocationId")));
+                if (HasColumn(reader, "OneBillNumber") && !reader.IsDBNull(reader.GetOrdinal("OneBillNumber")))
+                    dto.OneBillNumber = reader.GetString(reader.GetOrdinal("OneBillNumber"));
             }
             else
             {

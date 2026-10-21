@@ -4730,6 +4730,8 @@ END";
                 SntnNtnNic = r.IsDBNull(r.GetOrdinal("SntnNtnNic")) ? "" : r.GetString(r.GetOrdinal("SntnNtnNic")),
 
                 CenterName = HasColumn(r, "CenterName") && !r.IsDBNull(r.GetOrdinal("CenterName")) ? r.GetString(r.GetOrdinal("CenterName")) : null,
+                LocationId = HasColumn(r, "LocationId") && !r.IsDBNull(r.GetOrdinal("LocationId")) ? Convert.ToInt32(r.GetValue(r.GetOrdinal("LocationId"))) : (int?)null,
+                OneBillNumber = HasColumn(r, "OneBillNumber") && !r.IsDBNull(r.GetOrdinal("OneBillNumber")) ? r.GetString(r.GetOrdinal("OneBillNumber")) : null,
                 VendorLegalName = r.IsDBNull(r.GetOrdinal("VendorLegalName")) ? "WorkNest Coworking Spaces (Pvt) Ltd" : r.GetString(r.GetOrdinal("VendorLegalName")),
                 VendorAddress = r.IsDBNull(r.GetOrdinal("VendorAddress")) ? "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad" : r.GetString(r.GetOrdinal("VendorAddress")),
                 VendorPhone = r.IsDBNull(r.GetOrdinal("VendorPhone")) ? "+92 328 0256000 / +92 320 1809696" : r.GetString(r.GetOrdinal("VendorPhone")),

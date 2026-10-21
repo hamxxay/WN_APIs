@@ -152,27 +152,33 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#000000");
                 tc.Spacing(2);
                 int itemNum = 1;
-                tc.Item().Text($"{itemNum++}. Please deposit this payment into the following bank account: ").FontSize(7.5f).FontColor("#000000");
 
-                bool isF7 = data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase));
+                bool isLocation2 = data.LocationId == 2
+                    || (data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase)));
 
-                if (isF7)
+                if (isLocation2)
                 {
-                    tc.Item().Text($"Account Title: Work Nest Co-Working").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Account: 6-2-10-20389-714-250794").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"IBAN: PK26MPBL0210587140250794").FontSize(7.5f).FontColor("#000000");
+                    if (!string.IsNullOrWhiteSpace(data.OneBillNumber))
+                    {
+                        tc.Item().Text($"{itemNum++}. Please use the 1Bill number to pay: {data.OneBillNumber} (Pay with 1Bill from any bank app, ATM or bank branch).").Bold().FontSize(7.5f).FontColor("#000000");
+                    }
+                    else
+                    {
+                        tc.Item().Text($"{itemNum++}. Please use the 1Bill number to pay from any bank app, ATM or bank branch.").Bold().FontSize(7.5f).FontColor("#000000");
+                    }
                 }
                 else
                 {
+                    tc.Item().Text($"{itemNum++}. Please deposit this payment into the following bank account: ").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text($"Bank Name: Bank Of Punjab").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text($"Account Title: WORKNEST PRIVATE LIMITED").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text($"Account Number: 5310449521900010").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text($"IBAN: PK24BPUN5310449521900010 ").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text($"Swift code: BPUNPKKA ").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text($"Branch code: 0839 ").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text($"And send the receipt to +923201809696").FontSize(7.5f).FontColor("#000000");
                 }
 
-                tc.Item().Text($"And send the receipt to +923201809696").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid within 5 days of the due date.").FontSize(7.5f).FontColor("#000000");
                 tc.Item().Text($"{itemNum++}. Payment is due on or before the due date specified on this invoice.").FontSize(7.5f).FontColor("#000000");
                 if (depositTotal > 0 || data.SecurityDepositAmount > 0)

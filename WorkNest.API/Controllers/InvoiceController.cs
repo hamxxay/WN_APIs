@@ -253,6 +253,11 @@ namespace WorkNest.API.Controllers
                 if (dto == null)
                     return NotFound(new { isSuccessful = false, message = "Invoice not found." });
 
+                if (string.IsNullOrWhiteSpace(dto.OneBillNumber))
+                {
+                    dto.OneBillNumber = await _oneBill.GetNumberAsync(id);
+                }
+
                 byte[] pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(dto);
                 string fileName = $"Statement-Invoice-{dto.InvoiceNumber}.pdf";
                 if (Request.Path.Value?.Contains("/download", StringComparison.OrdinalIgnoreCase) == true)
@@ -431,6 +436,10 @@ namespace WorkNest.API.Controllers
                         && Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId"))) == 6;
                     if (HasColumn(reader, "WithholdingTaxRate") && !reader.IsDBNull(reader.GetOrdinal("WithholdingTaxRate")))
                         dto.WithholdingTaxRate = reader.GetDecimal(reader.GetOrdinal("WithholdingTaxRate"));
+                    if (HasColumn(reader, "LocationId") && !reader.IsDBNull(reader.GetOrdinal("LocationId")))
+                        dto.LocationId = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("LocationId")));
+                    if (HasColumn(reader, "OneBillNumber") && !reader.IsDBNull(reader.GetOrdinal("OneBillNumber")))
+                        dto.OneBillNumber = reader.GetString(reader.GetOrdinal("OneBillNumber"));
                     // The sales-tax invoice (STPublicId) is attached further down, after it is made sure to exist.
                 }
                 else
@@ -969,6 +978,7 @@ namespace WorkNest.API.Controllers
                             var pdfDto = await BuildStatementInvoicePdfDtoAsync(newInvoiceId, conn);
                             if (pdfDto != null)
                             {
+                                if (!string.IsNullOrWhiteSpace(oneBillNumber)) pdfDto.OneBillNumber = oneBillNumber;
                                 pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(pdfDto);
                             }
                         }
@@ -1113,6 +1123,7 @@ namespace WorkNest.API.Controllers
                 var pdfDto = await BuildStatementInvoicePdfDtoAsync(id, conn);
                 if (pdfDto != null)
                 {
+                    if (!string.IsNullOrWhiteSpace(oneBillNumber)) pdfDto.OneBillNumber = oneBillNumber;
                     pdfBytes = StatementInvoicePdfGenerator.GeneratePdf(pdfDto);
                     if (securityDeposit <= 0 && pdfDto.SecurityDepositAmount > 0)
                     {

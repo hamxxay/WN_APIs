@@ -6,7 +6,8 @@ namespace WorkNest.Domain.Enums
         Pending   = 5,
         Cancelled = 86,
         Rejected  = 3,
-        Confirmed = 33
+        Confirmed = 33,
+        
     }
 
     /// <summary>User role IDs stored in WN_Users.RoleId column.</summary>
