@@ -21,10 +21,15 @@ namespace WorkNest.Application.DTOs.Reports
         public string Month { get; set; } = "";
         /// <summary>e.g. "Nov 2026"</summary>
         public string Label { get; set; } = "";
-        /// <summary>Monthly rent of every live lease (confirmed + waiting for confirmation), prorated by days active.</summary>
+        /// <summary>
+        /// Monthly rent of every live lease (confirmed + waiting for confirmation), prorated by days active; after the
+        /// percentage and (CP_02) fixed PKR discounts.
+        /// </summary>
         public decimal ExpectedRent { get; set; }
         /// <summary>The part of ExpectedRent from confirmed (running) leases only.</summary>
         public decimal ConfirmedRent { get; set; }
+        /// <summary>CP_02: the part of ExpectedRent from bookings waiting for confirmation (ExpectedRent - ConfirmedRent).</summary>
+        public decimal PendingRent { get; set; }
         public int TotalSpaces { get; set; }
         /// <summary>Distinct spaces with a live lease on the last day of the month.</summary>
         public int OccupiedSpaces { get; set; }

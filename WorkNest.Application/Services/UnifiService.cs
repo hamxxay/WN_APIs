@@ -154,6 +154,35 @@ namespace WorkNest.Application.Services
             catch (Exception ex) { _logger.LogError("[unifi logs] {Error}", ex.Message); }
         }
 
+        private int _warming; // 1 while WarmDashboardAsync runs
+
+        public async Task WarmDashboardAsync()
+        {
+            // A cold read can take minutes (each console call ~30 s, more with a retry): skip this round while the last one runs.
+            if (Interlocked.CompareExchange(ref _warming, 1, 0) != 0)
+            {
+                _logger.LogDebug("[unifi warm] previous warm still running; skipped");
+                return;
+            }
+            try
+            {
+                async Task Warm(string what, Func<Task> read)
+                {
+                    try { await read(); }
+                    catch (Exception ex) { _logger.LogWarning("[unifi warm] {What}: {Error}", what, ex.Message); }
+                }
+                // The same cached reads the CEO / Sales Manager dashboards wait for (nothing new is asked of UniFi).
+                await Task.WhenAll(
+                    Warm("line speeds", GetWansAsync),
+                    Warm("client list", NetClients),
+                    Warm("top data users", () => TopUsageAsync(TopClientsDays, 5, withDevices: true)));
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _warming, 0);
+            }
+        }
+
         private async Task PollCoreAsync(CancellationToken ct)
         {
             var hostsTask = _client.GetAllAsync("/v1/hosts", null, ct);
@@ -356,6 +385,12 @@ namespace WorkNest.Application.Services
             }).ToList();
         }
 
+        /// <summary>Updating firmware or being provisioned: the device is up, just busy for a few minutes.</summary>
+        private static bool IsBusyStatus(string status) => status is "updating" or "provisioning";
+
+        /// <summary>Counts as online on the CEO / Sales Manager dashboards (online, or online and busy updating).</summary>
+        private static bool CountsAsOnline(string status) => status == "online" || IsBusyStatus(status);
+
         private static JsonArray BuildAlerts(List<JsonObject> sites, List<JsonObject> devices, List<JsonObject> isp)
         {
             var alerts = new List<(int Order, JsonObject Alert)>();
@@ -364,7 +399,11 @@ namespace WorkNest.Application.Services
 
             foreach (var d in devices)
             {
-                if (ToStr(d["status"]) != "online" && !ToBool(d["placeholder"]))
+                if (ToBool(d["placeholder"])) continue;
+                // A device installing firmware or being set up is still on the network: a warning, not an outage.
+                if (IsBusyStatus(ToStr(d["status"])))
+                    Add("warning", $"{ToStr(d["name"])} is {ToStr(d["status"])}", ToStr(d["host"]));
+                else if (ToStr(d["status"]) != "online")
                     Add("critical", $"{ToStr(d["name"])} is {ToStr(d["status"])}", ToStr(d["host"]));
             }
             foreach (var s in sites)
@@ -1113,13 +1152,30 @@ namespace WorkNest.Application.Services
         private static List<string> WanKeysOf(JsonElement gw) =>
             gw.EnumerateObject().Select(p => p.Name).Where(k => Regex.IsMatch(k, @"^wan\d$")).OrderBy(k => k, StringComparer.Ordinal).ToList();
 
-        private Task<List<JsonElement>> SpeedtestArchive() => Cached("speedtests", TimeSpan.FromMinutes(10), () =>
+        /// <summary>
+        /// A report's rows; when UniFi does not answer the read is cached empty like a result (so it is not asked again at
+        /// once) with <see cref="Failed"/> set, so the dashboards can say the figures could not be read instead of a bare dash.
+        /// </summary>
+        private sealed record ReportRows(List<JsonElement> Rows, bool Failed);
+
+        private async Task<ReportRows> ReadReport(string path, object body)
+        {
+            try { return new ReportRows(await NetData(path, body), false); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("[unifi] {Path} could not be read: {Error}", path, ex.Message);
+                return new ReportRows(new List<JsonElement>(), true);
+            }
+        }
+
+        private Task<ReportRows> SpeedtestReport() => Cached("speedtests", TimeSpan.FromMinutes(10), () =>
         {
             var end = NowMs();
-            return NetData("/api/s/default/stat/report/archive.speedtest",
-                new { attrs = new[] { "xput_download", "xput_upload", "latency", "time", "interface_name" }, start = (long)(end - 90 * DayMs), end = (long)end },
-                swallow: true);
+            return ReadReport("/api/s/default/stat/report/archive.speedtest",
+                new { attrs = new[] { "xput_download", "xput_upload", "latency", "time", "interface_name" }, start = (long)(end - 90 * DayMs), end = (long)end });
         });
+
+        private async Task<List<JsonElement>> SpeedtestArchive() => (await SpeedtestReport()).Rows;
 
         public async Task<JsonObject> GetWanTrafficAsync(int rangeHours)
         {
@@ -1131,20 +1187,24 @@ namespace WorkNest.Application.Services
         // Live speed, link, latency, last speed test and 24h traffic for each WAN port on the gateway.
         public async Task<JsonObject> GetWansAsync()
         {
+            // Speed-test history (90 days): the gateway only keeps the latest run for the primary WAN, the archive has all of them.
+            // It does not need the gateway, so it is read alongside it (a cold read is ~30 s per call).
+            var testsTask = SpeedtestReport();
             if (await GatewayDevice() is not { } gw) return new JsonObject { ["wans"] = new JsonArray() };
             var keys = WanKeysOf(gw);
             var end = NowMs();
-            var rows = await Cached("wan-hist", TimeSpan.FromSeconds(120), () =>
-                NetData("/api/s/default/stat/report/5minutes.gw",
+            var hist = await Cached("wan-hist", TimeSpan.FromSeconds(120), () =>
+                ReadReport("/api/s/default/stat/report/5minutes.gw",
                     new
                     {
                         attrs = new[] { "time" }.Concat(keys.SelectMany(k => new[] { $"{WanPrefix(k)}-rx_bytes", $"{WanPrefix(k)}-tx_bytes" })).ToArray(),
                         start = (long)(end - DayMs), end = (long)end, macs = new[] { Str(P(gw, "mac")) },
-                    }, swallow: true));
+                    }));
+            var rows = hist.Rows;
             var st = P(gw, "speedtest-status");
             JsonNode? Mbps(JsonElement? b) => D(b) is double v ? N(v * 8 / 300 / 1e6) : null;
-            // Speed-test history (90 days): the gateway only keeps the latest run for the primary WAN, the archive has all of them.
-            var tests = await SpeedtestArchive();
+            var testsRead = await testsTask;
+            var tests = testsRead.Rows;
 
             var wans = keys.Select(k =>
             {
@@ -1208,7 +1268,8 @@ namespace WorkNest.Application.Services
                 };
             }).ToArray();
 
-            return new JsonObject { ["wans"] = new JsonArray(wans) };
+            // trafficFailed / testsFailed: the 5-minute traffic or the speed-test archive could not be read (empty above).
+            return new JsonObject { ["wans"] = new JsonArray(wans), ["trafficFailed"] = hist.Failed, ["testsFailed"] = testsRead.Failed };
         }
 
         // =====================================================================
@@ -1468,12 +1529,53 @@ namespace WorkNest.Application.Services
         public async Task<JsonObject> GetTopUsageAsync(int days)
         {
             await InitializeAsync();
+            var rows = await TopUsageAsync(days, 50, withDevices: false);
+            var clients = rows.Select(r => (JsonNode?)new JsonObject
+            {
+                ["mac"] = r.Mac,
+                ["name"] = r.Name,
+                ["kind"] = r.Kind,
+                ["kindLabel"] = Kinds[r.Kind],
+                ["wired"] = r.Wired,
+                ["online"] = r.Online,
+                ["down"] = N(r.Down),
+                ["up"] = N(r.Up),
+                ["total"] = N(r.Down + r.Up),
+            }).ToArray();
+            return new JsonObject { ["days"] = days, ["clients"] = new JsonArray(clients) };
+        }
+
+        /// <summary>One client's data over a range (Clients page "Top data users" and the dashboards' top 5).</summary>
+        private sealed record TopUsageRow(string Mac, string MacDisplay, string Name, string Kind, string Hostname, string Vendor, string Ip,
+            bool Wired, bool Guest, bool Online, double? LastSeenMs, string Network, string Ssid, string Uplink, string? Port, double Down, double Up);
+
+        /// <summary>
+        /// Clients by data used over the last <paramref name="days"/> (daily report: whole days, so 1 = today so far), most
+        /// first, zero-use left out. Names and kinds come from the live client list, else the known-clients list for the
+        /// same range. All reads are the cached calls the Clients page makes; the uplink names (device list, 20 s cache)
+        /// are read only when asked for and are skipped when the device list fails.
+        /// </summary>
+        private async Task<List<TopUsageRow>> TopUsageAsync(int days, int take, bool withDevices)
+        {
             var end = NowMs();
-            var rows = await Cached($"usage-{days}", TimeSpan.FromMinutes(15), () =>
+            var rowsTask = Cached($"usage-{days}", TimeSpan.FromMinutes(15), () =>
                 NetData("/api/s/default/stat/report/daily.user",
                     new { attrs = new[] { "time", "rx_bytes", "tx_bytes" }, start = (long)(end - days * DayMs), end = (long)end }));
-            var known = await Cached("alluser", TimeSpan.FromMinutes(15), () => NetData($"/api/s/default/stat/alluser?type=all&conn=all&within={days * 24}"));
-            var live = await NetClients();
+            // One cache entry per range: the request depends on `within`, so a shared key let whichever range was asked
+            // first answer every range for 15 minutes.
+            var knownTask = Cached($"alluser-{days}", TimeSpan.FromMinutes(15), () => NetData($"/api/s/default/stat/alluser?type=all&conn=all&within={days * 24}"));
+            var liveTask = NetClients();
+            var devicesTask = withDevices ? NetDevices() : null;
+            await Task.WhenAll(rowsTask, knownTask, liveTask);
+            var rows = rowsTask.Result;
+            var known = knownTask.Result;
+            var live = liveTask.Result;
+            var devByMac = new Dictionary<string, JsonObject>();
+            if (devicesTask != null)
+            {
+                try { devByMac = DevByMac((await devicesTask).Select(NormaliseNetDevice).ToList()); }
+                catch (Exception ex) { _logger.LogWarning("[unifi] top data users without uplink names: {Error}", ex.Message); }
+            }
 
             var tot = new Dictionary<string, (double Down, double Up)>();
             var order = new List<string>();
@@ -1481,32 +1583,58 @@ namespace WorkNest.Application.Services
             {
                 var m = NormMac(Str(P(r, "user")));
                 if (!tot.TryGetValue(m, out var t)) { t = (0, 0); order.Add(m); }
+                // UniFi reports rx/tx from the access point's side; flip so "down" means data the client downloaded.
                 tot[m] = (t.Down + (D(P(r, "tx_bytes")) ?? 0), t.Up + (D(P(r, "rx_bytes")) ?? 0));
             }
 
-            var clients = order.Select(mac =>
-            {
-                var t = tot[mac];
-                var info = Find(live, c => NormMac(Str(P(c, "mac"))) == mac)
-                           ?? Find(known, c => NormMac(Str(P(c, "mac"))) == mac)
-                           ?? JsonSerializer.SerializeToElement(new { mac });
-                var kind = ClientKind(info);
-                return (Total: t.Down + t.Up, Obj: new JsonObject
-                {
-                    ["mac"] = mac,
-                    ["name"] = FriendlyName(info, kind),
-                    ["kind"] = kind,
-                    ["kindLabel"] = Kinds[kind],
-                    ["wired"] = Truthy(P(info, "is_wired")),
-                    ["online"] = live.Any(c => NormMac(Str(P(c, "mac"))) == mac),
-                    ["down"] = N(t.Down),
-                    ["up"] = N(t.Up),
-                    ["total"] = N(t.Down + t.Up),
-                });
-            }).Where(x => x.Total > 0).OrderByDescending(x => x.Total).Take(50).Select(x => (JsonNode?)x.Obj).ToArray();
+            var liveByMac = new Dictionary<string, JsonElement>();
+            foreach (var c in live) liveByMac.TryAdd(NormMac(Str(P(c, "mac"))), c);
+            var knownByMac = new Dictionary<string, JsonElement>();
+            foreach (var c in known) knownByMac.TryAdd(NormMac(Str(P(c, "mac"))), c);
 
-            return new JsonObject { ["days"] = days, ["clients"] = new JsonArray(clients) };
+            return order
+                .Select((mac, i) => (Mac: mac, Index: i, Total: tot[mac].Down + tot[mac].Up))
+                .Where(x => x.Total > 0)
+                .OrderByDescending(x => x.Total).ThenBy(x => x.Index)
+                .Take(take)
+                .Select(x =>
+                {
+                    var (down, up) = tot[x.Mac];
+                    var online = liveByMac.TryGetValue(x.Mac, out var liveInfo);
+                    var info = online ? liveInfo
+                        : knownByMac.TryGetValue(x.Mac, out var knownInfo) ? knownInfo
+                        : JsonSerializer.SerializeToElement(new { mac = x.Mac });
+                    var kind = ClientKind(info);
+                    var wired = Truthy(P(info, "is_wired"));
+                    devByMac.TryGetValue(UplinkMacOf(info), out var upDev);
+                    var upName = upDev != null ? ToStr(upDev["name"]) : "";
+                    var lastSeen = D(P(info, "last_seen")) is double ls && ls > 0 ? ls * 1000 : (double?)null;
+                    if (online && lastSeen == null) lastSeen = NowMs();
+                    var port = wired ? Str(P(info, "sw_port") ?? P(info, "last_uplink_remote_port")) : null;
+                    return new TopUsageRow(
+                        x.Mac,
+                        MacDisplayOf(x.Mac),
+                        FriendlyName(info, kind),
+                        kind,
+                        S(P(info, "hostname")),
+                        S(P(info, "oui")),
+                        S(P(info, "ip"), P(info, "last_ip")),
+                        wired,
+                        Truthy(P(info, "is_guest")),
+                        online,
+                        lastSeen,
+                        S(P(info, "network"), P(info, "last_connection_network_name")),
+                        wired ? "" : S(P(info, "essid")),
+                        upName != "" ? upName : S(P(info, "last_uplink_name")),
+                        port,
+                        down,
+                        up);
+                })
+                .ToList();
         }
+
+        private static string MacDisplayOf(string norm) =>
+            norm.Length == 12 ? string.Join(":", Enumerable.Range(0, 6).Select(i => norm.Substring(i * 2, 2))) : norm;
 
         // =====================================================================
         // Speed tests — starts a test on one WAN port of the gateway. UniFi runs one test at a time.
@@ -2171,12 +2299,21 @@ namespace WorkNest.Application.Services
             var consoleVisible = consoleSite != null && ids.Contains(consoleSite);
             var clientsTask = consoleVisible ? NetClients() : null;
             var wansTask = consoleVisible ? GetWansAsync() : null;
-            if (clientsTask != null && wansTask != null)
+            // Top data users: the Clients page's cached reads (daily report, known clients, client and device lists),
+            // fetched in parallel with the rest and inside the same wait.
+            var topTask = consoleVisible ? TopUsageAsync(TopClientsDays, 5, withDevices: true) : null;
+            if (clientsTask != null && wansTask != null && topTask != null)
             {
-                var both = Task.WhenAll(clientsTask, wansTask);
-                await Task.WhenAny(both, Task.Delay(clientsWait));
-                foreach (var t in new Task[] { both, clientsTask, wansTask })
-                    _ = t.ContinueWith(x => _ = x.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                var all = Task.WhenAll(clientsTask, wansTask, topTask);
+                await Task.WhenAny(all, Task.Delay(clientsWait));
+                _ = all.ContinueWith(x => _ = x.Exception, TaskContinuationOptions.OnlyOnFaulted);
+                // A read still running after the wait is not reported below: log it if it fails later, instead of losing it.
+                foreach (var (what, t) in new (string, Task)[] { ("line speeds", wansTask), ("client list", clientsTask), ("top data users", topTask) })
+                {
+                    if (t.IsCompleted) continue;
+                    _ = t.ContinueWith(x => _logger.LogWarning("[unifi dashboard] {What} failed after the wait: {Error}", what, x.Exception?.GetBaseException().Message),
+                        TaskContinuationOptions.OnlyOnFaulted);
+                }
             }
 
             // ---- clients now, and over time (stored history) ----
@@ -2212,7 +2349,7 @@ namespace WorkNest.Application.Services
             var devicesDto = new DTOs.Dashboard.NetworkDevicesDto
             {
                 Total = real.Count,
-                Online = real.Count(d => ToStr(d["status"]) == "online"),
+                Online = real.Count(d => CountsAsOnline(ToStr(d["status"]))),
                 NotInstalled = devices.Count - real.Count,
                 ByType = real.GroupBy(d => ToStr(d["type"]))
                     .OrderBy(g => TypeOrder(g.Key)).ThenBy(g => g.Key, LocaleCompare)
@@ -2220,9 +2357,9 @@ namespace WorkNest.Application.Services
                     {
                         Type = g.Key,
                         Label = Array.Find(DeviceTypeLabels, x => x.Type == g.Key).Label ?? g.Key,
-                        Online = g.Count(d => ToStr(d["status"]) == "online"),
-                        Offline = g.Count(d => ToStr(d["status"]) != "online"),
-                        OfflineNames = g.Where(d => ToStr(d["status"]) != "online").Select(d => ToStr(d["name"])).Take(10).ToList(),
+                        Online = g.Count(d => CountsAsOnline(ToStr(d["status"]))),
+                        Offline = g.Count(d => !CountsAsOnline(ToStr(d["status"]))),
+                        OfflineNames = g.Where(d => !CountsAsOnline(ToStr(d["status"]))).Select(d => ToStr(d["name"])).Take(10).ToList(),
                     }).ToList(),
             };
             devicesDto.Offline = devicesDto.Total - devicesDto.Online;
@@ -2239,10 +2376,15 @@ namespace WorkNest.Application.Services
                 Issues = (int)(ToNum(w["issues"]) ?? 0),
             }))).ToList();
             string? speedsMessage = null;
+            var speedsPending = false;
             if (wansTask == null)
                 speedsMessage = lineRows.Count > 0 ? "Live line speeds are only read from the main UniFi console." : null;
             else if (!wansTask.IsCompleted)
-                speedsMessage = "Line speeds are still loading. They show at the next refresh.";
+            {
+                // Still being read (the dashboard reloads by itself; the poller keeps these reads warm, so this is rare).
+                speedsPending = true;
+                speedsMessage = SpeedsLoadingMessage;
+            }
             else if (!wansTask.IsCompletedSuccessfully)
             {
                 _logger.LogWarning("[unifi dashboard] line speeds unavailable: {Error}", wansTask.Exception?.GetBaseException().Message);
@@ -2250,8 +2392,17 @@ namespace WorkNest.Application.Services
             }
             else
             {
+                var live = wansTask.Result;
                 ApplyLiveWans(lineRows.Where(r => string.Equals(r.SiteId, consoleSite, StringComparison.OrdinalIgnoreCase)).Select(r => r.Line).ToList(),
-                    wansTask.Result, now);
+                    live, now);
+                // A report UniFi did not answer leaves "Data 24 h" / "Last test" as a dash: say why.
+                speedsMessage = (ToBool(live["trafficFailed"]), ToBool(live["testsFailed"])) switch
+                {
+                    (true, true) => "24-hour data and speed test history could not be read right now.",
+                    (true, false) => "24-hour data could not be read right now.",
+                    (false, true) => "Speed test history could not be read right now.",
+                    _ => null
+                };
             }
             var lines = lineRows.Select(r => r.Line).ToList();
             if (speedsMessage == null && lines.Any(l => !l.Live))
@@ -2271,6 +2422,7 @@ namespace WorkNest.Application.Services
             {
                 Lines = lines,
                 SpeedsMessage = speedsMessage,
+                SpeedsPending = speedsPending,
                 LinesTotal = lines.Count,
                 LinesUp = lines.Count(l => l.Up),
                 UptimePct = uptimes.Count > 0 ? Round1(uptimes.Min()) : null,
@@ -2321,7 +2473,7 @@ namespace WorkNest.Application.Services
                 var task = clientsTask;
                 if (!task.IsCompleted)
                 {
-                    types.Message = "Client types are still loading. They show at the next refresh.";
+                    types.Message = ClientTypesLoadingMessage;
                 }
                 else if (task.IsFaulted || task.IsCanceled)
                 {
@@ -2347,6 +2499,21 @@ namespace WorkNest.Application.Services
                 }
             }
 
+            // ---- top data users (today) ----
+            List<DTOs.Dashboard.NetworkTopClientDto>? top = null;
+            string? topMessage = null;
+            if (topTask == null)
+                topMessage = "Top data users are only read from the main UniFi console.";
+            else if (!topTask.IsCompleted)
+                topMessage = TopClientsLoadingMessage;
+            else if (!topTask.IsCompletedSuccessfully)
+            {
+                _logger.LogWarning("[unifi dashboard] top data users unavailable: {Error}", topTask.Exception?.GetBaseException().Message);
+                topMessage = "Top data users could not be read right now.";
+            }
+            else
+                top = topTask.Result.Select((r, i) => TopClientDto(r, i + 1)).ToList();
+
             return new DTOs.Dashboard.NetworkDashboardDto
             {
                 Clients = clients,
@@ -2355,6 +2522,57 @@ namespace WorkNest.Application.Services
                 History = historyDto,
                 Internet = internet,
                 Alerts = alerts,
+                TopClients = top,
+                TopClientsRangeDays = TopClientsDays,
+                TopClientsRangeLabel = TopClientsRangeLabel,
+                TopClientsMessage = topMessage,
+            };
+        }
+
+        /// <summary>
+        /// The dashboards' top data users range. UniFi's daily report is the only usage read the Clients page makes for
+        /// every client; its rows are whole days, so the shortest range is today (since midnight, site time), labelled
+        /// "Today" as on the Clients page. A rolling 24 hours would need a new kind of call (hourly report for all clients).
+        /// </summary>
+        internal const int TopClientsDays = 1;
+        internal const string TopClientsRangeLabel = "Today";
+
+        // Read still running after the dashboard's wait (the CMS reloads the section by itself while one shows).
+        internal const string SpeedsLoadingMessage = "Line speeds are loading from the network and appear within a minute.";
+        internal const string ClientTypesLoadingMessage = "Client types are loading from the network and appear within a minute.";
+        internal const string TopClientsLoadingMessage = "Top data users are loading from the network and appear within a minute.";
+
+        private static DTOs.Dashboard.NetworkTopClientDto TopClientDto(TopUsageRow r, int rank)
+        {
+            string connection;
+            if (r.Wired)
+                connection = r.Uplink != "" ? $"Wired · {r.Uplink}{(r.Port != null ? $" port {r.Port}" : "")}" : "Wired";
+            else if (r.Ssid != "" && r.Uplink != "")
+                connection = $"{r.Ssid} via {r.Uplink}";
+            else
+                connection = r.Ssid != "" ? r.Ssid : r.Uplink != "" ? $"Wi-Fi via {r.Uplink}" : "Wi-Fi";
+            return new DTOs.Dashboard.NetworkTopClientDto
+            {
+                Rank = rank,
+                Name = r.Name,
+                Kind = r.Kind,
+                KindLabel = Kinds[r.Kind],
+                Mac = r.MacDisplay,
+                Ip = r.Ip,
+                Hostname = r.Hostname,
+                Vendor = r.Vendor,
+                DownloadBytes = r.Down,
+                UploadBytes = r.Up,
+                TotalBytes = r.Down + r.Up,
+                Online = r.Online,
+                LastSeen = r.LastSeenMs is double ms ? IsoMs(ms) : null,
+                Wired = r.Wired,
+                Guest = r.Guest,
+                Network = r.Network,
+                Ssid = r.Ssid,
+                Uplink = r.Uplink,
+                Port = r.Port,
+                Connection = connection,
             };
         }
 

@@ -62,18 +62,27 @@ namespace WorkNest.Infrastructure.Repositories
                   FROM dbo.WN_Spaces s WITH (NOLOCK)
                  WHERE s.Status = 1 {(locationIds is null ? "" : $"AND s.LocationId IN ({IdList(locationIds)})")};
 
-                -- Live leases that overlap the forecast months. Rent = the booking's monthly rent less a percentage
-                -- discount (a fixed-amount discount is per billing cycle, not per month, so it is left out); no tax
-                -- or service charge.
+                -- Live leases that overlap the forecast months. Rent (CP_02, the room report's RM_02 rule) = the
+                -- booking's monthly rent (WN_vw_BookingSummary's when the booking has none) less its percentage
+                -- discount, less its fixed PKR discount a month (DiscountType Amount / Fixed with no percentage:
+                -- DiscountValue, else DiscountAmount, at most the rent); no tax or service charge.
                 DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, LocationId INT, StartOn DATE, EndOn DATE, StatusId INT, Rent DECIMAL(18,2));
                 INSERT INTO @Live
                 SELECT b.Id, b.SpaceId, sp.LocationId, CAST(b.StartOn AS DATE), CAST(b.EndOn AS DATE), b.BookingStatusId,
-                       ISNULL(b.MonthlyRent, 0) * (100 - d.Pct) / 100
+                       mr.MonthlyRent * (100 - d.Pct) / 100 - fx.FixedMonthly
                   FROM dbo.WN_Bookings b WITH (NOLOCK)
                   JOIN @Spaces sp ON sp.Id = b.SpaceId
-                 -- Only DiscountPercentage (used by WN_Invoice_CreateRecurring); fixed-amount discounts are per cycle.
+                 OUTER APPLY (SELECT TOP 1 v.MonthlyRent FROM dbo.WN_vw_BookingSummary v WITH (NOLOCK)
+                               WHERE ISNULL(b.MonthlyRent, 0) = 0 AND v.BookingId = b.Id) vr
+                 CROSS APPLY (SELECT CAST(ISNULL(COALESCE(NULLIF(b.MonthlyRent, 0), vr.MonthlyRent), 0) AS DECIMAL(18,2)) AS MonthlyRent) mr
                  CROSS APPLY (SELECT CASE WHEN ISNULL(b.DiscountPercentage, 0) BETWEEN 0.01 AND 100 THEN b.DiscountPercentage
                                           ELSE 0 END AS Pct) d
+                 CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(b.DiscountPercentage, 0) = 0
+                                                AND LOWER(LTRIM(RTRIM(ISNULL(b.DiscountType, '')))) IN ('amount', 'fixed')
+                                                AND mr.MonthlyRent > 0
+                                           THEN CASE WHEN COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) > mr.MonthlyRent THEN mr.MonthlyRent
+                                                     ELSE COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) END
+                                           ELSE 0 END AS DECIMAL(18,2)) AS FixedMonthly) fx
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33)
                    AND b.StartOn < @Last AND b.EndOn >= @First;
 

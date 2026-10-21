@@ -158,17 +158,48 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Top", SqlDbType.Int).Value = top;
             }, from, to);
 
-        public Task<List<List<IDictionary<string, object?>>>> GetSpaceRecordsAsync(int? spaceTypeId, int? locationId, bool noLocation,
-            bool? occupied, DateTime businessNow, int top) =>
-            RunAsync("dbo.WN_Ceo_Records_Spaces", p =>
+        public async Task<List<List<IDictionary<string, object?>>>> GetSpaceRecordsAsync(int? spaceTypeId, int? locationId, bool noLocation,
+            bool? occupied, DateTime businessNow, int top, string? categoryCode = null, bool roomsOnly = false)
+        {
+            try
             {
-                p.Add("@SpaceTypeId", SqlDbType.Int).Value = Db(spaceTypeId);
-                p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
-                p.Add("@NoLocation", SqlDbType.Bit).Value = noLocation;
-                p.Add("@Occupied", SqlDbType.Bit).Value = Db(occupied);
-                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                p.Add("@Top", SqlDbType.Int).Value = top;
-            });
+                return await RunAsync("dbo.WN_Ceo_Records_Spaces", p =>
+                {
+                    p.Add("@SpaceTypeId", SqlDbType.Int).Value = Db(spaceTypeId);
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@NoLocation", SqlDbType.Bit).Value = noLocation;
+                    p.Add("@Occupied", SqlDbType.Bit).Value = Db(occupied);
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                    p.Add("@Top", SqlDbType.Int).Value = top;
+                    // CP_02: only when asked for, so the lists keep working with the procedure from before CP_02.
+                    if (categoryCode != null) p.Add("@CategoryCode", SqlDbType.NVarChar, 30).Value = categoryCode;
+                    if (roomsOnly) p.Add("@RoomsOnly", SqlDbType.Bit).Value = true;
+                });
+            }
+            catch (SqlException ex) when (ex.Number is 8144 or 8145 && (categoryCode != null || roomsOnly)) // CP_02 not run yet
+            {
+                throw CeoDatabaseUpdateMissingException.OccupancyCategoryMissing(ex);
+            }
+        }
+
+        public async Task<List<List<IDictionary<string, object?>>>> GetOccupancyCategoryBreakdownAsync(string categoryCode, int? locationId,
+            DateTime businessNow)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Breakdown", p =>
+                {
+                    p.Add("@Metric", SqlDbType.NVarChar, 30).Value = "occupancy-category";
+                    p.Add("@CategoryCode", SqlDbType.NVarChar, 30).Value = categoryCode;
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                });
+            }
+            catch (SqlException ex) when (ex.Number is 8144 or 8145) // CP_02 not run yet: no @CategoryCode
+            {
+                throw CeoDatabaseUpdateMissingException.OccupancyCategoryMissing(ex);
+            }
+        }
 
         public Task<List<List<IDictionary<string, object?>>>> GetBookingRecordsAsync(DateTime? from, DateTime? to, int? locationId, bool noLocation,
             string? statusIds, bool runningOnly, DateTime businessNow, int top) =>
@@ -212,6 +243,26 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Top", SqlDbType.Int).Value = top;
             });
 
+        public async Task<List<List<IDictionary<string, object?>>>> GetSalesRecordsAsync(DateTime? from, DateTime? to, int? locationId,
+            int? sellerId, int top)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Records_Sales", p =>
+                {
+                    p.Add("@From", SqlDbType.DateTime2).Value = Db(from);
+                    p.Add("@To", SqlDbType.DateTime2).Value = Db(to);
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@SellerId", SqlDbType.Int).Value = Db(sellerId);
+                    p.Add("@Top", SqlDbType.Int).Value = top;
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_01") // this procedure comes with CP_02, not CEO_01
+            {
+                throw CeoDatabaseUpdateMissingException.SalesRecordsMissing(ex.InnerException);
+            }
+        }
+
         public async Task<List<List<IDictionary<string, object?>>>> GetLeaseRecordsAsync(int? locationId, bool noLocation, DateTime? from,
             DateTime? to, int expiringDays, DateTime businessNow, int top)
         {
@@ -249,6 +300,57 @@ namespace WorkNest.Infrastructure.Repositories
             catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_01") // this procedure comes with CEO_02, not CEO_01
             {
                 throw CeoDatabaseUpdateMissingException.RoomReportMissing(ex.InnerException);
+            }
+        }
+
+        // CP_02: money received (fee receipts + paid payments by their day). Both procedures come with CP_02; before it
+        // (SQL error 2812 -> CeoDatabaseUpdateMissingException) the answer is null, so the dashboard still loads.
+
+        public async Task<List<List<IDictionary<string, object?>>>?> GetReceivedAsync(int? locationId, int periodMonths, DateTime businessNow,
+            DateTime? from = null, DateTime? to = null)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Received", p =>
+                {
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                    p.Add("@From", SqlDbType.Date).Value = Db(from?.Date);
+                    p.Add("@To", SqlDbType.Date).Value = Db(to?.Date);
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException)
+            {
+                return null;
+            }
+            catch (SqlException ex) when (ex.Number == 208) // a table it reads (WN_FeeReceipts) is not on this database
+            {
+                return null;
+            }
+        }
+
+        public async Task<List<List<IDictionary<string, object?>>>?> GetReceiptRecordsAsync(DateTime? from, DateTime? to, int? locationId,
+            bool noLocation, int top)
+        {
+            try
+            {
+                return await RunAsync("dbo.WN_Ceo_Records_Receipts", p =>
+                {
+                    p.Add("@From", SqlDbType.Date).Value = Db(from?.Date);
+                    p.Add("@To", SqlDbType.Date).Value = Db(to?.Date);
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@NoLocation", SqlDbType.Bit).Value = noLocation;
+                    p.Add("@Top", SqlDbType.Int).Value = top;
+                });
+            }
+            catch (CeoDatabaseUpdateMissingException)
+            {
+                return null;
+            }
+            catch (SqlException ex) when (ex.Number == 208) // a table it reads (WN_FeeReceipts) is not on this database
+            {
+                return null;
             }
         }
     }

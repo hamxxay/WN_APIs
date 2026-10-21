@@ -23,6 +23,11 @@ namespace WorkNest.Application.Interfaces
         Task RefreshIspAsync(CancellationToken ct = default);
         /// <summary>Keep the console event log cached so client/device history opens instantly.</summary>
         Task WarmLogsAsync();
+        /// <summary>
+        /// Keep the CEO / Sales Manager dashboards' console reads cached (gateway WAN ports, client list, today's top data
+        /// users) so a dashboard never waits on a cold read. Never throws; skipped while the previous warm still runs.
+        /// </summary>
+        Task WarmDashboardAsync();
 
         // --- Dashboard payloads ---
         Task<JsonObject> GetSummaryAsync();
@@ -78,7 +83,8 @@ namespace WorkNest.Application.Interfaces
         /// <summary>
         /// Network section figures for these sites: clients now and over time (stored history), devices online / offline
         /// by type, internet lines and latency, critical / serious issues, and clients by type from the cached client list
-        /// (waits at most <paramref name="clientsWait"/> for it; only for the main console's site).
+        /// and today's top 5 data users from the Clients page's cached reads (waits at most <paramref name="clientsWait"/> for
+        /// them, in parallel; only for the main console's site).
         /// </summary>
         Task<NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait);
     }

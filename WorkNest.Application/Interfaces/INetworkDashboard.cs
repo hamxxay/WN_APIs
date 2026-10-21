@@ -5,7 +5,7 @@ namespace WorkNest.Application.Interfaces
     /// <summary>
     /// Network (UniFi) section of the CEO and Sales Manager dashboards, and the per-site location setting behind it.
     /// Read-only for the dashboards: it never calls UniFi beyond what the Network pages already use (the polled
-    /// summary, the stored client-count history and the cached client list).
+    /// summary, the stored client-count history, the cached client list and the Clients page's cached "Top data users" reads).
     /// </summary>
     public interface INetworkDashboardService
     {

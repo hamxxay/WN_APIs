@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.API.Filters;
@@ -16,6 +18,7 @@ namespace WorkNest.API.Controllers
     /// their branch once the database update QA_07 has run, before it they count every location and say so).
     /// Bad parameters answer 400; before the database update CEO_01 has run, 503 (records/leases: before QA_07; rooms:
     /// before CEO_02 a 200 with available = false; a custom period: before CS_01).
+    /// Read-only, except for one network action: running a speed test on an internet line (api/ceo/network/speedtest).
     /// </summary>
     [ApiController]
     [Authorize(Roles = "ceo,super_admin,SuperAdmin")]
@@ -40,7 +43,9 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Level 2: one chart element broken down. metric = revenue (month) | aging (bucket) | occupancy-type
         /// (spaceTypeId) | occupancy-location (locationId) | bookings-month (month) | inquiries-type (type) | staff (userId).
-        /// revenue takes from / to (issued in that range, CS_01) instead of a month for a custom period.
+        /// revenue takes from / to (billing period starting in that range, CS_01 / CP_01) instead of a month for a custom period.
+        /// CP_02: occupancy-category (category = PrivateOffice | SharedSpace): rooms of the category with a confirmed booking now,
+        /// by location; occupancy-location rows are per room category.
         /// </summary>
         [HttpGet("api/ceo/breakdown")]
         public Task<IActionResult> Breakdown([FromQuery] CeoBreakdownQuery query) =>
@@ -49,7 +54,12 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Level 3: records behind a breakdown row, newest first (leases: soonest first), at most 200 (total = all that
         /// match). kind = invoices | spaces | bookings | inquiries | quotations | leases (QA_07: confirmed leases ending in
-        /// the next 90 days, or month / from / to). invoices: from / to = issued in that range (CS_01).
+        /// the next 90 days, or month / from / to). invoices: from / to = billing period starting in that range (CS_01 / CP_01);
+        /// status = open | overdue | paid | advance (CP_01: unpaid, for a billing period not started yet) | collected (CP_02:
+        /// something paid, the invoices behind Collected; before CP_02 the paid ones) | deposit (CP_02: with a security deposit).
+        /// spaces (CP_02): category = PrivateOffice | SharedSpace, rooms = true (rooms only); occupied = a confirmed booking now.
+        /// receipts (CP_02): money received (fee receipts and paid payments) by the day it came in: month, or from / to,
+        /// else the period to date; the answer also has amount (the sum of every matching row).
         /// </summary>
         [HttpGet("api/ceo/records/{kind}")]
         public Task<IActionResult> Records(string kind, [FromQuery] CeoRecordsQuery query) =>
@@ -75,6 +85,53 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Network([FromQuery] int? locationId, [FromServices] INetworkDashboardService network) =>
             Ok(ApiResponse.Ok(await network.GetAsync(new NetworkScope(null, locationId is > 0 ? locationId : null),
                 HttpContext?.RequestAborted ?? default)));
+
+        /// <summary>
+        /// Runs a speed test on one internet line of the main console's gateway now (wan = WAN1 / WAN2 / ...), the same
+        /// test as the Network Overview's "Run test" (api/unifi/speedtest, admins). The only network action the CEO has:
+        /// it uses the line's full bandwidth for about 30 seconds. UniFi runs one test at a time: 409 while one is
+        /// running (started here or on the Network pages), 400 for a line the gateway does not have, 502 when UniFi
+        /// cannot be reached. Answers { wan, ifname, startedAt }; follow it with GET api/ceo/network/speedtest.
+        /// </summary>
+        [HttpPost("api/ceo/network/speedtest")]
+        public Task<IActionResult> StartSpeedtest([FromQuery] string? wan, [FromServices] IUnifiService unifi)
+        {
+            if (string.IsNullOrWhiteSpace(wan) || !WanRe.IsMatch(wan))
+                return Task.FromResult<IActionResult>(BadRequest(ApiResponse.Fail("Choose the internet line to test (WAN1, WAN2, ...).")));
+            return RunSpeedtest(() => unifi.StartSpeedtestAsync(wan.ToUpperInvariant()));
+        }
+
+        /// <summary>
+        /// The running speed test: { running: false } when none, else { running, wan, elapsed (s), result: { down, up
+        /// (Mbps), ping (ms), server, interface } once finished, timedOut }. 502 when UniFi cannot be reached.
+        /// </summary>
+        [HttpGet("api/ceo/network/speedtest")]
+        public Task<IActionResult> SpeedtestStatus([FromServices] IUnifiService unifi) =>
+            RunSpeedtest(() => unifi.GetSpeedtestStatusAsync());
+
+        private static readonly Regex WanRe = new("^WAN[0-9]{1,2}$", RegexOptions.IgnoreCase);
+
+        private async Task<IActionResult> RunSpeedtest(Func<Task<JsonObject>> action)
+        {
+            try
+            {
+                return Ok(ApiResponse.Ok(await action()));
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("A speed test is already running", StringComparison.Ordinal))
+            {
+                return Conflict(ApiResponse.Fail($"{ex.Message}. UniFi runs one test at a time: wait for it to finish (about 30 seconds)."));
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("Unknown WAN", StringComparison.Ordinal))
+            {
+                return BadRequest(ApiResponse.Fail("This line cannot be tested: the gateway does not report it."));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("[ceo speedtest] {Error}", ex.Message);
+                return StatusCode(StatusCodes.Status502BadGateway,
+                    ApiResponse.Fail("The network could not be reached to run the speed test. Try again in a minute."));
+            }
+        }
 
         private async Task<IActionResult> Run(Func<Task<ApiResponse>> action)
         {
