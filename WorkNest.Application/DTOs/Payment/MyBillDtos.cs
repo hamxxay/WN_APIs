@@ -51,6 +51,8 @@ namespace WorkNest.Application.DTOs.Payment
         /// <summary>This bill is why door access to the booking's space is suspended right now.</summary>
         public bool AccessSuspended { get; set; }
         public bool HasPdf { get; set; }
+        /// <summary>1-Link consumer number to pay this invoice with 1Bill (unpaid invoices of One Bill locations only).</summary>
+        public string? OneBillNumber { get; set; }
     }
 
     public class MyBillsSummaryDto

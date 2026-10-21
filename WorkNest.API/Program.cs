@@ -193,6 +193,9 @@ try
     builder.Services.AddSingleton<IHikSyncRepository, HikSyncRepository>();
     builder.Services.AddSingleton<IHikSyncService, HikSyncService>();
     builder.Services.AddSingleton<IUnifiClient, UnifiClient>();
+    // One Bill (EzPay / 1-Link): OneBill:* settings; dbo.WN_OneBill_*, script OB_01_one_bill.
+    // Singleton, so the EzPay token is reused between invoices.
+    builder.Services.AddSingleton<IOneBillService, WorkNest.Infrastructure.ExternalServices.OneBill.OneBillService>();
 
     // ── Application Services ──────────────────────────────────────────────────
     builder.Services.AddScoped<IAuthService, AuthService>();
@@ -315,6 +318,7 @@ try
     builder.Services.AddHttpClient();
     builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();
     builder.Services.AddHostedService<UnifiPollingService>();
+    builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();

@@ -148,7 +148,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             string toEmail, string customerName, string challanNumber, string spaceName, string billingPeriod,
             decimal totalPayable = 0, DateTime? startOn = null, DateTime? endOn = null, decimal totalContractAmount = 0,
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, decimal currentCycleAmount = 0,
-            decimal securityDeposit = 0, decimal taxAmount = 0, decimal discountAmount = 0, byte[]? pdfBytes = null)
+            decimal securityDeposit = 0, decimal taxAmount = 0, decimal discountAmount = 0, byte[]? pdfBytes = null, string? oneBillNumber = null)
         {
             var (fromEmail, password, host, port) = GetEmailSettings();
 
@@ -178,6 +178,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     sb.AppendLine($"End Date                : {endOn:dd MMM yyyy}");
                 if (nextBillDueDate.HasValue)
                     sb.AppendLine($"Next Bill Due Date      : {nextBillDueDate.Value:dd MMM yyyy}");
+                if (!string.IsNullOrWhiteSpace(oneBillNumber))
+                {
+                    sb.AppendLine();
+                    sb.AppendLine($"1Bill Consumer Number   : {oneBillNumber}");
+                    sb.AppendLine("Pay with 1Bill from any bank app, ATM or bank branch using this consumer number.");
+                }
                 sb.AppendLine();
                 sb.AppendLine("Please find the attachment below.");
                 sb.AppendLine();

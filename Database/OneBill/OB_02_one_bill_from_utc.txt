@@ -1,0 +1,26 @@
+-- ============================================================================================
+-- One Bill fix: WN_Locations.OneBillFrom was set from the server's local time (GETDATE()), but WN_Invoices.CreatedOn
+-- is UTC (SYSUTCDATETIME()). Invoices made in the hours after OB_01 ran looked older than the start and were skipped.
+-- This turns OneBillFrom into UTC. Run once, only on a database where OB_01 already ran with GETDATE().
+-- Run as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. No GO / USE needed. One transaction.
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- Local time -> UTC with the server's own offset (e.g. Pakistan: 5 hours back).
+    UPDATE dbo.WN_Locations
+       SET OneBillFrom = DATEADD(MINUTE, DATEDIFF(MINUTE, GETDATE(), GETUTCDATE()), OneBillFrom)
+     WHERE OneBillFrom IS NOT NULL;
+
+    COMMIT TRANSACTION;
+
+    -- The invoices that now qualify (picked up by the One Bill sync within 2 minutes when the API runs with OneBill on).
+    SELECT l.Id AS LocationId, l.Name, l.OneBillFrom AS OneBillFromUtc
+      FROM dbo.WN_Locations l WHERE l.OneBillFrom IS NOT NULL;
+    EXEC dbo.WN_OneBill_GetPending;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
