@@ -15,7 +15,7 @@ namespace WorkNest.Application.Interfaces
         /// <summary>OneBill:Enabled is true and OneBill:BaseUrl / Username / Password are set.</summary>
         bool IsConfigured { get; }
 
-
+        /// <summary>Records an EzPay payment notification (dbo.WN_OneBill_RecordPayment) in one transaction, here and in the procedure.</summary>
         Task<OneBillPaymentResult> RecordPaymentAsync(OneBillPaymentNotice notice, CancellationToken ct = default);
     }
 

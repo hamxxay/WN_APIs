@@ -12,9 +12,11 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// EzPay payment notifications (EzPay vendor portal, Notification Configuration): when a customer pays a One Bill
     /// invoice, EzPay posts { billno, rcvdamount, rcvddate, rcvdtime, rcvdvia } with the header api_key. The notification
-    /// is kept in dbo.WN_OneBill_Payments and recorded on the invoice (script OB_03_one_bill_payments).
-    /// Answers HTTP 200 { "status": "success" } once it is safely stored (also for a repeat, an already paid invoice or an
-    /// unknown bill number, which are kept for review), so EzPay stops sending it. Any other answer makes EzPay send again.
+    /// is kept in dbo.WN_OneBill_Payments and recorded on the invoice (script OB_03_one_bill_payments), in one transaction
+    /// (in the API and in the procedure).
+    /// Answers HTTP 200 { "status": "success" } ONLY when the payment is saved and recorded on the invoice (Applied), or the
+    /// notification repeats one that already was (Duplicate). Anything else (unknown bill number, invoice already paid,
+    /// bad data, database error) answers an error, so EzPay sends it again; each attempt is kept for review.
     /// Settings: OneBill:NotifyApiKey (the api_key EzPay sends).
     /// </summary>
     [ApiController]
@@ -91,9 +93,14 @@ namespace WorkNest.API.Controllers
                 var result = await _oneBill.RecordPaymentAsync(notice, ct);
                 _logger.LogInformation("One Bill notification #{Id}: bill {BillNo}, {Amount} via {Via}: {Outcome}. {Message}",
                     result.NotificationId, notice.BillNo, notice.Amount, notice.ReceivedVia, result.Outcome, result.Message);
-                if (result.Outcome == "Invalid")
-                    return BadRequest(Error(result.Message ?? "Invalid notification."));
-                return Ok(new { status = "success" });
+                return result.Outcome switch
+                {
+                    "Applied" or "Duplicate" => Ok(new { status = "success" }),
+                    "Unmatched" => NotFound(Error(result.Message ?? "No invoice has this bill number.")),
+                    "AlreadyPaid" => Conflict(Error(result.Message ?? "The invoice is already paid.")),
+                    "Invalid" => BadRequest(Error(result.Message ?? "Invalid notification.")),
+                    _ => StatusCode(500, Error("The notification could not be recorded. Please send it again."))
+                };
             }
             catch (Exception ex)
             {

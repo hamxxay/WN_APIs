@@ -3,6 +3,9 @@
 -- (POST api/onebill/payment-notification) with { billno, rcvdamount, rcvddate, rcvdtime, rcvdvia }. Every notification
 -- is kept in WN_OneBill_Payments, and the payment is recorded on the invoice with dbo.WN_RecordInvoicePayment (PaidTotal,
 -- Paid / Partial status, access cards, WN_Payments row), all in one transaction.
+-- The API answers EzPay "success" only when the payment was recorded on the invoice (Applied), or is a repeat of a
+-- notification that already was (Duplicate). Every other outcome answers an error, so EzPay sends it again; each attempt
+-- is kept as a row for review.
 -- Needs OB_01_one_bill (WN_Invoices.OneBill* columns) and INV_FIX_A (WN_RecordInvoicePayment).
 -- Run as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. No GO / USE needed.
 -- One transaction: if anything fails, nothing is changed. Safe to run again.
@@ -12,9 +15,9 @@ BEGIN TRY
     BEGIN TRANSACTION;
 
     -- 1. Every notification EzPay sends, as received, with what was done with it.
-    --    Outcome: Applied (payment recorded on the invoice), Duplicate (same notification again: not recorded twice),
-    --    AlreadyPaid (invoice was already fully paid: kept for review, not recorded), Unmatched (no invoice has this bill
-    --    number: kept for review), Invalid (amount missing or not above zero).
+    --    Outcome: Applied (payment recorded on the invoice), Duplicate (repeat of an Applied notification: not recorded
+    --    twice), AlreadyPaid (invoice was already fully paid: not recorded), Unmatched (no invoice has this bill number:
+    --    not recorded), Invalid (amount missing or not above zero). Only Applied / Duplicate answer EzPay "success".
     IF OBJECT_ID('dbo.WN_OneBill_Payments', 'U') IS NULL
         EXEC(N'CREATE TABLE dbo.WN_OneBill_Payments (
             Id                 INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_OneBill_Payments PRIMARY KEY,
@@ -59,19 +62,22 @@ BEGIN
 
     BEGIN TRANSACTION;
 
-    -- Same notification again (EzPay retries until it gets HTTP 200): answer it, record nothing twice.
+    -- Same notification as one already recorded on its invoice (EzPay sends again when it got no answer): record nothing
+    -- twice. Earlier attempts that were NOT recorded (Unmatched / AlreadyPaid / Invalid) are tried again in full.
     SELECT TOP 1 @NotificationId = p.Id, @InvoiceId = p.InvoiceId
       FROM dbo.WN_OneBill_Payments p WITH (UPDLOCK, HOLDLOCK)
      WHERE p.BillNo = @BillNo AND p.RcvdAmount = @RcvdAmount
        AND ISNULL(p.RcvdDate, ''19000101'') = ISNULL(@RcvdDate, ''19000101'')
        AND ISNULL(p.RcvdTime, ''00:00:00'') = ISNULL(@RcvdTime, ''00:00:00'')
-       AND p.Outcome IN (''Applied'', ''AlreadyPaid'', ''Unmatched'')
+       AND p.Outcome = ''Applied''
      ORDER BY p.Id;
 
     IF @NotificationId IS NOT NULL
     BEGIN
         SET @Outcome = ''Duplicate'';
-        SET @Message = ''Same notification as #'' + CAST(@NotificationId AS VARCHAR(12)) + ''; not recorded again.'';
+        SET @Message = ''Same notification as #'' + CAST(@NotificationId AS VARCHAR(12)) + '', already recorded on the invoice; not recorded again.'';
+        SELECT @PaidTotalAfter = PaidTotalAfter, @StatusAfter = InvoiceStatusAfter FROM dbo.WN_OneBill_Payments WHERE Id = @NotificationId;
+        SELECT @InvoiceNumber = InvoiceNumber FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
     END
     ELSE IF ISNULL(@RcvdAmount, 0) <= 0
     BEGIN
@@ -105,7 +111,7 @@ BEGIN
             IF @Paid >= @Due
             BEGIN
                 SET @Outcome = ''AlreadyPaid'';
-                SET @Message = ''Invoice '' + @InvoiceNumber + '' was already fully paid; payment kept for review, not recorded.'';
+                SET @Message = ''Invoice '' + @InvoiceNumber + '' was already fully paid; payment not recorded (check for a double payment).'';
             END
             ELSE
             BEGIN
@@ -126,6 +132,8 @@ BEGIN
                      @TransactionRef = @Ref, @Notes = @Notes;
 
                 SELECT TOP 1 @PaidTotalAfter = PaidTotal, @StatusAfter = StatusId FROM @Result;
+                IF @PaidTotalAfter IS NULL OR @PaidTotalAfter < @Paid + @RcvdAmount
+                    THROW 50010, N''WN_RecordInvoicePayment did not record the payment.'', 1;   -- rolls everything back; API answers an error
                 SET @Outcome = ''Applied'';
                 SET @Message = ''Payment of '' + CONVERT(VARCHAR(30), @RcvdAmount) + '' recorded on invoice '' + @InvoiceNumber
                     + CASE WHEN @PaidTotalAfter < @Due THEN '' (part payment).''
