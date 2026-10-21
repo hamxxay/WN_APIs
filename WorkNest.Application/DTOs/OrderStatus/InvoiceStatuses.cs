@@ -12,6 +12,8 @@ namespace WorkNest.Application.DTOs.OrderStatus
         public const string PartialName = "Partial";
         public const string OverdueName = "Challan Expire";
         public const string CancelledName = "Cancelled";
+        public const string DeleteName = "Delete";
+        public const string DeletedName = "Deleted";
 
         /// <summary>OrderStatus IDs — what new writes should use (null if the row is missing).</summary>
         public int? UnpaidId { get; init; }

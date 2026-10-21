@@ -110,6 +110,7 @@ namespace WorkNest.Application.Services
             foreach (var r in invoiceRows)
             {
                 int statusId = RowInt(r, "StatusId") ?? 0;
+                if (statusId == 40) continue;
                 var statusDescription = RowText(r, "StatusDescription");
                 decimal total = Math.Round(RowDecimal(r, "GrandTotal"), 2), withheld = Math.Round(RowDecimal(r, "WHTAmount"), 2), paid = Math.Round(RowDecimal(r, "PaidTotal"), 2);
                 var dueOn = RowDate(r, "DueOn")?.Date;

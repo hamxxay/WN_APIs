@@ -1802,6 +1802,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
                  WHERE u.Email = @Email
                    AND (b.Id IS NULL OR ISNULL(b.IsDeleted, 0) = 0)
+                    AND ISNULL(i.StatusId, 0) <> 40
                  ORDER BY i.Id DESC;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 256).Value = email;
@@ -1857,12 +1858,12 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         // cancel check and GET booking/my (totalPaidAmount), so "anything paid" means the same in both.
         private const string BookingPaidApplySql = @"
                   OUTER APPLY (SELECT ISNULL(SUM(ISNULL(pi.PaidTotal, 0)), 0) AS InvoicePaid
-                                 FROM dbo.WN_Invoices pi WITH (NOLOCK) WHERE pi.BookingId = b.Id) paid_inv
+                                 FROM dbo.WN_Invoices pi WITH (NOLOCK) WHERE pi.BookingId = b.Id AND ISNULL(pi.StatusId, 0) <> 40) paid_inv
                   OUTER APPLY (SELECT ISNULL(SUM(ISNULL(pp.Amount, 0)), 0) AS PaymentsPaid
                                  FROM dbo.WN_Payments pp WITH (NOLOCK)
                                 WHERE pp.StatusId = 2
                                   AND (pp.BookingIdInt = b.Id
-                                       OR pp.InvoiceId IN (SELECT pi2.Id FROM dbo.WN_Invoices pi2 WITH (NOLOCK) WHERE pi2.BookingId = b.Id))) paid_pay";
+                                       OR pp.InvoiceId IN (SELECT pi2.Id FROM dbo.WN_Invoices pi2 WITH (NOLOCK) WHERE pi2.BookingId = b.Id AND ISNULL(pi2.StatusId, 0) <> 40))) paid_pay";
         private const string BookingPaidAmountSql =
             "CAST(CASE WHEN paid_inv.InvoicePaid > paid_pay.PaymentsPaid THEN paid_inv.InvoicePaid ELSE paid_pay.PaymentsPaid END AS DECIMAL(18,2))";
 
@@ -3120,6 +3121,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                  WHERE i.StatusId NOT IN ({voids})
+                    AND ISNULL(i.StatusId, 0) <> 40
                    AND {invLocFilter};
 
                 -- [0] headline numbers
@@ -3425,7 +3427,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 SELECT 'Invoices', CAST(i.Id AS NVARCHAR(20))
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
-                 WHERE i.StatusId IN ({openList}) AND i.DueOn < @Today
+                 WHERE i.StatusId IN ({openList}) AND i.DueOn < @Today AND ISNULL(i.StatusId, 0) <> 40
                    AND {SpaceIn("b.SpaceId")}
                 UNION ALL
                 -- door access suspended right now: open suspension, no override running, booking still running
@@ -4564,7 +4566,7 @@ END";
                     OR (@UserId > 0 AND i.UserId = @UserId)
                 )
                 AND (@StatusId IS NULL OR @StatusId <= 0 OR i.StatusId = @StatusId)
-                AND (@StatusId = 40 OR i.StatusId <> 40)";
+                AND ISNULL(i.StatusId, 0) <> 40";
 
             string countSql = $"SELECT COUNT(1) FROM dbo.WN_Invoices i WITH (NOLOCK) {whereClause}";
             await using var countCmd = new SqlCommand(countSql, c);
@@ -6293,7 +6295,8 @@ END";
                        ISNULL(i.GrandTotal, 0) AS GrandTotal, ISNULL(i.PaidTotal, 0) AS PaidTotal, i.StatusId
                 FROM dbo.WN_Invoices i WITH (NOLOCK)
                 WHERE i.BookingId = @BookingId AND ISNULL(i.StatusId, 0) <> 5
-                  AND ISNULL(i.StatusId, 0) NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled')
+                  AND ISNULL(i.StatusId, 0) <> 40
+                  AND ISNULL(i.StatusId, 0) NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Cancelled', 'Delete', 'Deleted'))
                 ORDER BY i.IssuedOn DESC, i.Id DESC;
 
                 SELECT c.Id, c.ChallanNumber, c.IssuedOn, c.ValidUntil, c.StatusId AS ChallanStatusId,
@@ -7383,7 +7386,7 @@ END";
                  CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.WHTAmount, 0) > 0 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(i.WHTAmount, 2)
                                                WHEN i.InvoiceTypeId = 6 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(ROUND(ISNULL(i.GrandTotal, 0), 2) * ISNULL(i.WHTRate, 0) / 100.0, 2)
                                                ELSE ROUND(ISNULL(i.GrandTotal, 0), 2) END AS DECIMAL(18,2)) AS Payable) x
-                 WHERE i.PublicId = @PublicId;", c);
+                 WHERE i.PublicId = @PublicId AND ISNULL(i.StatusId, 0) <> 40;", c);
             cmd.Parameters.Add("@PublicId", SqlDbType.UniqueIdentifier).Value = invoiceIdGuid;
             await using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return null;

@@ -176,7 +176,7 @@ namespace WorkNest.Infrastructure.Repositories
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                   JOIN @Spaces sp ON sp.Id = b.SpaceId
-                 WHERE i.StatusId IN ({IdList(openInvoiceStatusIds)});
+                 WHERE i.StatusId IN ({IdList(openInvoiceStatusIds)}) AND ISNULL(i.StatusId, 0) <> 40;
                 SELECT ISNULL(SUM(Balance), 0) AS Outstanding, COUNT(*) AS OutstandingCount,
                        ISNULL(SUM(CASE WHEN DueOn < @Today THEN Balance ELSE 0 END), 0) AS Overdue,
                        SUM(CASE WHEN DueOn < @Today THEN 1 ELSE 0 END) AS OverdueCount
@@ -262,7 +262,7 @@ namespace WorkNest.Infrastructure.Repositories
                          FROM dbo.WN_Invoices i WITH (NOLOCK)
                          JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                          JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-                        WHERE s.LocationId = l.Id AND i.StatusId NOT IN ({IdList(voidStatusIds)})) inv
+                        WHERE s.LocationId = l.Id AND i.StatusId NOT IN ({IdList(voidStatusIds)}) AND ISNULL(i.StatusId, 0) <> 40) inv
                  ORDER BY l.Name;",
                 p =>
                 {

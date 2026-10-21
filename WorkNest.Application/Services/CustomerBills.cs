@@ -45,17 +45,19 @@ namespace WorkNest.Application.Services
             return d;
         }
 
-        /// <summary>A voided invoice: legacy 5 (Cancelled), 40 (Deleted) or OrderStatus 'Cancelled'/'Deleted'.</summary>
+        /// <summary>A voided invoice: legacy 5 (Cancelled), 40 (Deleted) or OrderStatus 'Cancelled'/'Deleted'/'Delete'.</summary>
         public static bool IsVoidInvoice(int statusId, string? orderStatusDescription) =>
             statusId is 5 or 40 ||
             string.Equals((orderStatusDescription ?? string.Empty).Trim(), "Cancelled", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals((orderStatusDescription ?? string.Empty).Trim(), "Deleted", StringComparison.OrdinalIgnoreCase);
+            string.Equals((orderStatusDescription ?? string.Empty).Trim(), "Deleted", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals((orderStatusDescription ?? string.Empty).Trim(), "Delete", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Invoice statuses WN_HIK_AccessSuspension_Run treats as unpaid: legacy 1 / 4, 'Un Paid', 'Challan Expire'.</summary>
         public static bool CountsForSuspension(int statusId, string? orderStatusDescription)
         {
+            if (IsVoidInvoice(statusId, orderStatusDescription)) return false;
             if (statusId is 1 or 4) return true;
-            if (statusId is >= 2 and <= 5) return false;
+            if (statusId is (>= 2 and <= 5) or 40) return false;
             var d = (orderStatusDescription ?? string.Empty).Trim();
             return d.Equals("Un Paid", StringComparison.OrdinalIgnoreCase) || d.Equals("Challan Expire", StringComparison.OrdinalIgnoreCase);
         }

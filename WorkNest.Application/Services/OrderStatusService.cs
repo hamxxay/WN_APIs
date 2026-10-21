@@ -37,18 +37,25 @@ namespace WorkNest.Application.Services
             var partial = await GetIdAsync(InvoiceStatuses.PartialName);
             var overdue = await GetIdAsync(InvoiceStatuses.OverdueName);
             var cancelled = await GetIdAsync(InvoiceStatuses.CancelledName);
+            var delete = await GetIdAsync(InvoiceStatuses.DeleteName);
+            var deleted = await GetIdAsync(InvoiceStatuses.DeletedName);
 
             static HashSet<int> Set(int legacy, int? current) =>
                 current.HasValue ? new HashSet<int> { legacy, current.Value } : new HashSet<int> { legacy };
 
+            var cancelledSet = new HashSet<int> { LegacyVoid, 40 };
+            if (cancelled.HasValue) cancelledSet.Add(cancelled.Value);
+            if (delete.HasValue) cancelledSet.Add(delete.Value);
+            if (deleted.HasValue) cancelledSet.Add(deleted.Value);
+
             return new InvoiceStatuses
             {
-                UnpaidId = unpaid, PaidId = paid, PartialId = partial, OverdueId = overdue, CancelledId = cancelled,
+                UnpaidId = unpaid, PaidId = paid, PartialId = partial, OverdueId = overdue, CancelledId = cancelled ?? delete ?? 40,
                 Unpaid = Set(LegacyUnpaid, unpaid),
                 Paid = Set(LegacyPaid, paid),
                 Partial = Set(LegacyPartial, partial),
                 Overdue = Set(LegacyOverdue, overdue),
-                Cancelled = Set(LegacyVoid, cancelled)
+                Cancelled = cancelledSet
             };
         }
 

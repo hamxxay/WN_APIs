@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -101,8 +101,9 @@ namespace WorkNest.API.Services
                         continue;
                     }
 
-                    // Anchored to the contract start so month-end starts don't drift (see BillingPeriods).
-                    DateTime rawPeriodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(b.ContractStart, nextPeriodStart, b.BillingPeriodMonths);
+                    // All subsequent recurring cycles after initial advance rent are billed monthly (1 month at a time).
+                    const int recurringBillingMonths = 1;
+                    DateTime rawPeriodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(b.ContractStart, nextPeriodStart, recurringBillingMonths);
                     DateTime nextPeriodEnd = rawPeriodEnd > b.ContractEnd ? b.ContractEnd : rawPeriodEnd;
 
                     // One instance at a time per booking (IIS overlapped recycle, a second server): the check below and

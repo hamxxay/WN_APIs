@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Threading.Tasks;
@@ -1639,21 +1639,23 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
+                // All subsequent recurring cycles after initial advance rent are billed monthly (1 month at a time).
+                int recurringMonths = 1;
                 // Anchored to the contract start so month-end starts don't drift (see BillingPeriods).
-                DateTime periodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(startOn, periodStart, billingMonths);
+                DateTime periodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(startOn, periodStart, recurringMonths);
 
                 // Never bill past the contract: stop once it has ended, and cut the last period at the contract end
                 // (same cap as the billing job), charging only the months/days actually in that period.
                 if (endOn.HasValue && periodStart.Date >= endOn.Value.Date)
                     return BadRequest(new { isSuccessful = false, message = $"The contract ended on {endOn.Value:MMM d, yyyy}; there is no further period to invoice." });
-                decimal cycleMonths = billingMonths;   // a normal period is always a full cycle
+                decimal cycleMonths = recurringMonths;   // a normal recurring period is always 1 month
                 if (endOn.HasValue && periodEnd.Date > endOn.Value.Date)
                 {
                     periodEnd = endOn.Value.Date;
                     if (!isMeetingRoom)
                     {
                         decimal partial = WorkNest.Application.Services.BillingPeriods.MonthsBetween(periodStart, periodEnd);
-                        if (partial > 0 && partial < billingMonths) cycleMonths = partial;
+                        if (partial > 0 && partial < recurringMonths) cycleMonths = partial;
                     }
                 }
 
@@ -1735,7 +1737,7 @@ namespace WorkNest.API.Controllers
                     SendEmail = true,
                     BillingPeriodStart = periodStart,
                     BillingPeriodEnd = periodEnd,
-                    AdvanceRentMonths = billingMonths,
+                    AdvanceRentMonths = (int)Math.Max(1, Math.Round(cycleMonths)),
                     SecurityDepositMonths = secMonths,
                     SecurityDepositAmount = 0m,
                     RoomRentExclTax = roomRentExclusive,
