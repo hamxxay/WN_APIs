@@ -267,13 +267,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 r.RelativeItem().Column(c =>
                 {
                     // c.Item().Text("BILL TO").FontSize(8).Bold().FontColor("#000000");
+                    // The account: the company, else the person (WN_GetStatementInvoicePdfData). It used to print "-" when it
+                    // equalled the Attn name, i.e. for every individual customer, from when an Attn line was printed below.
                     string companyName = "-";
                     if (!string.IsNullOrWhiteSpace(data.AccountName) &&
-                        !string.Equals(data.AccountName.Trim(), data.AttnName?.Trim(), StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(data.AccountName.Trim(), "Valued Customer", StringComparison.OrdinalIgnoreCase))
-                    {
                         companyName = data.AccountName.Trim();
-                    }
                     c.Item().Text($"Customer Name: {companyName}").FontSize(10).FontColor("#000000");
                     // if (!string.IsNullOrWhiteSpace(data.AttnName))
                     //     c.Item().Text($"Attn: {data.AttnName}").FontSize(10).FontColor("#000000");
