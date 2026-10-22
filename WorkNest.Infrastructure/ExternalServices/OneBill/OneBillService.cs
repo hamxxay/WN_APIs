@@ -123,35 +123,56 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
 
         public async Task<OneBillPaymentResult> RecordPaymentAsync(OneBillPaymentNotice notice, CancellationToken ct = default)
         {
+            // CancellationToken.None from here on: once started, the notification is recorded completely or not at all.
             await using var conn = await OpenAsync(ct);
-            using var cmd = new SqlCommand("dbo.WN_OneBill_RecordPayment", conn) { CommandType = CommandType.StoredProcedure };
-            cmd.Parameters.Add("@BillNo", SqlDbType.VarChar, 30).Value = notice.BillNo;
-            var amount = cmd.Parameters.Add("@RcvdAmount", SqlDbType.Decimal);
-            amount.Precision = 18;
-            amount.Scale = 2;
-            amount.Value = Math.Round(notice.Amount, 2);
-            cmd.Parameters.Add("@RcvdDate", SqlDbType.Date).Value = (object?)notice.ReceivedDate?.Date ?? DBNull.Value;
-            cmd.Parameters.Add("@RcvdTime", SqlDbType.Time).Value = (object?)notice.ReceivedTime ?? DBNull.Value;
-            cmd.Parameters.Add("@RcvdVia", SqlDbType.NVarChar, 50).Value = (object?)Cut(notice.ReceivedVia, 50) ?? DBNull.Value;
-            cmd.Parameters.Add("@RawBody", SqlDbType.NVarChar, -1).Value = (object?)notice.RawBody ?? DBNull.Value;
-            cmd.Parameters.Add("@RemoteIp", SqlDbType.VarChar, 64).Value = (object?)Cut(notice.RemoteIp, 64) ?? DBNull.Value;
-
-            // CancellationToken.None: once started, the payment is always recorded completely (one transaction).
-            using var r = await cmd.ExecuteReaderAsync(CancellationToken.None);
-            if (!await r.ReadAsync(CancellationToken.None))
-                throw new InvalidOperationException("WN_OneBill_RecordPayment returned no row.");
-
-            object? Val(string name) => Has(r, name) && !r.IsDBNull(r.GetOrdinal(name)) ? r.GetValue(r.GetOrdinal(name)) : null;
-            return new OneBillPaymentResult
+            // Transaction here as well as inside dbo.WN_OneBill_RecordPayment: the notification row, the invoice payment and
+            // the WN_Payments row are committed only after the procedure's answer has been read; any error rolls all back.
+            await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+            try
             {
-                NotificationId = Convert.ToInt32(Val("NotificationId") ?? 0, CultureInfo.InvariantCulture),
-                Outcome = Convert.ToString(Val("Outcome"), CultureInfo.InvariantCulture) ?? "",
-                Message = Convert.ToString(Val("Message"), CultureInfo.InvariantCulture),
-                InvoiceId = Val("InvoiceId") is { } id ? Convert.ToInt32(id, CultureInfo.InvariantCulture) : null,
-                InvoiceNumber = Convert.ToString(Val("InvoiceNumber"), CultureInfo.InvariantCulture),
-                PaidTotal = Val("PaidTotal") is { } paid ? Convert.ToDecimal(paid, CultureInfo.InvariantCulture) : null,
-                StatusId = Val("StatusId") is { } st ? Convert.ToInt32(st, CultureInfo.InvariantCulture) : null,
-            };
+                OneBillPaymentResult result;
+                using (var cmd = new SqlCommand("dbo.WN_OneBill_RecordPayment", conn, tx) { CommandType = CommandType.StoredProcedure })
+                {
+                    cmd.Parameters.Add("@BillNo", SqlDbType.VarChar, 30).Value = notice.BillNo;
+                    var amount = cmd.Parameters.Add("@RcvdAmount", SqlDbType.Decimal);
+                    amount.Precision = 18;
+                    amount.Scale = 2;
+                    amount.Value = Math.Round(notice.Amount, 2);
+                    cmd.Parameters.Add("@RcvdDate", SqlDbType.Date).Value = (object?)notice.ReceivedDate?.Date ?? DBNull.Value;
+                    cmd.Parameters.Add("@RcvdTime", SqlDbType.Time).Value = (object?)notice.ReceivedTime ?? DBNull.Value;
+                    cmd.Parameters.Add("@RcvdVia", SqlDbType.NVarChar, 50).Value = (object?)Cut(notice.ReceivedVia, 50) ?? DBNull.Value;
+                    cmd.Parameters.Add("@RawBody", SqlDbType.NVarChar, -1).Value = (object?)notice.RawBody ?? DBNull.Value;
+                    cmd.Parameters.Add("@RemoteIp", SqlDbType.VarChar, 64).Value = (object?)Cut(notice.RemoteIp, 64) ?? DBNull.Value;
+
+                    using var r = await cmd.ExecuteReaderAsync(CancellationToken.None);
+                    if (!await r.ReadAsync(CancellationToken.None))
+                        throw new InvalidOperationException("WN_OneBill_RecordPayment returned no row.");
+
+                    object? Val(string name) => Has(r, name) && !r.IsDBNull(r.GetOrdinal(name)) ? r.GetValue(r.GetOrdinal(name)) : null;
+                    result = new OneBillPaymentResult
+                    {
+                        NotificationId = Convert.ToInt32(Val("NotificationId") ?? 0, CultureInfo.InvariantCulture),
+                        Outcome = Convert.ToString(Val("Outcome"), CultureInfo.InvariantCulture) ?? "",
+                        Message = Convert.ToString(Val("Message"), CultureInfo.InvariantCulture),
+                        InvoiceId = Val("InvoiceId") is { } id ? Convert.ToInt32(id, CultureInfo.InvariantCulture) : null,
+                        InvoiceNumber = Convert.ToString(Val("InvoiceNumber"), CultureInfo.InvariantCulture),
+                        PaidTotal = Val("PaidTotal") is { } paid ? Convert.ToDecimal(paid, CultureInfo.InvariantCulture) : null,
+                        StatusId = Val("StatusId") is { } st ? Convert.ToInt32(st, CultureInfo.InvariantCulture) : null,
+                    };
+                }
+                if (result.NotificationId <= 0 || string.IsNullOrWhiteSpace(result.Outcome))
+                    throw new InvalidOperationException("WN_OneBill_RecordPayment answered without a notification row.");
+                if (result.Outcome == "Applied" && (result.InvoiceId is null || result.PaidTotal is null))
+                    throw new InvalidOperationException("WN_OneBill_RecordPayment answered Applied without the invoice payment.");
+
+                await tx.CommitAsync(CancellationToken.None);
+                return result;
+            }
+            catch
+            {
+                try { await tx.RollbackAsync(CancellationToken.None); } catch (InvalidOperationException) { /* already rolled back by XACT_ABORT */ }
+                throw;
+            }
         }
 
         // ---- database ---------------------------------------------------------------------------------------------
