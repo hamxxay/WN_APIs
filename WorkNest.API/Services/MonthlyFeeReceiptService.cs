@@ -67,7 +67,17 @@ namespace WorkNest.API.Services
             {
                 using var scope = _scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<IDbRepository>();
-                var created = (await db.CreateDueMonthlyFeeReceiptsDbAsync(_clock.Today)).ToList();
+                var result = await db.CreateDueMonthlyFeeReceiptsDbAsync(_clock.Today);
+                var created = result.ToList();
+                // RC_04: the procedure's second result set lists the months it could not create (each in its own
+                // transaction, the others are kept); logged as warnings, they are tried again on the next cycle.
+                var failed = result is MonthlyFeeReceiptRun run ? run.Failed : new List<IDictionary<string, object?>>();
+                foreach (var row in failed)
+                {
+                    object? F(string key) => row.TryGetValue(key, out var v) ? v : null;
+                    _logger.LogWarning("Monthly fee receipt for invoice {InvoiceNumber}, month {MonthNo} was not created: {Error}",
+                        F("InvoiceNumber"), F("MonthNo"), F("Error"));
+                }
                 foreach (var row in created)
                 {
                     object? V(string key) => row.TryGetValue(key, out var v) ? v : null;

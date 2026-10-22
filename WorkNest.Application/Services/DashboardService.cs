@@ -264,8 +264,11 @@ namespace WorkNest.Application.Services
                     if (kind == "revenue-month")
                     {
                         monthStart = month;
-                        dto.Title = $"Invoices issued in {monthLabel}";
-                        dto.From = Day(month); dto.To = Day(month.AddMonths(1).AddDays(-1));
+                        // A custom range: the chart counts only the days of the month inside it, so does the list.
+                        var (mFrom, mTo) = MonthInRange(month, from, to);
+                        if (from.HasValue) { invFrom = mFrom; invTo = mTo; }
+                        dto.Title = from.HasValue ? $"Invoices issued {RangeLabel(mFrom, mTo)}" : $"Invoices issued in {monthLabel}";
+                        dto.From = Day(mFrom); dto.To = Day(mTo);
                     }
                     else if (kind == "aging-bucket")
                     {
@@ -322,11 +325,21 @@ namespace WorkNest.Application.Services
                 case "leases-ending":
                 {
                     var list = kind == "new-bookings" ? "new" : "ending";
-                    sets = await _db.GetOverviewDetailBookingsDbAsync(locationIds, now, list, month, DetailRows);
+                    // New bookings with a custom range: only the days of the month inside it, as the chart's bar.
+                    var ranged = kind == "new-bookings" && from.HasValue;
+                    var (mFrom, mTo) = ranged ? MonthInRange(month, from, to) : (month, month.AddMonths(1).AddDays(-1));
+                    try
+                    {
+                        sets = await _db.GetOverviewDetailBookingsDbAsync(locationIds, now, list, month, DetailRows,
+                            ranged ? mFrom : null, ranged ? mTo : null);
+                    }
+                    catch (DashboardDatabaseUpdateMissingException ex) { return ApiResponse.Fail(ex.Message); }
                     if (sets is null) return ApiResponse.Fail(DashboardOverviewDetails.DbUpdateMessage);
                     dto.Records = "bookings";
-                    dto.Title = kind == "new-bookings" ? $"Bookings made in {monthLabel}" : $"Leases ending in {monthLabel}";
-                    dto.From = Day(month); dto.To = Day(month.AddMonths(1).AddDays(-1));
+                    dto.Title = kind == "new-bookings"
+                        ? (ranged ? $"Bookings made {RangeLabel(mFrom, mTo)}" : $"Bookings made in {monthLabel}")
+                        : $"Leases ending in {monthLabel}";
+                    dto.From = Day(mFrom); dto.To = Day(mTo);
                     var head = Head(sets);
                     dto.Total = Int(head, "Total");
                     dto.Amount = Money(Dec(head, "Amount"));
@@ -404,6 +417,26 @@ namespace WorkNest.Application.Services
             static string? TimeOf(IDictionary<string, object?>? r, string key) => Val(r, key) is DateTime d ? d.ToString("yyyy-MM-ddTHH:mm:ss") : null;
             static decimal Money(decimal v) => Math.Round(v, 2);
             static string Day(DateTime d) => d.ToString("yyyy-MM-dd");
+        }
+
+        /// <summary>
+        /// The days of <paramref name="month"/> inside the custom range <paramref name="from"/> .. <paramref name="to"/>
+        /// (both included); no range = the whole month. A month outside the range gives from after to (nothing matches).
+        /// </summary>
+        public static (DateTime From, DateTime To) MonthInRange(DateTime month, DateTime? from, DateTime? to)
+        {
+            var first = new DateTime(month.Year, month.Month, 1);
+            var last = first.AddMonths(1).AddDays(-1);
+            var f = from.HasValue && from.Value.Date > first ? from.Value.Date : first;
+            var t = to.HasValue && to.Value.Date < last ? to.Value.Date : last;
+            return (f, t);
+        }
+
+        /// <summary>"1 Oct 2026 to 15 Oct 2026" (one day: "on 1 Oct 2026").</summary>
+        public static string RangeLabel(DateTime from, DateTime to)
+        {
+            static string D(DateTime d) => d.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            return from.Date == to.Date ? $"on {D(from)}" : $"from {D(from)} to {D(to)}";
         }
 
         /// <summary>Start of this calendar month / quarter / year (as the overview's period).</summary>

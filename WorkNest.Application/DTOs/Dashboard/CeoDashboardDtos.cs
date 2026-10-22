@@ -54,6 +54,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         /// <summary>CP_02: the billing period starts InvoicedPrev / CollectedPrev cover (yyyy-MM-dd, both days included); null before CP_02.</summary>
         public string? InvoicedPrevFrom { get; set; }
         public string? InvoicedPrevTo { get; set; }
+        /// <summary>
+        /// RC_05: the WHT not paid on the period's / previous period's billing (each month's WHT, at most what is left of the
+        /// month): the customer withholds it and never pays it, so Receivable = Invoiced - Collected - WhtOpen (the CMS works
+        /// it out). Null before the database update RC_05.
+        /// </summary>
+        public decimal? WhtOpen { get; set; }
+        public decimal? WhtOpenPrev { get; set; }
         /// <summary>Open invoices owed now (CP_01: without the ones billed in advance).</summary>
         public decimal Outstanding { get; set; }
         public int OutstandingCount { get; set; }
@@ -94,6 +101,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public string Month { get; set; } = "";
         public decimal Invoiced { get; set; }
         public decimal Collected { get; set; }
+        /// <summary>RC_05: the WHT not paid on the month's billing (as <see cref="CeoMoneyDto.WhtOpen"/>); null before RC_05.</summary>
+        public decimal? WhtOpen { get; set; }
     }
 
     public class CeoAgingBucketDto
@@ -366,6 +375,11 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal Value { get; set; }
         public decimal? Value2 { get; set; }
         public int? Count { get; set; }
+        /// <summary>
+        /// RC_05, metric revenue: the WHT not paid on the row's billing (the customer withholds it), so the row's receivable
+        /// = Value - Value2 - Wht; null for other metrics and before RC_05.
+        /// </summary>
+        public decimal? Wht { get; set; }
     }
 
     /// <summary>Query of GET api/ceo/breakdown.</summary>
@@ -456,6 +470,13 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal? Deposit { get; set; }
         public decimal? Billed { get; set; }
         public decimal? Collected { get; set; }
+        /// <summary>RC_05 (null before it): the WHT not paid (with a period: of its months; withheld by the customer).</summary>
+        public decimal? WhtOpen { get; set; }
+        /// <summary>
+        /// RC_05: billed - collected - WHT not paid of the period's months (what the customer still has to pay for them);
+        /// sent only for a list with a period (month, from / to, a customer's 12 months), else null.
+        /// </summary>
+        public decimal? Receivable { get; set; }
     }
 
     /// <summary>CP_02: records/invoices totals of every matching invoice (not only the rows sent); null before CP_02.</summary>
@@ -467,6 +488,12 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal Collected { get; set; }
         /// <summary>Owed now (GrandTotal - WHT - paid of the invoices with something left to pay).</summary>
         public decimal Balance { get; set; }
+        /// <summary>
+        /// RC_05: billed - collected - WHT not paid of the list's period (what the Receivable card counts); null without a
+        /// period or before RC_05.
+        /// </summary>
+        public decimal? Receivable { get; set; }
+        public decimal? WhtOpen { get; set; }
     }
 
     public class CeoSpaceRecordDto

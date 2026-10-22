@@ -603,6 +603,18 @@ namespace WorkNest.Application.Services
             return s;
         }
 
+        /// <summary>
+        /// True when the booking's WN_BookingStatuses code is Pending or Confirmed. A row without the StatusCode column
+        /// (WN_HIK_Sync_Booking_Get before BK_12) counts as live, as before.
+        /// </summary>
+        public static bool IsLiveBooking(IDictionary<string, object?> booking)
+        {
+            if (!booking.ContainsKey("StatusCode")) return true;
+            var code = S(booking, "StatusCode")?.Trim();
+            return string.Equals(code, "Pending", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(code, "Confirmed", StringComparison.OrdinalIgnoreCase);
+        }
+
         private async Task<string> MigrateRenewedBookingsAsync()
         {
             int migrated = 0, extended = 0;
@@ -628,8 +640,10 @@ namespace WorkNest.Application.Services
                 if (attendees.Count == 0) continue;
 
                 var curEnd = AccessEndOf(oldB);
-                // 1) Same-row extension: a new installment advanced BillingPeriodEnd (or EndOn was edited) — follow it.
-                if (curEnd != null && string.CompareOrdinal(curEnd, nowIso) > 0)
+                // 1) Same-row extension: a new installment advanced BillingPeriodEnd (or EndOn was edited) — follow it,
+                //    only while the booking is live (WN_BookingStatuses Pending / Confirmed: StatusCode from
+                //    WN_HIK_Sync_Booking_Get, BK_12). A rejected / no-show / cancelled booking is never extended.
+                if (curEnd != null && string.CompareOrdinal(curEnd, nowIso) > 0 && IsLiveBooking(oldB))
                 {
                     if (attendees.Any(a => (a.ValidEnd ?? "") != curEnd))
                     {

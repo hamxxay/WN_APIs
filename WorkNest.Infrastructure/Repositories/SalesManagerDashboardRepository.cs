@@ -164,19 +164,64 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Top", SqlDbType.Int).Value = top;
             }, 1, "Desks");
 
-        public Task<List<List<IDictionary<string, object?>>>> GetBookingRecordsAsync(string? locationIds, bool noLocation, DateTime? from,
-            DateTime? to, string? statusIds, bool runningOnly, DateTime businessNow, int top) =>
-            RunAsync("dbo.WN_SalesMgr_Records_Bookings", p =>
+        /// <summary>
+        /// <paramref name="statusIds"/>: booking status ids and / or WN_BookingStatuses codes (e.g. Pending,Confirmed), * or
+        /// null. Codes are turned into their ids here (<see cref="ResolveBookingStatusIdsAsync"/>), so the procedure gets
+        /// ids only: the versions before BK_11 read ids only and would ignore a code.
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetBookingRecordsAsync(string? locationIds, bool noLocation, DateTime? from,
+            DateTime? to, string? statusIds, bool runningOnly, DateTime businessNow, int top)
+        {
+            var ids = await ResolveBookingStatusIdsAsync(statusIds);
+            return await RunAsync("dbo.WN_SalesMgr_Records_Bookings", p =>
             {
                 p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
                 p.Add("@NoLocation", SqlDbType.Bit).Value = noLocation;
                 p.Add("@From", SqlDbType.DateTime2).Value = Db(from);
                 p.Add("@To", SqlDbType.DateTime2).Value = Db(to);
-                p.Add("@StatusIds", SqlDbType.NVarChar, 100).Value = Db(statusIds);
+                p.Add("@StatusIds", SqlDbType.NVarChar, 100).Value = Db(ids);
                 p.Add("@RunningOnly", SqlDbType.Bit).Value = runningOnly;
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@Top", SqlDbType.Int).Value = top;
             }, 1, "Desks");
+        }
+
+        /// <summary>
+        /// A status list of ids and / or WN_BookingStatuses codes as an id CSV: ids stay, codes become their ids
+        /// (SELECT Id FROM dbo.WN_BookingStatuses WHERE Code IN (...)). Null, empty and * are returned unchanged.
+        /// Codes that are not in the table match nothing ("0" when no id is left), never every status.
+        /// </summary>
+        public async Task<string?> ResolveBookingStatusIdsAsync(string? statusIds)
+        {
+            var text = statusIds?.Trim();
+            if (string.IsNullOrEmpty(text) || text == "*") return statusIds;
+            var parts = text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var ids = new List<int>();
+            var codes = new List<string>();
+            foreach (var part in parts)
+            {
+                if (int.TryParse(part, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id)) ids.Add(id);
+                else codes.Add(part);
+            }
+            if (codes.Count > 0) ids.AddRange(await GetBookingStatusIdsByCodeAsync(codes));
+            var distinct = ids.Distinct().OrderBy(i => i).ToList();
+            return distinct.Count == 0 ? "0" : string.Join(",", distinct);
+        }
+
+        /// <summary>The ids of these WN_BookingStatuses codes (a code not in the table has none).</summary>
+        protected virtual async Task<List<int>> GetBookingStatusIdsByCodeAsync(IReadOnlyList<string> codes)
+        {
+            await using var c = new SqlConnection(_connectionString);
+            await c.OpenAsync();
+            var names = codes.Select((_, i) => $"@c{i}").ToList();
+            await using var cmd = new SqlCommand(
+                $"SELECT CAST(Id AS INT) FROM dbo.WN_BookingStatuses WITH (NOLOCK) WHERE Code IN ({string.Join(", ", names)});", c) { CommandTimeout = 30 };
+            for (var i = 0; i < codes.Count; i++) cmd.Parameters.Add(names[i], SqlDbType.NVarChar, 50).Value = codes[i];
+            var ids = new List<int>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
 
         public Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(string? locationIds, bool includeNoBranch, DateTime? from,
             DateTime? to, string? inquiryType, string? outcome, string? reason, DateTime businessNow, int top) =>

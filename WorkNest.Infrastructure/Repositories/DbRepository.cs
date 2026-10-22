@@ -1934,6 +1934,16 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             await cmd.ExecuteNonQueryAsync();
         }
 
+        public async Task<IReadOnlyList<(int Id, string Code)>> GetBookingStatusesDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("SELECT CAST(Id AS INT) AS Id, LTRIM(RTRIM(Code)) AS Code FROM dbo.WN_BookingStatuses WITH (NOLOCK) ORDER BY Id;", c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            var list = new List<(int Id, string Code)>();
+            while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.IsDBNull(1) ? "" : r.GetString(1)));
+            return list;
+        }
+
         public async Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById)
         {
             await using var c = await Open();
@@ -3043,18 +3053,24 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         // --- Dashboard ---
 
         /// <summary>
-        /// Live bookings on the admin dashboard: old 1 / 2 + WN_BookingStatuses 5 Pending / 33 Confirmed. A space is "in use"
+        /// Live bookings on the admin dashboard: WN_BookingStatuses codes Pending / Confirmed (ids from the table). A space is "in use"
         /// (Occupancy KPI and its list of rooms) when it is active (WN_Spaces.Status = 1) and a live, not deleted booking on it
         /// has StartOn &lt;= now &lt;= EndOn (business time, to the second). Keep GetDashboardOverviewDbAsync and
         /// GetDashboardOccupiedSpacesDbAsync on this rule so the list always matches the card.
         /// </summary>
-        private const string DashboardLiveBookingStatuses = "1, 2, 5, 33";
+        private const string DashboardLiveBookingStatuses =
+            "SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WITH (NOLOCK) WHERE bs_.Code IN (N'Pending', N'Confirmed')";
+
+        /// <summary>Closed bookings (WN_BookingStatuses Rejected, NoShow, Cancelled), a subquery for IN (...).</summary>
+        private const string DashboardClosedBookingStatuses =
+            "SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WITH (NOLOCK) WHERE bs_.Code IN (N'Rejected', N'NoShow', N'Cancelled')";
 
         /// <summary>
         /// Admin dashboard overview (read-only): [0] headline numbers, [1] last 6 months,
         /// [2] overdue invoices, [3] leases ending soon, [4] bookings waiting for confirmation,
         /// [5] receivables aging, [6] occupancy by space type, [7] top customers, [8] lease expiries next 6 months.
-        /// Live bookings = BookingStatusId 1, 2, 5, 33 (old + WN_BookingStatuses pending / confirmed).
+        /// Live bookings = WN_BookingStatuses Pending / Confirmed; leases ending soon (card and list) = Confirmed, as the
+        /// chart drill-down (WN_Dash_OverviewBookings, BK_12). The previous period never reaches into the current one.
         /// A custom range (<paramref name="customFrom"/> .. <paramref name="customTo"/>, both days included) replaces the
         /// period: invoiced / paid / top customers count invoices issued in it, the comparison is the same number of days
         /// just before it (occupancy and active bookings: that many days ago), the trend shows every month it touches
@@ -3100,6 +3116,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                                     ELSE DATEADD(DAY, -(DATEDIFF(DAY, @FromP, @ToP) + 1), @FromP) END;
                 DECLARE @PrevEnd DATE = CASE WHEN @FromP IS NULL THEN DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevMonthStart)
                                              ELSE @FromP END;
+                -- never past the start of the current period (e.g. 31 Mar: the previous month to date would run into March)
+                IF @PrevEnd > @PStart SET @PrevEnd = @PStart;
                 DECLARE @SeriesEnd DATE = CASE WHEN @ToP IS NULL THEN @MonthStart ELSE DATEFROMPARTS(YEAR(@ToP), MONTH(@ToP), 1) END;
                 DECLARE @SoonEnd DATETIME2(0) = DATEADD(DAY, @Days, @Now);
 
@@ -3109,12 +3127,13 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   FROM dbo.WN_Spaces s WITH (NOLOCK)
                  WHERE s.Status = 1 AND {spaceLocFilter};
 
-                DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, StartOn DATETIME2(0), EndOn DATETIME2(0), StatusId INT, UserId INT NULL, CustomerCode NVARCHAR(50) NULL, TotalAmount DECIMAL(18,2) NULL);
+                DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, StartOn DATETIME2(0), EndOn DATETIME2(0), StatusId INT, StatusCode NVARCHAR(50) NULL, UserId INT NULL, CustomerCode NVARCHAR(50) NULL, TotalAmount DECIMAL(18,2) NULL);
                 INSERT INTO @Live
-                SELECT b.Id, b.SpaceId, b.StartOn, b.EndOn, b.BookingStatusId, b.UserId, b.CustomerCode, b.TotalAmount
+                SELECT b.Id, b.SpaceId, b.StartOn, b.EndOn, b.BookingStatusId, bs.Code, b.UserId, b.CustomerCode, b.TotalAmount
                   FROM dbo.WN_Bookings b WITH (NOLOCK)
                   JOIN @Spaces sp ON sp.Id = b.SpaceId
-                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN ({DashboardLiveBookingStatuses});
+                  JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
+                 WHERE ISNULL(b.IsDeleted, 0) = 0 AND bs.Code IN (N'Pending', N'Confirmed');
 
                 DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4));
                 INSERT INTO @Inv
@@ -3132,7 +3151,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     (SELECT COUNT(DISTINCT SpaceId) FROM @Live WHERE StartOn <= @MonthAgo AND EndOn >= @MonthAgo) AS OccupiedSpacesLastMonth,
                     (SELECT COUNT(*) FROM @Live WHERE StartOn <= @Now AND EndOn >= @Now) AS ActiveBookings,
                     (SELECT COUNT(*) FROM @Live WHERE StartOn <= @MonthAgo AND EndOn >= @MonthAgo) AS ActiveBookingsLastMonth,
-                    (SELECT COUNT(*) FROM @Live WHERE StatusId IN (1, 5) AND EndOn >= @Now) AS PendingConfirmations,
+                    (SELECT COUNT(*) FROM @Live WHERE StatusCode = N'Pending' AND EndOn >= @Now) AS PendingConfirmations,
                     (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open})) AS Outstanding, -- WHT is withheld by the customer, not owed
                     (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open})) AS OutstandingCount,
                     (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueAmount,
@@ -3140,7 +3159,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS InvoicedThisMonth,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < @PrevEnd) AS InvoicedLastMonth,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
-                    (SELECT COUNT(*) FROM @Live WHERE StatusId IN (2, 33) AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
+                    (SELECT COUNT(*) FROM @Live WHERE StatusCode = N'Confirmed' AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
 
                 -- [1] last 12 months (occupancy measured at month end, or now for the current month); a custom range:
                 -- the months it touches, money and new bookings inside it
@@ -3155,7 +3174,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                            AND nb.CreatedOn >= m.MStart AND nb.CreatedOn < DATEADD(MONTH, 1, m.MStart)
                            AND (@PEnd IS NULL OR (nb.CreatedOn >= DATEADD(MINUTE, -@UtcShift, CAST(@PStart AS DATETIME2(0)))
                                                   AND nb.CreatedOn < DATEADD(MINUTE, -@UtcShift, CAST(@PEnd AS DATETIME2(0)))))   -- CreatedOn is UTC
-                           AND nb.BookingStatusId NOT IN (3, 4, 6, 86)) AS NewBookings,
+                           AND nb.BookingStatusId NOT IN ({DashboardClosedBookingStatuses})) AS NewBookings,
                        (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
                            AND (@PEnd IS NULL OR (IssuedOn >= @PStart AND IssuedOn < @PEnd))) AS Invoiced,
                        (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
@@ -3194,7 +3213,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                WHERE (l.CustomerCode IS NOT NULL AND cu.Code = l.CustomerCode)
                                   OR (l.UserId IS NOT NULL AND cu.UserId = l.UserId)
                                   OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
-                 WHERE l.StatusId IN (2, 33) AND l.EndOn >= @Now AND l.EndOn <= @SoonEnd
+                 WHERE l.StatusCode = N'Confirmed' AND l.EndOn >= @Now AND l.EndOn <= @SoonEnd
                  ORDER BY l.EndOn;
 
                 -- [4] bookings waiting for confirmation
@@ -3209,7 +3228,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                WHERE (l.CustomerCode IS NOT NULL AND cu.Code = l.CustomerCode)
                                   OR (l.UserId IS NOT NULL AND cu.UserId = l.UserId)
                                   OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
-                 WHERE l.StatusId IN (1, 5) AND l.EndOn >= @Now
+                 WHERE l.StatusCode = N'Pending' AND l.EndOn >= @Now
                  ORDER BY l.StartOn;
 
                 -- [5] receivables aging (open balance by days past due)
@@ -3304,10 +3323,11 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 ;WITH live AS (
                     SELECT b.Id, b.SpaceId, b.StartOn, b.EndOn, b.BookingStatusId, b.UserId, b.CustomerCode, b.Capacity,
                            ROW_NUMBER() OVER (PARTITION BY b.SpaceId
-                                              ORDER BY CASE WHEN b.BookingStatusId IN (2, 33) THEN 0 ELSE 1 END, b.StartOn, b.Id) AS rn,
+                                              ORDER BY CASE WHEN lbs.Code = N'Confirmed' THEN 0 ELSE 1 END, b.StartOn, b.Id) AS rn,
                            COUNT(*) OVER (PARTITION BY b.SpaceId) AS BookingCount
                       FROM dbo.WN_Bookings b WITH (NOLOCK)
                       JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                      LEFT JOIN dbo.WN_BookingStatuses lbs WITH (NOLOCK) ON lbs.Id = b.BookingStatusId
                      WHERE s.Status = 1 AND {spaceLocFilter}
                        AND ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN ({DashboardLiveBookingStatuses})
                        AND b.StartOn <= @Now AND b.EndOn >= @Now
@@ -7510,7 +7530,10 @@ END";
             await using var cmd = SP("dbo.WN_FeeReceipts_CreateDueMonthly", c);
             cmd.Parameters.Add("@Today", SqlDbType.Date).Value = today.Date;
             await using var r = await cmd.ExecuteReaderAsync();
-            return await ReadAll(r);
+            // [0] the receipts created; [1] (RC_04) the months that failed: InvoiceNumber, MonthNo, Error.
+            var created = await ReadAll(r);
+            var failed = await r.NextResultAsync() ? await ReadAll(r) : new List<IDictionary<string, object?>>();
+            return new MonthlyFeeReceiptRun(created, failed);
         }
 
         public async Task<(decimal TaxPercentage, bool TaxApplicable)> GetSupportTaxRateAsync(int? locationId = null, int? spaceId = null)
@@ -7612,16 +7635,32 @@ SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) 
             });
         }
 
-        public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
-            string list, DateTime monthStart, int top) =>
-            RunOverviewDetailAsync("dbo.WN_Dash_OverviewBookings", p =>
+        public async Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
+            string list, DateTime monthStart, int top, DateTime? from = null, DateTime? to = null)
+        {
+            var ranged = from.HasValue && to.HasValue;
+            try
             {
-                p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
-                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                p.Add("@List", SqlDbType.NVarChar, 20).Value = list;
-                p.Add("@MonthStart", SqlDbType.Date).Value = monthStart.Date;
-                p.Add("@Top", SqlDbType.Int).Value = top;
-            });
+                return await RunOverviewDetailAsync("dbo.WN_Dash_OverviewBookings", p =>
+                {
+                    p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = OverviewLocationCsv(locationIds);
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                    p.Add("@List", SqlDbType.NVarChar, 20).Value = list;
+                    p.Add("@MonthStart", SqlDbType.Date).Value = monthStart.Date;
+                    p.Add("@Top", SqlDbType.Int).Value = top;
+                    if (!ranged) return; // sent only with a range, so the month lists work before BK_12
+                    p.Add("@From", SqlDbType.Date).Value = from!.Value.Date;
+                    p.Add("@To", SqlDbType.Date).Value = to!.Value.Date;
+                    // CreatedOn is UTC: the range's business days start this many minutes earlier (as the overview's chart).
+                    p.Add("@UtcShift", SqlDbType.Int).Value = (int)_clock.TimeZone.GetUtcOffset(from.Value).TotalMinutes;
+                });
+            }
+            catch (SqlException ex) when (ranged && ex.Number is 8144 or 8145) // BK_12 not run: no @From / @To
+            {
+                throw new DashboardDatabaseUpdateMissingException(
+                    "Database update needed: run the script Database/Booking/BK_12_fixes.txt (new bookings of a custom date range).", ex);
+            }
+        }
 
         public Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
             string list, string? spaceType, DateTime? monthStart, int top) =>

@@ -3,7 +3,8 @@ namespace WorkNest.Application.Interfaces
  
     public interface IOneBillService
     {
-
+        /// <summary>Creates the invoice on EzPay when it should be (or waits briefly while another request does) and answers
+        /// its One Bill number, else null. Never throws.</summary>
         Task<string?> EnsureAsync(int invoiceId, CancellationToken ct = default);
 
         /// <summary>The invoice's One Bill number once it exists on EzPay, else null. Never throws.</summary>
@@ -35,6 +36,7 @@ namespace WorkNest.Application.Interfaces
     public sealed class OneBillPaymentResult
     {
         public int NotificationId { get; init; }
+        /// <summary>Applied, Duplicate, AlreadyPaid, InvoiceClosed (deleted / cancelled), Unmatched or Invalid.</summary>
         public string Outcome { get; init; } = "";
         public string? Message { get; init; }
         public int? InvoiceId { get; init; }

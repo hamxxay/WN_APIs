@@ -592,6 +592,13 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> UpdateBookingStatusAsync(int id, byte statusId, int? actorId)
         {
+            // Only the statuses of dbo.WN_BookingStatuses (looked up, never a list of numbers here): the old 1 / 2 / 4 and
+            // any other id are refused, so they can never be written again.
+            var statuses = await _db.GetBookingStatusesDbAsync() ?? Array.Empty<(int Id, string Code)>();
+            if (!statuses.Any(s => s.Id == statusId))
+                return ApiResponse.Fail(statuses.Count == 0
+                    ? $"Booking status {statusId} is not a booking status."
+                    : $"Booking status {statusId} is not a booking status. Use one of: {string.Join(", ", statuses.Select(s => $"{s.Id} {s.Code}"))}.");
             await _db.UpdateBookingStatusAsync(id, statusId, actorId);
             return ApiResponse.Ok("Booking status updated.");
         }
