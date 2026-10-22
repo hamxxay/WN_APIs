@@ -7404,7 +7404,7 @@ END";
             cmd.Parameters.AddWithValue("@InvoiceIdGUID", invoiceIdGuid);
             cmd.Parameters.AddWithValue("@CashInHandAccountId", cashInHandAccountId);
             cmd.Parameters.AddWithValue("@PaymentType", (object?)paymentType ?? "Cash");
-            cmd.Parameters.AddWithValue("@ReceiptDate", receiptDate.Date);
+            cmd.Parameters.AddWithValue("@ReceiptDate", receiptDate);
             cmd.Parameters.AddWithValue("@Remarks", (object?)remarks ?? DBNull.Value);
             cmd.Parameters.Add("@DepositorName", SqlDbType.NVarChar, 150).Value = depositorName;
             cmd.Parameters.Add("@DepositorCNIC", SqlDbType.VarChar, 15).Value = depositorCnic;

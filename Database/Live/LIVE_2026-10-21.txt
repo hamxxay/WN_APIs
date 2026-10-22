@@ -1583,6 +1583,13 @@ BEGIN
         -- CustomerLedger Description format: {AccountsCOA.Title} - {head label} - {FeeReceiptCode}
         DECLARE @DescCustLedger VARCHAR(500) = LEFT(CONCAT_WS('''' - '''', @TitleAR, ''''Accounts Receivable'''', @Code), 500);
 
+        -- If only date portion was passed, preserve the date and append current Pakistan time down to the second
+        DECLARE @NowPST DATETIME = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''''Pakistan Standard Time'''' AS DATETIME2(0));
+        IF @ReceiptTransDateTime IS NULL
+            SET @ReceiptTransDateTime = @NowPST;
+        ELSE IF CAST(@ReceiptTransDateTime AS TIME) = ''''00:00:00''''
+            SET @ReceiptTransDateTime = DATEADD(SECOND, DATEDIFF(SECOND, ''''00:00:00'''', CAST(@NowPST AS TIME)), CAST(CAST(@ReceiptTransDateTime AS DATE) AS DATETIME));
+
         -- (h) Voucher: Vouchers_Insert, ONE header row (TypeId 27: Customer Invoice Receipt)
         DECLARE @VoucherTable TABLE (Id INT, Code VARCHAR(50));
         DECLARE @VoucherShortGUID VARCHAR(50) = CONVERT(VARCHAR(50), NEWID());

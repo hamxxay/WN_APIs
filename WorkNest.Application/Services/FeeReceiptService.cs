@@ -112,7 +112,7 @@ namespace WorkNest.Application.Services
                     invoiceGuid,
                     accountId,
                     paymentType,
-                    dto.ReceiptDate.Date,
+                    dto.ReceiptDate,
                     remarks,
                     depositorName,
                     depositorCnic,

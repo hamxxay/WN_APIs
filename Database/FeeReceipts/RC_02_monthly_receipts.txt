@@ -33,9 +33,45 @@ BEGIN TRY
     IF COL_LENGTH('dbo.WN_FeeReceipts', 'MonthCount') IS NULL
         EXEC(N'ALTER TABLE dbo.WN_FeeReceipts ADD MonthCount INT NULL;');
 
-    -- One active receipt per invoice and month (MonthNo NULL = a receipt from before RC_02, one per invoice as before).
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.WN_FeeReceipts') AND name = 'UQ_WN_FeeReceipts_InvoiceMonth_Active')
-        EXEC(N'CREATE UNIQUE NONCLUSTERED INDEX UQ_WN_FeeReceipts_InvoiceMonth_Active ON dbo.WN_FeeReceipts (InvoiceIdGUID, MonthNo) WHERE [Status] = (1);');
+    -- Safe backfill for existing single-receipt active invoices (invoices with multiple active receipts remain MonthNo NULL)
+    EXEC(N'UPDATE fr
+       SET fr.MonthNo = 1,
+           fr.MonthCount = 1,
+           fr.BillingMonth = COALESCE(CAST(i.BillingPeriodStart AS DATE), fr.ReceiptDate)
+      FROM dbo.WN_FeeReceipts fr
+      LEFT JOIN dbo.WN_Invoices i ON i.PublicId = fr.InvoiceIdGUID
+     WHERE fr.Status = 1
+       AND fr.MonthNo IS NULL
+       AND fr.InvoiceIdGUID IS NOT NULL
+       AND fr.InvoiceIdGUID IN (
+           SELECT InvoiceIdGUID
+             FROM dbo.WN_FeeReceipts
+            WHERE Status = 1
+            GROUP BY InvoiceIdGUID
+           HAVING COUNT(*) = 1
+       );');
+
+    -- One active receipt per invoice and month (enforced for all monthly receipts where MonthNo IS NOT NULL;
+    -- legacy part-payments or un-reconciled receipts with MonthNo NULL are preserved without crashing the index).
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.WN_FeeReceipts') AND name = 'UQ_WN_FeeReceipts_InvoiceMonth_Active')
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM sys.indexes 
+            WHERE object_id = OBJECT_ID('dbo.WN_FeeReceipts') 
+              AND name = 'UQ_WN_FeeReceipts_InvoiceMonth_Active'
+              AND has_filter = 1 
+              AND filter_definition LIKE '%MonthNo%IS NOT NULL%'
+        )
+        BEGIN
+            EXEC(N'DROP INDEX UQ_WN_FeeReceipts_InvoiceMonth_Active ON dbo.WN_FeeReceipts;');
+            EXEC(N'CREATE UNIQUE NONCLUSTERED INDEX UQ_WN_FeeReceipts_InvoiceMonth_Active ON dbo.WN_FeeReceipts (InvoiceIdGUID, MonthNo) WHERE [Status] = (1) AND [MonthNo] IS NOT NULL;');
+        END
+    END
+    ELSE
+    BEGIN
+        EXEC(N'CREATE UNIQUE NONCLUSTERED INDEX UQ_WN_FeeReceipts_InvoiceMonth_Active ON dbo.WN_FeeReceipts (InvoiceIdGUID, MonthNo) WHERE [Status] = (1) AND [MonthNo] IS NOT NULL;');
+    END
+
     IF EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.WN_FeeReceipts') AND name = 'UQ_WN_FeeReceipts_InvoiceIdGUID_Active')
         EXEC(N'DROP INDEX UQ_WN_FeeReceipts_InvoiceIdGUID_Active ON dbo.WN_FeeReceipts;');
 
@@ -348,6 +384,13 @@ BEGIN
 
         -- CustomerLedger Description format: {AccountsCOA.Title} - {head label} - {FeeReceiptCode}
         DECLARE @DescCustLedger VARCHAR(500) = LEFT(CONCAT_WS('' - '', @TitleAR, ''Accounts Receivable'', @Code), 500);
+
+        -- If only date portion was passed, preserve the date and append current Pakistan time down to the second
+        DECLARE @NowPST DATETIME = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME2(0));
+        IF @ReceiptTransDateTime IS NULL
+            SET @ReceiptTransDateTime = @NowPST;
+        ELSE IF CAST(@ReceiptTransDateTime AS TIME) = ''00:00:00''
+            SET @ReceiptTransDateTime = DATEADD(SECOND, DATEDIFF(SECOND, ''00:00:00'', CAST(@NowPST AS TIME)), CAST(CAST(@ReceiptTransDateTime AS DATE) AS DATETIME));
 
         -- (h) Voucher: Vouchers_Insert, ONE header row (TypeId 27: Customer Invoice Receipt)
         DECLARE @VoucherTable TABLE (Id INT, Code VARCHAR(50));
