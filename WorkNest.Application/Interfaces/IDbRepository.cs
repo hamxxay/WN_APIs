@@ -570,9 +570,16 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         Task<(int InvoiceTypeId, decimal Balance)?> GetFeeReceiptInvoiceBalanceDbAsync(Guid invoiceIdGuid);
         Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null);
-        Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds);
+        /// <summary>Voids the receipt and the later monthly receipts of its invoice (RC_02); VoidedCount is null before RC_02.</summary>
+        Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview, int? VoidedCount)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds);
         Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds);
         Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid, string? allowedLocationIds);
+        /// <summary>
+        /// Creates the monthly receipts (months 2..N of a multi-month invoice) that are due by <paramref name="today"/> and not
+        /// created yet, each with its voucher (dbo.WN_FeeReceipts_CreateDueMonthly, script RC_02). One row per receipt created:
+        /// ReceiptId, Code, InvoiceNumber, MonthNo, MonthCount, BillingMonth, Amount. Safe to call again.
+        /// </summary>
+        Task<IEnumerable<IDictionary<string, object?>>> CreateDueMonthlyFeeReceiptsDbAsync(DateTime today);
 
         // Overview chart drill-down (stored procedures dbo.WN_Dash_Overview*, script DASH_02_main_dashboard_drilldown), on the
         // overview's rules: [0] totals of every match, [1] the first <paramref name="top"/> rows. Null = the procedure is not on

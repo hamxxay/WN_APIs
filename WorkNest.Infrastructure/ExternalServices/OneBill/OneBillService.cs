@@ -131,28 +131,46 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
             try
             {
                 OneBillPaymentResult result;
+                // dbo.WN_OneBill_RecordPayment (OB_04): @StatusCode 200 recorded, 201 same notification already recorded,
+                // 202 invoice already fully paid, 104 no invoice with this bill number, 105 bad amount; an error = 103 (thrown).
                 using (var cmd = new SqlCommand("dbo.WN_OneBill_RecordPayment", conn, tx) { CommandType = CommandType.StoredProcedure })
                 {
-                    cmd.Parameters.Add("@BillNo", SqlDbType.VarChar, 30).Value = notice.BillNo;
-                    var amount = cmd.Parameters.Add("@RcvdAmount", SqlDbType.Decimal);
+                    cmd.Parameters.Add("@ezpayRefNo", SqlDbType.NVarChar, 30).Value = notice.BillNo;
+                    var amount = cmd.Parameters.Add("@ezpayRcvdAmount", SqlDbType.Decimal);
                     amount.Precision = 18;
                     amount.Scale = 2;
                     amount.Value = Math.Round(notice.Amount, 2);
-                    cmd.Parameters.Add("@RcvdDate", SqlDbType.Date).Value = (object?)notice.ReceivedDate?.Date ?? DBNull.Value;
-                    cmd.Parameters.Add("@RcvdTime", SqlDbType.Time).Value = (object?)notice.ReceivedTime ?? DBNull.Value;
-                    cmd.Parameters.Add("@RcvdVia", SqlDbType.NVarChar, 50).Value = (object?)Cut(notice.ReceivedVia, 50) ?? DBNull.Value;
+                    cmd.Parameters.Add("@ezpayRcvdDate", SqlDbType.Date).Value = (object?)notice.ReceivedDate?.Date ?? DBNull.Value;
+                    cmd.Parameters.Add("@ezpayRcvdTime", SqlDbType.Time).Value = (object?)notice.ReceivedTime ?? DBNull.Value;
+                    cmd.Parameters.Add("@ezpayRcvdVia", SqlDbType.NVarChar, 50).Value = (object?)Cut(notice.ReceivedVia, 50) ?? DBNull.Value;
+                    var statusCode = cmd.Parameters.Add("@StatusCode", SqlDbType.Int);
+                    statusCode.Direction = ParameterDirection.Output;
                     cmd.Parameters.Add("@RawBody", SqlDbType.NVarChar, -1).Value = (object?)notice.RawBody ?? DBNull.Value;
                     cmd.Parameters.Add("@RemoteIp", SqlDbType.VarChar, 64).Value = (object?)Cut(notice.RemoteIp, 64) ?? DBNull.Value;
 
-                    using var r = await cmd.ExecuteReaderAsync(CancellationToken.None);
-                    if (!await r.ReadAsync(CancellationToken.None))
-                        throw new InvalidOperationException("WN_OneBill_RecordPayment returned no row.");
+                    // The row the procedure answers (for the log); the output parameter is read once the reader is closed.
+                    var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                    using (var r = await cmd.ExecuteReaderAsync(CancellationToken.None))
+                    {
+                        if (await r.ReadAsync(CancellationToken.None))
+                            for (var i = 0; i < r.FieldCount; i++) row[r.GetName(i)] = r.IsDBNull(i) ? null : r.GetValue(i);
+                        while (await r.NextResultAsync(CancellationToken.None)) { }
+                    }
 
-                    object? Val(string name) => Has(r, name) && !r.IsDBNull(r.GetOrdinal(name)) ? r.GetValue(r.GetOrdinal(name)) : null;
+                    var code = statusCode.Value is int c ? c : (int?)null;
+                    object? Val(string name) => row.TryGetValue(name, out var v) ? v : null;
                     result = new OneBillPaymentResult
                     {
                         NotificationId = Convert.ToInt32(Val("NotificationId") ?? 0, CultureInfo.InvariantCulture),
-                        Outcome = Convert.ToString(Val("Outcome"), CultureInfo.InvariantCulture) ?? "",
+                        Outcome = code switch
+                        {
+                            200 => "Applied",
+                            201 => "Duplicate",
+                            202 => "AlreadyPaid",
+                            104 => "Unmatched",
+                            105 => "Invalid",
+                            _ => throw new InvalidOperationException($"WN_OneBill_RecordPayment answered status code {code?.ToString(CultureInfo.InvariantCulture) ?? "none"}.")
+                        },
                         Message = Convert.ToString(Val("Message"), CultureInfo.InvariantCulture),
                         InvoiceId = Val("InvoiceId") is { } id ? Convert.ToInt32(id, CultureInfo.InvariantCulture) : null,
                         InvoiceNumber = Convert.ToString(Val("InvoiceNumber"), CultureInfo.InvariantCulture),
@@ -160,10 +178,8 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
                         StatusId = Val("StatusId") is { } st ? Convert.ToInt32(st, CultureInfo.InvariantCulture) : null,
                     };
                 }
-                if (result.NotificationId <= 0 || string.IsNullOrWhiteSpace(result.Outcome))
-                    throw new InvalidOperationException("WN_OneBill_RecordPayment answered without a notification row.");
-                if (result.Outcome == "Applied" && (result.InvoiceId is null || result.PaidTotal is null))
-                    throw new InvalidOperationException("WN_OneBill_RecordPayment answered Applied without the invoice payment.");
+                if (result.Outcome == "Applied" && result.InvoiceId is null)
+                    throw new InvalidOperationException("WN_OneBill_RecordPayment answered 200 without the invoice.");
 
                 await tx.CommitAsync(CancellationToken.None);
                 return result;

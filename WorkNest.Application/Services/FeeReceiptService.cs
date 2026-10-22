@@ -168,7 +168,8 @@ namespace WorkNest.Application.Services
                 {
                     receiptId = result.ReceiptId,
                     invoiceRestored = result.InvoiceRestored,
-                    accessCardsNeedReview = result.AccessCardsNeedReview
+                    accessCardsNeedReview = result.AccessCardsNeedReview,
+                    voidedCount = result.VoidedCount
                 }, result.Message));
             }
             catch (FeeReceiptRuleException ex)
@@ -369,7 +370,10 @@ namespace WorkNest.Application.Services
                 AmountPaid = Math.Round(GetDecimal(r, "AmountPaid", GetDecimal(r, "TotalAmount")), 2),
                 BalanceAfter = GetDecimalOrNull(r, "BalanceAfter"),
                 InvoiceBalanceNow = GetDecimalOrNull(r, "InvoiceBalanceNow"),
-                InvoicePaymentStatus = GetStringOrNull(r, "InvoicePaymentStatus")
+                InvoicePaymentStatus = GetStringOrNull(r, "InvoicePaymentStatus"),
+                BillingMonth = GetDateTimeOrNull(r, "BillingMonth"),
+                MonthNo = Math.Max(1, GetInt(r, "MonthNo", 1)),
+                MonthCount = Math.Max(1, GetInt(r, "MonthCount", 1))
             };
         }
 

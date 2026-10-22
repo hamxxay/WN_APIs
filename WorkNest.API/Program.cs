@@ -319,6 +319,7 @@ try
     builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();
     builder.Services.AddHostedService<UnifiPollingService>();
     builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
+    builder.Services.AddHostedService<MonthlyFeeReceiptService>();   // FeeReceipts:MonthlyEnabled (on by default)
 
     // ── Build ─────────────────────────────────────────────────────────────────
     var app = builder.Build();
