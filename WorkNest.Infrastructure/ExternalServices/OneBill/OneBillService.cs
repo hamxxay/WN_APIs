@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Infrastructure.ExternalServices.OneBill
@@ -44,12 +45,12 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
         private string Username => (_config["OneBill:Username"] ?? "").Trim();
         private string Password => _config["OneBill:Password"] ?? "";
         private string Url(string key, string fallback) => BaseUrl + "/" + (string.IsNullOrWhiteSpace(_config[key]) ? fallback : _config[key]!.Trim().TrimStart('/'));
-        private int MaxAttempts => Math.Max(1, _config.GetValue("OneBill:MaxAttempts", 5));
+        private int MaxAttempts => OneBillRules.MaxAttempts(_config.GetValue("OneBill:MaxAttempts", 5));
         public bool IsConfigured => _config.GetValue("OneBill:Enabled", false) && BaseUrl.Length > 0 && Username.Length > 0 && Password.Length > 0;
 
         public async Task<string?> EnsureAsync(int invoiceId, CancellationToken ct = default)
         {
-            if (invoiceId <= 0) return null;
+            if (!OneBillRules.IsSendableInvoiceId(invoiceId)) return null;   // checked here, never sent to the procedures
             try
             {
                 if (!IsConfigured) return await GetNumberAsync(invoiceId, ct);
@@ -105,7 +106,7 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
 
         public async Task<string?> GetNumberAsync(int invoiceId, CancellationToken ct = default)
         {
-            if (invoiceId <= 0) return null;
+            if (!OneBillRules.IsSendableInvoiceId(invoiceId)) return null;   // checked here, never sent to the procedure
             try
             {
                 await using var conn = await OpenAsync(ct);
@@ -132,7 +133,7 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
             var ids = new List<int>();
             await using var conn = await OpenAsync(ct);
             using var cmd = new SqlCommand("dbo.WN_OneBill_GetPending", conn) { CommandType = CommandType.StoredProcedure };
-            cmd.Parameters.Add("@Top", SqlDbType.Int).Value = Math.Max(1, top);
+            cmd.Parameters.Add("@Top", SqlDbType.Int).Value = OneBillRules.PendingTop(top);
             cmd.Parameters.Add("@MaxAttempts", SqlDbType.Int).Value = MaxAttempts;
             using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct)) ids.Add(r.GetInt32(0));
@@ -141,6 +142,14 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
 
         public async Task<OneBillPaymentResult> RecordPaymentAsync(OneBillPaymentNotice notice, CancellationToken ct = default)
         {
+            // Checked before the procedure is called (OB_06): a notification that fails is answered Invalid, not sent.
+            var invalid = OneBillRules.NoticeError(notice);
+            if (invalid != null)
+            {
+                _logger.LogWarning("One Bill notification refused before the database: {Error} (bill {BillNo}, amount {Amount}).", invalid, notice.BillNo, notice.Amount);
+                return new OneBillPaymentResult { Outcome = "Invalid", Message = invalid };
+            }
+
             // CancellationToken.None from here on: once started, the notification is recorded completely or not at all.
             await using var conn = await OpenAsync(ct);
             // Transaction here as well as inside dbo.WN_OneBill_RecordPayment: the notification row, the invoice payment and
@@ -154,18 +163,18 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
                 // 105 bad amount; an error = 103 (thrown).
                 using (var cmd = new SqlCommand("dbo.WN_OneBill_RecordPayment", conn, tx) { CommandType = CommandType.StoredProcedure })
                 {
-                    cmd.Parameters.Add("@ezpayRefNo", SqlDbType.NVarChar, 30).Value = notice.BillNo;
+                    cmd.Parameters.Add("@ezpayRefNo", SqlDbType.NVarChar, OneBillRules.MaxBillNoLength).Value = notice.BillNo.Trim();
                     var amount = cmd.Parameters.Add("@ezpayRcvdAmount", SqlDbType.Decimal);
                     amount.Precision = 18;
                     amount.Scale = 2;
                     amount.Value = Math.Round(notice.Amount, 2);
                     cmd.Parameters.Add("@ezpayRcvdDate", SqlDbType.Date).Value = (object?)notice.ReceivedDate?.Date ?? DBNull.Value;
                     cmd.Parameters.Add("@ezpayRcvdTime", SqlDbType.Time).Value = (object?)notice.ReceivedTime ?? DBNull.Value;
-                    cmd.Parameters.Add("@ezpayRcvdVia", SqlDbType.NVarChar, 50).Value = (object?)Cut(notice.ReceivedVia, 50) ?? DBNull.Value;
+                    cmd.Parameters.Add("@ezpayRcvdVia", SqlDbType.NVarChar, OneBillRules.MaxViaLength).Value = (object?)OneBillRules.Cut(notice.ReceivedVia, OneBillRules.MaxViaLength) ?? DBNull.Value;
                     var statusCode = cmd.Parameters.Add("@StatusCode", SqlDbType.Int);
                     statusCode.Direction = ParameterDirection.Output;
                     cmd.Parameters.Add("@RawBody", SqlDbType.NVarChar, -1).Value = (object?)notice.RawBody ?? DBNull.Value;
-                    cmd.Parameters.Add("@RemoteIp", SqlDbType.VarChar, 64).Value = (object?)Cut(notice.RemoteIp, 64) ?? DBNull.Value;
+                    cmd.Parameters.Add("@RemoteIp", SqlDbType.VarChar, OneBillRules.MaxRemoteIpLength).Value = (object?)OneBillRules.Cut(notice.RemoteIp, OneBillRules.MaxRemoteIpLength) ?? DBNull.Value;
 
                     // The row the procedure answers (for the log); the output parameter is read once the reader is closed.
                     var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -257,7 +266,7 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
             cmd.Parameters.Add("@Success", SqlDbType.Bit).Value = ok;
             cmd.Parameters.Add("@EzPayInvoiceId", SqlDbType.BigInt).Value = (object?)ezPayId ?? DBNull.Value;
             cmd.Parameters.Add("@EzPayTranAuthId", SqlDbType.BigInt).Value = (object?)tranAuthId ?? DBNull.Value;
-            cmd.Parameters.Add("@Error", SqlDbType.NVarChar, 500).Value = (object?)error ?? DBNull.Value;
+            cmd.Parameters.Add("@Error", SqlDbType.NVarChar, OneBillRules.MaxErrorLength).Value = (object?)OneBillRules.Cut(error, OneBillRules.MaxErrorLength) ?? DBNull.Value;
             // CancellationToken.None: once EzPay has answered, the answer is always saved.
             await cmd.ExecuteNonQueryAsync(CancellationToken.None);
         }

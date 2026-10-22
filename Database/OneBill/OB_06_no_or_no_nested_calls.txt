@@ -1,0 +1,381 @@
+-- ============================================================================================
+-- OB_06: One Bill procedures without OR and without calling another procedure (run on test and LIVE).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter). One transaction: if anything fails, nothing is
+-- changed. Safe to run again. Changes no data. Needs OB_01 ... OB_05 (WN_Invoices.OneBill* columns,
+-- dbo.WN_OneBill_Payments) and WN_Invoices.ApprovalStatus.
+--
+--   dbo.WN_OneBill_ClaimInvoice   the OR-joined checks are one IF / ELSE IF step each; the customer is looked up by the
+--                                 booking's customer code, then by the invoice's user (UNION ALL, was one lookup with OR).
+--   dbo.WN_OneBill_GetPending     "never sent / failed" and "stuck being sent" are two lists (UNION ALL, was OR);
+--                                 "created on/after One Bill started" uses ISNULL (was OR).
+--   dbo.WN_OneBill_RecordPayment  records the payment itself (PaidTotal, status, access cards, WN_Payments row: what
+--                                 dbo.WN_RecordInvoicePayment did; no longer called); one notification of a bill at a time
+--                                 by locking that bill's WN_OneBill_Payments rows (was sp_getapplock); the bill number is
+--                                 looked up as the 1-Link number, then as our ref; the repeat check is two IF branches.
+--   Same results, outcomes and @StatusCode values as OB_05. The API checks every parameter before calling them.
+--   (dbo.WN_OneBill_SetResult / dbo.WN_OneBill_GetByInvoice have neither OR nor procedure calls: unchanged.)
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF COL_LENGTH('dbo.WN_Invoices', 'OneBillStatus') IS NULL
+        THROW 50001, N'One Bill is not installed: run OB_01_one_bill.txt first. Nothing changed.', 1;
+    IF OBJECT_ID('dbo.WN_OneBill_Payments', 'U') IS NULL
+        THROW 50002, N'dbo.WN_OneBill_Payments is missing: run OB_03_one_bill_payments.txt first. Nothing changed.', 1;
+    IF COL_LENGTH('dbo.WN_Invoices', 'ApprovalStatus') IS NULL
+        THROW 50003, N'dbo.WN_Invoices.ApprovalStatus is missing: install the invoice approval changes first. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- One notification of a bill at a time locks that bill's rows: an index on BillNo keeps the lock to that bill.
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.WN_OneBill_Payments') AND name = 'IX_WN_OneBill_Payments_BillNo')
+        EXEC(N'CREATE INDEX IX_WN_OneBill_Payments_BillNo ON dbo.WN_OneBill_Payments (BillNo, RcvdDate, RcvdTime, RcvdAmount);');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_ClaimInvoice
+    @InvoiceId    INT,
+    @MaxAttempts  INT = 5,
+    @StaleMinutes INT = 10
+AS
+BEGIN
+    -- OB_06: as OB_05, without OR and calling no other procedure. The API checks the parameters first (invoice id
+    -- 1..99999999, attempts / minutes above 0). Outcome: Claimed (+ the invoice''s data for EzPay), Done (+ OneBillNumber),
+    -- Busy (being sent elsewhere), NotApplicable.
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Outcome VARCHAR(20), @Status TINYINT, @Attempts INT, @ClaimedOn DATETIME, @Number VARCHAR(30),
+            @BillerCode VARCHAR(10), @Prefix VARCHAR(20), @From DATETIME, @CreatedOn DATETIME, @LocationFound BIT = 0,
+            @StatusId INT, @Grand DECIMAL(18, 2), @Paid DECIMAL(18, 2), @LocationId INT,
+            @Approval NVARCHAR(50), @Wht DECIMAL(18, 2), @NetDue DECIMAL(18, 2),
+            @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5),
+            @PaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+
+    BEGIN TRANSACTION;
+
+    -- WHT invoice (InvoiceTypeId 6 or WHTAmount > 0): WHTAmount, or GrandTotal * WHTRate / 100 (as WN_FeeReceipts_Insert).
+    SELECT @Status = i.OneBillStatus, @Attempts = i.OneBillAttempts, @ClaimedOn = i.OneBillClaimedOn,
+           @Number = i.OneBillNumber, @CreatedOn = i.CreatedOn, @StatusId = i.StatusId,
+           @Grand = ROUND(ISNULL(i.GrandTotal, 0), 2), @Paid = ISNULL(i.PaidTotal, 0),
+           @Wht = CASE WHEN ISNULL(i.WHTAmount, 0) > 0 THEN ROUND(i.WHTAmount, 2)
+                       WHEN i.InvoiceTypeId = 6 THEN ROUND(ROUND(ISNULL(i.GrandTotal, 0), 2) * (ISNULL(i.WHTRate, 0) / 100.0), 2)
+                       ELSE 0 END,
+           @Approval = i.ApprovalStatus,
+           @LocationId = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+      FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+      LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = i.Id
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+     WHERE i.Id = @InvoiceId;
+    SET @NetDue = @Grand - ISNULL(@Wht, 0);
+
+    SELECT @LocationFound = 1,
+           @BillerCode = NULLIF(LTRIM(RTRIM(l.OneBillBillerCode)), ''''), @Prefix = NULLIF(LTRIM(RTRIM(l.OneBillPrefix)), ''''),
+           @From = l.OneBillFrom
+      FROM dbo.WN_Locations l WITH (NOLOCK)
+     WHERE l.Id = @LocationId;
+
+    -- One condition per step (OB_05 had them joined with OR).
+    IF @InvoiceId > 99999999                                  SET @Outcome = ''NotApplicable'';   -- 8 digits in the bill number (the API checks it first)
+    ELSE IF @LocationFound = 0                                SET @Outcome = ''NotApplicable'';   -- no location
+    ELSE IF @BillerCode IS NULL                                SET @Outcome = ''NotApplicable'';   -- location not on One Bill
+    ELSE IF @Prefix IS NULL                                    SET @Outcome = ''NotApplicable'';
+    ELSE IF @CreatedOn IS NULL                                 SET @Outcome = ''NotApplicable'';
+    ELSE IF @CreatedOn < ISNULL(@From, @CreatedOn)             SET @Outcome = ''NotApplicable'';   -- before One Bill started there
+    ELSE IF @Status = 2                                        SET @Outcome = ''Done'';
+    ELSE IF ISNULL(@StatusId, 0) IN (40, 5, 2, @CancelledId, @PaidId) SET @Outcome = ''NotApplicable'';   -- deleted / cancelled / paid
+    ELSE IF ISNULL(@Approval, '''') = ''PendingApproval''          SET @Outcome = ''NotApplicable'';
+    ELSE IF @NetDue <= 0                                       SET @Outcome = ''NotApplicable'';
+    ELSE IF @Paid >= @NetDue                                   SET @Outcome = ''NotApplicable'';
+    ELSE IF @Attempts >= @MaxAttempts                          SET @Outcome = ''NotApplicable'';
+    ELSE IF @Status = 1 AND @ClaimedOn > DATEADD(MINUTE, -@StaleMinutes, GETDATE()) SET @Outcome = ''Busy'';
+    ELSE
+    BEGIN
+        SET @Outcome = ''Claimed'';
+        UPDATE dbo.WN_Invoices
+           SET OneBillStatus = 1,
+               OneBillClaimedOn = GETDATE(),
+               OneBillAttempts = OneBillAttempts + 1,
+               OneBillRef = @BillerCode + RIGHT(REPLICATE(''0'', 8) + CAST(@InvoiceId AS VARCHAR(8)), 8),
+               OneBillNumber = @Prefix + RIGHT(REPLICATE(''0'', 8) + CAST(@InvoiceId AS VARCHAR(8)), 8)
+         WHERE Id = @InvoiceId;
+    END;
+
+    COMMIT TRANSACTION;
+
+    IF @Outcome <> ''Claimed''
+    BEGIN
+        SELECT @Outcome AS Outcome, @InvoiceId AS InvoiceId, CASE WHEN @Outcome = ''Done'' THEN @Number END AS OneBillNumber;
+        RETURN;
+    END;
+
+    -- The customer: by the booking''s customer code first, else by the invoice''s user (two lookups, no OR).
+    SELECT TOP 1
+        @Outcome AS Outcome,
+        i.Id AS InvoiceId,
+        i.InvoiceNumber,
+        i.OneBillRef,
+        i.OneBillNumber,
+        CAST(@NetDue - @Paid AS DECIMAL(18, 2)) AS Amount,
+        i.DueOn,
+        i.BillingPeriodStart,
+        i.BillingPeriodEnd,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Code)), ''''), NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''''), ''C'' + CAST(i.UserId AS VARCHAR(12))) AS RegistrationNumber,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '''') + '' '' + ISNULL(c.LastName, ''''))), ''''),
+                 NULLIF(LTRIM(RTRIM(u.Name)), ''''), ''WorkNest Customer'') AS CustomerName,
+        COALESCE(NULLIF(LTRIM(RTRIM(u.Email)), ''''), NULLIF(LTRIM(RTRIM(c.Email)), '''')) AS Email,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.PhoneNumber)), ''''), NULLIF(LTRIM(RTRIM(u.PhoneNumber)), '''')) AS Phone,
+        l.Name AS LocationName
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+      OUTER APPLY (SELECT TOP 1 x.Code, x.Company, x.FirstName, x.LastName, x.Email, x.PhoneNumber
+                     FROM (SELECT cc.Code, cc.Company, cc.FirstName, cc.LastName, cc.Email, cc.PhoneNumber, 0 AS Pick, cc.Id
+                             FROM dbo.WN_Customers cc WITH (NOLOCK)
+                            WHERE cc.Code = NULLIF(LTRIM(RTRIM(b.CustomerCode)), '''') AND ISNULL(cc.IsActive, 1) = 1
+                           UNION ALL
+                           SELECT cc.Code, cc.Company, cc.FirstName, cc.LastName, cc.Email, cc.PhoneNumber, 1 AS Pick, cc.Id
+                             FROM dbo.WN_Customers cc WITH (NOLOCK)
+                            WHERE cc.UserId = NULLIF(i.UserId, 0) AND ISNULL(cc.IsActive, 1) = 1) x
+                    ORDER BY x.Pick, x.Id) c
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = @LocationId
+     WHERE i.Id = @InvoiceId;
+END');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_GetPending
+    @Top          INT = 50,
+    @MaxAttempts  INT = 5,
+    @StaleMinutes INT = 10
+AS
+BEGIN
+    -- OB_06: as OB_05, without OR (the API checks @Top 1..200 and the others above 0). Invoices still to send: at a One
+    -- Bill location, created on/after its start, not awaiting approval, not deleted / cancelled / paid, net due not fully
+    -- paid, attempts left, and either never sent / failed (OneBillStatus NULL or 3) or stuck "being sent" for too long.
+    SET NOCOUNT ON;
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5),
+            @PaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2),
+            @StaleBefore DATETIME = DATEADD(MINUTE, -@StaleMinutes, GETDATE());
+
+    DECLARE @Candidates TABLE (InvoiceId INT PRIMARY KEY, OneBillStatus TINYINT NULL, ClaimedOn DATETIME NULL);
+    INSERT INTO @Candidates (InvoiceId, OneBillStatus, ClaimedOn)
+    SELECT i.Id, i.OneBillStatus, i.OneBillClaimedOn
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = i.Id
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+      JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+      -- Net due (as WN_OneBill_ClaimInvoice): GrandTotal less the WHT of a WHT invoice.
+      CROSS APPLY (SELECT ROUND(ISNULL(i.GrandTotal, 0), 2)
+                          - CASE WHEN ISNULL(i.WHTAmount, 0) > 0 THEN ROUND(i.WHTAmount, 2)
+                                 WHEN i.InvoiceTypeId = 6 THEN ROUND(ROUND(ISNULL(i.GrandTotal, 0), 2) * (ISNULL(i.WHTRate, 0) / 100.0), 2)
+                                 ELSE 0 END AS NetDue) n
+     WHERE NULLIF(LTRIM(RTRIM(l.OneBillBillerCode)), '''') IS NOT NULL
+       AND NULLIF(LTRIM(RTRIM(l.OneBillPrefix)), '''') IS NOT NULL
+       AND i.CreatedOn >= ISNULL(l.OneBillFrom, i.CreatedOn)
+       AND ISNULL(i.StatusId, 0) NOT IN (40, 5, 2, @CancelledId, @PaidId)
+       AND ISNULL(i.ApprovalStatus, '''') <> ''PendingApproval''
+       AND n.NetDue > 0
+       AND ISNULL(i.PaidTotal, 0) < n.NetDue
+       AND i.OneBillAttempts < @MaxAttempts
+       AND ISNULL(i.OneBillStatus, 0) <> 2;
+
+    -- Never sent / failed, and stuck "being sent": two lists (no OR), oldest invoice first.
+    SELECT TOP (@Top) x.InvoiceId
+      FROM (SELECT c.InvoiceId FROM @Candidates c WHERE ISNULL(c.OneBillStatus, 3) = 3
+            UNION ALL
+            SELECT c.InvoiceId FROM @Candidates c WHERE c.OneBillStatus = 1 AND c.ClaimedOn <= @StaleBefore) x
+     ORDER BY x.InvoiceId;
+END');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_OneBill_RecordPayment
+    @ezpayRefNo      NVARCHAR(30),
+    @ezpayRcvdAmount DECIMAL(18, 2),
+    @ezpayRcvdDate   DATE          = NULL,
+    @ezpayRcvdTime   TIME          = NULL,
+    @ezpayRcvdVia    NVARCHAR(50)  = NULL,
+    @StatusCode      INT OUTPUT,             -- 200 recorded, 201 already recorded, 202 invoice already paid, 106 invoice deleted / cancelled, 104 no invoice, 105 bad amount, 103 db error
+    @RawBody         NVARCHAR(MAX) = NULL,
+    @RemoteIp        VARCHAR(64)   = NULL
+AS
+BEGIN
+    -- OB_06: as OB_05, without OR and calling no other procedure:
+    --   * the payment is recorded here (what dbo.WN_RecordInvoicePayment did: PaidTotal, status, access cards, the
+    --     WN_Payments row), no longer by calling it;
+    --   * one notification of a bill at a time by locking that bill''s rows of WN_OneBill_Payments (was sp_getapplock);
+    --   * the bill number is looked up as the 1-Link number, then as our ref (two lookups, was one with OR).
+    -- The API checks the notification first (bill number digits, amount above 0 with 2 decimals); 105 stays as a guard.
+    SET XACT_ABORT, NOCOUNT ON;
+
+    DECLARE @Outcome VARCHAR(20), @Message NVARCHAR(500), @InvoiceId INT, @InvoiceNumber NVARCHAR(50), @Matches INT,
+            @Due DECIMAL(18, 4), @Paid DECIMAL(18, 4), @PaidTotalAfter DECIMAL(18, 4), @StatusAfter INT,
+            @Ref NVARCHAR(100), @Notes NVARCHAR(MAX), @NotificationId INT,
+            @DuplicateId INT, @InvoiceStatusId INT, @BookingId INT, @UserId INT, @Grand DECIMAL(18, 4),
+            @BillingPeriodStart DATETIME2, @BillingPeriodEnd DATETIME2, @MonthlyRent DECIMAL(18, 4), @MonthsCovered INT,
+            @AccessValidUntil DATETIME2, @Time0 TIME(0) = CAST(@ezpayRcvdTime AS TIME(0)),
+            @UnPaidId  INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Un Paid'' ORDER BY Id), 1),
+            @PartialId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Partial'' ORDER BY Id), 3),
+            @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5),
+            @PaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+
+    SET @StatusCode = 200;
+    SET @ezpayRefNo = LTRIM(RTRIM(@ezpayRefNo));
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- One notification of this bill at a time: its rows (and the gap where a new one goes) stay locked to the end.
+        SELECT @Matches = COUNT(*) FROM dbo.WN_OneBill_Payments WITH (UPDLOCK, HOLDLOCK) WHERE BillNo = @ezpayRefNo;
+
+        -- Same notification as one already recorded: same bill, amount, date and time; without a date or a time, the raw
+        -- body must be the same as well.
+        IF @ezpayRcvdDate IS NOT NULL AND @ezpayRcvdTime IS NOT NULL
+            SELECT TOP 1 @DuplicateId = p.Id, @InvoiceId = p.InvoiceId, @PaidTotalAfter = p.PaidTotalAfter, @StatusAfter = p.InvoiceStatusAfter
+              FROM dbo.WN_OneBill_Payments p
+             WHERE p.BillNo = @ezpayRefNo AND p.RcvdAmount = @ezpayRcvdAmount AND p.Outcome = ''Applied''
+               AND p.RcvdDate = @ezpayRcvdDate AND p.RcvdTime = @Time0
+             ORDER BY p.Id;
+        ELSE
+            SELECT TOP 1 @DuplicateId = p.Id, @InvoiceId = p.InvoiceId, @PaidTotalAfter = p.PaidTotalAfter, @StatusAfter = p.InvoiceStatusAfter
+              FROM dbo.WN_OneBill_Payments p
+             WHERE p.BillNo = @ezpayRefNo AND p.RcvdAmount = @ezpayRcvdAmount AND p.Outcome = ''Applied''
+               AND ISNULL(p.RcvdDate, ''19000101'') = ISNULL(@ezpayRcvdDate, ''19000101'')
+               AND ISNULL(p.RcvdTime, ''00:00:00'') = ISNULL(@Time0, ''00:00:00'')
+               AND ISNULL(p.RawBody, N'''') = ISNULL(@RawBody, N'''')
+             ORDER BY p.Id;
+
+        IF ISNULL(@ezpayRcvdAmount, 0) <= 0
+        BEGIN
+            SELECT @InvoiceId = NULL, @PaidTotalAfter = NULL, @StatusAfter = NULL;
+            SELECT @StatusCode = 105, @Outcome = ''Invalid'', @Message = ''Amount missing or not above zero.'';
+        END
+        ELSE IF @DuplicateId IS NOT NULL
+            SELECT @StatusCode = 201, @Outcome = ''Duplicate'', @Message = ''Same notification as one already recorded; not recorded again.'';
+        ELSE
+        BEGIN
+            -- The invoice: the 1-Link consumer number (OneBillNumber), else our ref (OneBillRef).
+            SELECT @Matches = COUNT(*), @InvoiceId = MIN(i.Id) FROM dbo.WN_Invoices i WHERE i.OneBillNumber = @ezpayRefNo;
+            IF ISNULL(@Matches, 0) = 0
+                SELECT @Matches = COUNT(*), @InvoiceId = MIN(i.Id) FROM dbo.WN_Invoices i WHERE i.OneBillRef = @ezpayRefNo;
+
+            IF ISNULL(@Matches, 0) <> 1
+                SELECT @InvoiceId = NULL, @StatusCode = 104, @Outcome = ''Unmatched'',
+                       @Message = CASE WHEN ISNULL(@Matches, 0) = 0 THEN ''No invoice has this bill number.'' ELSE ''More than one invoice has this bill number.'' END;
+            ELSE
+            BEGIN
+                -- Net due: GrandTotal less the WHT of a WHT invoice (InvoiceTypeId 6 or WHTAmount > 0), as WN_FeeReceipts_Insert.
+                SELECT @InvoiceNumber = i.InvoiceNumber,
+                       @Grand = ISNULL(i.GrandTotal, 0),
+                       @Due  = ROUND(ISNULL(i.GrandTotal, 0), 2)
+                               - CASE WHEN ISNULL(i.WHTAmount, 0) > 0 THEN ROUND(i.WHTAmount, 2)
+                                      WHEN i.InvoiceTypeId = 6 THEN ROUND(ROUND(ISNULL(i.GrandTotal, 0), 2) * (ISNULL(i.WHTRate, 0) / 100.0), 2)
+                                      ELSE 0 END,
+                       @Paid = ISNULL(i.PaidTotal, 0),
+                       @InvoiceStatusId = i.StatusId,
+                       @BookingId = i.BookingId,
+                       @UserId = i.UserId,
+                       @BillingPeriodStart = ISNULL(i.BillingPeriodStart, b.StartOn),
+                       @BillingPeriodEnd = ISNULL(i.BillingPeriodEnd, b.EndOn),
+                       @MonthlyRent = ISNULL(NULLIF(i.GrandTotal, 0), b.TotalAmount)
+                  FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                 WHERE i.Id = @InvoiceId;
+
+                IF ISNULL(@InvoiceStatusId, 0) IN (40, 5, @CancelledId)
+                    SELECT @StatusCode = 106, @Outcome = ''InvoiceClosed'',
+                           @Message = ''Invoice '' + @InvoiceNumber + '' is ''
+                                      + CASE WHEN @InvoiceStatusId = 40 THEN ''deleted'' ELSE ''cancelled'' END
+                                      + ''; payment not recorded (refund it or record it on another invoice).'';
+                ELSE IF ISNULL(@InvoiceStatusId, 0) IN (2, @PaidId)
+                    SELECT @StatusCode = 202, @Outcome = ''AlreadyPaid'',
+                           @Message = ''Invoice '' + @InvoiceNumber + '' was already fully paid; payment not recorded (check for a double payment).'';
+                ELSE IF @Paid >= @Due
+                    SELECT @StatusCode = 202, @Outcome = ''AlreadyPaid'',
+                           @Message = ''Invoice '' + @InvoiceNumber + '' was already fully paid; payment not recorded (check for a double payment).'';
+                ELSE
+                BEGIN
+                    SET @Ref = N''1BILL-'' + @ezpayRefNo
+                             + ISNULL(N''-'' + CONVERT(NVARCHAR(8), @ezpayRcvdDate, 112), N'''')
+                             + ISNULL(N''-'' + REPLACE(CONVERT(NVARCHAR(8), @ezpayRcvdTime, 108), N'':'', N''''), N'''');
+                    SET @Notes = N''Paid with 1Bill (EzPay)''
+                             + ISNULL(N'' via '' + NULLIF(LTRIM(RTRIM(@ezpayRcvdVia)), N''''), N'''')
+                             + ISNULL(N'' on '' + CONVERT(NVARCHAR(10), @ezpayRcvdDate, 23), N'''')
+                             + ISNULL(N'' '' + CONVERT(NVARCHAR(8), @ezpayRcvdTime, 108), N'''')
+                             + N'', bill no '' + @ezpayRefNo + N''.'';
+
+                    -- The payment (as WN_RecordInvoicePayment, with the net due of OB_05): Paid once the net due is paid
+                    -- (access cards active to the end of the billing period); otherwise Partial (access cards active for
+                    -- the whole months the payments cover, never past the billing period).
+                    SET @PaidTotalAfter = @Paid + @ezpayRcvdAmount;
+                    IF @PaidTotalAfter >= @Due
+                    BEGIN
+                        SET @StatusAfter = @PaidId;
+                        IF @BookingId > 0
+                            UPDATE dbo.WN_AccessCards
+                               SET Status = 1, EndDate = ISNULL(@BillingPeriodEnd, EndDate), UpdatedOn = SYSUTCDATETIME()
+                             WHERE BookingId = @BookingId;
+                    END
+                    ELSE
+                    BEGIN
+                        SET @StatusAfter = @PartialId;
+                        SET @MonthsCovered = CASE WHEN @MonthlyRent > 0 THEN FLOOR(@PaidTotalAfter / @MonthlyRent) ELSE 0 END;
+                        IF @MonthsCovered >= 1 AND @BookingId > 0
+                        BEGIN
+                            SET @AccessValidUntil = DATEADD(MONTH, @MonthsCovered,
+                                ISNULL(@BillingPeriodStart, CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME2(0))));
+                            IF @AccessValidUntil > ISNULL(@BillingPeriodEnd, @AccessValidUntil)
+                                SET @AccessValidUntil = @BillingPeriodEnd;
+                            UPDATE dbo.WN_AccessCards
+                               SET Status = 1, EndDate = @AccessValidUntil, UpdatedOn = SYSUTCDATETIME()
+                             WHERE BookingId = @BookingId;
+                        END;
+                    END;
+
+                    -- A payment proves the invoice is on EzPay, even if our call had been recorded as failed.
+                    UPDATE dbo.WN_Invoices
+                       SET PaidTotal = @PaidTotalAfter, StatusId = @StatusAfter,
+                           OneBillStatus = 2, OneBillCreatedOn = ISNULL(OneBillCreatedOn, GETDATE()), OneBillError = NULL
+                     WHERE Id = @InvoiceId;
+
+                    INSERT INTO dbo.WN_Payments (IdGUID, Amount, TransactionRef, InvoiceId, PaymentMethodId,
+                                                 CurrencyCode, StatusId, PaidOn, CreatedOn, Notes, UserIdInt, BookingIdInt)
+                    VALUES (NEWID(), @ezpayRcvdAmount, @Ref, @InvoiceId, 1,
+                            ''PKR'', 2, SYSUTCDATETIME(), SYSUTCDATETIME(), @Notes, @UserId, @BookingId);
+
+                    SET @Outcome = ''Applied'';
+                    SET @Message = ''Payment of '' + CONVERT(VARCHAR(30), @ezpayRcvdAmount) + '' recorded on invoice '' + @InvoiceNumber
+                        + CASE WHEN @PaidTotalAfter < @Due THEN '' (part payment).''
+                               WHEN @PaidTotalAfter > @Due THEN '' (more than the amount due).''
+                               ELSE ''.'' END;
+                END;
+            END;
+        END;
+
+        -- Every notification is kept, whatever its outcome (rows that were not recorded are for review).
+        INSERT INTO dbo.WN_OneBill_Payments
+            (BillNo, RcvdAmount, RcvdDate, RcvdTime, RcvdVia, RawBody, RemoteIp, InvoiceId, Outcome, [Message], PaidTotalAfter, InvoiceStatusAfter)
+        VALUES
+            (LEFT(@ezpayRefNo, 30), ISNULL(@ezpayRcvdAmount, 0), @ezpayRcvdDate, @Time0, @ezpayRcvdVia, @RawBody, @RemoteIp,
+             @InvoiceId, @Outcome, LEFT(@Message, 500), @PaidTotalAfter, @StatusAfter);
+        SET @NotificationId = SCOPE_IDENTITY();
+
+        COMMIT TRANSACTION;
+
+        SELECT @NotificationId AS NotificationId, @StatusCode AS StatusCode, @Outcome AS Outcome, @Message AS Message,
+               @InvoiceId AS InvoiceId, @InvoiceNumber AS InvoiceNumber, @PaidTotalAfter AS PaidTotal, @StatusAfter AS StatusId;
+    END TRY
+    BEGIN CATCH
+        SET @StatusCode = 103;   -- database error: nothing kept, EzPay should send it again
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT 'OB_06 installed: One Bill procedures without OR and without calling another procedure.' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH
