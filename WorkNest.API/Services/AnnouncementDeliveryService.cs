@@ -22,6 +22,7 @@ namespace WorkNest.API.Services
         private readonly IServiceProvider _serviceProvider;
         private readonly TimeSpan _checkInterval = TimeSpan.FromSeconds(20);
         private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
+        private readonly ServiceSwitchGate _emailGate; // Email Sending switch: off = e-mail items wait (push still goes)
 
         public AnnouncementDeliveryService(
             ILogger<AnnouncementDeliveryService> logger,
@@ -30,6 +31,7 @@ namespace WorkNest.API.Services
         {
             _logger = logger;
             _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.AnnouncementDelivery, logger);
+            _emailGate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.EmailSending, logger);
             _serviceProvider = serviceProvider;
         }
 
@@ -67,10 +69,14 @@ namespace WorkNest.API.Services
             _logger.LogInformation("Processing {Count} pending announcement delivery item(s)...", pendingItems.Count);
 
             var touchedAnnouncements = new HashSet<Guid>();
+            var emailOn = await _emailGate.IsOnAsync(stoppingToken);
 
             foreach (var item in pendingItems)
             {
                 if (stoppingToken.IsCancellationRequested) break;
+
+                // Email Sending off: the e-mail item stays pending (no attempt used) until it is back on.
+                if (!emailOn && string.Equals(item.Channel, "Email", StringComparison.OrdinalIgnoreCase)) continue;
 
                 touchedAnnouncements.Add(item.AnnouncementId);
                 int attempt = item.RetryCount + 1;
@@ -119,6 +125,13 @@ namespace WorkNest.API.Services
 
                 await db.UpdateAnnouncementDeliveryStatusAsync(item.RecipientId, "Sent", item.RetryCount);
                 _logger.LogInformation("Email announcement '{Title}' delivered to {Email} (Recipient ID: {Id}).", item.Title, item.UserEmail, item.RecipientId);
+            }
+            catch (EmailHeldException held)
+            {
+                // Email Sending was turned off meanwhile: held in Pending emails, which sends it (or a super admin discards
+                // it). This delivery is done here, so it is not sent twice.
+                await db.UpdateAnnouncementDeliveryStatusAsync(item.RecipientId, "Sent", item.RetryCount);
+                _logger.LogInformation("Email announcement '{Title}' to {Email} held as pending e-mail #{OutboxId}.", item.Title, item.UserEmail, held.OutboxId);
             }
             catch (Exception ex)
             {

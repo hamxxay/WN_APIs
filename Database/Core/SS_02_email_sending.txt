@@ -1,0 +1,154 @@
+-- ============================================================================================
+-- SS_02: Email Sending switch + Pending emails (CMS Administration > Services).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again. Needs SS_01 (dbo.WN_ServiceSwitches).
+--
+--   dbo.WN_ServiceSwitches     + row EmailSending (on). Off: the API sends no e-mail at all.
+--   dbo.WN_EmailOutbox (new)   an e-mail the API was asked to send while Email Sending was off, kept whole (recipients,
+--                              subject, body, attachments as JSON in MessageJson) until it is sent or discarded.
+--                              Status: Pending (waits) -> Sending (being sent) -> Sent | Failed (3 attempts) |
+--                              Discarded (stopped for good by a super admin: never sent).
+--   dbo.WN_EmailOutbox_Add      holds one e-mail; returns its Id.
+--   dbo.WN_EmailOutbox_GetList  [0] counts per status; [1] the newest @Top rows of @Status (NULL = all), without MessageJson.
+--   dbo.WN_EmailOutbox_Claim    @Id = that Pending / Failed e-mail, else up to @Top Pending ones: marks them Sending and
+--                              returns them with MessageJson (a claimed row is never sent twice).
+--   dbo.WN_EmailOutbox_Finish   after a claim: @Sent = 1 -> Sent; 0 -> Pending again (Failed after 3 attempts) + error.
+--   dbo.WN_EmailOutbox_Discard  @Id = that one, NULL = every Pending / Failed one: Discarded, with who and when.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NULL
+        THROW 50001, N'dbo.WN_ServiceSwitches is missing: run SS_01_service_switches first. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- 1. The switch (on, as every e-mail went out before).
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_ServiceSwitches WHERE ServiceName = N'EmailSending')
+        INSERT INTO dbo.WN_ServiceSwitches (ServiceName, IsEnabled) VALUES (N'EmailSending', 1);
+
+    -- 2. Pending e-mails.
+    IF OBJECT_ID(N'dbo.WN_EmailOutbox', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_EmailOutbox (
+            Id           INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_EmailOutbox PRIMARY KEY,
+            Kind         NVARCHAR(100)  NOT NULL,
+            ToEmail      NVARCHAR(1000) NOT NULL,
+            Subject      NVARCHAR(500)  NOT NULL,
+            MessageJson  NVARCHAR(MAX)  NOT NULL,
+            Status       NVARCHAR(20)   NOT NULL CONSTRAINT DF_WN_EmailOutbox_Status DEFAULT (N''Pending''),
+            Attempts     INT            NOT NULL CONSTRAINT DF_WN_EmailOutbox_Attempts DEFAULT (0),
+            LastError    NVARCHAR(1000) NULL,
+            CreatedOn    DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_EmailOutbox_CreatedOn DEFAULT (SYSUTCDATETIME()),
+            ClaimedOn    DATETIME2(0)   NULL,
+            SentOn       DATETIME2(0)   NULL,
+            DiscardedOn  DATETIME2(0)   NULL,
+            DiscardedBy  NVARCHAR(256)  NULL,
+            CONSTRAINT CK_WN_EmailOutbox_Status CHECK (Status IN (N''Pending'', N''Sending'', N''Sent'', N''Failed'', N''Discarded''))
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_EmailOutbox') AND name = N'IX_WN_EmailOutbox_Status')
+        EXEC(N'CREATE INDEX IX_WN_EmailOutbox_Status ON dbo.WN_EmailOutbox (Status, Id);');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_EmailOutbox_Add
+    @Kind        NVARCHAR(100),
+    @ToEmail     NVARCHAR(1000),
+    @Subject     NVARCHAR(500),
+    @MessageJson NVARCHAR(MAX)
+AS
+BEGIN
+    -- SS_02: holds one e-mail asked for while Email Sending was off.
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_EmailOutbox (Kind, ToEmail, Subject, MessageJson)
+    VALUES (LEFT(ISNULL(@Kind, N''E-mail''), 100), LEFT(ISNULL(@ToEmail, N''''), 1000), LEFT(ISNULL(@Subject, N''''), 500), @MessageJson);
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS Id;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_EmailOutbox_GetList
+    @Status NVARCHAR(20) = NULL,
+    @Top    INT = 200
+AS
+BEGIN
+    -- SS_02: [0] counts per status; [1] the newest @Top e-mails of @Status (NULL = all), without MessageJson.
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 200;
+    SET @Status = NULLIF(LTRIM(RTRIM(@Status)), N'''');
+    SELECT SUM(CASE WHEN Status = N''Pending'' THEN 1 ELSE 0 END) AS Pending,
+           SUM(CASE WHEN Status = N''Sending'' THEN 1 ELSE 0 END) AS Sending,
+           SUM(CASE WHEN Status = N''Sent'' THEN 1 ELSE 0 END) AS Sent,
+           SUM(CASE WHEN Status = N''Failed'' THEN 1 ELSE 0 END) AS Failed,
+           SUM(CASE WHEN Status = N''Discarded'' THEN 1 ELSE 0 END) AS Discarded
+      FROM dbo.WN_EmailOutbox WITH (NOLOCK);
+    SELECT TOP (@Top) Id, Kind, ToEmail, Subject, Status, Attempts, LastError, CreatedOn, SentOn, DiscardedOn, DiscardedBy
+      FROM dbo.WN_EmailOutbox WITH (NOLOCK)
+     WHERE @Status IS NULL OR Status = @Status
+     ORDER BY Id DESC;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_EmailOutbox_Claim
+    @Id  INT = NULL,
+    @Top INT = 20
+AS
+BEGIN
+    -- SS_02: @Id = that e-mail when it is Pending or Failed (Send now); else up to @Top Pending ones, oldest first. A
+    -- row left Sending for 15 minutes (the API stopped mid-send) counts as Pending again. Claimed rows become Sending
+    -- and are returned with MessageJson, so two senders never send the same e-mail.
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 20;
+    DECLARE @Claimed TABLE (Id INT, Kind NVARCHAR(100), ToEmail NVARCHAR(1000), Subject NVARCHAR(500), MessageJson NVARCHAR(MAX), Attempts INT);
+    IF @Id IS NOT NULL
+        UPDATE o SET Status = N''Sending'', ClaimedOn = SYSUTCDATETIME()
+        OUTPUT inserted.Id, inserted.Kind, inserted.ToEmail, inserted.Subject, inserted.MessageJson, inserted.Attempts INTO @Claimed
+          FROM dbo.WN_EmailOutbox o WITH (ROWLOCK, UPDLOCK)
+         WHERE o.Id = @Id
+           AND (o.Status IN (N''Pending'', N''Failed'') OR (o.Status = N''Sending'' AND o.ClaimedOn < DATEADD(MINUTE, -15, SYSUTCDATETIME())));
+    ELSE
+        UPDATE o SET Status = N''Sending'', ClaimedOn = SYSUTCDATETIME()
+        OUTPUT inserted.Id, inserted.Kind, inserted.ToEmail, inserted.Subject, inserted.MessageJson, inserted.Attempts INTO @Claimed
+          FROM dbo.WN_EmailOutbox o WITH (ROWLOCK, UPDLOCK, READPAST)
+         WHERE o.Id IN (SELECT TOP (@Top) x.Id FROM dbo.WN_EmailOutbox x WITH (READPAST)
+                         WHERE x.Status = N''Pending''
+                            OR (x.Status = N''Sending'' AND x.ClaimedOn < DATEADD(MINUTE, -15, SYSUTCDATETIME()))
+                         ORDER BY x.Id);
+    SELECT Id, Kind, ToEmail, Subject, MessageJson, Attempts FROM @Claimed ORDER BY Id;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_EmailOutbox_Finish
+    @Id    INT,
+    @Sent  BIT,
+    @Error NVARCHAR(1000) = NULL
+AS
+BEGIN
+    -- SS_02: after a claim. Sent -> Sent; not sent -> Pending again, or Failed after 3 attempts (a super admin can still
+    -- Send now or discard it). Only a row that is Sending changes (a discard in between wins).
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_EmailOutbox
+       SET Status    = CASE WHEN @Sent = 1 THEN N''Sent'' WHEN Attempts + 1 >= 3 THEN N''Failed'' ELSE N''Pending'' END,
+           Attempts  = Attempts + 1,
+           SentOn    = CASE WHEN @Sent = 1 THEN SYSUTCDATETIME() ELSE SentOn END,
+           LastError = CASE WHEN @Sent = 1 THEN NULL ELSE LEFT(@Error, 1000) END,
+           ClaimedOn = NULL
+     WHERE Id = @Id AND Status = N''Sending'';
+    SELECT Id, Status, Attempts, LastError FROM dbo.WN_EmailOutbox WITH (NOLOCK) WHERE Id = @Id;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_EmailOutbox_Discard
+    @Id INT = NULL,
+    @By NVARCHAR(256) = NULL
+AS
+BEGIN
+    -- SS_02: stops e-mails for good (never sent): @Id = that one, NULL = every Pending / Failed one. Returns how many.
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_EmailOutbox
+       SET Status = N''Discarded'', DiscardedOn = SYSUTCDATETIME(), DiscardedBy = LEFT(@By, 256), ClaimedOn = NULL
+     WHERE Status IN (N''Pending'', N''Failed'') AND (@Id IS NULL OR Id = @Id);
+    SELECT @@ROWCOUNT AS Discarded;
+END;');
+
+    COMMIT TRANSACTION;
+    SELECT N'OK: Email Sending switch and Pending emails installed (SS_02).' AS Result,
+           (SELECT IsEnabled FROM dbo.WN_ServiceSwitches WHERE ServiceName = N'EmailSending') AS EmailSendingOn;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

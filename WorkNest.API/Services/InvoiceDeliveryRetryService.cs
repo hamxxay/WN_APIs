@@ -25,6 +25,7 @@ namespace WorkNest.API.Services
         private readonly IServiceProvider _serviceProvider;
         private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(5);
         private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
+        private readonly ServiceSwitchGate _emailGate; // Email Sending switch: off = the queue waits (no attempt used)
 
         public InvoiceDeliveryRetryService(
             ILogger<InvoiceDeliveryRetryService> logger,
@@ -34,6 +35,7 @@ namespace WorkNest.API.Services
         {
             _logger = logger;
             _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.InvoiceDeliveryRetry, logger);
+            _emailGate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.EmailSending, logger);
             _connectionString = configuration.GetConnectionString("DefaultConnection") 
                 ?? throw new InvalidOperationException("DefaultConnection string is missing.");
             _serviceProvider = serviceProvider;
@@ -47,7 +49,7 @@ namespace WorkNest.API.Services
             {
                 try
                 {
-                    if (await _gate.IsOnAsync(stoppingToken))
+                    if (await _gate.IsOnAsync(stoppingToken) && await _emailGate.IsOnAsync(stoppingToken))
                         await ProcessPendingDeliveryQueueAsync(stoppingToken);
                 }
                 catch (Exception ex)
@@ -210,6 +212,18 @@ namespace WorkNest.API.Services
                     await okCmd.ExecuteNonQueryAsync(stoppingToken);
 
                     _logger.LogInformation("Successfully delivered email for Invoice ID {InvoiceId} on retry attempt {Attempt}.", item.InvoiceId, attemptNum);
+                }
+                catch (EmailHeldException held)
+                {
+                    // Email Sending was turned off meanwhile: the e-mail is held in Pending emails (it goes out from there),
+                    // so this row stops here instead of retrying (it would go out twice). No attempt is used.
+                    using var heldCmd = new SqlCommand(@"
+                        UPDATE dbo.WN_InvoiceDeliveryQueue
+                           SET Status = 'HeldInPendingEmails', NextRetryAt = NULL, LastAttemptAt = SYSUTCDATETIME(), LastError = @LastError
+                         WHERE Id = @Id;", conn);
+                    heldCmd.Parameters.AddWithValue("@LastError", $"Held as pending e-mail #{held.OutboxId}.");
+                    heldCmd.Parameters.AddWithValue("@Id", item.Id);
+                    await heldCmd.ExecuteNonQueryAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {

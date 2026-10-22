@@ -42,6 +42,7 @@ namespace WorkNest.Application.Services
     /// </summary>
     public static class BackgroundServiceCatalog
     {
+        public const string EmailSending = "EmailSending";
         public const string BillingAutomation = "BillingAutomation";
         public const string InvoiceDeliveryRetry = "InvoiceDeliveryRetry";
         public const string AccessCardRestriction = "AccessCardRestriction";
@@ -56,6 +57,10 @@ namespace WorkNest.Application.Services
         /// <summary>The services in the order the CMS lists them.</summary>
         public static readonly IReadOnlyList<BackgroundServiceInfo> All = new[]
         {
+            // Not a loop of its own: EmailService asks it before every e-mail (SS_02_email_sending adds its row).
+            new BackgroundServiceInfo(EmailSending, "Email Sending",
+                "Every e-mail the system sends: invoices, challans, agreements, quotations, booking confirmations, announcements, reports and reminders. Off: nothing is e-mailed; the e-mails asked for meanwhile wait in Pending emails and go out when it is on again, unless discarded.",
+                null, true, _ => true),
             new BackgroundServiceInfo(BillingAutomation, "Billing Automation",
                 "Every hour: creates the next recurring invoice of each active booking 5 days before its billing cycle ends (security deposit charged once).",
                 null, true, _ => true),

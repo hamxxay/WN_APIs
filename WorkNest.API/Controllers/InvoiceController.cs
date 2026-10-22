@@ -1007,6 +1007,11 @@ namespace WorkNest.API.Controllers
                             );
                             emailNotice = $" Email dispatched with PDF attached to {targetEmail}.";
                         }
+                        catch (EmailHeldException)
+                        {
+                            // Email Sending is off: held in Pending emails (not queued here too, or it would go out twice).
+                            emailNotice = " Email sending is off: the invoice e-mail is held in Pending emails and goes out when it is turned on.";
+                        }
                         catch (Exception emailEx)
                         {
                             await QueueInvoiceDeliveryFailureAsync(newInvoiceId, null, targetEmail, emailEx.Message, conn);
@@ -1167,6 +1172,10 @@ namespace WorkNest.API.Controllers
                 );
 
                 return (true, $"Invoice email sent successfully to {targetEmail} with Statement PDF attached.");
+            }
+            catch (EmailHeldException held)
+            {
+                return (false, held.Message);   // held in Pending emails: not queued for the invoice retry too
             }
             catch (Exception emailEx)
             {

@@ -86,6 +86,7 @@ namespace WorkNest.Application.Interfaces
         /// and today's top 5 data users from the Clients page's cached reads (waits at most <paramref name="clientsWait"/> for
         /// them, in parallel; only for the main console's site).
         /// </summary>
-        Task<NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait);
+        /// <param name="usage">The dashboard's period for the top data users; null = today.</param>
+        Task<NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait, NetworkUsageRange? usage = null);
     }
 }

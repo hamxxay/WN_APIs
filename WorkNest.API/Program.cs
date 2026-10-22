@@ -297,6 +297,8 @@ try
     // SS_01_service_switches), cached 10 s. Singletons, because the hosted services below check them every cycle.
     builder.Services.AddSingleton<IServiceSwitchRepository, WorkNest.Infrastructure.Repositories.ServiceSwitchRepository>();
     builder.Services.AddSingleton<IServiceSwitch, ServiceSwitchService>();
+    // Pending emails (Email Sending switch off): dbo.WN_EmailOutbox (script SS_02_email_sending); sent by EmailOutboxService.
+    builder.Services.AddSingleton<IEmailOutbox, WorkNest.Infrastructure.Repositories.EmailOutboxRepository>();
     // Custom invoices (api/custom-invoices/*, super admin + permitted admins): dbo.WN_CustomInvoice_* and
     // dbo.WN_UserPermissions_* (script CI_01_custom_invoice); before CI_01 the calls answer 503 "Database update needed".
     builder.Services.AddScoped<ICustomInvoiceRepository, WorkNest.Infrastructure.Repositories.CustomInvoiceRepository>();
@@ -309,6 +311,7 @@ try
     builder.Services.AddHostedService<InvoiceDeliveryRetryService>();
     builder.Services.AddHostedService<AccessCardRestrictionService>();
     builder.Services.AddHostedService<AnnouncementDeliveryService>();
+    builder.Services.AddHostedService<EmailOutboxService>();   // Pending emails: sent once Email Sending is on
     builder.Services.AddHostedService<ChallanAccessSuspensionService>();
     builder.Services.AddHostedService<HikSyncBackgroundService>();
     builder.Services.AddHostedService<BookingAutoConfirmService>();

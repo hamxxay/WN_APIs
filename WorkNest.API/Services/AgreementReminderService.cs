@@ -27,6 +27,7 @@ namespace WorkNest.API.Services
         private const int SendFromHour = 9;   // 09:00 Pakistan time
         private const int SendUntilHour = 20; // up to 20:00 Pakistan time
         private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
+        private readonly ServiceSwitchGate _emailGate; // Email Sending switch: off = the cycle waits
 
         // AgreementId -> UTC time until which it is not retried after a failure.
         private readonly Dictionary<int, DateTime> _heldBackUntilUtc = new();
@@ -36,6 +37,7 @@ namespace WorkNest.API.Services
         {
             _logger = logger;
             _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.AgreementReminders, logger);
+            _emailGate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.EmailSending, logger);
             _scopeFactory = scopeFactory;
             _configuration = configuration;
             _clock = clock;
@@ -71,7 +73,7 @@ namespace WorkNest.API.Services
                 {
                     var options = ReadOptions();
                     int hour = _clock.Now.Hour;
-                    if (options.Enabled && await _gate.IsOnAsync(stoppingToken) && hour >= SendFromHour && hour < SendUntilHour)
+                    if (options.Enabled && await _gate.IsOnAsync(stoppingToken) && await _emailGate.IsOnAsync(stoppingToken) && hour >= SendFromHour && hour < SendUntilHour)
                         await RunOnceAsync(options, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
