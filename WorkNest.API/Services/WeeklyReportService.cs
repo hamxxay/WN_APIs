@@ -32,6 +32,7 @@ namespace WorkNest.API.Services
         private readonly TimeSpan _startupDelay = TimeSpan.FromMinutes(2);
         private readonly TimeSpan _retryAfter = TimeSpan.FromHours(1);
         private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
+        private readonly ServiceSwitchGate _emailGate; // Email Sending switch: off = the cycle waits
 
         // Weeks this instance knows are done (sent here or by another instance), so it stops asking the database.
         private readonly HashSet<string> _doneWeeks = new();
@@ -43,6 +44,7 @@ namespace WorkNest.API.Services
         {
             _logger = logger;
             _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.WeeklyReport, logger);
+            _emailGate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.EmailSending, logger);
             _scopeFactory = scopeFactory;
             _configuration = configuration;
             _clock = clock;
@@ -80,7 +82,7 @@ namespace WorkNest.API.Services
                 try
                 {
                     var options = ReadOptions(_configuration);
-                    if (options.Enabled && await _gate.IsOnAsync(stoppingToken))
+                    if (options.Enabled && await _gate.IsOnAsync(stoppingToken) && await _emailGate.IsOnAsync(stoppingToken))
                         await RunOnceAsync(options, stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

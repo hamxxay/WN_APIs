@@ -3,7 +3,10 @@ using System.Net.Mail;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using WorkNest.Application.DTOs.EmailOutbox;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 
 namespace WorkNest.Infrastructure.ExternalServices.Email
 {
@@ -15,11 +18,114 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
     {
         private readonly IConfiguration _config;
         private readonly ILogger<EmailService> _logger;
+        private readonly IServiceSwitch? _serviceSwitch;
+        private readonly IEmailOutbox? _outbox;
 
-        public EmailService(IConfiguration config, ILogger<EmailService> logger)
+        public EmailService(IConfiguration config, ILogger<EmailService> logger, IServiceSwitch? serviceSwitch = null, IEmailOutbox? outbox = null)
         {
             _config = config;
             _logger = logger;
+            _serviceSwitch = serviceSwitch;
+            _outbox = outbox;
+        }
+
+        /// <summary>Email Sending is off and the e-mail could not be held either (SS_02 not run): nothing was e-mailed.</summary>
+        public const string EmailOffMessage = "Email sending is turned off (Administration > Services > Email Sending). Nothing was e-mailed.";
+
+        /// <summary>
+        /// The Email Sending switch (CMS Services, <see cref="BackgroundServiceCatalog.EmailSending"/>). Fails open like every
+        /// switch (true without the row / when the database cannot be read).
+        /// </summary>
+        private async Task<bool> EmailOnAsync()
+        {
+            if (_serviceSwitch == null) return true;
+            try { return await _serviceSwitch.IsEnabledAsync(BackgroundServiceCatalog.EmailSending); }
+            catch (Exception) { return true; }
+        }
+
+        /// <summary>
+        /// Every e-mail goes out here. Email Sending on: sent now. Off: held whole in Pending emails (dbo.WN_EmailOutbox)
+        /// and <see cref="EmailHeldException"/> is thrown, so the caller reports it and does not queue its own retry; it goes
+        /// out when the switch is on again unless a super admin discards it. Off without SS_02: refused, nothing kept.
+        /// </summary>
+        private async Task DeliverAsync(SmtpClient smtp, MailMessage mail, string kind)
+        {
+            if (await EmailOnAsync())
+            {
+                await smtp.SendMailAsync(mail);
+                return;
+            }
+            if (_outbox == null)
+                throw new EmailSendingOffException(EmailOffMessage);
+            int id;
+            try
+            {
+                id = await _outbox.AddAsync(kind, string.Join(", ", mail.To.Select(a => a.Address)), mail.Subject ?? "", ToJson(mail));
+            }
+            catch (EmailOutboxMissingException)
+            {
+                _logger.LogWarning("[EMAIL] {Kind} not sent: Email Sending is off and SS_02 (Pending emails) is not installed.", kind);
+                throw new EmailSendingOffException(EmailOffMessage);
+            }
+            _logger.LogInformation("[EMAIL] {Kind} to {To} held as pending e-mail #{Id}: Email Sending is off.", kind, string.Join(", ", mail.To.Select(a => a.Address)), id);
+            throw new EmailHeldException(id);
+        }
+
+        private static string ToJson(MailMessage mail)
+        {
+            var held = new HeldEmail
+            {
+                FromName = mail.From?.DisplayName ?? "",
+                To = mail.To.Select(a => a.ToString()).ToList(),
+                Cc = mail.CC.Select(a => a.ToString()).ToList(),
+                Bcc = mail.Bcc.Select(a => a.ToString()).ToList(),
+                ReplyTo = mail.ReplyToList.Select(a => a.ToString()).ToList(),
+                Subject = mail.Subject ?? "",
+                Body = mail.Body ?? "",
+                IsHtml = mail.IsBodyHtml
+            };
+            foreach (var a in mail.Attachments)
+            {
+                using var ms = new MemoryStream();
+                if (a.ContentStream.CanSeek) a.ContentStream.Position = 0;
+                a.ContentStream.CopyTo(ms);
+                if (a.ContentStream.CanSeek) a.ContentStream.Position = 0;
+                held.Attachments.Add(new HeldAttachment
+                {
+                    FileName = a.Name ?? "attachment",
+                    ContentType = a.ContentType?.MediaType ?? "application/octet-stream",
+                    Base64 = Convert.ToBase64String(ms.ToArray())
+                });
+            }
+            return JsonSerializer.Serialize(held);
+        }
+
+        /// <summary>Sends a held e-mail (Pending emails) as it was asked for, from the current Email settings. Throws when it fails.</summary>
+        public async Task SendHeldAsync(string messageJson)
+        {
+            var held = JsonSerializer.Deserialize<HeldEmail>(messageJson) ?? throw new InvalidOperationException("The held e-mail could not be read.");
+            var (fromEmail, password, host, port) = GetEmailSettings();
+            if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(password))
+                throw new InvalidOperationException("Email is not set up on the server (Email:FromEmail / Password).");
+            if (held.To.Count == 0)
+                throw new InvalidOperationException("The held e-mail has no recipient.");
+
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(fromEmail, string.IsNullOrWhiteSpace(held.FromName) ? null : held.FromName),
+                Subject = held.Subject,
+                Body = held.Body,
+                IsBodyHtml = held.IsHtml
+            };
+            foreach (var a in held.To) mail.To.Add(a);
+            foreach (var a in held.Cc) mail.CC.Add(a);
+            foreach (var a in held.Bcc) mail.Bcc.Add(a);
+            foreach (var a in held.ReplyTo) mail.ReplyToList.Add(a);
+            foreach (var a in held.Attachments)
+                mail.Attachments.Add(new Attachment(new MemoryStream(Convert.FromBase64String(a.Base64)), a.FileName, a.ContentType));
+
+            using var smtp = CreateSmtpClient(fromEmail, password, host, port);
+            await smtp.SendMailAsync(mail);
         }
 
         private (string fromEmail, string password, string host, int port) GetEmailSettings()
@@ -83,10 +189,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mailMessage.ReplyToList.Add(replyTo);
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mailMessage);
+                await DeliverAsync(smtp, mailMessage, "Tour request notification");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Tour notification sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send tour notification.");
             }
@@ -135,10 +241,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mailMessage);
+                await DeliverAsync(smtp, mailMessage, "Quotation e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Quotation email sent to {To} via {Host}:{Port}", email, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send quotation email.");
             }
@@ -218,10 +324,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mailMessage);
+                await DeliverAsync(smtp, mailMessage, "Invoice / challan e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Challan email sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send challan email.");
                 throw;
@@ -288,10 +394,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mailMessage);
+                await DeliverAsync(smtp, mailMessage, "Booking confirmation e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Booking confirmation email sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send booking confirmation email.");
                 throw;
@@ -399,10 +505,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mail);
+                await DeliverAsync(smtp, mail, "Surcharge invoice e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Custom surcharge invoice email #{InvoiceNumber} with Statement PDF sent successfully to {ToEmail} via {Host}:{Port}.", invoiceNumber, toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send custom surcharge invoice email #{InvoiceNumber} to {ToEmail}.", invoiceNumber, toEmail);
                 throw;
@@ -457,10 +563,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mail);
+                await DeliverAsync(smtp, mail, "Agreement e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Agreement PDF email for quotation #{QuotationNumber} sent successfully to {ToEmail} via {Host}:{Port}.", quotationNumber, toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send agreement email for quotation #{QuotationNumber} to {ToEmail}.", quotationNumber, toEmail);
                 throw;
@@ -533,10 +639,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mail);
+                await DeliverAsync(smtp, mail, "Agreement reminder e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Agreement reminder #{ReminderNumber} for quotation #{QuotationNumber} sent to {ToEmail} via {Host}:{Port}.", reminderNumber, quotationNumber, toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send agreement reminder #{ReminderNumber} for quotation #{QuotationNumber} to {ToEmail}.", reminderNumber, quotationNumber, toEmail);
                 throw;
@@ -589,10 +695,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 mail.Body = html;
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mail);
+                await DeliverAsync(smtp, mail, "Announcement e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Announcement email '{Title}' sent successfully to {ToEmail} via {Host}:{Port}.", title, toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send announcement email '{Title}' to {ToEmail}.", title, toEmail);
                 throw;
@@ -625,10 +731,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 mail.Body = html;
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await smtp.SendMailAsync(mail);
+                await DeliverAsync(smtp, mail, "Report e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Report '{Subject}' sent to {ToEmail} via {Host}:{Port}.", subject, toEmail, host, port);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
             {
                 _logger.LogError(ex, "[EMAIL] Failed to send report '{Subject}' to {ToEmail}.", subject, toEmail);
                 throw;
