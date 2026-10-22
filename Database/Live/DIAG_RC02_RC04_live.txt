@@ -1,0 +1,70 @@
+-- ============================================================================================
+-- READ-ONLY diagnostics for RC_02 / RC_04 on the LIVE database (WorkNestAEO). Changes nothing.
+-- Run each numbered query on its own in DBeaver (put the cursor in it, Ctrl+Enter) and export / copy the result.
+-- Query 6 returns long procedure texts: export that result to a file in ~/Documents/WN/.
+-- ============================================================================================
+
+-- 1. Which database this is (must say WorkNestAEO).
+SELECT DB_NAME() AS DatabaseName, @@SERVERNAME AS ServerName;
+
+-- 2. Indexes on dbo.WN_FeeReceipts (the RC_02 index UQ_WN_FeeReceipts_InvoiceMonth_Active should NOT be there).
+SELECT i.name, i.is_unique, i.filter_definition,
+       STRING_AGG(c.name, ',') WITHIN GROUP (ORDER BY ic.key_ordinal) AS Columns
+  FROM sys.indexes i
+  JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+  JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+ WHERE i.object_id = OBJECT_ID('dbo.WN_FeeReceipts')
+ GROUP BY i.name, i.is_unique, i.filter_definition;
+
+-- 3. Columns of dbo.WN_FeeReceipts and the FR_01 columns of dbo.WN_Invoices.
+SELECT c.column_id, c.name, t.name AS type, c.max_length, c.precision, c.scale, c.is_nullable
+  FROM sys.columns c JOIN sys.types t ON t.user_type_id = c.user_type_id
+ WHERE c.object_id = OBJECT_ID('dbo.WN_FeeReceipts') ORDER BY c.column_id;
+SELECT name FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Invoices') AND name IN ('BalanceAmount', 'ApprovalStatus', 'PaidTotal');
+
+-- 4. The receipt procedures: last change and parameters (FR_01's WN_FeeReceipts_Insert has @Amount).
+SELECT o.name, o.modify_date,
+       (SELECT STRING_AGG(p.name, ', ') FROM sys.parameters p WHERE p.object_id = o.object_id) AS Parameters
+  FROM sys.objects o
+ WHERE o.name LIKE 'WN_FeeReceipt%' AND o.type IN ('P', 'FN', 'IF', 'TF', 'U')
+ ORDER BY o.name;
+
+-- 5. Invoices with more than one ACTIVE receipt: the rows RC_02's unique index (InvoiceIdGUID, MonthNo) WHERE Status = 1
+--    tripped over (MonthNo is NULL on every existing receipt, so they all share the key (invoice, NULL)).
+SELECT i.Id AS InvoiceId, i.InvoiceNumber, i.BookingId, i.StatusId, i.GrandTotal, i.WHTAmount, i.PaidTotal,
+       fr.Id AS ReceiptId, fr.Code, fr.ReceiptDate, fr.TotalAmount, fr.SecurityDepositAmount, fr.PaymentType,
+       fr.VoucherId, fr.Status, fr.CreatedOn, fr.CreatedById
+  FROM dbo.WN_FeeReceipts fr
+  JOIN dbo.WN_Invoices i ON i.PublicId = fr.InvoiceIdGUID
+ WHERE fr.Status = 1
+   AND fr.InvoiceIdGUID IN (SELECT InvoiceIdGUID FROM dbo.WN_FeeReceipts WHERE Status = 1
+                             GROUP BY InvoiceIdGUID HAVING COUNT(*) > 1)
+ ORDER BY i.Id, fr.ReceiptDate, fr.Id;
+
+-- 5b. Per invoice: do its active receipts add up to what was paid (part payments) or more (a real duplicate)?
+SELECT i.Id AS InvoiceId, i.InvoiceNumber, COUNT(*) AS ActiveReceipts, SUM(fr.TotalAmount) AS ReceiptsTotal,
+       i.PaidTotal, i.GrandTotal - ISNULL(i.WHTAmount, 0) AS NetDue,
+       CASE WHEN SUM(fr.TotalAmount) > i.GrandTotal - ISNULL(i.WHTAmount, 0) + 1 THEN 'MORE THAN DUE - check'
+            ELSE 'part payments (within the amount due)' END AS Looks
+  FROM dbo.WN_FeeReceipts fr
+  JOIN dbo.WN_Invoices i ON i.PublicId = fr.InvoiceIdGUID
+ WHERE fr.Status = 1
+ GROUP BY i.Id, i.InvoiceNumber, i.PaidTotal, i.GrandTotal, i.WHTAmount
+HAVING COUNT(*) > 1
+ ORDER BY i.Id;
+
+-- 6. Live definitions of the procedures RC_02 / RC_04 would replace (export this result to a file).
+SELECT o.name, OBJECT_DEFINITION(o.object_id) AS Definition
+  FROM sys.objects o
+ WHERE o.name IN ('WN_FeeReceipts_Insert', 'WN_FeeReceipts_Void', 'WN_FeeReceipts_GetList', 'WN_FeeReceipts_GetById',
+                  'WN_FeeReceipts_GetUnpaidInvoices')
+ ORDER BY o.name;
+
+-- 7. INV-REC-49-20261001: paid in full but status Unpaid.
+SELECT i.Id, i.InvoiceNumber, i.StatusId, os.Description AS Status, i.GrandTotal, i.PaidTotal, i.WHTAmount, i.SecurityDepositAmount
+  FROM dbo.WN_Invoices i LEFT JOIN dbo.OrderStatus os ON os.Id = i.StatusId
+ WHERE i.InvoiceNumber = 'INV-REC-49-20261001';
+SELECT fr.Id, fr.Code, fr.ReceiptDate, fr.TotalAmount, fr.Status, fr.CreatedOn
+  FROM dbo.WN_FeeReceipts fr JOIN dbo.WN_Invoices i ON i.PublicId = fr.InvoiceIdGUID
+ WHERE i.InvoiceNumber = 'INV-REC-49-20261001';
+SELECT Id, Description FROM dbo.OrderStatus WHERE Id IN (1, 2, 3, 4, 12, 61, 62, 63);

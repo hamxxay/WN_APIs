@@ -1,8 +1,9 @@
 -- ============================================================================================
--- RC_06: security deposits kept apart on the CEO dashboard's receivables aging and money received.
+-- RC_06: security deposits kept apart on the CEO dashboard's receivables aging and money received; a Paid invoice that
+-- still owes shows its balance.
 -- Run as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. No GO / USE needed.
 -- One transaction: if anything fails, nothing is changed. Safe to run again (CREATE OR ALTER). Changes no data.
--- Needs RC_05_ceo_fixes.txt (and so RC_01) first: dbo.WN_Ceo_Dashboard / dbo.WN_Ceo_Breakdown below are RC_05's with the
+-- Needs RC_05_ceo_fixes.txt (and so RC_01) first: dbo.WN_Ceo_Dashboard / _Breakdown / _Records_Invoices are RC_05's with the
 -- RC_06 changes; dbo.WN_Ceo_Records_Receipts is CP_02's with the RC_06 change.
 --
 -- Deposit owed of an invoice = its security deposit less the deposit's share of what is paid (paid in proportion, the
@@ -12,7 +13,11 @@
 --   dbo.WN_Ceo_Dashboard        [3] aging: Amount = rent owed (was the whole balance); + Deposits (deposits owed).
 --   dbo.WN_Ceo_Breakdown        metric aging: Value = rent owed (was the whole balance); Value2 = deposits owed (was NULL).
 --   dbo.WN_Ceo_Records_Receipts [0] + Deposits; [1] + Deposit (the deposit inside each receipt / payment's Amount).
--- Everything else in the three procedures is unchanged.
+--   dashboard, breakdown and dbo.WN_Ceo_Records_Invoices: an invoice with a Paid status that still owes (PaidTotal above
+--                               0 and below GrandTotal - WHT) counts as open with its balance (it was taken as paid in
+--                               full, so its balance was missing from Receivable / outstanding / aging). A Paid invoice
+--                               with no PaidTotal recorded (older rows) is still paid in full.
+-- Everything else in the four procedures is unchanged.
 -- ============================================================================================
 SET XACT_ABORT ON;
 BEGIN TRY
@@ -190,8 +195,10 @@ BEGIN
       FROM dbo.WN_Invoices i WITH (NOLOCK)
       LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
       LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
-      LEFT JOIN @Open o ON o.Id = i.StatusId
-      LEFT JOIN @Paid p ON p.Id = i.StatusId
+      OUTER APPLY (SELECT TOP 1 x.Id FROM @Open x   -- RC_06: a Paid status that still owes counts as open
+                    WHERE x.Id = i.StatusId OR (ISNULL(i.PaidTotal, 0) > 0 AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0 AND EXISTS (SELECT 1 FROM @Paid y WHERE y.Id = i.StatusId))
+                    ORDER BY CASE WHEN x.Id = i.StatusId THEN 0 ELSE 1 END, x.Id) o
+      LEFT JOIN @Paid p ON p.Id = i.StatusId AND NOT (ISNULL(i.PaidTotal, 0) > 0 AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0)   -- RC_06: paid only when nothing is left (or nothing recorded)
      CROSS APPLY (SELECT COALESCE(CAST(i.BillingPeriodStart AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N''%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%'', i.Notes), 0) + 7, 10), 23), i.IssuedOn) AS PeriodOn) pd   -- CP_01
      CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0 WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END AS DECIMAL(18,4)) AS Deposit,   -- CP_02: refundable security deposit (inside GrandTotal)
                          CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp   -- CP_02: paid so far (Paid = in full; WHT left only = settled)
@@ -645,8 +652,10 @@ BEGIN
           FROM dbo.WN_Invoices i WITH (NOLOCK)
           LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
           LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
-          LEFT JOIN @Open o ON o.Id = i.StatusId
-          LEFT JOIN @Paid p ON p.Id = i.StatusId
+          OUTER APPLY (SELECT TOP 1 x.Id FROM @Open x   -- RC_06: a Paid status that still owes counts as open
+                        WHERE x.Id = i.StatusId OR (ISNULL(i.PaidTotal, 0) > 0 AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0 AND EXISTS (SELECT 1 FROM @Paid y WHERE y.Id = i.StatusId))
+                        ORDER BY CASE WHEN x.Id = i.StatusId THEN 0 ELSE 1 END, x.Id) o
+          LEFT JOIN @Paid p ON p.Id = i.StatusId AND NOT (ISNULL(i.PaidTotal, 0) > 0 AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0)   -- RC_06: paid only when nothing is left (or nothing recorded)
          CROSS APPLY (SELECT COALESCE(CAST(i.BillingPeriodStart AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N''%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%'', i.Notes), 0) + 7, 10), 23), i.IssuedOn) AS PeriodOn) pd   -- CP_01
          CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0 WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END AS DECIMAL(18,4)) AS Deposit,   -- CP_02: refundable security deposit (inside GrandTotal)
                              CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp   -- CP_02: paid so far (Paid = in full; WHT left only = settled)
@@ -964,8 +973,205 @@ BEGIN
      ORDER BY r.ReceivedOn DESC, r.Kind, r.RefId DESC;
 END;');
 
+    -- 4. dbo.WN_Ceo_Records_Invoices: RC_05 + a Paid status that still owes counts as open.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Ceo_Records_Invoices
+    @MonthStart    DATE = NULL,           -- CP_01: billing period starts in this month
+    @LocationId    INT = NULL,            -- invoices of this location’s spaces
+    @NoLocation    BIT = 0,               -- 1 = only invoices not tied to a location (breakdown row ’none’)
+    @Bucket        NVARCHAR(20) = NULL,   -- open invoices in this aging bucket: not_due | 1_30 | 31_60 | 61_90 | 90_plus
+    @CustomerId    INT = NULL,            -- this customer (without a month: the last 12 months, as top customers)
+    @Status        NVARCHAR(20) = NULL,   -- open | overdue | paid | advance (CP_01: billed in advance) | collected | deposit (CP_02) | receivable (RC_05)
+    @BizNow        DATETIME2(0) = NULL,
+    @OpenStatusIds NVARCHAR(400) = NULL,
+    @PaidStatusIds NVARCHAR(400) = NULL,
+    @VoidStatusIds NVARCHAR(400) = NULL,
+    @Top           INT = 200,
+    @From          DATE = NULL,           -- CS_01: billing period starts (CP_01) on or after this day (a custom period’s revenue)
+    @To            DATE = NULL            -- CS_01: billing period starts (CP_01) on or before this day
+AS
+BEGIN
+    -- CEO dashboard drill-down level 3 (read-only): invoices, newest first. Which invoices count (not void, location
+    -- by booking -> space, open / paid / aging) as dbo.WN_Ceo_Dashboard; the columns paid, balance and status as the
+    -- invoice list (dbo.WN_GetInvoicesList). CS_01: @From / @To = issued in that range (days included).
+    -- CP_01: month / @From / @To / the 12 months of a customer by billing period (PeriodOn = BillingPeriodStart, else
+    -- the date after Period in Notes, else IssuedOn; the 12 months end with this month), as the dashboard; billed in advance (open, PeriodOn after today,
+    -- not due yet) is not open / in an aging bucket, @Status advance = only those. Rows by billing period, newest
+    -- first; PeriodStart / PeriodEnd (NULL when unknown) appended to [1].
+    -- RC_03: with a period (month / @From / @To / a customer''s 12 months) an invoice is listed when any of its receipt
+    -- months (dbo.WN_FeeReceipt_MonthPlan) falls in it, and Billed / Collected / Deposit are those months'' shares (as the
+    -- dashboard); Total / Paid / Balance stay the whole invoice. Without a period: the whole invoice, as before.
+    -- RC_05: WhtOpen = the WHT not paid (withheld by the customer, never paid): with a period per month (the month''s WHT
+    -- at most what is left of it), else the invoice''s WHT at most Billed - Collected; Receivable = Billed - Collected -
+    -- WhtOpen (what the customer still has to pay for those months / the invoice). @Status receivable = only the invoices
+    -- with a Receivable above 0. Appended: [0] Receivable (SUM(Billed) - SUM(Collected) - SUM(WhtOpen)), WhtOpen;
+    -- [1] WhtOpen, Receivable.
+    -- Result sets: [0] Total (all matching), [1] the first @Top rows.
+    SET NOCOUNT ON;
+    IF @LocationId <= 0 SET @LocationId = NULL;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 200;
+    SET @Status = NULLIF(LOWER(LTRIM(RTRIM(@Status))), N'''');
+    DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, SYSDATETIME());
+    DECLARE @Today DATE = CAST(@Now AS DATE);
+    DECLARE @SeriesStart DATE = DATEADD(MONTH, -11, DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1));
+    DECLARE @SeriesEnd DATE = DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1));   -- CP_01: first day after this month
+    DECLARE @MonthEnd DATE = CASE WHEN @MonthStart IS NULL THEN NULL ELSE DATEADD(MONTH, 1, @MonthStart) END;
+    DECLARE @BucketNo INT = CASE @Bucket WHEN N''not_due'' THEN 0 WHEN N''1_30'' THEN 1 WHEN N''31_60'' THEN 2
+                                         WHEN N''61_90'' THEN 3 WHEN N''90_plus'' THEN 4 ELSE NULL END;
+    -- RC_03: the period window [@WS, @WE) (NULL = open): month, @From / @To and a customer''s 12 months together.
+    DECLARE @ThisMonth DATE = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
+    DECLARE @WS DATE = @MonthStart, @WE DATE = @MonthEnd;
+    IF @From IS NOT NULL AND (@WS IS NULL OR @From > @WS) SET @WS = @From;
+    IF @To IS NOT NULL AND @To < ''99991231'' AND (@WE IS NULL OR DATEADD(DAY, 1, @To) < @WE) SET @WE = DATEADD(DAY, 1, @To);
+    IF @CustomerId IS NOT NULL AND @MonthStart IS NULL
+    BEGIN
+        IF @WS IS NULL OR @SeriesStart > @WS SET @WS = @SeriesStart;
+        IF @WE IS NULL OR @SeriesEnd < @WE SET @WE = @SeriesEnd;
+    END;
+    DECLARE @HasWin BIT = CASE WHEN @WS IS NOT NULL OR @WE IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @Open TABLE (Id INT PRIMARY KEY);
+    DECLARE @Paid TABLE (Id INT PRIMARY KEY);
+    DECLARE @Void TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Open (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@OpenStatusIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    INSERT INTO @Paid (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@PaidStatusIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    INSERT INTO @Void (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@VoidStatusIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    DECLARE @Loc TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200));
+    INSERT INTO @Loc
+    SELECT l.Id, ISNULL(NULLIF(LTRIM(RTRIM(CAST(l.Name AS NVARCHAR(200)))), N''''), CONCAT(N''Location '', l.Id))
+      FROM dbo.WN_Locations l WITH (NOLOCK)
+     WHERE l.IsActive = 1 OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.LocationId = l.Id AND s.Status = 1);
+    DECLARE @Spaces TABLE (Id INT PRIMARY KEY, LocationId INT NULL);
+    INSERT INTO @Spaces (Id, LocationId)
+    SELECT s.Id, s.LocationId FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.Status = 1 AND (@LocationId IS NULL OR s.LocationId = @LocationId);
+    -- customer as on the dashboard’s top customers: booking customer code, else the user’s customer record, else the user
+    DECLARE @Inv TABLE (Id INT PRIMARY KEY, LocationId INT NULL, IssuedOn DATE NULL, Customer NVARCHAR(400) NULL,
+                        PeriodOn DATE NULL, PeriodStart DATE NULL, PeriodEnd DATE NULL,   -- CP_01
+                        Billed DECIMAL(18,4) NULL, Collected DECIMAL(18,4) NULL, Balance DECIMAL(18,4) NULL,   -- CP_02
+                        Deposit DECIMAL(18,4) NULL,   -- RC_03: security deposit (with a period: of its months)
+                        WhtOpen DECIMAL(18,4) NULL);   -- RC_05: WHT not paid (with a period: of its months)
+    INSERT INTO @Inv (Id, LocationId, IssuedOn, Customer, PeriodOn, PeriodStart, PeriodEnd, Billed, Collected, Balance, Deposit, WhtOpen)   -- CP_02; RC_03; RC_05
+    SELECT i.Id, sp.LocationId, i.IssuedOn,
+           COALESCE(NULLIF(cust.Name, N''''), NULLIF(u.Name, N''''), NULLIF(u.UserName, N''''), CONCAT(N''Customer #'', ISNULL(b.UserId, i.UserId))),
+           pd.PeriodOn, ps.PeriodStart, ps.PeriodEnd,
+           ISNULL(i.GrandTotal, 0) - cp.Deposit, cc.Collected, bl.Balance, cp.Deposit,   -- CP_02; RC_03
+           CASE WHEN ISNULL(i.GrandTotal, 0) - cp.Deposit - cc.Collected <= 0 OR ISNULL(i.WHTAmount, 0) <= 0 THEN 0
+                WHEN i.WHTAmount < ISNULL(i.GrandTotal, 0) - cp.Deposit - cc.Collected THEN i.WHTAmount
+                ELSE ISNULL(i.GrandTotal, 0) - cp.Deposit - cc.Collected END   -- RC_05: the whole invoice''s WHT not paid
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
+      OUTER APPLY (SELECT TOP 1 x.Id FROM @Open x   -- RC_06: a Paid status that still owes counts as open
+                    WHERE x.Id = i.StatusId OR (ISNULL(i.PaidTotal, 0) > 0 AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0 AND EXISTS (SELECT 1 FROM @Paid y WHERE y.Id = i.StatusId))
+                    ORDER BY CASE WHEN x.Id = i.StatusId THEN 0 ELSE 1 END, x.Id) o
+      LEFT JOIN @Paid p ON p.Id = i.StatusId AND NOT (ISNULL(i.PaidTotal, 0) > 0 AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0)   -- RC_06: paid only when nothing is left (or nothing recorded)
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(b.UserId, i.UserId)
+     OUTER APPLY (SELECT TOP 1 cu.Id, COALESCE(NULLIF(cu.Company, N''''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, N'' '', cu.LastName))), N''''), cu.Email) AS Name
+                    FROM dbo.WN_Customers cu WITH (NOLOCK)
+                   WHERE (b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode)
+                      OR (ISNULL(b.UserId, i.UserId) IS NOT NULL AND cu.UserId = ISNULL(b.UserId, i.UserId))
+                      OR (u.Email IS NOT NULL AND cu.Email = u.Email)
+                   ORDER BY CASE WHEN b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode THEN 0
+                                 WHEN cu.UserId = ISNULL(b.UserId, i.UserId) THEN 1 ELSE 2 END, cu.Id) cust
+     CROSS APPLY (SELECT CASE WHEN i.DueOn IS NULL OR i.DueOn >= @Today THEN 0
+                              WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 30 THEN 1
+                              WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 60 THEN 2
+                              WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 90 THEN 3
+                              ELSE 4 END AS AgeBucket) ab
+     CROSS APPLY (SELECT COALESCE(CAST(i.BillingPeriodStart AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N''%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%'', i.Notes), 0) + 7, 10), 23)) AS PeriodStart,
+                         COALESCE(CAST(i.BillingPeriodEnd AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N''%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] to [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%'', i.Notes), 0) + 21, 10), 23)) AS PeriodEnd) ps   -- CP_01
+     CROSS APPLY (SELECT COALESCE(ps.PeriodStart, i.IssuedOn) AS PeriodOn) pd   -- CP_01: billing period start, else issue date
+     CROSS APPLY (SELECT CASE WHEN p.Id IS NOT NULL THEN 0 ELSE ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) END AS Balance) bl   -- CP_02: owed now; 0 when paid
+     CROSS APPLY (SELECT CASE WHEN o.Id IS NOT NULL AND pd.PeriodOn > @Today AND (i.DueOn IS NULL OR i.DueOn >= @Today) AND bl.Balance > 0 THEN 1 ELSE 0 END AS IsAdvance) adv   -- CP_01: billed in advance; CP_02: something left to pay
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0 WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END AS DECIMAL(18,4)) AS Deposit,   -- CP_02: refundable security deposit (inside GrandTotal)
+                         CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp   -- CP_02: paid so far (Paid = in full; WHT left only = settled)
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.GrandTotal, 0) > 0 THEN cp.Settled * (ISNULL(i.GrandTotal, 0) - cp.Deposit) / i.GrandTotal ELSE 0 END AS DECIMAL(18,4)) AS Collected) cc   -- CP_02: collected without the deposit''s share
+     WHERE i.StatusId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @Void v WHERE v.Id = i.StatusId) AND ISNULL(i.StatusId, 0) <> 40
+       AND (@LocationId IS NULL OR sp.Id IS NOT NULL)
+       AND (ISNULL(@NoLocation, 0) = 0 OR sp.LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @Loc l WHERE l.Id = sp.LocationId))
+       AND (@WE IS NULL OR pd.PeriodOn < @WE)                                              -- CP_01 / CS_01; RC_03: may have a month in
+       AND (@WS IS NULL OR pd.PeriodOn >= @WS OR ps.PeriodEnd >= @WS)                      -- the window (checked per month below)
+       AND (@Bucket IS NULL OR (o.Id IS NOT NULL AND adv.IsAdvance = 0 AND ab.AgeBucket = ISNULL(@BucketNo, -1) AND bl.Balance > 0))   -- CP_02: something left to pay
+       AND (@Status IS NULL
+            OR (@Status = N''open'' AND o.Id IS NOT NULL AND adv.IsAdvance = 0 AND bl.Balance > 0)   -- CP_02
+            OR (@Status = N''overdue'' AND o.Id IS NOT NULL AND i.DueOn < @Today AND bl.Balance > 0)   -- CP_02
+            OR (@Status = N''collected'' AND (@HasWin = 1 OR cc.Collected > 0))   -- CP_02: something paid (the Collected drill); RC_03: with a period below
+            OR (@Status = N''deposit'' AND (@HasWin = 1 OR cp.Deposit > 0))   -- CP_02: with a security deposit (the Security deposits drill); RC_03
+            OR (@Status = N''paid'' AND p.Id IS NOT NULL)
+            OR (@Status = N''advance'' AND adv.IsAdvance = 1)   -- CP_01
+            OR (@Status = N''receivable'' AND (@HasWin = 1 OR p.Id IS NULL)))   -- RC_05: something left to pay (checked below)
+       AND (@CustomerId IS NULL OR cust.Id = @CustomerId);   -- RC_03: the 12 months are in @WS / @WE
+    IF @HasWin = 1   -- RC_03: only the invoices with a month in the window, with those months'' shares
+    BEGIN
+        -- RC_03: the invoices per receipt MONTH (dbo.WN_FeeReceipt_MonthPlan: a multi-month invoice one row per calendar
+        -- month, any other invoice one row). MStart = where the month''s share is placed (month 1: PeriodOn, as before; a later
+        -- month: its first day); Revenue = the month''s share without the security deposit (month 1 takes the rest, so the
+        -- months add up to GrandTotal - Deposit exactly; one row = GrandTotal - Deposit as before); Deposit all on month 1;
+        -- Paid = the invoice''s Collected spread over its months oldest first (month k: at most its Revenue), a later month
+        -- counted only once it has started (its receipt is issued then; month 1 as before), so the CMS''s Revenue - Paid is
+        -- what is still owed for the months that have started.
+        -- RC_05: WhtOpen per month as dbo.WN_Ceo_Dashboard. @Inv holds only the invoices that can reach the window (PeriodOn
+        -- before @WE, from @WS or ending on / after it: the WHERE above), so the month plan runs only for those.
+        DECLARE @InvM TABLE (InvoiceId INT NOT NULL, MonthNo INT NOT NULL, MStart DATE NULL, BillingMonth DATE NULL,   -- RC_03
+                             Revenue DECIMAL(18,4) NOT NULL, Deposit DECIMAL(18,4) NOT NULL, Paid DECIMAL(18,4) NOT NULL,
+                             WhtOpen DECIMAL(18,4) NOT NULL,   -- RC_05
+                             PRIMARY KEY (InvoiceId, MonthNo));
+        INSERT INTO @InvM (InvoiceId, MonthNo, MStart, BillingMonth, Revenue, Deposit, Paid, WhtOpen)   -- RC_03; RC_05
+        SELECT i.Id, r.MonthNo, r.MStart, r.BillingMonth, r.Revenue, r.Deposit, pp.Paid,
+               CASE WHEN r.Revenue - pp.Paid <= 0 THEN 0 WHEN r.Wht < r.Revenue - pp.Paid THEN r.Wht ELSE r.Revenue - pp.Paid END   -- RC_05
+          FROM @Inv i
+         CROSS APPLY (SELECT q.MonthNo, q.MonthCount, q.BillingMonth, q.MStart, q.Revenue, q.Deposit, q.Wht,
+                             ISNULL(SUM(q.Revenue) OVER (ORDER BY q.MonthNo ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS RevBefore
+                        FROM (SELECT mp.MonthNo, mp.MonthCount, mp.BillingMonth,
+                                     CASE WHEN mp.MonthNo = 1 THEN i.PeriodOn ELSE mp.PeriodFrom END AS MStart,
+                                     CAST(CASE WHEN mp.MonthNo = 1 THEN i.Billed - CAST(ISNULL(SUM(CASE WHEN mp.MonthNo > 1 THEN mp.Revenue END) OVER (), 0) AS DECIMAL(18,2))
+                                               ELSE mp.Revenue END AS DECIMAL(18,4)) AS Revenue,
+                                     CAST(CASE WHEN mp.MonthNo = 1 THEN i.Deposit ELSE 0 END AS DECIMAL(18,4)) AS Deposit,
+                                     CAST(CASE WHEN mp.WHT > 0 THEN mp.WHT ELSE 0 END AS DECIMAL(18,4)) AS Wht   -- RC_05
+                                FROM dbo.WN_FeeReceipt_MonthPlan(i.Id) mp) q) r   -- RC_03
+         CROSS APPLY (SELECT CAST(CASE WHEN r.MonthNo > 1 AND r.BillingMonth > @ThisMonth THEN 0                       -- a later month: paid once started
+                                       WHEN r.MonthNo = r.MonthCount THEN CASE WHEN i.Collected - r.RevBefore > 0 THEN i.Collected - r.RevBefore ELSE 0 END
+                                       WHEN i.Collected - r.RevBefore <= 0 THEN 0
+                                       WHEN i.Collected - r.RevBefore >= r.Revenue THEN r.Revenue
+                                       ELSE i.Collected - r.RevBefore END AS DECIMAL(18,4)) AS Paid) pp;   -- RC_05: as RC_03, named
+        DELETE x FROM @Inv x
+         WHERE NOT EXISTS (SELECT 1 FROM @InvM m WHERE m.InvoiceId = x.Id AND (@WS IS NULL OR m.MStart >= @WS) AND (@WE IS NULL OR m.MStart < @WE));
+        UPDATE x SET Billed = w.Revenue, Collected = w.Paid, Deposit = w.Deposit, WhtOpen = w.WhtOpen   -- RC_05: WhtOpen
+          FROM @Inv x
+          JOIN (SELECT m.InvoiceId, SUM(m.Revenue) AS Revenue, SUM(m.Paid) AS Paid, SUM(m.Deposit) AS Deposit, SUM(m.WhtOpen) AS WhtOpen
+                  FROM @InvM m
+                 WHERE (@WS IS NULL OR m.MStart >= @WS) AND (@WE IS NULL OR m.MStart < @WE)
+                 GROUP BY m.InvoiceId) w ON w.InvoiceId = x.Id;
+        IF @Status = N''collected'' DELETE FROM @Inv WHERE Collected <= 0;   -- something paid for those months
+        IF @Status = N''deposit'' DELETE FROM @Inv WHERE Deposit <= 0;       -- a deposit in those months (month 1)
+    END;
+    IF @Status = N''receivable'' DELETE FROM @Inv WHERE Billed - Collected - WhtOpen <= 0;   -- RC_05: something left to pay
+    SELECT COUNT(*) AS Total,   -- CP_02: the totals of every matching invoice (not only the first @Top)
+           ISNULL(SUM(Billed), 0) AS Billed, ISNULL(SUM(Collected), 0) AS Collected, ISNULL(SUM(CASE WHEN Balance > 0 THEN Balance ELSE 0 END), 0) AS Balance,
+           ISNULL(SUM(Billed), 0) - ISNULL(SUM(Collected), 0) - ISNULL(SUM(WhtOpen), 0) AS Receivable,   -- RC_05: still to pay (the window''s months)
+           ISNULL(SUM(WhtOpen), 0) AS WhtOpen   -- RC_05
+      FROM @Inv;
+    SELECT TOP (@Top)
+           i.Id AS InvoiceId, i.InvoiceNumber, x.Customer, loc.Name AS Location, i.IssuedOn, i.DueOn,
+           ISNULL(i.GrandTotal, 0) AS Total,
+           ISNULL(i.PaidTotal, 0) AS Paid,
+           x.Balance AS Balance,   -- CP_02: GrandTotal - WHT - PaidTotal (WHT is withheld, not owed); 0 when paid
+           COALESCE(
+               CASE i.StatusId WHEN 1 THEN ''Unpaid'' WHEN 2 THEN ''Paid'' WHEN 3 THEN ''Partial'' WHEN 4 THEN ''Overdue'' WHEN 5 THEN ''Cancelled'' END,
+               (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN ''Un Paid'' THEN ''Unpaid'' WHEN ''Challan Expire'' THEN ''Overdue'' ELSE LTRIM(RTRIM(os.Description)) END
+                  FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
+               ''Unknown'') AS Status,
+           x.PeriodStart, x.PeriodEnd,   -- CP_01: billing period (NULL when unknown)
+           ISNULL(i.WHTAmount, 0) AS Wht, x.Deposit AS Deposit,   -- CP_02: WHT withheld; security deposit (RC_03: of the window''s months)
+           x.Billed, x.Collected,   -- CP_02: GrandTotal less the deposit; paid so far less the deposit''s share (RC_03: with a period, of its months)
+           x.WhtOpen, x.Billed - x.Collected - x.WhtOpen AS Receivable   -- RC_05
+      FROM @Inv x
+      JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = x.Id
+      LEFT JOIN @Loc loc ON loc.Id = x.LocationId
+     ORDER BY x.PeriodOn DESC, x.Id DESC;   -- CP_01: by billing period
+END;');
+
     COMMIT TRANSACTION;
-    SELECT 'dbo.WN_Ceo_Dashboard, dbo.WN_Ceo_Breakdown, dbo.WN_Ceo_Records_Receipts updated (RC_06: security deposits apart).' AS Result;
+    SELECT 'dbo.WN_Ceo_Dashboard, dbo.WN_Ceo_Breakdown, dbo.WN_Ceo_Records_Receipts, dbo.WN_Ceo_Records_Invoices updated (RC_06).' AS Result;
 END TRY
 BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
