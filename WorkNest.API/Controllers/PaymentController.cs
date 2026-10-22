@@ -239,7 +239,10 @@ namespace WorkNest.API.Controllers
         [DisableRateLimiting] // machine-to-machine caller: never throttle
         [HttpPost("api/onebill/payment-notification")]
         [AllowAnonymous]
-        public async Task<IActionResult> OneBillPaymentNotification(CancellationToken ct)
+        public async Task<IActionResult> OneBillPaymentNotification(
+            [FromHeader(Name = "api_key")] string? apiKey = null,
+            [FromQuery(Name = "api_key")] string? queryApiKey = null,
+            CancellationToken ct = default)
         {
             var expectedKey = _config["OneBill:NotifyApiKey"] ?? _config["OneBill:ApiKey"];
             if (string.IsNullOrWhiteSpace(expectedKey))
@@ -247,10 +250,13 @@ namespace WorkNest.API.Controllers
                 _logger.LogError("One Bill notification refused: OneBill:ApiKey or OneBill:NotifyApiKey is not set in configuration.");
                 return StatusCode(503, OneBillError("Notifications are not set up."));
             }
-            var sentKey = Request.Headers["api_key"].FirstOrDefault()
+            var sentKey = apiKey
+                          ?? queryApiKey
+                          ?? Request.Headers["api_key"].FirstOrDefault()
                           ?? Request.Headers["api-key"].FirstOrDefault()
                           ?? Request.Headers["x-api-key"].FirstOrDefault()
-                          ?? Request.Headers["X-API-KEY"].FirstOrDefault();
+                          ?? Request.Headers["X-API-KEY"].FirstOrDefault()
+                          ?? Request.Headers["Authorization"].FirstOrDefault()?.Replace("Bearer ", "", StringComparison.OrdinalIgnoreCase).Trim();
             if (!SameOneBillKey(sentKey, expectedKey))
             {
                 _logger.LogWarning("One Bill notification refused: wrong or missing api_key (from {Ip}).", RemoteIp());
