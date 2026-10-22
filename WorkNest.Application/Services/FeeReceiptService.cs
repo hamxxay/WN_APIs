@@ -258,6 +258,8 @@ namespace WorkNest.Application.Services
             // InvoiceTypeId: 0 when the procedure does not return it (older database).
             var invoiceTypeId = GetInt(r, "InvoiceTypeId");
             var isCustom = invoiceTypeId == CustomInvoiceTypeId;
+            var isWht = invoiceTypeId == 6 || GetDecimal(r, "WHTAmount") > 0;
+            var allowPartial = (Value(r, "AllowPartial") != null ? GetBool(r, "AllowPartial") : !isWht) && !isCustom && !isWht;
             return new FeeReceiptUnpaidInvoiceDto
             {
                 InvoiceId = GetInt(r, "InvoiceId"),
@@ -299,7 +301,7 @@ namespace WorkNest.Application.Services
                     : Math.Max(0, Math.Round(GetDecimal(r, "NetReceivableAmount") - GetDecimal(r, "PaidTotal"), 2)),
                 PaymentStatus = GetString(r, "PaymentStatus", "Unpaid"),
                 // Custom invoices are paid in full only, whatever the procedure says (LIVE answers 1 for type 7).
-                AllowPartial = GetBool(r, "AllowPartial") && !isCustom
+                AllowPartial = allowPartial
             };
         }
 

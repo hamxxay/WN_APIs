@@ -98,7 +98,9 @@ BEGIN
         loc.CompanyId,
         loc.BranchId,
         i.StatusId,
-        CASE WHEN i.StatusId IN (4, @OverdueId) THEN ''Overdue'' ELSE ''Unpaid'' END AS StatusLabel
+        CASE WHEN i.StatusId IN (4, @OverdueId) THEN ''Overdue'' ELSE ''Unpaid'' END AS StatusLabel,
+        CAST(ROUND(ISNULL(i.PaidTotal, 0), 2) AS DECIMAL(18,2)) AS AmountPaid,
+        CAST(CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN 0 ELSE 1 END AS BIT) AS AllowPartial
     FROM dbo.WN_Invoices i WITH (NOLOCK)
     OUTER APPLY (SELECT TOP 1 cu.Code, cu.FirstName, cu.LastName, cu.PhoneNumber, cu.Company, cu.IdGUID
                    FROM dbo.WN_Customers cu WITH (NOLOCK)
