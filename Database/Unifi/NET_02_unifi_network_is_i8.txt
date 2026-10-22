@@ -1,0 +1,44 @@
+-- ============================================================================================
+-- NET_02: the UniFi network is I-8's (dbo.WN_Locations Id 1). Run on the LIVE database (WorkNestAEO), and on the test
+-- database if it is not set there. Run as ONE statement in DBeaver (select all, then Ctrl+Enter). Safe to run again.
+--
+-- The CEO / Sales Manager dashboards show a UniFi site's network only for the locations it serves: its own rows in
+-- dbo.WN_UNIFI_SiteLocations first, else the network-wide setting WN_UNIFI_Settings 'LocationIds' (the Network
+-- Overview's location chip), else EVERY location. With nothing saved, F-7 (and every other location) showed I-8's
+-- network. This sets the network-wide setting to 1 (I-8) and removes site rows that point anywhere else, so:
+--   I-8 or All locations selected  -> the network section shows I-8's UniFi figures;
+--   F-7 (or any other) selected    -> "No UniFi site serves this location" instead of I-8's figures.
+-- Changes only these two UniFi tables. The API reads the setting on its next poll (within a minute or two).
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_UNIFI_Settings', N'U') IS NULL
+        THROW 50001, N'dbo.WN_UNIFI_Settings is missing (the UniFi scripts have not run on this database). Nothing changed.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WHERE Id = 1)
+        THROW 50002, N'dbo.WN_Locations has no Id 1. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- 1. The whole network serves location 1 (I-8).
+    IF EXISTS (SELECT 1 FROM dbo.WN_UNIFI_Settings WHERE SettingKey = N'LocationIds')
+        UPDATE dbo.WN_UNIFI_Settings
+           SET SettingValue = N'1', UpdatedAt = SYSUTCDATETIME(), UpdatedBy = N'NET_02'
+         WHERE SettingKey = N'LocationIds' AND ISNULL(SettingValue, N'') <> N'1';
+    ELSE
+        INSERT INTO dbo.WN_UNIFI_Settings (SettingKey, SettingValue, UpdatedAt, UpdatedBy)
+        VALUES (N'LocationIds', N'1', SYSUTCDATETIME(), N'NET_02');
+
+    -- 2. Site rows (when that table exists) may only point at I-8: a row for another location would show I-8's
+    --    network there again, since a site's own rows win over the setting.
+    IF OBJECT_ID(N'dbo.WN_UNIFI_SiteLocations', N'U') IS NOT NULL
+        EXEC(N'DELETE FROM dbo.WN_UNIFI_SiteLocations WHERE LocationId <> 1;');
+
+    COMMIT TRANSACTION;
+
+    SELECT N'OK: the UniFi network now serves I-8 only (location 1).' AS Result,
+           (SELECT SettingValue FROM dbo.WN_UNIFI_Settings WHERE SettingKey = N'LocationIds') AS NetworkLocationIds;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

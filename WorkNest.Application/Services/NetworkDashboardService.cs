@@ -80,7 +80,7 @@ namespace WorkNest.Application.Services
                     };
                 }
 
-                var dto = await _unifi.GetNetworkSectionAsync(visible.Select(v => v.Site.Id).ToList(), ClientsWait);
+                var dto = await _unifi.GetNetworkSectionAsync(visible.Select(v => v.Site.Id).ToList(), ClientsWait, scope.Usage);
                 dto.Available = true;
                 dto.LocationId = locationId;
                 dto.UpdatedAt = updatedText;

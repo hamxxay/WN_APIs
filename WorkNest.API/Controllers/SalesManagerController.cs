@@ -99,11 +99,15 @@ namespace WorkNest.API.Controllers
         /// Read-only; UniFi not set up or not reachable: 200 with available = false and a short message.
         /// </summary>
         [HttpGet("api/sales-manager/network")]
-        public async Task<IActionResult> Network([FromQuery] int? locationId, [FromServices] INetworkDashboardService network)
+        public async Task<IActionResult> Network([FromQuery] int? locationId, [FromServices] INetworkDashboardService network,
+            [FromQuery] string? period = null, [FromQuery] string? from = null, [FromQuery] string? to = null, [FromServices] IBusinessClock? clock = null)
         {
             var scope = Scope(locationId, false, out var refusal);
             if (scope == null) return refusal!;
-            return Ok(ApiResponse.Ok(await network.GetAsync(new NetworkScope(scope.MyLocations, scope.LocationId),
+            // period / from / to (as the dashboard call): the top data users over that period; none = today.
+            var usage = NetworkUsageRange.FromPeriod(period, from, to, clock?.Today ?? PakistanNow().Date, clock?.Now ?? PakistanNow(), out var periodError);
+            if (periodError != null) return BadRequest(ApiResponse.Fail(periodError));
+            return Ok(ApiResponse.Ok(await network.GetAsync(new NetworkScope(scope.MyLocations, scope.LocationId, usage),
                 HttpContext?.RequestAborted ?? default)));
         }
 
@@ -150,5 +154,7 @@ namespace WorkNest.API.Controllers
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
             }
         }
+        /// <summary>Pakistan wall-clock time (UTC+5), when no business clock is given.</summary>
+        private static DateTime PakistanNow() => DateTime.SpecifyKind(DateTime.UtcNow.AddHours(5), DateTimeKind.Unspecified);
     }
 }

@@ -9,7 +9,37 @@ namespace WorkNest.Application.DTOs.Dashboard
     /// What the caller may see: <see cref="MyLocations"/> = the Sales Manager's locations (null = every location: CEO,
     /// super admin); <see cref="LocationId"/> = the one chosen (null = all of them).
     /// </summary>
-    public sealed record NetworkScope(IReadOnlyList<int>? MyLocations, int? LocationId);
+    public sealed record NetworkScope(IReadOnlyList<int>? MyLocations, int? LocationId, NetworkUsageRange? Usage = null);
+
+    /// <summary>
+    /// The dashboard's period for the top data users: Pakistan days <see cref="From"/> to <see cref="To"/> (to included),
+    /// labelled as the dashboard labels it ("October 2026", "Q4 2026", "1 Oct - 15 Oct 2026").
+    /// </summary>
+    public sealed record NetworkUsageRange(DateTime From, DateTime To, string Label)
+    {
+        public const int PakistanUtcOffsetHours = 5;
+        public int Days => (To.Date - From.Date).Days + 1;
+        public long StartMs => new DateTimeOffset(DateTime.SpecifyKind(From.Date.AddHours(-PakistanUtcOffsetHours), DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        public long EndMs => new DateTimeOffset(DateTime.SpecifyKind(To.Date.AddDays(1).AddHours(-PakistanUtcOffsetHours), DateTimeKind.Utc)).ToUnixTimeMilliseconds();
+        public int WithinHours => Days * 24;
+        public string Key => $"{From:yyyyMMdd}-{To:yyyyMMdd}";
+
+        /// <summary>The period of a dashboard call (period / from / to as the other dashboard calls send them); null = no period sent.</summary>
+        public static NetworkUsageRange? FromPeriod(string? period, string? from, string? to, DateTime today, DateTime now, out string? error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(period) && string.IsNullOrWhiteSpace(from)) return null;
+            if (!Helpers.DashboardPeriod.TryParse(period, from, to, today, out var p, out error)) return null;
+            if (p.IsCustom) return new NetworkUsageRange(p.From!.Value, p.To!.Value, p.Label(now));
+            var start = p.Key switch
+            {
+                "year" => new DateTime(today.Year, 1, 1),
+                "quarter" => new DateTime(today.Year, (today.Month - 1) / 3 * 3 + 1, 1),
+                _ => new DateTime(today.Year, today.Month, 1)
+            };
+            return new NetworkUsageRange(start, today.Date, p.Label(now));
+        }
+    }
 
     /// <summary>GET api/ceo/network, GET api/sales-manager/network</summary>
     public sealed class NetworkDashboardDto

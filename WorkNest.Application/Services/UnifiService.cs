@@ -1555,15 +1555,25 @@ namespace WorkNest.Application.Services
         /// same range. All reads are the cached calls the Clients page makes; the uplink names (device list, 20 s cache)
         /// are read only when asked for and are skipped when the device list fails.
         /// </summary>
-        private async Task<List<TopUsageRow>> TopUsageAsync(int days, int take, bool withDevices)
+        private Task<List<TopUsageRow>> TopUsageAsync(int days, int take, bool withDevices)
         {
             var end = NowMs();
-            var rowsTask = Cached($"usage-{days}", TimeSpan.FromMinutes(15), () =>
+            return TopUsageRangeAsync((long)(end - days * DayMs), (long)end, days.ToString(CultureInfo.InvariantCulture), days * 24, take, withDevices);
+        }
+
+        /// <summary>
+        /// Clients by data used between <paramref name="startMs"/> and <paramref name="endMs"/> (daily report rows, so whole
+        /// days); <paramref name="key"/> names the range in the cache; <paramref name="withinHours"/> is how far back the
+        /// known-clients list (names / kinds) looks.
+        /// </summary>
+        private async Task<List<TopUsageRow>> TopUsageRangeAsync(long startMs, long endMs, string key, int withinHours, int take, bool withDevices)
+        {
+            var rowsTask = Cached($"usage-{key}", TimeSpan.FromMinutes(15), () =>
                 NetData("/api/s/default/stat/report/daily.user",
-                    new { attrs = new[] { "time", "rx_bytes", "tx_bytes" }, start = (long)(end - days * DayMs), end = (long)end }));
+                    new { attrs = new[] { "time", "rx_bytes", "tx_bytes" }, start = startMs, end = endMs }));
             // One cache entry per range: the request depends on `within`, so a shared key let whichever range was asked
             // first answer every range for 15 minutes.
-            var knownTask = Cached($"alluser-{days}", TimeSpan.FromMinutes(15), () => NetData($"/api/s/default/stat/alluser?type=all&conn=all&within={days * 24}"));
+            var knownTask = Cached($"alluser-{key}", TimeSpan.FromMinutes(15), () => NetData($"/api/s/default/stat/alluser?type=all&conn=all&within={Math.Clamp(withinHours, 24, 24 * 400)}"));
             var liveTask = NetClients();
             var devicesTask = withDevices ? NetDevices() : null;
             await Task.WhenAll(rowsTask, knownTask, liveTask);
@@ -2280,7 +2290,8 @@ namespace WorkNest.Application.Services
             }
         }
 
-        public async Task<DTOs.Dashboard.NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait)
+        public async Task<DTOs.Dashboard.NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait,
+            DTOs.Dashboard.NetworkUsageRange? usage = null)
         {
             await InitializeAsync();
             var ids = new HashSet<string>(siteIds, StringComparer.OrdinalIgnoreCase);
@@ -2301,7 +2312,10 @@ namespace WorkNest.Application.Services
             var wansTask = consoleVisible ? GetWansAsync() : null;
             // Top data users: the Clients page's cached reads (daily report, known clients, client and device lists),
             // fetched in parallel with the rest and inside the same wait.
-            var topTask = consoleVisible ? TopUsageAsync(TopClientsDays, 5, withDevices: true) : null;
+            // The dashboard's period (usage); without one, today as before.
+            var topTask = !consoleVisible ? null
+                : usage == null ? TopUsageAsync(TopClientsDays, 5, withDevices: true)
+                : TopUsageRangeAsync(usage.StartMs, Math.Min(usage.EndMs, (long)NowMs()), usage.Key, usage.WithinHours, 5, withDevices: true);
             if (clientsTask != null && wansTask != null && topTask != null)
             {
                 var all = Task.WhenAll(clientsTask, wansTask, topTask);
@@ -2523,8 +2537,8 @@ namespace WorkNest.Application.Services
                 Internet = internet,
                 Alerts = alerts,
                 TopClients = top,
-                TopClientsRangeDays = TopClientsDays,
-                TopClientsRangeLabel = TopClientsRangeLabel,
+                TopClientsRangeDays = usage?.Days ?? TopClientsDays,
+                TopClientsRangeLabel = usage?.Label ?? TopClientsRangeLabel,
                 TopClientsMessage = topMessage,
             };
         }

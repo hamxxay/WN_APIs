@@ -82,9 +82,15 @@ namespace WorkNest.API.Controllers
         /// reachable: 200 with available = false and a short message (the rest of the dashboard does not depend on it).
         /// </summary>
         [HttpGet("api/ceo/network")]
-        public async Task<IActionResult> Network([FromQuery] int? locationId, [FromServices] INetworkDashboardService network) =>
-            Ok(ApiResponse.Ok(await network.GetAsync(new NetworkScope(null, locationId is > 0 ? locationId : null),
+        public async Task<IActionResult> Network([FromQuery] int? locationId, [FromServices] INetworkDashboardService network,
+            [FromQuery] string? period = null, [FromQuery] string? from = null, [FromQuery] string? to = null, [FromServices] IBusinessClock? clock = null)
+        {
+            // period / from / to (as the dashboard call): the top data users over that period; none = today.
+            var usage = NetworkUsageRange.FromPeriod(period, from, to, clock?.Today ?? PakistanNow().Date, clock?.Now ?? PakistanNow(), out var periodError);
+            if (periodError != null) return BadRequest(ApiResponse.Fail(periodError));
+            return Ok(ApiResponse.Ok(await network.GetAsync(new NetworkScope(null, locationId is > 0 ? locationId : null, usage),
                 HttpContext?.RequestAborted ?? default)));
+        }
 
         /// <summary>
         /// Runs a speed test on one internet line of the main console's gateway now (wan = WAN1 / WAN2 / ...), the same
@@ -146,5 +152,7 @@ namespace WorkNest.API.Controllers
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
             }
         }
+        /// <summary>Pakistan wall-clock time (UTC+5), when no business clock is given.</summary>
+        private static DateTime PakistanNow() => DateTime.SpecifyKind(DateTime.UtcNow.AddHours(5), DateTimeKind.Unspecified);
     }
 }
