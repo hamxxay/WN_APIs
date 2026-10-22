@@ -215,6 +215,29 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@Top", SqlDbType.Int).Value = top;
             });
 
+        public async Task<string?> GetBookingStatusIdsAsync(IReadOnlyCollection<string> codes)
+        {
+            var list = codes.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (list.Count == 0) return null;
+            try
+            {
+                await using var c = new SqlConnection(_connectionString);
+                await c.OpenAsync();
+                var names = list.Select((_, i) => $"@c{i}").ToList();
+                await using var cmd = new SqlCommand(
+                    $"SELECT Id FROM dbo.WN_BookingStatuses WHERE Code IN ({string.Join(", ", names)}) ORDER BY Id", c) { CommandTimeout = 30 };
+                for (var i = 0; i < list.Count; i++) cmd.Parameters.Add(names[i], SqlDbType.NVarChar, 50).Value = list[i];
+                var ids = new List<int>();
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync()) ids.Add(Convert.ToInt32(r.GetValue(0)));
+                return ids.Count == 0 ? null : Csv(ids);
+            }
+            catch (SqlException ex) when (ex.Number is 207 or 208) // no WN_BookingStatuses (or no Code column) on this database
+            {
+                return null;
+            }
+        }
+
         public Task<List<List<IDictionary<string, object?>>>> GetInquiryRecordsAsync(DateTime? from, DateTime? to, string? inquiryType,
             int? locationId, int top)
         {

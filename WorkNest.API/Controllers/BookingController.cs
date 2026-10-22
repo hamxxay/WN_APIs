@@ -310,8 +310,12 @@ namespace WorkNest.API.Controllers
 
         [HttpPatch("api/booking/{id:int}/status")]
         [Authorize(Roles = StaffRoles)]
-        public async Task<IActionResult> UpdateStatus(int id, [FromBody] BookingStatusUpdateRequest request) =>
-            Ok(await _bookings.UpdateBookingStatusAsync(id, request.StatusId, null));
+        public async Task<IActionResult> UpdateStatus(int id, [FromBody] BookingStatusUpdateRequest request)
+        {
+            // 400 for an id that is not in dbo.WN_BookingStatuses (BookingService checks it against the table).
+            var result = await _bookings.UpdateBookingStatusAsync(id, request.StatusId, null);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
 
         [HttpPatch("api/booking/{publicId:guid}/status")]
         [Authorize(Roles = StaffRoles)]
@@ -320,7 +324,8 @@ namespace WorkNest.API.Controllers
             var booking = await _db.GetBookingByPublicIdAsync(publicId, null);
             if (booking is null) return NotFound(new { isSuccessful = false, message = "Booking not found" });
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
-            return Ok(await _bookings.UpdateBookingStatusAsync(id, request.StatusId, null));
+            var result = await _bookings.UpdateBookingStatusAsync(id, request.StatusId, null);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
         

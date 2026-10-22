@@ -281,7 +281,8 @@ namespace WorkNest.Application.Services
             {
                 case "": break;
                 case "all": statusIds = "*"; break;
-                // WN_BookingStatuses codes: the procedure takes the ids from the table (no status numbers here).
+                // WN_BookingStatuses codes (no status numbers here): the repository turns them into the table's ids before
+                // calling the procedure, so the versions before BK_11 (ids only) filter on them too.
                 case "active": case "running": statusIds = "Pending,Confirmed"; running = true; break;
                 case "pending": statusIds = "Pending"; break;
                 case "confirmed": statusIds = "Confirmed"; break;

@@ -27,6 +27,9 @@ namespace WorkNest.Application.Services
     /// period's invoices; whole billing months against the same months one period earlier; only invoices with something
     /// left to pay count as outstanding / overdue / billed in advance. Records: balance = GrandTotal - WHT - paid (0 when
     /// paid), status collected, invoiceTotals.
+    /// RC_05 (22 Oct 2026): whtOpen (the WHT customers withhold and never pay) with the money figures, the 12 months and the
+    /// revenue breakdown rows, so the CMS's Receivable = revenue - paid - whtOpen; records status receivable (something
+    /// left to pay for the period) with the period's receivable; booking statuses sent as ids read from WN_BookingStatuses.
     /// </summary>
     public class CeoDashboardService : ICeoDashboardService
     {
@@ -116,10 +119,13 @@ namespace WorkNest.Application.Services
                     SecurityDepositsCount = Has(money, "SecurityDepositsCount") ? Int(money, "SecurityDepositsCount") : null,
                     InvoicedPrevFrom = Day(money, "InvoicePrevFrom"),
                     InvoicedPrevTo = Day(money, "InvoicePrevTo"),
+                    // RC_05: WHT not paid of the period's billing (the customer withholds it, never pays it); null before RC_05.
+                    WhtOpen = DecOrNull(money, "WhtOpen"),
+                    WhtOpenPrev = Has(money, "WhtOpen") ? Dec(money, "WhtOpenPrev") : null,
                     Months = Set(s, 2).Select(r => new CeoMoneyMonthDto
-                        { Month = Str(r, "Month") ?? "", Invoiced = Dec(r, "Invoiced"), Collected = Dec(r, "Collected") }).ToList(),
+                        { Month = Str(r, "Month") ?? "", Invoiced = Dec(r, "Invoiced"), Collected = Dec(r, "Collected"), WhtOpen = DecOrNull(r, "WhtOpen") }).ToList(),
                     Aging = Set(s, 3).Select(r => new CeoAgingBucketDto
-                        { Bucket = Str(r, "BucketKey") ?? "", Label = Str(r, "Label") ?? "", Amount = Dec(r, "Amount"), Count = Int(r, "Invoices") }).ToList(),
+                        { Bucket = Str(r, "BucketKey") ?? "", Label = Str(r, "Label") ?? "", Amount = Dec(r, "Amount"), Count = Int(r, "Invoices"), Deposits = DecOrNull(r, "Deposits") }).ToList(),   // RC_06: Deposits
                     TopCustomers = Set(s, 4).Select(r => new CeoTopCustomerDto
                     {
                         CustomerId = Val(r, "CustomerId") is { } id ? Convert.ToInt32(id) : null,
@@ -330,7 +336,9 @@ namespace WorkNest.Application.Services
                         Label = monthRows && TryMonth(key, out var m) ? m.ToString("MMM yyyy", En) : Str(r, "Label") ?? key,
                         Value = Dec(r, "Value"),
                         Value2 = Val(r, "Value2") != null ? Dec(r, "Value2") : null,
-                        Count = Val(r, "Count") is { } c ? Convert.ToInt32(c) : null
+                        Count = Val(r, "Count") is { } c ? Convert.ToInt32(c) : null,
+                        // RC_05, revenue: WHT not paid of the row's billing (Receivable = Value - Value2 - Wht); null otherwise.
+                        Wht = metric == "revenue" ? DecOrNull(r, "Wht") : null
                     };
                 }).ToList()
             };
@@ -339,12 +347,15 @@ namespace WorkNest.Application.Services
                 case "revenue":
                     var billed = rangeFrom != null ? DashboardPeriod.RangeLabel(rangeFrom.Value, rangeTo!.Value) : month!.Value.ToString("MMMM yyyy", En);
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
-                        ("Revenue by location", $"Invoices by billing period, {billed}, without security deposits; collected = paid so far", "Invoiced", "Collected");
+                        ("Revenue by location", $"Invoices by billing period, {billed}, without security deposits; paid = paid so far", "Revenue", "Paid");
                     break;
                 case "aging":
                     var bucketLabel = Buckets.First(b => b.Key == bucket).Label;
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
                         ("Outstanding by location", bucket == "not_due" ? "Unpaid invoices not due yet" : $"Unpaid invoices {bucketLabel} past due", "Outstanding", null);
+                    // RC_06: Value = rent owed, Value2 = security deposits owed (before RC_06 Value2 is null: the whole balance).
+                    if (dto.Rows.Any(r => r.Value2 != null))
+                        (dto.Subtitle, dto.ValueLabel, dto.Value2Label) = (dto.Subtitle + ", without security deposits", "Outstanding", "Security deposits");
                     break;
                 case "occupancy-type":
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
@@ -450,8 +461,9 @@ namespace WorkNest.Application.Services
                 // advance (CP_01): unpaid, for a billing period not started yet (open leaves them out).
                 // collected (CP_02): something paid (what Collected counts: partial payments too); deposit (CP_02): with a
                 // security deposit (what Security deposits counts).
-                if (status is not ("open" or "overdue" or "paid" or "advance" or "collected" or "deposit"))
-                    return ApiResponse.Fail("status must be open, overdue, paid, advance, collected or deposit.");
+                // receivable (RC_05): something left to pay (billed - collected - WHT not paid), with a period of its months.
+                if (status is not ("open" or "overdue" or "paid" or "advance" or "collected" or "deposit" or "receivable"))
+                    return ApiResponse.Fail("status must be open, overdue, paid, advance, collected, deposit or receivable.");
             }
             // CS_01: billing period starting from / to (yyyy-MM-dd, both days included; CP_01), e.g. a custom period's revenue by location.
             DateTime? from = null, to = null;
@@ -476,6 +488,16 @@ namespace WorkNest.Application.Services
                 s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, customerId, status, _clock.Now, statuses, MaxRows, from, to);
                 head = Set(s, 0).FirstOrDefault();
             }
+            // A database before RC_05 knows no status receivable (no Receivable in [0], no rows): every invoice of the window.
+            if (status == "receivable" && !Has(head, "Receivable"))
+            {
+                status = null;
+                s = await _repo.GetInvoiceRecordsAsync(month, locationId, noLocation, bucket, customerId, status, _clock.Now, statuses, MaxRows, from, to);
+                head = Set(s, 0).FirstOrDefault();
+            }
+            // RC_05: with a period (a month, from / to, a customer's 12 months) billed / collected / receivable are the
+            // window's months; the receivable is sent only then (without a period the balance says what is owed).
+            var windowed = month != null || from != null || customerId != null;
             var rows = Set(s, 1).Select(r => new CeoInvoiceRecordDto
             {
                 InvoiceId = Int(r, "InvoiceId"), InvoiceNumber = Str(r, "InvoiceNumber"), Customer = Str(r, "Customer"),
@@ -484,7 +506,9 @@ namespace WorkNest.Application.Services
                 // CP_01 columns; null before it (Day answers null for a missing column).
                 PeriodStart = Day(r, "PeriodStart"), PeriodEnd = Day(r, "PeriodEnd"),
                 // CP_02 columns; null before it.
-                Wht = DecOrNull(r, "Wht"), Deposit = DecOrNull(r, "Deposit"), Billed = DecOrNull(r, "Billed"), Collected = DecOrNull(r, "Collected")
+                Wht = DecOrNull(r, "Wht"), Deposit = DecOrNull(r, "Deposit"), Billed = DecOrNull(r, "Billed"), Collected = DecOrNull(r, "Collected"),
+                // RC_05 columns; null before it.
+                WhtOpen = DecOrNull(r, "WhtOpen"), Receivable = windowed ? DecOrNull(r, "Receivable") : null
             }).ToList();
 
             var parts = new List<string>();
@@ -494,6 +518,7 @@ namespace WorkNest.Application.Services
             else if (status == "advance") parts.Add("billed in advance");
             else if (status == "collected") parts.Add("with payments");
             else if (status == "deposit") parts.Add("with a security deposit");
+            else if (status == "receivable") parts.Add("with something left to pay");
             if (bucket != null) parts.Add(bucket == "not_due" ? "not due yet" : $"{Buckets.First(b => b.Key == bucket).Label} past due");
             if (month != null) parts.Add($"billing period {month.Value.ToString("MMMM yyyy", En)}");
             if (periodWindow != null) parts.Add(periodWindow);
@@ -503,7 +528,13 @@ namespace WorkNest.Application.Services
             var result = Records("Invoices", parts, Total(s), rows);
             // CP_02: the totals of every matching invoice (the list holds at most MaxRows).
             if (Has(head, "Billed") && result.Data is CeoRecordsDto<CeoInvoiceRecordDto> dto)
-                dto.InvoiceTotals = new CeoInvoiceTotalsDto { Billed = Dec(head, "Billed"), Collected = Dec(head, "Collected"), Balance = Dec(head, "Balance") };
+                dto.InvoiceTotals = new CeoInvoiceTotalsDto
+                {
+                    Billed = Dec(head, "Billed"), Collected = Dec(head, "Collected"), Balance = Dec(head, "Balance"),
+                    // RC_05: the window's billed - collected - WHT not paid; null without a period or before RC_05.
+                    Receivable = windowed ? DecOrNull(head, "Receivable") : null,
+                    WhtOpen = windowed ? DecOrNull(head, "WhtOpen") : null
+                };
             return result;
         }
 
@@ -550,11 +581,12 @@ namespace WorkNest.Application.Services
             {
                 case "": break;
                 case "all": statusIds = "*"; break;
-                // WN_BookingStatuses codes: the procedure takes the ids from the table (no status numbers here).
-                case "active": case "running": statusIds = "Confirmed"; running = true; break;   // CP_02: confirmed only, as the occupancy
-                case "pending": statusIds = "Pending"; break;
-                case "confirmed": statusIds = "Confirmed"; break;
-                case "cancelled": statusIds = "Rejected,NoShow,Cancelled"; break;
+                // WN_BookingStatuses codes, sent as their ids read from the table (no status numbers here): the procedure
+                // from before BK_11 knows only ids, the later one ids or codes.
+                case "active": case "running": statusIds = await BookingStatusIdsAsync("Confirmed"); running = true; break;   // CP_02: confirmed only, as the occupancy
+                case "pending": statusIds = await BookingStatusIdsAsync("Pending"); break;
+                case "confirmed": statusIds = await BookingStatusIdsAsync("Confirmed"); break;
+                case "cancelled": statusIds = await BookingStatusIdsAsync("Rejected", "NoShow", "Cancelled"); break;
                 default:
                     if (int.TryParse(status, out var id) && id > 0) statusIds = id.ToString(En);
                     else return ApiResponse.Fail("status must be all, active, pending, confirmed, cancelled or a booking status id.");
@@ -682,7 +714,7 @@ namespace WorkNest.Application.Services
                 Customer = Str(r, "Customer"), Location = Str(r, "Location"),
                 InvoiceId = Val(r, "InvoiceId") is { } inv ? Convert.ToInt32(inv, En) : null, InvoiceNumber = Str(r, "InvoiceNumber"),
                 BookingId = Val(r, "BookingId") is { } b ? Convert.ToInt32(b, En) : null,
-                Amount = Dec(r, "Amount"), Method = Str(r, "Method")
+                Amount = Dec(r, "Amount"), Method = Str(r, "Method"), Deposit = DecOrNull(r, "Deposit")   // RC_06
             }).ToList();
 
             var parts = new List<string> { window };
@@ -694,6 +726,7 @@ namespace WorkNest.Application.Services
                 Title = $"Money received: {string.Join(", ", parts)}",
                 Total = Int(head, "Total"),
                 Amount = Dec(head, "Amount"),
+                Deposits = DecOrNull(head, "Deposits"),   // RC_06
                 Rows = rows
             });
         }
@@ -1071,6 +1104,13 @@ namespace WorkNest.Application.Services
         private const string MonthError = "month must be yyyy-MM (e.g. 2026-10).";
         private const string BucketError = "bucket must be not_due, 1_30, 31_60, 61_90 or 90_plus.";
         private const string TypeError = "type must be Website, WhatsApp, WalkIn, Reference or NotSet.";
+
+        /// <summary>
+        /// Booking status codes (WN_BookingStatuses.Code) as their ids, CSV, read from the table; the codes themselves when
+        /// the table has none of them (the procedures from BK_11 on take codes too).
+        /// </summary>
+        private async Task<string> BookingStatusIdsAsync(params string[] codes) =>
+            await _repo.GetBookingStatusIdsAsync(codes) is { Length: > 0 } ids ? ids : string.Join(",", codes);
 
         private async Task<CeoInvoiceStatusIds> StatusesAsync()
         {

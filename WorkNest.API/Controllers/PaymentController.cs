@@ -234,7 +234,8 @@ namespace WorkNest.API.Controllers
         /// EzPay payment notifications (EzPay vendor portal, Notification Configuration): when a customer pays a One Bill
         /// invoice, EzPay posts { billno, rcvdamount, rcvddate, rcvdtime, rcvdvia } with the header api_key.
         /// Authenticated via API key configured in appsettings.json under OneBill:ApiKey or OneBill:NotifyApiKey.
-        /// Answers HTTP 200 { "status": "success" } once it is safely stored.
+        /// Answers HTTP 200 { "status": "success" } ONLY when the payment is recorded on the invoice (or repeats one that
+        /// was); anything else answers an error so EzPay sends it again.
         /// </summary>
         [DisableRateLimiting] // machine-to-machine caller: never throttle
         [HttpPost("api/onebill/payment-notification")]
@@ -303,9 +304,17 @@ namespace WorkNest.API.Controllers
                 var result = await _oneBill.RecordPaymentAsync(notice, ct);
                 _logger.LogInformation("One Bill notification #{Id}: bill {BillNo}, {Amount} via {Via}: {Outcome}. {Message}",
                     result.NotificationId, notice.BillNo, notice.Amount, notice.ReceivedVia, result.Outcome, result.Message);
-                if (result.Outcome == "Invalid")
-                    return BadRequest(OneBillError(result.Message ?? "Invalid notification."));
-                return Ok(new { status = "success" });
+                // Success ONLY when the payment is recorded on the invoice (Applied) or repeats one that already was
+                // (Duplicate); anything else answers an error so EzPay sends it again (each attempt is kept for review).
+                return result.Outcome switch
+                {
+                    "Applied" or "Duplicate" => Ok(new { status = "success" }),
+                    "Unmatched" => NotFound(OneBillError(result.Message ?? "No invoice has this bill number.")),
+                    "AlreadyPaid" => Conflict(OneBillError(result.Message ?? "The invoice is already paid.")),
+                    "InvoiceClosed" => Conflict(OneBillError(result.Message ?? "The invoice is deleted or cancelled.")),
+                    "Invalid" => BadRequest(OneBillError(result.Message ?? "Invalid notification.")),
+                    _ => StatusCode(500, OneBillError("The notification could not be recorded. Please send it again."))
+                };
             }
             catch (Exception ex)
             {

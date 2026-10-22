@@ -1,0 +1,560 @@
+-- ============================================================================================
+-- BK_12: booking status fixes (run AFTER BK_11_booking_statuses_from_table).
+-- Booking statuses come only from dbo.WN_BookingStatuses (3 Rejected, 5 Pending, 6 NoShow, 33 Confirmed, 86 Cancelled);
+-- every procedure below finds them by Code, never by number.
+--
+-- 1. WN_Bookings_UpdateStatus: every closed status (Rejected, NoShow, Cancelled) voids the booking's open challan
+--    (StatusId 1 -> 4), exactly as Rejected already did (before: only id 3).
+-- 2. WN_HIK_Sync_Booking_GetNext: the renewal HIK access moves to is a live booking only (Pending, Confirmed).
+--    WN_HIK_Sync_Booking_Get also returns StatusCode, so the API extends access on the same booking only while it is
+--    Pending or Confirmed.
+-- 3. WN_SalesMgr_Dashboard (BK_11 version): the previous period ends at the latest where the current one starts
+--    (e.g. on 31 Mar the previous month to date no longer runs into March).
+-- 4. WN_Dash_OverviewBookings (BK_11 version): Leases ending = Confirmed only, as the dashboard card; new bookings take an
+--    optional custom range @From / @To (+ @UtcShift, as the chart).
+-- 5. WN_Dash_OverviewInvoices: @From / @To also narrow a month (Revenue and collections drill-down of a custom range).
+--
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_BookingStatuses WHERE Code = N'Pending')
+       OR NOT EXISTS (SELECT 1 FROM dbo.WN_BookingStatuses WHERE Code = N'Confirmed')
+       OR NOT EXISTS (SELECT 1 FROM dbo.WN_BookingStatuses WHERE Code = N'Cancelled')
+       OR NOT EXISTS (SELECT 1 FROM dbo.WN_BookingStatuses WHERE Code = N'Rejected')
+       OR NOT EXISTS (SELECT 1 FROM dbo.WN_BookingStatuses WHERE Code = N'NoShow')
+        THROW 50001, N'dbo.WN_BookingStatuses has not got the codes Rejected / Pending / NoShow / Confirmed / Cancelled on this database. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- WN_Bookings_UpdateStatus
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_UpdateStatus]
+        @Id              INT,
+        @BookingStatusId TINYINT,
+        @UpdatedById     INT = NULL
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        UPDATE dbo.WN_Bookings SET
+            BookingStatusId = @BookingStatusId,
+            UpdatedOn       = SYSUTCDATETIME(),
+            UpdatedById     = @UpdatedById
+        WHERE Id = @Id AND IsDeleted = 0;
+        DECLARE @Updated INT = @@ROWCOUNT;
+
+        -- BK_12. Every closed status (WN_BookingStatuses codes Rejected, NoShow, Cancelled; the ids come from the table):
+        -- void the open challan, as WN_Bookings_Cancel does, so the customer is no longer asked to pay it.
+        IF @Updated > 0 AND EXISTS (SELECT 1 FROM dbo.WN_BookingStatuses bs
+                                     WHERE bs.Id = @BookingStatusId AND bs.Code IN (N''Rejected'', N''NoShow'', N''Cancelled''))
+            UPDATE dbo.WN_Challans SET StatusId = 4
+            WHERE BookingId = @Id AND StatusId = 1;
+    END');
+
+    -- WN_HIK_Sync_Booking_Get
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Booking_Get
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- BK_12: StatusCode (WN_BookingStatuses.Code): HikSyncService extends access on the same booking only while it is
+    -- Pending or Confirmed.
+    SELECT b.Id, b.CustomerCode, b.SpaceId, b.EndOn, b.BillingPeriodEnd AS billEnd, bs.Code AS StatusCode
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
+    WHERE b.Id = @BookingId;
+END');
+
+    -- WN_HIK_Sync_Booking_GetNext
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Booking_GetNext
+    @OldId INT, @CustomerCode NVARCHAR(50) = NULL, @SpaceId INT, @OldEnd DATETIME2(0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- Renewal: the earliest newer running booking of the same customer for the same space.
+    -- BK_12: only a live booking (WN_BookingStatuses codes Pending, Confirmed), never a rejected / no-show / cancelled one.
+    SELECT TOP 1 b.Id, b.StartOn, b.EndOn, b.BillingPeriodEnd AS billEnd
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.Id <> @OldId AND b.CustomerCode = @CustomerCode AND b.SpaceId = @SpaceId
+      AND b.EndOn > @OldEnd AND b.EndOn > SYSDATETIME()
+      AND b.BookingStatusId IN (SELECT bs.Id FROM dbo.WN_BookingStatuses bs WITH (NOLOCK) WHERE bs.Code IN (N''Pending'', N''Confirmed''))
+    ORDER BY b.StartOn ASC;
+END');
+
+    -- WN_SalesMgr_Dashboard
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_SalesMgr_Dashboard
+    @LocationIds       NVARCHAR(MAX) = NULL,  -- locations in scope, CSV (NULL = all locations, super admin)
+    @PickerLocationIds NVARCHAR(MAX) = NULL,  -- locations for the location picker (those of the manager), CSV (NULL = all)
+    @PMonths           INT = 1,               -- 1 = this month, 3 = this quarter, 12 = this year (to date)
+    @BizNow            DATETIME2(0) = NULL,   -- business (Pakistan) wall-clock time from the app clock
+    @VoidStatusIds     NVARCHAR(400) = NULL,  -- not used since SM_02 (no money); kept so an older API build still runs
+    @ExpiringDays      INT = 90,              -- leases ending in the next N days
+    @InquiriesNoBranch BIT = NULL,            -- BR_02: tour inquiries follow @LocationIds too: 1 = also those without a
+                                              -- branch (all my locations), 0 = only those of @LocationIds (one location
+                                              -- chosen); NULL = every inquiry of every branch (as before BR_02)
+    @From              DATE = NULL,           -- CS_01: first day of a custom range (with @To; replaces @PMonths)
+    @To                DATE = NULL            -- CS_01: last day of a custom range (included)
+AS
+BEGIN
+    -- Sales Manager dashboard (read-only), in desks, no money (SM_02). Same rules as the CEO dashboard
+    -- (dbo.WN_Ceo_Dashboard) for what is counted, so the counts match it for the same location and period:
+    --   spaces = WN_Spaces.Status = 1 at the locations in scope; quotations = active, on those spaces;
+    --   accepted = Accepted, AgreementSent, Signed or Converted; new bookings = created in the period, not deleted,
+    --   not rejected / cancelled / no show (3, 4, 6, 86);
+    --   desks of a booking = its Capacity, else the Capacity of its space; of a quotation = its Capacity, else the
+    --   Capacity of its space; meeting rooms (space type category MeetingRoom / Conference, P1) count 0 desks; no capacity = 0;
+    --   desks sold = desks on Converted quotations; leases = confirmed (2, 33) bookings, not deleted: expiring = ending
+    --   in the next @ExpiringDays days (and in the next 30 days), ended = ending in the period before now;
+    --   tour inquiries (BR_02) = those of the locations in scope by WN_Contacts.LocationId, plus the ones without a
+    --   branch (WN_BookTour bookings, LocationId NULL) when @InquiriesNoBranch = 1; every inquiry when @LocationIds is
+    --   NULL (super admin, all locations) or @InquiriesNoBranch is NULL (as before BR_02); latest feedback per inquiry
+    --   (dbo.WN_ContactFeedback). Team inquiries handled / follow-ups due count only those inquiries.
+    -- Previous period = the same number of days, one period earlier. CS_01: @From / @To = a custom range for every
+    -- period figure, previous = as many days just before it (the 12-month series and expiring leases stay as they are).
+    -- Result sets: [0] picker locations, [1] funnel, [2] funnel last 12 months, [3] team people, [4] team per location,
+    -- [5] inquiries, [6] inquiries by type, [7] not-interested reasons (top 6), [8] inquiries last 12 months,
+    -- [9] renewals, [10] leases expiring (first 50), [11] renewals last 12 months and next 3.
+    SET NOCOUNT ON;
+    IF @PMonths IS NULL OR @PMonths NOT IN (1, 3, 12) SET @PMonths = 1;
+    SET @LocationIds = NULLIF(LTRIM(RTRIM(@LocationIds)), N'''');
+    SET @PickerLocationIds = NULLIF(LTRIM(RTRIM(@PickerLocationIds)), N'''');
+    -- CS_01: a custom range (@From - @To, both days included) instead of the calendar period of @PMonths; previous
+    -- period = as many days just before it. Without both days (or @From after @To): the calendar period, as before.
+    DECLARE @Custom BIT = CASE WHEN @From IS NOT NULL AND @To IS NOT NULL AND @From <= @To THEN 1 ELSE 0 END;
+    DECLARE @CustomDays INT = CASE WHEN @Custom = 1 THEN DATEDIFF(DAY, @From, @To) + 1 ELSE 0 END;
+    DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, SYSDATETIME());
+    DECLARE @Today DATE = CAST(@Now AS DATE);
+    DECLARE @MonthStart DATE = DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1);
+    DECLARE @PStart DATE = CASE @PMonths
+        WHEN 12 THEN DATEFROMPARTS(YEAR(@Today), 1, 1)
+        WHEN 3  THEN DATEFROMPARTS(YEAR(@Today), ((MONTH(@Today) - 1) / 3) * 3 + 1, 1)
+        ELSE @MonthStart END;
+    IF @Custom = 1 SET @PStart = @From;                                                     -- CS_01
+    DECLARE @PrevStart DATE = CASE WHEN @Custom = 1 THEN DATEADD(DAY, -@CustomDays, @PStart) ELSE DATEADD(MONTH, -@PMonths, @PStart) END;
+    DECLARE @PrevEnd DATE = CASE WHEN @Custom = 1 THEN @PStart                              -- CS_01: the days just before the range
+                                 ELSE DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevStart) END;   -- same number of days, exclusive
+    IF @PrevEnd > @PStart SET @PrevEnd = @PStart;   -- BK_12: never into the current period (e.g. 31 Mar: Feb has 28 days)
+    -- CS_01: created before this day (custom: the day after @To); the calendar periods have no end (to date, as before).
+    DECLARE @CEnd DATETIME2(0) = CASE WHEN @Custom = 1 THEN CAST(DATEADD(DAY, 1, @To) AS DATETIME2(0)) ELSE CAST(N''9999-12-31'' AS DATETIME2(0)) END;
+    -- CS_01: the same bounds for the columns written in UTC (SYSUTCDATETIME: bookings CreatedOn, quotations CreatedDate,
+    -- tour inquiries CreatedOn): a custom range is in Pakistan days (UTC+5, no daylight saving), so 5 hours earlier.
+    -- The calendar periods keep their comparisons as they were.
+    DECLARE @UShift INT = CASE WHEN @Custom = 1 THEN -5 ELSE 0 END;
+    DECLARE @UStart DATETIME2(0) = DATEADD(HOUR, @UShift, CAST(@PStart AS DATETIME2(0)));
+    DECLARE @UEnd DATETIME2(0) = CASE WHEN @Custom = 1 THEN DATEADD(HOUR, -5, @CEnd) ELSE @CEnd END;
+    DECLARE @UPrevStart DATETIME2(0) = DATEADD(HOUR, @UShift, CAST(@PrevStart AS DATETIME2(0)));
+    DECLARE @UPrevEnd DATETIME2(0) = DATEADD(HOUR, @UShift, CAST(@PrevEnd AS DATETIME2(0)));
+    DECLARE @SeriesStart DATE = DATEADD(MONTH, -11, @MonthStart);                          -- 12 months incl. this one
+    DECLARE @Earliest DATE = CASE WHEN @PrevStart < @SeriesStart THEN @PrevStart ELSE @SeriesStart END;
+    DECLARE @ExpEnd DATETIME2(0) = DATEADD(DAY, ISNULL(@ExpiringDays, 90), @Now);
+    DECLARE @Exp30End DATETIME2(0) = DATEADD(DAY, 30, @Now);
+    DECLARE @All BIT = CASE WHEN @LocationIds IS NULL THEN 1 ELSE 0 END;
+    DECLARE @Scope TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Scope (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@LocationIds, N''''), N'','') WHERE TRY_CAST(value AS INT) > 0;
+    -- Locations: Shown = active, or still has active spaces (the CEO dashboard list). @Loc = the ones in scope.
+    DECLARE @LocAll TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200), Shown BIT NOT NULL);
+    INSERT INTO @LocAll (Id, Name, Shown)
+    SELECT l.Id, ISNULL(NULLIF(LTRIM(RTRIM(CAST(l.Name AS NVARCHAR(200)))), N''''), CONCAT(N''Location '', l.Id)),
+           CASE WHEN l.IsActive = 1 OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.LocationId = l.Id AND s.Status = 1) THEN 1 ELSE 0 END
+      FROM dbo.WN_Locations l WITH (NOLOCK);
+    DECLARE @Loc TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200));
+    INSERT INTO @Loc (Id, Name)
+    SELECT Id, Name FROM @LocAll WHERE (@All = 1 AND Shown = 1) OR Id IN (SELECT Id FROM @Scope);
+    -- Spaces in scope with their desks (Capacity) and whether they are a meeting room (category MeetingRoom / Conference, P1: no desks).
+    DECLARE @Spaces TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200), LocationId INT NULL, Capacity INT NOT NULL, Meeting BIT NOT NULL);
+    INSERT INTO @Spaces (Id, Name, LocationId, Capacity, Meeting)
+    SELECT s.Id, CAST(COALESCE(NULLIF(s.Name, N''''), s.Code) AS NVARCHAR(200)), s.LocationId, ISNULL(s.Capacity, 0),
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_SpaceTypes mst WITH (NOLOCK) JOIN dbo.WN_SpaceCategories msc WITH (NOLOCK) ON msc.Id = mst.CategoryId WHERE mst.Id = s.SpaceTypeId AND msc.Code IN (N''MeetingRoom'', N''Conference'')) THEN 1 ELSE 0 END
+      FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.Status = 1 AND (@All = 1 OR s.LocationId IN (SELECT Id FROM @Scope));
+    -- New bookings since the earliest date any section needs, with their desks.
+    DECLARE @New TABLE (Id INT PRIMARY KEY, LocationId INT NULL, CreatedOn DATETIME NULL, Desks INT NOT NULL);
+    INSERT INTO @New (Id, LocationId, CreatedOn, Desks)
+    SELECT b.Id, sp.LocationId, b.CreatedOn,
+           CASE WHEN sp.Meeting = 1 THEN 0 ELSE ISNULL(COALESCE(NULLIF(b.Capacity, 0), sp.Capacity), 0) END
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN @Spaces sp ON sp.Id = b.SpaceId
+     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId NOT IN (SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WHERE bs_.Code IN (N''Rejected'', N''NoShow'', N''Cancelled'')) AND b.CreatedOn >= DATEADD(HOUR, @UShift, CAST(@Earliest AS DATETIME2(0)));
+    -- Active quotations on the spaces in scope (sales funnel, per location), with their desks.
+    -- CP_02: Booked = Converted and its booking is live (not deleted, not rejected / cancelled / no show: 3, 4, 6, 86),
+    -- as the CEO dashboard; "converted", conversion and desks sold count only those.
+    DECLARE @Q TABLE (Id INT PRIMARY KEY, LocationId INT NULL, CreatedDate DATETIME2 NULL, Status NVARCHAR(100) NULL, Desks INT NOT NULL,
+                      Booked BIT NOT NULL);   -- CP_02
+    INSERT INTO @Q (Id, LocationId, CreatedDate, Status, Desks, Booked)
+    SELECT q.Id, sp.LocationId, q.CreatedDate, q.Status,
+           CASE WHEN sp.Meeting = 1 THEN 0 ELSE ISNULL(COALESCE(NULLIF(q.Capacity, 0), sp.Capacity), 0) END,
+           CASE WHEN q.Status = ''Converted'' AND bk.Id IS NOT NULL THEN 1 ELSE 0 END   -- CP_02
+      FROM dbo.WN_Quotations q WITH (NOLOCK)
+      JOIN @Spaces sp ON sp.Id = q.SpaceId
+      LEFT JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WHERE bs_.Code IN (N''Rejected'', N''NoShow'', N''Cancelled''))   -- CP_02
+     WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= DATEADD(HOUR, @UShift, CAST(@Earliest AS DATETIME2(0)));
+    -- The tour inquiries in scope with their latest feedback (BR_02: by branch; see above).
+    DECLARE @InqLocationIds NVARCHAR(MAX) = CASE WHEN @InquiriesNoBranch IS NULL THEN NULL ELSE @LocationIds END;
+    DECLARE @Inq TABLE (Id INT, Name NVARCHAR(MAX), PhoneNumber NVARCHAR(MAX), InquiryType NVARCHAR(20), ReferenceName NVARCHAR(MAX),
+                        StatusId INT, CreatedOn DATETIME2, FeedbackOutcome NVARCHAR(50), FeedbackReason NVARCHAR(1000),
+                        FollowUpOn DATE, FeedbackById INT);
+    INSERT INTO @Inq EXEC dbo.WN_SalesMgr_InquiryRows @From = NULL, @To = NULL, @LocationIds = @InqLocationIds,
+                          @IncludeNoLocation = @InquiriesNoBranch;
+    -- [0] the location picker (never narrowed by the chosen location)
+    SELECT Id AS LocationId, Name FROM @LocAll
+     WHERE (@PickerLocationIds IS NULL AND Shown = 1)
+        OR Id IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@PickerLocationIds, N''''), N'',''))
+     ORDER BY Name;
+    -- [1] sales funnel: created in the period (and the previous period); desks quoted and booked
+    SELECT (SELECT COUNT(*) FROM @Inq WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd) AS Inquiries,
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= @UStart AND CreatedDate < @UEnd) AS Quotations,
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= @UStart AND CreatedDate < @UEnd AND Status IN (''Accepted'', ''AgreementSent'', ''Signed'', ''Converted'')) AS Accepted,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @Q WHERE CreatedDate >= @UStart AND CreatedDate < @UEnd) AS QuotedDesks,
+           (SELECT COUNT(*) FROM @New WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd) AS Bookings,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @New WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd) AS BookedDesks,
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= @UPrevStart AND CreatedDate < @UPrevEnd) AS QuotationsPrev,
+           (SELECT COUNT(*) FROM @New WHERE CreatedOn >= @UPrevStart AND CreatedOn < @UPrevEnd) AS BookingsPrev,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @New WHERE CreatedOn >= @UPrevStart AND CreatedOn < @UPrevEnd) AS BookedDesksPrev,
+           -- SM_04: conversion = quotations created in the period that were booked (Converted) / quotations created in it
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= @UStart AND CreatedDate < @UEnd AND Booked = 1) AS QuotationsBooked,   -- CP_02
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= @UPrevStart AND CreatedDate < @UPrevEnd AND Booked = 1) AS QuotationsBookedPrev;   -- CP_02
+    -- [2] funnel, last 12 months, oldest first
+    ;WITH m AS (
+        SELECT DATEADD(MONTH, -n, @MonthStart) AS MStart
+          FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
+    )
+    SELECT CONVERT(CHAR(7), m.MStart, 126) AS [Month],
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= m.MStart AND CreatedDate < DATEADD(MONTH, 1, m.MStart)) AS Quotations,
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= m.MStart AND CreatedDate < DATEADD(MONTH, 1, m.MStart)
+               AND Status IN (''Accepted'', ''AgreementSent'', ''Signed'', ''Converted'')) AS Accepted,
+           (SELECT COUNT(*) FROM @New WHERE CreatedOn >= m.MStart AND CreatedOn < DATEADD(MONTH, 1, m.MStart)) AS Bookings,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @New WHERE CreatedOn >= m.MStart AND CreatedOn < DATEADD(MONTH, 1, m.MStart)) AS BookedDesks,
+           (SELECT COUNT(*) FROM @Q WHERE CreatedDate >= m.MStart AND CreatedDate < DATEADD(MONTH, 1, m.MStart) AND Booked = 1) AS QuotationsBooked   -- CP_02
+      FROM m
+     ORDER BY m.MStart;
+    -- Staff and their locations (as the CEO dashboard): main location + WN_UserLocations.
+    DECLARE @UL TABLE (UserId INT, LocationId INT, PRIMARY KEY (UserId, LocationId));
+    INSERT INTO @UL SELECT Id, LocationId FROM dbo.WN_Users WITH (NOLOCK) WHERE IsActive = 1 AND RoleId IN (2, 16) AND LocationId IS NOT NULL;
+    IF OBJECT_ID(N''dbo.WN_UserLocations'', N''U'') IS NOT NULL
+        INSERT INTO @UL SELECT DISTINCT ul.UserId, ul.LocationId FROM dbo.WN_UserLocations ul WITH (NOLOCK)
+          JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId
+         WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
+           AND NOT EXISTS (SELECT 1 FROM @UL x WHERE x.UserId = ul.UserId AND x.LocationId = ul.LocationId);
+    -- People: active admins and sales executives of the locations in scope (all of them when all locations).
+    DECLARE @People TABLE (UserId INT PRIMARY KEY);
+    INSERT INTO @People (UserId)
+    SELECT u.Id FROM dbo.WN_Users u WITH (NOLOCK)
+     WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
+       AND (@All = 1 OR EXISTS (SELECT 1 FROM @UL ul JOIN @Scope sc ON sc.Id = ul.LocationId WHERE ul.UserId = u.Id));
+    -- Inquiries each person gave feedback on in the period (Tour Inquiries page feedback); BR_02: only the inquiries in
+    -- scope (@Inq), unless every inquiry counts.
+    DECLARE @Handled TABLE (UserId INT PRIMARY KEY, Inquiries INT NOT NULL);
+    IF OBJECT_ID(N''dbo.WN_ContactFeedback'', N''U'') IS NOT NULL
+        INSERT INTO @Handled (UserId, Inquiries)
+        SELECT f.CreatedById, COUNT(DISTINCT f.ContactId) FROM dbo.WN_ContactFeedback f WITH (NOLOCK)
+         WHERE f.CreatedById IS NOT NULL AND f.CreatedOn >= @PStart AND f.CreatedOn < @CEnd
+           AND (@InqLocationIds IS NULL OR f.ContactId IN (SELECT i.Id FROM @Inq i))
+         GROUP BY f.CreatedById;
+    -- [3] people: quotations created in the period (only on the spaces in scope, unless all locations), accepted,
+    --     converted and the desks on the converted ones (desks sold); inquiries handled in the period; follow-ups due
+    --     now (their latest feedback is a future prospect whose date has come, inquiry still open). Role name from
+    --     WN_Roles.DisplayName. Ranked by desks sold, converted, quotations, name.
+    SELECT u.Id AS UserId, COALESCE(NULLIF(u.Name, N''''), NULLIF(u.UserName, N''''), u.Email) AS Name, u.RoleId,
+           COALESCE(NULLIF(r.DisplayName, N''''), r.RoleName) AS RoleName,
+           STUFF((SELECT N'', '' + l.Name FROM @UL ul JOIN @LocAll l ON l.Id = ul.LocationId AND l.Shown = 1
+                   WHERE ul.UserId = u.Id ORDER BY l.Name FOR XML PATH(''''), TYPE).value(''.'', ''NVARCHAR(MAX)''), 1, 2, N'''') AS Locations,
+           ISNULL(qs.Quotations, 0) AS Quotations, ISNULL(qs.Accepted, 0) AS Accepted, ISNULL(qs.Converted, 0) AS Converted,
+           ISNULL(qs.DesksSold, 0) AS DesksSold, ISNULL(h.Inquiries, 0) AS InquiriesHandled,
+           (SELECT COUNT(*) FROM @Inq i WHERE i.FeedbackById = u.Id AND i.FeedbackOutcome = N''future_prospect''
+               AND i.FollowUpOn <= @Today AND ISNULL(i.StatusId, 1) <> 3) AS FollowUpsDue
+      FROM @People p
+      JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = p.UserId
+      LEFT JOIN dbo.WN_Roles r WITH (NOLOCK) ON r.Id = u.RoleId
+      LEFT JOIN @Handled h ON h.UserId = u.Id
+     OUTER APPLY (SELECT COUNT(q.Id) AS Quotations,
+                         SUM(CASE WHEN q.Status IN (''Accepted'', ''AgreementSent'', ''Signed'', ''Converted'') THEN 1 ELSE 0 END) AS Accepted,
+                         SUM(CASE WHEN q.Status = ''Converted'' AND bk.Id IS NOT NULL THEN 1 ELSE 0 END) AS Converted,   -- CP_02
+                         SUM(CASE WHEN q.Status = ''Converted'' AND bk.Id IS NOT NULL AND ISNULL(msc.Code, N'''') NOT IN (N''MeetingRoom'', N''Conference'')
+                                  THEN ISNULL(COALESCE(NULLIF(q.Capacity, 0), s.Capacity), 0) ELSE 0 END) AS DesksSold
+                    FROM dbo.WN_Quotations q WITH (NOLOCK)
+                    LEFT JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WHERE bs_.Code IN (N''Rejected'', N''NoShow'', N''Cancelled''))   -- CP_02
+                    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+                    LEFT JOIN dbo.WN_SpaceTypes mst WITH (NOLOCK) ON mst.Id = s.SpaceTypeId
+                    LEFT JOIN dbo.WN_SpaceCategories msc WITH (NOLOCK) ON msc.Id = mst.CategoryId  -- P1: meeting rooms by category (no subquery inside SUM)
+                   WHERE q.CreatedById = u.Id AND q.CreatedDate >= @UStart AND q.CreatedDate < @UEnd AND ISNULL(q.IsActive, 1) = 1
+                     AND (@All = 1 OR q.SpaceId IN (SELECT Id FROM @Spaces))) qs
+     ORDER BY ISNULL(qs.DesksSold, 0) DESC, ISNULL(qs.Converted, 0) DESC, ISNULL(qs.Quotations, 0) DESC,
+              COALESCE(NULLIF(u.Name, N''''), NULLIF(u.UserName, N''''), u.Email);
+    -- [4] per location: sales executives assigned, quotations created in the period on its spaces, converted and
+    --     desks sold (desks on the converted ones)
+    SELECT l.Id AS LocationId, l.Name,
+           (SELECT COUNT(*) FROM @UL ul JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId WHERE ul.LocationId = l.Id AND u.RoleId = 16) AS SalesExecutives,
+           (SELECT COUNT(*) FROM @Q q WHERE q.LocationId = l.Id AND q.CreatedDate >= @UStart AND q.CreatedDate < @UEnd) AS Quotations,
+           (SELECT COUNT(*) FROM @Q q WHERE q.LocationId = l.Id AND q.CreatedDate >= @UStart AND q.CreatedDate < @UEnd AND q.Booked = 1) AS Converted,   -- CP_02
+           (SELECT ISNULL(SUM(q.Desks), 0) FROM @Q q WHERE q.LocationId = l.Id AND q.CreatedDate >= @UStart AND q.CreatedDate < @UEnd AND q.Booked = 1) AS DesksSold   -- CP_02
+      FROM @Loc l
+     ORDER BY l.Name;
+    -- [5] tour inquiries created in the period by latest outcome; follow-ups due now (any inquiry still open);
+    --     ByBranch = 1: the inquiries follow the locations in scope (BR_02, @InquiriesNoBranch given)
+    SELECT (SELECT COUNT(*) FROM @Inq WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd) AS Total,
+           (SELECT COUNT(*) FROM @Inq WHERE CreatedOn >= @UPrevStart AND CreatedOn < @UPrevEnd) AS TotalPrev,
+           (SELECT COUNT(*) FROM @Inq WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd AND FeedbackOutcome = N''future_prospect'') AS FollowedUp,
+           (SELECT COUNT(*) FROM @Inq WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd AND FeedbackOutcome = N''not_interested'') AS NotInterested,
+           (SELECT COUNT(*) FROM @Inq WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd AND FeedbackOutcome = N''converted'') AS Converted,
+           (SELECT COUNT(*) FROM @Inq WHERE FeedbackOutcome = N''future_prospect'' AND FollowUpOn <= @Today AND ISNULL(StatusId, 1) <> 3) AS FollowUpsDue,
+           CAST(CASE WHEN @InquiriesNoBranch IS NULL THEN 0 ELSE 1 END AS BIT) AS ByBranch;
+    -- [6] tour inquiries created in the period by type
+    SELECT InquiryType, COUNT(*) AS Inquiries FROM @Inq WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd GROUP BY InquiryType;
+    -- [7] not-interested reasons of the inquiries created in the period (case and spaces ignored), top 6
+    SELECT TOP 6 MIN(LTRIM(RTRIM(FeedbackReason))) AS Reason, COUNT(*) AS Inquiries
+      FROM @Inq
+     WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd AND FeedbackOutcome = N''not_interested'' AND NULLIF(LTRIM(RTRIM(FeedbackReason)), N'''') IS NOT NULL
+     GROUP BY LOWER(LTRIM(RTRIM(FeedbackReason)))
+     ORDER BY COUNT(*) DESC, MIN(LTRIM(RTRIM(FeedbackReason)));
+    -- [8] tour inquiries by type, last 12 months, oldest first
+    ;WITH m AS (
+        SELECT DATEADD(MONTH, -n, @MonthStart) AS MStart
+          FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
+    )
+    SELECT CONVERT(CHAR(7), m.MStart, 126) AS [Month],
+           ISNULL(SUM(CASE WHEN i.InquiryType = N''Website'' THEN 1 ELSE 0 END), 0) AS Website,
+           ISNULL(SUM(CASE WHEN i.InquiryType = N''WhatsApp'' THEN 1 ELSE 0 END), 0) AS WhatsApp,
+           ISNULL(SUM(CASE WHEN i.InquiryType = N''WalkIn'' THEN 1 ELSE 0 END), 0) AS WalkIn,
+           ISNULL(SUM(CASE WHEN i.InquiryType = N''Reference'' THEN 1 ELSE 0 END), 0) AS Reference,
+           ISNULL(SUM(CASE WHEN i.InquiryType NOT IN (N''Website'', N''WhatsApp'', N''WalkIn'', N''Reference'') THEN 1 ELSE 0 END), 0) AS NotSet
+      FROM m
+      LEFT JOIN @Inq i ON i.CreatedOn >= m.MStart AND i.CreatedOn < DATEADD(MONTH, 1, m.MStart)
+     GROUP BY m.MStart
+     ORDER BY m.MStart;
+    -- Confirmed leases (bookings 2, 33, not deleted) on the spaces in scope with their desks, ending from the earliest
+    -- date any section needs on (the first month of the series, or the start of the previous period).
+    DECLARE @Leases TABLE (Id INT PRIMARY KEY, SpaceId INT, LocationId INT NULL, EndOn DATETIME2(0), UserId INT NULL,
+                           CustomerCode NVARCHAR(50) NULL, Desks INT NOT NULL);
+    INSERT INTO @Leases (Id, SpaceId, LocationId, EndOn, UserId, CustomerCode, Desks)
+    SELECT b.Id, b.SpaceId, sp.LocationId, b.EndOn, b.UserId, b.CustomerCode,
+           CASE WHEN sp.Meeting = 1 THEN 0 ELSE ISNULL(COALESCE(NULLIF(b.Capacity, 0), sp.Capacity), 0) END
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN @Spaces sp ON sp.Id = b.SpaceId
+     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WHERE bs_.Code IN (N''Confirmed'')) AND b.EndOn >= @Earliest;
+    -- [9] renewals in desks: leases ending in the next @ExpiringDays days and in the next 30 days; desks on the leases
+    --     that ended in the period (before now) and in the previous period
+    SELECT (SELECT COUNT(*) FROM @Leases WHERE EndOn >= @Now AND EndOn <= @ExpEnd) AS ExpiringCount,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @Leases WHERE EndOn >= @Now AND EndOn <= @ExpEnd) AS ExpiringDesks,
+           (SELECT COUNT(*) FROM @Leases WHERE EndOn >= @Now AND EndOn <= @Exp30End) AS Expiring30Count,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @Leases WHERE EndOn >= @Now AND EndOn <= @Exp30End) AS Expiring30Desks,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @Leases WHERE EndOn >= @PStart AND EndOn < @Now AND EndOn < @CEnd) AS EndedDesks,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @Leases WHERE EndOn >= @PrevStart AND EndOn < @PrevEnd) AS EndedDesksPrev;
+    -- [10] leases ending in the next @ExpiringDays days with their desks, soonest first (as the CEO dashboard), first 50
+    SELECT TOP 50 lv.Id AS BookingId,
+           COALESCE(NULLIF(cust.Name, N''''), NULLIF(u.Name, N''''), NULLIF(u.UserName, N''''), NULLIF(u.Email, N''''), N''Customer'') AS Customer,
+           sp.Name AS Space, loc.Name AS Location, lv.EndOn, lv.Desks,
+           DATEDIFF(DAY, @Today, CAST(lv.EndOn AS DATE)) AS DaysLeft
+      FROM @Leases lv
+      JOIN @Spaces sp ON sp.Id = lv.SpaceId
+      LEFT JOIN @LocAll loc ON loc.Id = sp.LocationId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = lv.UserId
+     OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, N''''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, N'' '', cu.LastName))), N''''), cu.Email) AS Name
+                    FROM dbo.WN_Customers cu WITH (NOLOCK)
+                   WHERE (lv.CustomerCode IS NOT NULL AND cu.Code = lv.CustomerCode)
+                      OR (lv.UserId IS NOT NULL AND cu.UserId = lv.UserId)
+                      OR (u.Email IS NOT NULL AND cu.Email = u.Email)
+                   ORDER BY CASE WHEN lv.CustomerCode IS NOT NULL AND cu.Code = lv.CustomerCode THEN 0
+                                 WHEN cu.UserId = lv.UserId THEN 1 ELSE 2 END, cu.Id) cust
+     WHERE lv.EndOn >= @Now AND lv.EndOn <= @ExpEnd
+     ORDER BY lv.EndOn, lv.Id;
+    -- [11] renewals by month: last 12 months and the next 3, oldest first (desks on the bookings created in the month,
+    --      desks on the leases ending in the month and how many leases)
+    ;WITH m AS (
+        SELECT DATEADD(MONTH, -n, @MonthStart) AS MStart
+          FROM (VALUES (-3),(-2),(-1),(0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
+    )
+    SELECT CONVERT(CHAR(7), m.MStart, 126) AS [Month],
+           (SELECT ISNULL(SUM(Desks), 0) FROM @New WHERE CreatedOn >= m.MStart AND CreatedOn < DATEADD(MONTH, 1, m.MStart)) AS BookedDesks,
+           (SELECT ISNULL(SUM(Desks), 0) FROM @Leases WHERE EndOn >= m.MStart AND EndOn < DATEADD(MONTH, 1, m.MStart)) AS EndingDesks,
+           (SELECT COUNT(*) FROM @Leases WHERE EndOn >= m.MStart AND EndOn < DATEADD(MONTH, 1, m.MStart)) AS Expiring
+      FROM m
+     ORDER BY m.MStart;
+END;');
+
+    -- WN_Dash_OverviewBookings
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Dash_OverviewBookings
+    @LocationIds NVARCHAR(MAX) = NULL,   -- comma-separated location ids; NULL = every location (as api/dashboard/overview)
+    @BizNow      DATETIME2(0) = NULL,    -- business (Pakistan) wall-clock time from the app clock
+    @List        NVARCHAR(20) = N''new'',  -- new: bookings made in @MonthStart | ending: live bookings ending in @MonthStart, from now on
+    @MonthStart  DATE = NULL,            -- the month (first day)
+    @Top         INT = 200,
+    @From        DATE = NULL,            -- BK_12, new: a custom range (business days, both included); NULL = the whole month
+    @To          DATE = NULL,
+    @UtcShift    INT = 0                 -- BK_12: minutes the business time is ahead of UTC (CreatedOn is UTC), as the overview
+AS
+BEGIN
+    -- DASH_02. Main admin dashboard (/admin/dashboard) chart drill-down, read-only: the bookings behind one month of
+    -- Occupancy and new bookings (the bars, @List = new) or of Leases expiring (@List = ending).
+    -- Which bookings count is exactly api/dashboard/overview (DbRepository.GetDashboardOverviewDbAsync):
+    --   on an active space (WN_Spaces.Status = 1) of the locations, not deleted;
+    --   new: CreatedOn in the month and a status other than 3, 4, 6, 86 (rejected, cancelled, no show);
+    --   ending (BK_12): a Confirmed booking (WN_BookingStatuses code, as the overview''s Leases ending soon card) whose end
+    --   (to the second, as the overview stores it) is in the month and not before now. Amount = WN_Bookings.TotalAmount.
+    --   new with @From / @To (BK_12): also created on those business days (shifted to UTC by @UtcShift, as the chart).
+    -- Result sets: [0] Total and Amount of every matching booking; [1] the first @Top of them (new: newest first;
+    -- ending: soonest end first).
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 200;
+    SET @List = LOWER(LTRIM(RTRIM(ISNULL(@List, N''''))));
+    DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, SYSDATETIME());
+    DECLARE @MonthEnd DATE = DATEADD(MONTH, 1, @MonthStart);
+    DECLARE @Loc TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Loc (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@LocationIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    DECLARE @Spaces TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Spaces (Id)
+    SELECT s.Id FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.Status = 1 AND (@LocationIds IS NULL OR s.LocationId IN (SELECT l.Id FROM @Loc l));
+    DECLARE @B TABLE (Id INT PRIMARY KEY, EndOn DATETIME2(0) NULL);
+    INSERT INTO @B (Id, EndOn)
+    SELECT b.Id, CAST(b.EndOn AS DATETIME2(0))
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+     WHERE ISNULL(b.IsDeleted, 0) = 0
+       AND b.SpaceId IN (SELECT sp.Id FROM @Spaces sp)
+       AND ((@List = N''new'' AND b.CreatedOn >= @MonthStart AND b.CreatedOn < @MonthEnd AND b.BookingStatusId NOT IN (SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WHERE bs_.Code IN (N''Rejected'', N''NoShow'', N''Cancelled''))
+              AND (@From IS NULL OR b.CreatedOn >= DATEADD(MINUTE, -ISNULL(@UtcShift, 0), CAST(@From AS DATETIME2(0))))
+              AND (@To IS NULL OR b.CreatedOn < DATEADD(MINUTE, -ISNULL(@UtcShift, 0), CAST(DATEADD(DAY, 1, @To) AS DATETIME2(0)))))
+         OR (@List = N''ending'' AND b.BookingStatusId IN (SELECT bs_.Id FROM dbo.WN_BookingStatuses bs_ WHERE bs_.Code = N''Confirmed'')
+             AND CAST(b.EndOn AS DATETIME2(0)) >= @MonthStart AND CAST(b.EndOn AS DATETIME2(0)) < @MonthEnd
+             AND CAST(b.EndOn AS DATETIME2(0)) >= @Now));
+    SELECT COUNT(*) AS Total, ISNULL(SUM(b.TotalAmount), 0) AS Amount
+      FROM @B x
+      JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = x.Id;
+    SELECT TOP (@Top)
+           b.Id AS BookingId,
+           COALESCE(NULLIF(cust.Name, N''''), NULLIF(u.Name, N''''), NULLIF(u.UserName, N''''), NULLIF(u.Email, N''''), N''Customer'') AS Customer,
+           COALESCE(NULLIF(s.Name, N''''), s.Code) AS Space,
+           COALESCE(NULLIF(st.Description, N''''), N''Other'') AS SpaceType,
+           s.LocationId, CAST(loc.Name AS NVARCHAR(200)) AS Location,
+           b.CreatedOn, b.StartOn, b.EndOn,
+           b.BookingStatusId AS StatusId,
+           COALESCE(NULLIF(bs.Label, N''''),
+                    CONCAT(N''Status '', b.BookingStatusId)) AS Status,
+           ISNULL(b.TotalAmount, 0) AS TotalAmount,
+           NULLIF(b.Capacity, 0) AS Seats
+      FROM @B x
+      JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = x.Id
+      JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+      LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+      LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+     OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, N''''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, N'' '', cu.LastName))), N''''), cu.Email) AS Name
+                    FROM dbo.WN_Customers cu WITH (NOLOCK)
+                   WHERE (b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode)
+                      OR (b.UserId IS NOT NULL AND cu.UserId = b.UserId)
+                      OR (u.Email IS NOT NULL AND cu.Email = u.Email)
+                   ORDER BY CASE WHEN cu.Code = b.CustomerCode THEN 0 WHEN cu.UserId = b.UserId THEN 1 ELSE 2 END, cu.Id) cust
+     ORDER BY CASE WHEN @List = N''ending'' THEN x.EndOn END, b.CreatedOn DESC, b.Id DESC;
+END;');
+
+    -- WN_Dash_OverviewInvoices
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Dash_OverviewInvoices
+    @LocationIds   NVARCHAR(MAX) = NULL,   -- comma-separated location ids; NULL = every location (as api/dashboard/overview)
+    @BizNow        DATETIME2(0) = NULL,    -- business (Pakistan) wall-clock time from the app clock
+    @OpenStatusIds NVARCHAR(400) = NULL,   -- invoice StatusIds still owed: Unpaid / Partial / Challan Expire (legacy + OrderStatus)
+    @PaidStatusIds NVARCHAR(400) = NULL,   -- Paid (legacy + OrderStatus)
+    @VoidStatusIds NVARCHAR(400) = NULL,   -- Cancelled (legacy 5 + OrderStatus)
+    @MonthStart    DATE = NULL,            -- Revenue and collections: the invoices issued in this month
+    @Bucket        NVARCHAR(20) = NULL,    -- Receivables aging: the open invoices of this bucket (not_due, 1_30, 31_60, 61_90, 90_plus)
+    @Customer      NVARCHAR(400) = NULL,   -- Top customers: this customer (the name as the chart shows it), issued from @From
+    @From          DATE = NULL,            -- first issue date (with @Customer: start of the period or range; BK_12, with @MonthStart: of a custom range)
+    @To            DATE = NULL,            -- last issue date (end of the custom range); NULL = no end, as the chart
+    @Top           INT = 200
+AS
+BEGIN
+    -- DASH_02. Main admin dashboard (/admin/dashboard) chart drill-down, read-only: the invoices behind one month of
+    -- Revenue and collections, one bucket of Receivables aging or one bar of Top customers.
+    -- Which invoices count is exactly api/dashboard/overview (DbRepository.GetDashboardOverviewDbAsync):
+    --   not void (a status, not one of @VoidStatusIds); with locations, only invoices whose booking is on an active
+    --   space (WN_Spaces.Status = 1) of those locations; without locations, every invoice.
+    --   Invoiced = GrandTotal by IssuedOn; Paid = GrandTotal of the invoices with a paid status;
+    --   owed (balance) = GrandTotal - WHTAmount - PaidTotal of the open invoices; aging by DueOn against today.
+    --   Customer = the Top customers name: the customer record (booking customer code, else the user, else the e-mail):
+    --   company, else first + last name, else e-mail; else the user name; else Customer #user id.
+    -- Result sets: [0] Total, Amount (GrandTotal), PaidAmount (GrandTotal of the paid ones) and Balance (owed) of every
+    -- matching invoice; [1] the first @Top of them (aging: oldest due date first; else newest issue date first).
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 200;
+    SET @Bucket = NULLIF(LOWER(LTRIM(RTRIM(@Bucket))), N'''');
+    DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, SYSDATETIME());
+    DECLARE @Today DATE = CAST(@Now AS DATE);
+    DECLARE @BucketNo INT = CASE @Bucket WHEN N''not_due'' THEN 0 WHEN N''1_30'' THEN 1 WHEN N''31_60'' THEN 2
+                                         WHEN N''61_90'' THEN 3 WHEN N''90_plus'' THEN 4 ELSE -1 END;
+    DECLARE @Open TABLE (Id INT PRIMARY KEY);
+    DECLARE @Paid TABLE (Id INT PRIMARY KEY);
+    DECLARE @Void TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Open (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@OpenStatusIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    INSERT INTO @Paid (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@PaidStatusIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    INSERT INTO @Void (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@VoidStatusIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    DECLARE @Loc TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Loc (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@LocationIds, N''''), N'','') WHERE TRY_CAST(value AS INT) IS NOT NULL;
+    DECLARE @Spaces TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @Spaces (Id)
+    SELECT s.Id FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.Status = 1 AND (@LocationIds IS NULL OR s.LocationId IN (SELECT l.Id FROM @Loc l));
+    DECLARE @Inv TABLE (Id INT PRIMARY KEY, BookingId INT NULL, SpaceId INT NULL, IssuedOn DATE NULL, DueOn DATE NULL,
+                        GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), Wht DECIMAL(18,4), IsOpen BIT, IsPaid BIT, Customer NVARCHAR(400) NULL);
+    INSERT INTO @Inv (Id, BookingId, SpaceId, IssuedOn, DueOn, GrandTotal, PaidTotal, Wht, IsOpen, IsPaid, Customer)
+    SELECT i.Id, i.BookingId, b.SpaceId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), ISNULL(i.WHTAmount, 0),
+           CASE WHEN o.Id IS NULL THEN 0 ELSE 1 END, CASE WHEN p.Id IS NULL THEN 0 ELSE 1 END, cn.Customer
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      LEFT JOIN @Open o ON o.Id = i.StatusId
+      LEFT JOIN @Paid p ON p.Id = i.StatusId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(b.UserId, i.UserId)
+     OUTER APPLY (SELECT TOP 1 COALESCE(NULLIF(cu.Company, N''''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, N'' '', cu.LastName))), N''''), cu.Email) AS Name
+                    FROM dbo.WN_Customers cu WITH (NOLOCK)
+                   WHERE (b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode)
+                      OR (ISNULL(b.UserId, i.UserId) IS NOT NULL AND cu.UserId = ISNULL(b.UserId, i.UserId))
+                      OR (u.Email IS NOT NULL AND cu.Email = u.Email)
+                   ORDER BY cu.Id) cust
+     CROSS APPLY (SELECT COALESCE(NULLIF(cust.Name, N''''), NULLIF(u.Name, N''''), NULLIF(u.UserName, N''''), CONCAT(N''Customer #'', ISNULL(b.UserId, i.UserId))) AS Customer) cn
+     CROSS APPLY (SELECT CASE WHEN i.DueOn IS NULL OR i.DueOn >= @Today THEN 0
+                              WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 30 THEN 1
+                              WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 60 THEN 2
+                              WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 90 THEN 3
+                              ELSE 4 END AS AgeBucket) ab
+     WHERE i.StatusId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @Void v WHERE v.Id = i.StatusId) AND ISNULL(i.StatusId, 0) <> 40
+       AND (@LocationIds IS NULL OR b.SpaceId IN (SELECT sp.Id FROM @Spaces sp))
+       AND (@MonthStart IS NULL OR (i.IssuedOn >= @MonthStart AND i.IssuedOn < DATEADD(MONTH, 1, @MonthStart)))
+       AND (@Bucket IS NULL OR (o.Id IS NOT NULL AND ab.AgeBucket = @BucketNo))
+       AND (@Customer IS NULL OR (cn.Customer = @Customer AND i.IssuedOn >= @From))
+       -- BK_12: @From / @To also narrow a month (Revenue and collections of a custom range: its days in that month)
+       AND (@From IS NULL OR i.IssuedOn >= @From)
+       AND (@To IS NULL OR i.IssuedOn < DATEADD(DAY, 1, @To));
+    SELECT COUNT(*) AS Total,
+           ISNULL(SUM(x.GrandTotal), 0) AS Amount,
+           ISNULL(SUM(CASE WHEN x.IsPaid = 1 THEN x.GrandTotal ELSE 0 END), 0) AS PaidAmount,
+           ISNULL(SUM(CASE WHEN x.IsOpen = 1 THEN x.GrandTotal - x.Wht - x.PaidTotal ELSE 0 END), 0) AS Balance
+      FROM @Inv x;
+    SELECT TOP (@Top)
+           x.Id AS InvoiceId, i.InvoiceNumber, x.BookingId, x.Customer,
+           COALESCE(NULLIF(s.Name, N''''), s.Code) AS Space,
+           CAST(loc.Name AS NVARCHAR(200)) AS Location,
+           x.IssuedOn, x.DueOn,
+           x.GrandTotal AS Total, x.PaidTotal AS Paid, x.Wht,
+           CASE WHEN x.IsOpen = 1 THEN x.GrandTotal - x.Wht - x.PaidTotal ELSE 0 END AS Balance,
+           x.IsOpen, x.IsPaid,
+           CASE WHEN x.IsOpen = 1 AND x.DueOn < @Today THEN DATEDIFF(DAY, x.DueOn, @Today) ELSE 0 END AS DaysOverdue,
+           COALESCE(
+               CASE i.StatusId WHEN 1 THEN N''Unpaid'' WHEN 2 THEN N''Paid'' WHEN 3 THEN N''Partial'' WHEN 4 THEN N''Overdue'' WHEN 5 THEN N''Cancelled'' END,
+               (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN N''Un Paid'' THEN N''Unpaid'' WHEN N''Challan Expire'' THEN N''Overdue'' ELSE LTRIM(RTRIM(os.Description)) END
+                  FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
+               N''Unknown'') AS Status
+      FROM @Inv x
+      JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = x.Id
+      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = x.SpaceId
+      LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = s.LocationId
+     ORDER BY CASE WHEN @Bucket IS NOT NULL THEN x.DueOn END, x.IssuedOn DESC, x.Id DESC;
+END;');
+
+    COMMIT TRANSACTION;
+    SELECT N'BK_12 installed: closed statuses void the open challan, HIK follows live bookings only, previous periods do not overlap, dashboard drill-downs follow the custom range and Confirmed leases.' AS Result, DB_NAME() AS DatabaseName;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

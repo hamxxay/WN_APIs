@@ -280,7 +280,7 @@ namespace WorkNest.Application.Services
                     }
                     t.Data.WorkspaceType = WorkspaceTypes[i - 1];
                     t.State = "booking_seats";
-                    t.Texts.Add($"Branch: {t.Data.Branch}\nWorkspace: {t.Data.WorkspaceType}\n\nPlease enter the number of seats / persons required.\n\nExample: 1 (or 5)\n\nType 0 for the main menu.");
+                    t.Texts.Add($"Branch: {t.Data.Branch}\nWorkspace: {t.Data.WorkspaceType}\n\nPlease enter the number of seats / persons required.\n\nExample: 1 (or 100)\n\nType 0 for the main menu.");
                     return;
                 }
                 case "booking_seats":
@@ -288,7 +288,7 @@ namespace WorkNest.Application.Services
                     var digits = Regex.Replace(message, @"[^\d]", "");
                     if (!int.TryParse(digits, out var seats) || seats <= 0 || seats > 500)
                     {
-                        t.Texts.Add("Please enter a valid number of seats / persons required.\n\nExample: 1 (or 5)\n\nType 0 for the main menu.");
+                        t.Texts.Add("Please enter a valid number of seats / persons required.\n\nExample: 1 (or 100)\n\nType 0 for the main menu.");
                         return;
                     }
                     t.Data.Seats = seats.ToString();

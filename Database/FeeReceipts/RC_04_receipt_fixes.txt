@@ -1,0 +1,510 @@
+-- ============================================================================================
+-- RC_04: fee receipt fixes (after RC_02_monthly_receipts).
+--   WN_FeeReceipts_CreateDueMonthly: a monthly receipt is dated the LATER of its month start (BillingMonth) and receipt 1's
+--     date, so a late payment no longer makes receipts dated before the money came in (e.g. paid 15 Dec for Nov + Dec:
+--     both dated 15 Dec, not 1 Nov / 1 Dec). Its voucher is on that date (00:00) and its code uses that date's year.
+--     Also: per-month variables are reset each loop, so a month never reuses the previous month's values.
+--   WN_FeeReceipts_Insert: refuses an invoice waiting for approval (WN_Invoices.ApprovalStatus = 'PendingApproval').
+-- Everything else in these two procedures is as in RC_02. Needs RC_01 + RC_02.
+--
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID('dbo.WN_FeeReceipt_MonthPlan') IS NULL
+        THROW 50001, N'dbo.WN_FeeReceipt_MonthPlan is missing: run RC_01_month_plan.txt first. Nothing changed.', 1;
+    IF OBJECT_ID('dbo.WN_FeeReceipts_PostVoucher', 'P') IS NULL OR OBJECT_ID('dbo.WN_FeeReceipts_CreateDueMonthly', 'P') IS NULL
+       OR COL_LENGTH('dbo.WN_FeeReceipts', 'MonthNo') IS NULL
+        THROW 50002, N'RC_02 is not installed (WN_FeeReceipts_PostVoucher / WN_FeeReceipts_CreateDueMonthly / WN_FeeReceipts.MonthNo missing): run RC_02_monthly_receipts.txt first. Nothing changed.', 1;
+    IF COL_LENGTH('dbo.WN_Invoices', 'ApprovalStatus') IS NULL
+        THROW 50003, N'dbo.WN_Invoices.ApprovalStatus is missing: install the invoice approval changes first. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- WN_FeeReceipts_Insert
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_FeeReceipts_Insert]
+    @InvoiceIdGUID       UNIQUEIDENTIFIER,
+    @CashInHandAccountId INT           = NULL,
+    @PaymentType         VARCHAR(50)   = ''Cash'',
+    @ReceiptDate         DATETIME      = NULL,
+    @Remarks             NVARCHAR(500) = NULL,
+    @CreatedById         INT,
+    @AllowedLocationIds  NVARCHAR(MAX) = NULL,   -- NULL = every location (super admin)
+    @DepositorName       NVARCHAR(150) = NULL,
+    @DepositorCNIC       VARCHAR(15)   = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    -- Errors are RAISERROR(..., 16, state): state 1 = rule broken (HTTP 400), 2 = not found (404),
+    -- 3 = outside the caller''s locations (403). The API maps them by state.
+
+    -- @AllowedLocationIds: comma-separated location ids of the caller. NULL = every location; '''' or no valid id = none.
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, '','')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    -- Invoice statuses looked up in dbo.OrderStatus by description (falls back to legacy ids 1-5).
+    DECLARE @UnPaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Un Paid'' ORDER BY Id), 1);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Partial'' ORDER BY Id), 3);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Challan Expire'' ORDER BY Id), 4);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5);
+
+    DECLARE
+        @InvoiceId             INT,
+        @InvoiceNumber         NVARCHAR(50),
+        @IssuedOn              DATE,
+        @StatusId              INT,
+        @GrandTotal            DECIMAL(18,4),
+        @PaidTotal             DECIMAL(18,4),
+        @InvoiceTypeId         INT,
+        @RoomRentExclTax       DECIMAL(18,4),
+        @ServiceCharges        DECIMAL(18,4),
+        @TaxOnServiceCharges   DECIMAL(18,4),
+        @WHTAmount             DECIMAL(18,4),
+        @WHTRate               DECIMAL(9,4),
+        @SecurityDepositAmount DECIMAL(18,2),
+        @BookingId             INT,
+        @UserId                INT,
+        @BillingPeriodEnd      DATETIME2,
+        @ApprovalStatus        NVARCHAR(50),
+        @LocationId            INT,
+        @CompanyId             INT,
+        @BranchId              INT,
+        @CustomerIdGUID        UNIQUEIDENTIFIER,
+        @Total                 DECIMAL(18,4),
+        @IsWhtInvoice          BIT,
+        @CalcWHTAmount         DECIMAL(18,4),
+        @NetTotal              DECIMAL(18,4),
+        @Prefix                VARCHAR(40),
+        @NextSeq               INT,
+        @Code                  VARCHAR(50),
+        @ReceiptId             INT,
+        @VoucherId             INT = NULL,
+        @ReceiptGUID           UNIQUEIDENTIFIER = NEWID(),
+        @Today                 DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE),
+        @NowPST                DATETIME = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME2(0)),
+        @ReceiptTransDateTime  DATETIME,
+        @IssuedOnStr           NVARCHAR(30);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- 1. Lock the invoice first (WN_FeeReceipts_Void uses the same order: invoice, then receipt).
+        SELECT
+            @InvoiceId             = i.Id,
+            @InvoiceNumber         = i.InvoiceNumber,
+            @IssuedOn              = CAST(i.IssuedOn AS DATE),
+            @StatusId              = ISNULL(i.StatusId, 0),
+            @GrandTotal            = ISNULL(i.GrandTotal, 0),
+            @PaidTotal             = ISNULL(i.PaidTotal, 0),
+            @InvoiceTypeId         = ISNULL(i.InvoiceTypeId, 1),
+            @RoomRentExclTax       = ISNULL(i.RoomRentExclTax, 0),
+            @ServiceCharges        = ISNULL(i.ServiceCharges, 0),
+            @TaxOnServiceCharges   = ISNULL(i.TaxOnServiceCharges, 0),
+            @WHTAmount             = ISNULL(i.WHTAmount, 0),
+            @WHTRate               = ISNULL(i.WHTRate, 0),
+            @SecurityDepositAmount = ISNULL(i.SecurityDepositAmount, 0),
+            @BookingId             = i.BookingId,
+            @UserId                = i.UserId,
+            @BillingPeriodEnd      = i.BillingPeriodEnd,
+            @ApprovalStatus        = i.ApprovalStatus
+        FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+        WHERE i.PublicId = @InvoiceIdGUID;
+
+        IF @InvoiceId IS NULL
+            RAISERROR(''Invoice not found.'', 16, 2);
+
+        -- 2. Location: booking space''s location, else the user''s location (same rule as GetList / GetById / Void).
+        SELECT @LocationId = ISNULL(s.LocationId, u.LocationId)
+        FROM (SELECT 1 AS One) z
+        LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = @BookingId
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = @UserId;
+
+        IF @AllowedLocationIds IS NOT NULL
+           AND (@LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @AllowedLocs WHERE LocId = @LocationId))
+            RAISERROR(''You are not authorized to create receipts for invoices outside your assigned location(s).'', 16, 3);
+
+        -- 3. Status: only Un Paid / Challan Expire (overdue) with nothing paid.
+        IF @StatusId IN (5, @CancelledId)
+            RAISERROR(''Invoice is cancelled and cannot receive fee receipts.'', 16, 1);
+
+        -- RC_04: an invoice waiting for approval cannot be receipted yet.
+        IF LTRIM(RTRIM(ISNULL(@ApprovalStatus, ''''))) = ''PendingApproval''
+            RAISERROR(''This invoice is waiting for approval and cannot be receipted yet.'', 16, 1);
+
+        IF @StatusId IN (2, 3, @PaidId, @PartialId) OR @PaidTotal > 0
+            RAISERROR(''Invoice is already paid or partially settled.'', 16, 1);
+
+        IF @StatusId NOT IN (1, 4, @UnPaidId, @OverdueId)
+            RAISERROR(''Invoice is not in an eligible unpaid status.'', 16, 1);
+
+        -- 4. One active receipt per invoice (receipt rows are locked after the invoice row).
+        IF EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts WITH (UPDLOCK, HOLDLOCK)
+                    WHERE InvoiceIdGUID = @InvoiceIdGUID AND Status = 1)
+            RAISERROR(''An active fee receipt already exists for this invoice.'', 16, 1);
+
+        -- 5. Receipt date: required, not in the future (Pakistan date), not before the invoice issue date.
+        IF @ReceiptDate IS NULL
+            SET @ReceiptDate = @NowPST;
+
+        IF CAST(@ReceiptDate AS TIME) = ''00:00:00''
+        BEGIN
+            -- If only date portion was passed, preserve the date and append current time down to the second
+            SET @ReceiptTransDateTime = DATEADD(SECOND, DATEDIFF(SECOND, ''00:00:00'', CAST(@NowPST AS TIME)), CAST(CAST(@ReceiptDate AS DATE) AS DATETIME));
+        END
+        ELSE
+        BEGIN
+            SET @ReceiptTransDateTime = CAST(@ReceiptDate AS DATETIME);
+        END
+
+        IF CAST(@ReceiptDate AS DATE) > @Today
+            RAISERROR(''Receipt date cannot be in the future.'', 16, 1);
+
+        IF @IssuedOn IS NOT NULL AND CAST(@ReceiptDate AS DATE) < @IssuedOn
+        BEGIN
+            SET @IssuedOnStr = CONVERT(NVARCHAR(30), @IssuedOn, 23);
+            RAISERROR(''Receipt date cannot be earlier than invoice issue date (%s).'', 16, 1, @IssuedOnStr);
+        END;
+
+        -- 6. Company / branch of the location.
+        IF @LocationId IS NOT NULL
+            SELECT TOP 1 @CompanyId = l.CompanyId, @BranchId = l.BranchId
+            FROM dbo.WN_Locations l WITH (NOLOCK)
+            WHERE l.Id = @LocationId;
+
+        -- 7. Cash / Bank Account: dynamically resolved from dbo.AccountsCOA if not provided,
+        --    or validated from dbo.AccountsCOA (no hardcoded IDs like 101).
+        IF @CashInHandAccountId IS NULL OR @CashInHandAccountId <= 0
+        BEGIN
+            DECLARE @IsBankPayment BIT = CASE WHEN @PaymentType IN (''Bank'', ''Cheque'', ''Online'', ''Pay Order'', ''Credit Card'') THEN 1 ELSE 0 END;
+
+            SELECT TOP 1 @CashInHandAccountId = a.Id
+            FROM dbo.AccountsCOA a WITH (NOLOCK)
+            WHERE (
+                    (@CompanyId IS NOT NULL AND a.CompanyId = @CompanyId)
+                    OR a.CompanyId = 1
+                    OR a.IsForAllCompanies = 1
+                    OR a.CompanyId IS NULL
+                  )
+              AND ISNULL(a.ActiveStatus, 1) = 1
+              AND a.Description NOT LIKE ''%DONATION%''
+              AND (
+                  (@IsBankPayment = 1 AND (a.AccountNature IN (''Bank Account'', ''Bank Credit Card Account'') OR a.Description LIKE ''%Bank%''))
+                  OR
+                  (@IsBankPayment = 0 AND (a.AccountNature IN (''Cash in Hand'', ''Petty Cash'', ''POS Cash'') OR a.AccountsCategoryId = 21 OR a.Description LIKE ''%Cash%''))
+                  OR
+                  a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+                  OR a.AccountsCategoryId = 21
+                  OR a.Description LIKE ''%Cash%''
+                  OR a.Description LIKE ''%Bank%''
+              )
+            ORDER BY
+                CASE 
+                    -- Highest priority: matching Company and payment nature
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 1 AND a.AccountNature = ''Bank Account'' THEN 1
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 0 AND a.AccountNature = ''Cash in Hand'' THEN 1
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 0 AND a.Description = ''CASH IN HAND'' THEN 2
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId AND @IsBankPayment = 0 AND a.Description LIKE ''%Cash%'' THEN 3
+                    WHEN @CompanyId IS NOT NULL AND a.CompanyId = @CompanyId THEN 4
+                    -- Next: default / shared company (1, NULL, IsForAllCompanies)
+                    WHEN @IsBankPayment = 1 AND a.AccountNature = ''Bank Account'' THEN 5
+                    WHEN @IsBankPayment = 0 AND a.AccountNature = ''Cash in Hand'' THEN 5
+                    WHEN @IsBankPayment = 0 AND a.Description = ''CASH IN HAND'' THEN 6
+                    WHEN @IsBankPayment = 0 AND a.AccountNature = ''Petty Cash'' THEN 7
+                    WHEN a.Description LIKE ''%Cash%'' THEN 8
+                    WHEN a.Description LIKE ''%Bank%'' THEN 9
+                    ELSE 10
+                END,
+                a.Id ASC;
+
+            IF @CashInHandAccountId IS NULL OR @CashInHandAccountId <= 0
+                RAISERROR(''Could not resolve an eligible Cash/Bank account from AccountsCOA for this invoice.'', 16, 1);
+        END
+        ELSE
+        BEGIN
+            -- Validate that the provided account is valid in AccountsCOA for this company (no hardcoded IDs)
+            IF NOT EXISTS (
+                SELECT 1 FROM dbo.AccountsCOA a WITH (NOLOCK)
+                WHERE a.Id = @CashInHandAccountId
+                  AND (
+                        @CompanyId IS NULL 
+                        OR a.CompanyId = @CompanyId 
+                        OR a.CompanyId = 1 
+                        OR a.CompanyId IS NULL 
+                        OR a.IsForAllCompanies = 1
+                      )
+                  AND (
+                    a.AccountNature IN (''Cash in Hand'', ''Bank Account'', ''Petty Cash'', ''POS Cash'', ''Bank Credit Card Account'')
+                    OR a.AccountsCategoryId = 21
+                    OR a.Description LIKE ''%Cash%''
+                    OR a.Description LIKE ''%Bank%''
+                  )
+                  AND ISNULL(a.ActiveStatus, 1) = 1
+                  AND a.Description NOT LIKE ''%DONATION%'')
+                RAISERROR(''Selected account is invalid or not an allowed cash/bank account for this invoice.'', 16, 1);
+        END;
+
+        -- 8. Customer of the invoice user.
+        SELECT TOP 1 @CustomerIdGUID = c.IdGUID
+        FROM dbo.WN_Customers c WITH (NOLOCK)
+        WHERE c.UserId = @UserId
+        ORDER BY c.Id;
+
+        -- 9. Amounts calculation (2 decimal precision):
+        -- Total = invoice total (same figure the invoice posting used for AR debit).
+        -- WHT invoice (InvoiceTypeId = 6 or WHTAmount > 0): WHTAmount = ROUND(i.WHTAmount, 2) if > 0, else ROUND(GrandTotal * WHTRate/100, 2).
+        -- Net = Total - WHTAmount.
+        SET @Total = ROUND(@GrandTotal, 2);
+        SET @IsWhtInvoice = CASE WHEN @InvoiceTypeId = 6 OR @WHTAmount > 0 THEN 1 ELSE 0 END;
+
+        IF @IsWhtInvoice = 1
+        BEGIN
+            SET @CalcWHTAmount = CASE 
+                WHEN @WHTAmount > 0 THEN ROUND(@WHTAmount, 2) 
+                ELSE ROUND(@Total * (@WHTRate / 100.0), 2) 
+            END;
+            SET @NetTotal = ROUND(@Total - @CalcWHTAmount, 2);
+        END
+        ELSE
+        BEGIN
+            SET @CalcWHTAmount = 0.0000;
+            SET @NetTotal = @Total;
+        END
+
+        -- 9b. RC_02: one receipt per month. The customer pays the whole invoice now (the invoice becomes Paid below), but
+        -- a multi-month invoice (dbo.WN_FeeReceipt_MonthPlan) gets one receipt per calendar month: this receipt is month 1
+        -- (its rent share + the whole security deposit); months 2..N are made by WN_FeeReceipts_CreateDueMonthly when each
+        -- month starts, each with its own voucher. A single-month invoice keeps one receipt for the whole amount.
+        DECLARE @MonthCount INT = NULL, @BillingMonth DATE = NULL,
+                @RcNet DECIMAL(18,4) = @NetTotal, @RcWHT DECIMAL(18,4) = @CalcWHTAmount, @RcDeposit DECIMAL(18,4) = @SecurityDepositAmount,
+                @RcRoomRent DECIMAL(18,4) = @RoomRentExclTax, @RcService DECIMAL(18,4) = @ServiceCharges, @RcTax DECIMAL(18,4) = @TaxOnServiceCharges;
+
+        SELECT @MonthCount = p.MonthCount, @BillingMonth = p.BillingMonth
+        FROM dbo.WN_FeeReceipt_MonthPlan(@InvoiceId) p
+        WHERE p.MonthNo = 1;
+
+        IF ISNULL(@MonthCount, 1) > 1
+            SELECT @RcNet      = p.Payable,
+                   @RcWHT      = CASE WHEN @IsWhtInvoice = 1 THEN p.WHT ELSE 0 END,
+                   @RcDeposit  = p.Deposit,
+                   @RcRoomRent = p.RentGross - p.Discount - p.Service,
+                   @RcService  = p.Service,
+                   @RcTax      = p.Tax
+            FROM dbo.WN_FeeReceipt_MonthPlan(@InvoiceId) p
+            WHERE p.MonthNo = 1;
+        ELSE
+            SET @MonthCount = 1;
+
+        -- 10. Code FR-{CompanyId}-{BranchId}-{YYYY}-{NNNNN}: next number for this prefix.
+        SET @Prefix = ''FR-'' + CAST(ISNULL(@CompanyId, 0) AS VARCHAR(10))
+                    + ''-'' + CAST(ISNULL(@BranchId, 0) AS VARCHAR(10))
+                    + ''-'' + CAST(YEAR(@ReceiptDate) AS VARCHAR(4)) + ''-'';
+
+        SELECT @NextSeq = ISNULL(MAX(TRY_CAST(SUBSTRING(fr.Code, LEN(@Prefix) + 1, 20) AS INT)), 0) + 1
+        FROM dbo.WN_FeeReceipts fr WITH (UPDLOCK, HOLDLOCK)
+        WHERE fr.Code LIKE @Prefix + ''%'';
+
+        SET @Code = @Prefix + RIGHT(''00000'' + CAST(@NextSeq AS VARCHAR(10)), CASE WHEN @NextSeq > 99999 THEN LEN(CAST(@NextSeq AS VARCHAR(10))) ELSE 5 END);
+
+        -- 11. Save the receipt (stores Net for WHT, Total otherwise; stores WHTAmount).
+        INSERT INTO dbo.WN_FeeReceipts (
+            IdGUID, Code, CustomerIdGUID, InvoiceIdGUID, InvoiceTypeId, TotalAmount,
+            RoomRentExclTax, ServiceCharges, TaxOnServiceCharges, WHTAmount, SecurityDepositAmount,
+            BillingMonth, MonthNo, MonthCount,
+            CashInHandAccountId, PaymentType, BranchId, CompanyId, FeeStatus, Status, ReceiptDate,
+            CreatedOn, UpdatedOn, CreatedById, Remarks, UpdatedById, VoidReason, DepositorName, DepositorCNIC,
+            VoucherId
+        )
+        VALUES (
+            @ReceiptGUID, @Code, @CustomerIdGUID, @InvoiceIdGUID, @InvoiceTypeId, @RcNet,
+            @RcRoomRent, @RcService, @RcTax, @RcWHT, @RcDeposit,
+            @BillingMonth, 1, @MonthCount,
+            @CashInHandAccountId, ISNULL(NULLIF(LTRIM(RTRIM(@PaymentType)), ''''), ''Cash''), @BranchId, @CompanyId,
+            1,   -- FeeStatus 1 = Paid
+            1,   -- Status 1 = Active
+            @ReceiptDate,
+            SYSUTCDATETIME(), NULL, @CreatedById, NULLIF(LTRIM(RTRIM(@Remarks)), ''''), NULL, NULL,
+            NULLIF(LTRIM(RTRIM(@DepositorName)), ''''), NULLIF(LTRIM(RTRIM(@DepositorCNIC)), ''''),
+            @VoucherId
+        );
+
+        SET @ReceiptId = CAST(SCOPE_IDENTITY() AS INT);
+
+        -- 12. Invoice fully paid (the customer pays the whole invoice now, also when it is receipted month by month).
+        -- PaidTotal = net amount, like WN_RecordInvoicePayment.
+        UPDATE dbo.WN_Invoices
+        SET PaidTotal = @NetTotal,
+            StatusId  = @PaidId
+        WHERE Id = @InvoiceId;
+
+        -- 13. Activate the booking''s access cards, same as WN_RecordInvoicePayment does on full payment.
+        IF @BookingId IS NOT NULL AND @BookingId > 0
+            UPDATE dbo.WN_AccessCards
+            SET Status    = 1,   -- Active
+                EndDate   = ISNULL(@BillingPeriodEnd, EndDate),
+                UpdatedOn = SYSUTCDATETIME()
+            WHERE BookingId = @BookingId;
+
+        -- 14. Accounting for THIS receipt''s amount (RC_02: moved to WN_FeeReceipts_PostVoucher, also used by the monthly receipts).
+        EXEC dbo.WN_FeeReceipts_PostVoucher @ReceiptId = @ReceiptId, @CreatedById = @CreatedById, @TransDate = @ReceiptTransDateTime;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        IF ERROR_NUMBER() IN (2601, 2627)
+        BEGIN
+            -- unique index hit (active receipt per invoice / receipt code): another receipt was saved at the same moment
+            RAISERROR(''Another fee receipt was saved for this invoice at the same moment. Refresh and try again.'', 16, 1);
+            RETURN;
+        END;
+        THROW;
+    END CATCH;
+
+    EXEC dbo.WN_FeeReceipts_GetById @Id = @ReceiptId;
+END');
+
+    -- WN_FeeReceipts_CreateDueMonthly
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_CreateDueMonthly
+    @Today       DATE = NULL,   -- Pakistan date; NULL = today
+    @MaxReceipts INT  = 200
+AS
+BEGIN
+    -- RC_02: makes the monthly receipts that are due. For every active receipt 1 of a multi-month invoice (MonthNo 1,
+    -- MonthCount > 1) and every later month of its plan (dbo.WN_FeeReceipt_MonthPlan) that has started (BillingMonth on or
+    -- before @Today) and has no active receipt yet: a receipt for that month''s amount, with receipt 1''s account / payment
+    -- type / depositor, and its own voucher (WN_FeeReceipts_PostVoucher).
+    -- RC_04: dated the LATER of the 1st of the month and receipt 1''s date (a late payment must not make receipts dated
+    -- before the money came in); voucher on that date (00:00); code year = year of that date.
+    -- One transaction per receipt (a failure does not stop the others); safe to run as often as wanted (it never makes a
+    -- month twice: the unique index UQ_WN_FeeReceipts_InvoiceMonth_Active and the checks below).
+    -- Result: [0] one row per receipt made (ReceiptId, Code, InvoiceNumber, MonthNo, MonthCount, BillingMonth, Amount);
+    -- [1] the months that failed and why.
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @Today IS NULL SET @Today = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE);
+    IF @MaxReceipts IS NULL OR @MaxReceipts < 1 SET @MaxReceipts = 200;
+
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5);
+    DECLARE @Created TABLE (ReceiptId INT, Code NVARCHAR(50), InvoiceNumber NVARCHAR(50), MonthNo INT, MonthCount INT, BillingMonth DATE, Amount DECIMAL(18,2));
+    DECLARE @Failed  TABLE (InvoiceNumber NVARCHAR(50), MonthNo INT, Error NVARCHAR(2000));
+    DECLARE @Due TABLE (Seq INT IDENTITY(1, 1) PRIMARY KEY, FirstReceiptId INT, InvoiceId INT, MonthNo INT);
+
+    INSERT INTO @Due (FirstReceiptId, InvoiceId, MonthNo)
+    SELECT TOP (@MaxReceipts) r1.Id, i.Id, p.MonthNo
+      FROM dbo.WN_FeeReceipts r1 WITH (NOLOCK)
+      JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = r1.InvoiceIdGUID
+     CROSS APPLY dbo.WN_FeeReceipt_MonthPlan(i.Id) p
+     WHERE r1.Status = 1 AND r1.MonthNo = 1 AND r1.MonthCount > 1
+       AND ISNULL(i.StatusId, 0) NOT IN (5, 40, @CancelledId)
+       AND p.MonthNo > 1 AND p.MonthNo <= r1.MonthCount AND p.BillingMonth <= @Today
+       AND NOT EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts x WITH (NOLOCK)
+                        WHERE x.InvoiceIdGUID = r1.InvoiceIdGUID AND x.MonthNo = p.MonthNo AND x.Status = 1)
+     ORDER BY p.BillingMonth, i.Id, p.MonthNo;
+
+    DECLARE @Seq INT = 1, @Last INT = (SELECT ISNULL(MAX(Seq), 0) FROM @Due),
+            @FirstId INT, @InvoiceId INT, @MonthNo INT, @InvoiceGUID UNIQUEIDENTIFIER, @InvoiceNumber NVARCHAR(50),
+            @MonthCount INT, @BillingMonth DATE, @Payable DECIMAL(18,4), @WHT DECIMAL(18,4), @Deposit DECIMAL(18,4),
+            @RoomRent DECIMAL(18,4), @Service DECIMAL(18,4), @Tax DECIMAL(18,4), @IsWht BIT,
+            @CompanyId INT, @BranchId INT, @CreatedById INT, @FirstCode VARCHAR(50),
+            @Prefix VARCHAR(40), @NextSeq INT, @Code VARCHAR(50), @ReceiptId INT, @TransDate DATETIME,
+            @FirstDate DATE, @ReceiptDate DATE;
+
+    WHILE @Seq <= @Last
+    BEGIN
+        SELECT @FirstId = FirstReceiptId, @InvoiceId = InvoiceId, @MonthNo = MonthNo FROM @Due WHERE Seq = @Seq;
+        SET @InvoiceNumber = NULL;
+        SELECT @MonthCount = NULL, @BillingMonth = NULL, @Payable = NULL, @FirstDate = NULL;   -- RC_04: nothing carried over from the previous month
+        BEGIN TRY
+            BEGIN TRANSACTION;
+
+            -- Same lock order as WN_FeeReceipts_Insert / _Void: invoice first, then receipts.
+            SELECT @InvoiceGUID = i.PublicId, @InvoiceNumber = i.InvoiceNumber,
+                   @IsWht = CASE WHEN ISNULL(i.InvoiceTypeId, 1) = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN 1 ELSE 0 END
+              FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+             WHERE i.Id = @InvoiceId;
+
+            SELECT @MonthCount = r1.MonthCount, @CompanyId = r1.CompanyId, @BranchId = r1.BranchId,
+                   @CreatedById = r1.CreatedById, @FirstCode = r1.Code, @FirstDate = CAST(r1.ReceiptDate AS DATE)
+              FROM dbo.WN_FeeReceipts r1 WITH (UPDLOCK, HOLDLOCK)
+             WHERE r1.Id = @FirstId AND r1.Status = 1;
+            IF @MonthCount IS NULL
+                RAISERROR(''Receipt 1 is no longer active.'', 16, 1);
+
+            IF EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts WITH (UPDLOCK, HOLDLOCK)
+                        WHERE InvoiceIdGUID = @InvoiceGUID AND MonthNo = @MonthNo AND Status = 1)
+            BEGIN
+                COMMIT TRANSACTION;   -- made meanwhile (another run): nothing to do
+                SET @Seq += 1;
+                CONTINUE;
+            END;
+
+            SELECT @BillingMonth = p.BillingMonth, @Payable = p.Payable, @WHT = CASE WHEN @IsWht = 1 THEN p.WHT ELSE 0 END,
+                   @Deposit = p.Deposit, @RoomRent = p.RentGross - p.Discount - p.Service, @Service = p.Service, @Tax = p.Tax
+              FROM dbo.WN_FeeReceipt_MonthPlan(@InvoiceId) p
+             WHERE p.MonthNo = @MonthNo;
+            IF @BillingMonth IS NULL OR @Payable IS NULL
+                RAISERROR(''The month is not in the invoice''''s month plan.'', 16, 1);
+
+            -- RC_04: the later of the month start and receipt 1''s date (the money came in with receipt 1).
+            SET @ReceiptDate = CASE WHEN @FirstDate > @BillingMonth THEN @FirstDate ELSE @BillingMonth END;
+            SET @TransDate = CAST(@ReceiptDate AS DATETIME);
+
+            -- Code FR-{CompanyId}-{BranchId}-{YYYY}-{NNNNN} (same numbering as WN_FeeReceipts_Insert), year of the receipt date.
+            SET @Prefix = ''FR-'' + CAST(ISNULL(@CompanyId, 0) AS VARCHAR(10))
+                        + ''-'' + CAST(ISNULL(@BranchId, 0) AS VARCHAR(10))
+                        + ''-'' + CAST(YEAR(@ReceiptDate) AS VARCHAR(4)) + ''-'';
+            SELECT @NextSeq = ISNULL(MAX(TRY_CAST(SUBSTRING(fr.Code, LEN(@Prefix) + 1, 20) AS INT)), 0) + 1
+              FROM dbo.WN_FeeReceipts fr WITH (UPDLOCK, HOLDLOCK)
+             WHERE fr.Code LIKE @Prefix + ''%'';
+            SET @Code = @Prefix + RIGHT(''00000'' + CAST(@NextSeq AS VARCHAR(10)), CASE WHEN @NextSeq > 99999 THEN LEN(CAST(@NextSeq AS VARCHAR(10))) ELSE 5 END);
+
+            INSERT INTO dbo.WN_FeeReceipts (
+                IdGUID, Code, CustomerIdGUID, InvoiceIdGUID, InvoiceTypeId, TotalAmount,
+                RoomRentExclTax, ServiceCharges, TaxOnServiceCharges, WHTAmount, SecurityDepositAmount,
+                BillingMonth, MonthNo, MonthCount,
+                CashInHandAccountId, PaymentType, BranchId, CompanyId, FeeStatus, Status, ReceiptDate,
+                CreatedOn, UpdatedOn, CreatedById, Remarks, UpdatedById, VoidReason, DepositorName, DepositorCNIC, VoucherId)
+            SELECT NEWID(), @Code, r1.CustomerIdGUID, r1.InvoiceIdGUID, r1.InvoiceTypeId, @Payable,
+                   @RoomRent, @Service, @Tax, @WHT, @Deposit,
+                   @BillingMonth, @MonthNo, @MonthCount,
+                   r1.CashInHandAccountId, r1.PaymentType, r1.BranchId, r1.CompanyId, 1, 1, @ReceiptDate,
+                   SYSUTCDATETIME(), NULL, r1.CreatedById,
+                   LEFT(CONCAT(N''Month '', @MonthNo, N'' of '', @MonthCount, N'', issued automatically (paid with '', @FirstCode, N'').''), 500),
+                   NULL, NULL, r1.DepositorName, r1.DepositorCNIC, NULL
+              FROM dbo.WN_FeeReceipts r1
+             WHERE r1.Id = @FirstId;
+            SET @ReceiptId = CAST(SCOPE_IDENTITY() AS INT);
+
+            EXEC dbo.WN_FeeReceipts_PostVoucher @ReceiptId = @ReceiptId, @CreatedById = @CreatedById, @TransDate = @TransDate;
+
+            COMMIT TRANSACTION;
+            INSERT INTO @Created VALUES (@ReceiptId, @Code, @InvoiceNumber, @MonthNo, @MonthCount, @BillingMonth, @Payable);
+        END TRY
+        BEGIN CATCH
+            IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+            INSERT INTO @Failed VALUES (@InvoiceNumber, @MonthNo, LEFT(ERROR_MESSAGE(), 2000));
+        END CATCH;
+        SET @Seq += 1;
+    END;
+
+    SELECT ReceiptId, Code, InvoiceNumber, MonthNo, MonthCount, BillingMonth, Amount FROM @Created ORDER BY ReceiptId;
+    SELECT InvoiceNumber, MonthNo, Error FROM @Failed;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT 'RC_04 installed: monthly receipt dates (later of month start and payment date), no receipts for invoices waiting for approval.' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

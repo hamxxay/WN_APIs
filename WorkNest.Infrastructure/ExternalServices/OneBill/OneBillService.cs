@@ -61,6 +61,8 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
                 }
                 if (claim is null) return null;
                 if (claim.Outcome == "Done") return claim.OneBillNumber;
+                // Being sent by another request (e.g. the sync): wait for it, so this email / PDF still gets the number.
+                if (claim.Outcome == "Busy") return await WaitForNumberAsync(GetNumberAsync, invoiceId, BusyWait, BusyPoll, ct);
                 if (claim.Outcome != "Claimed") return null;
 
                 var (ok, ezPayId, tranAuthId, error) = await AddInvoiceAsync(claim, ct);
@@ -82,6 +84,22 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
             {
                 _logger.LogError(ex, "One Bill: sending invoice {InvoiceId} failed.", invoiceId);
                 return null;
+            }
+        }
+
+        private static readonly TimeSpan BusyWait = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan BusyPoll = TimeSpan.FromMilliseconds(500);
+
+        /// <summary>Asks for the One Bill number every <paramref name="poll"/> until it exists or <paramref name="wait"/> is over.</summary>
+        private static async Task<string?> WaitForNumberAsync(Func<int, CancellationToken, Task<string?>> getNumber, int invoiceId,
+            TimeSpan wait, TimeSpan poll, CancellationToken ct)
+        {
+            var until = DateTime.UtcNow + wait;
+            while (true)
+            {
+                await Task.Delay(poll, ct);
+                var number = await getNumber(invoiceId, ct);
+                if (number is not null || DateTime.UtcNow >= until) return number;
             }
         }
 
@@ -131,8 +149,9 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
             try
             {
                 OneBillPaymentResult result;
-                // dbo.WN_OneBill_RecordPayment (OB_04): @StatusCode 200 recorded, 201 same notification already recorded,
-                // 202 invoice already fully paid, 104 no invoice with this bill number, 105 bad amount; an error = 103 (thrown).
+                // dbo.WN_OneBill_RecordPayment (OB_04 / OB_05): @StatusCode 200 recorded, 201 same notification already recorded,
+                // 202 invoice already fully paid, 106 invoice deleted / cancelled, 104 no invoice with this bill number,
+                // 105 bad amount; an error = 103 (thrown).
                 using (var cmd = new SqlCommand("dbo.WN_OneBill_RecordPayment", conn, tx) { CommandType = CommandType.StoredProcedure })
                 {
                     cmd.Parameters.Add("@ezpayRefNo", SqlDbType.NVarChar, 30).Value = notice.BillNo;
@@ -167,6 +186,7 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
                             200 => "Applied",
                             201 => "Duplicate",
                             202 => "AlreadyPaid",
+                            106 => "InvoiceClosed",
                             104 => "Unmatched",
                             105 => "Invalid",
                             _ => throw new InvalidOperationException($"WN_OneBill_RecordPayment answered status code {code?.ToString(CultureInfo.InvariantCulture) ?? "none"}.")
@@ -303,6 +323,14 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
                     }
                     return (true, id, tranAuth, null);
                 }
+                // The ref is already on EzPay (an earlier call that timed out after EzPay created it): the invoice is there,
+                // so it gets its number; only the EzPay ids are unknown.
+                if (IsAlreadyOnEzPay(message))
+                {
+                    _logger.LogWarning("One Bill: EzPay already has invoice {InvoiceNumber} (ref {Ref}): {Message}. Taken as created, without EzPay ids.",
+                        inv.InvoiceNumber, inv.OneBillRef, message);
+                    return (true, null, null, null);
+                }
                 var detail = root is { ValueKind: JsonValueKind.Object } d && d.TryGetProperty("data", out var dd) && dd.ValueKind == JsonValueKind.Object ? " " + dd.GetRawText() : "";
                 return (false, null, null, Cut($"EzPay answered HTTP {(int)status}: {message ?? "no message"}{detail}", 500));
             }
@@ -311,6 +339,12 @@ namespace WorkNest.Infrastructure.ExternalServices.OneBill
                 return (false, null, null, Cut("Could not reach EzPay: " + ex.Message, 500));
             }
         }
+
+        /// <summary>EzPay's refusal says the ref already exists ("already exists", "duplicate", ...).</summary>
+        private static bool IsAlreadyOnEzPay(string? message) =>
+            // Only "already ..." / "duplicate": a plain "does not exist" (e.g. an unknown customer) is a real refusal.
+            message is not null && (message.Contains("already", StringComparison.OrdinalIgnoreCase)
+                                    || message.Contains("duplicate", StringComparison.OrdinalIgnoreCase));
 
         private async Task<(HttpStatusCode Status, JsonDocument? Json)> PostInvoiceAsync(Dictionary<string, object?> body, string token, CancellationToken ct)
         {

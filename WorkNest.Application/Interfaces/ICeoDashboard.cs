@@ -32,7 +32,8 @@ namespace WorkNest.Application.Interfaces
 
         /// <remarks>
         /// CS_01: <paramref name="from"/> / <paramref name="to"/> (days included) = billing period starting in that range (CP_01;
-        /// before it: issued in it). <paramref name="status"/>: open | overdue | paid | advance (CP_01: billed in advance).
+        /// before it: issued in it). <paramref name="status"/>: open | overdue | paid | advance (CP_01: billed in advance) |
+        /// collected | deposit (CP_02) | receivable (RC_05: something left to pay for the period).
         /// </remarks>
         Task<List<List<IDictionary<string, object?>>>> GetInvoiceRecordsAsync(DateTime? monthStart, int? locationId, bool noLocation,
             string? bucket, int? customerId, string? status, DateTime businessNow, CeoInvoiceStatusIds statuses, int top,
@@ -55,6 +56,13 @@ namespace WorkNest.Application.Interfaces
 
         Task<List<List<IDictionary<string, object?>>>> GetBookingRecordsAsync(DateTime? from, DateTime? to, int? locationId, bool noLocation,
             string? statusIds, bool runningOnly, DateTime businessNow, int top);
+
+        /// <summary>
+        /// The ids of these booking status codes (dbo.WN_BookingStatuses.Code, e.g. Confirmed), as a CSV in id order, so the
+        /// booking records get ids: the procedures from before BK_11 know only ids, the later ones ids or codes. Null when
+        /// none is found (the caller then sends the codes, as before).
+        /// </summary>
+        Task<string?> GetBookingStatusIdsAsync(IReadOnlyCollection<string> codes) => Task.FromResult<string?>(null);
 
         /// <summary>
         /// Tour inquiries of one branch (<paramref name="locationId"/>, QA_07; null = every inquiry). Before QA_07 every

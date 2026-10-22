@@ -63,6 +63,8 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         Task<IDictionary<string, object?>> UpdateBookingSecurityDepositAsync(int id, int securityDepositMonths, int? updatedById);
         Task UpdateBookingStatusAsync(int id, byte statusId, int? updatedById);
+        /// <summary>The booking statuses of dbo.WN_BookingStatuses (Id, Code), the only ones a booking may have.</summary>
+        Task<IReadOnlyList<(int Id, string Code)>> GetBookingStatusesDbAsync();
         /// <summary>Signed agreement: agreement SignedDate, booking date and challan dates follow the agreement's date.</summary>
         Task ApplyAgreementSignedDateDbAsync(int agreementId, int? bookingId, DateTime signedDate);
         /// <summary>One booking in the same shape as a bookings-list row (WN_vw_BookingSummary).</summary>
@@ -578,6 +580,8 @@ namespace WorkNest.Application.Interfaces
         /// Creates the monthly receipts (months 2..N of a multi-month invoice) that are due by <paramref name="today"/> and not
         /// created yet, each with its voucher (dbo.WN_FeeReceipts_CreateDueMonthly, script RC_02). One row per receipt created:
         /// ReceiptId, Code, InvoiceNumber, MonthNo, MonthCount, BillingMonth, Amount. Safe to call again.
+        /// The result is a <see cref="MonthlyFeeReceiptRun"/>: its <see cref="MonthlyFeeReceiptRun.Failed"/> holds the
+        /// procedure's second result set (RC_04: the months that could not be created, InvoiceNumber, MonthNo, Error).
         /// </summary>
         Task<IEnumerable<IDictionary<string, object?>>> CreateDueMonthlyFeeReceiptsDbAsync(DateTime today);
 
@@ -590,14 +594,32 @@ namespace WorkNest.Application.Interfaces
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds,
             DateTime? monthStart, string? bucket, string? customer, DateTime? from, DateTime? to, int top);
         /// <summary>Bookings made in a month (list "new") or live bookings ending in it from now on (list "ending").</summary>
+        /// <paramref name="from"/> / <paramref name="to"/> (list "new", BK_12): only bookings made on those business days (both
+        /// included, CreatedOn shifted to UTC as the overview's chart). Sent only when given: before BK_12 the procedure
+        /// does not take them and the call throws <see cref="DashboardDatabaseUpdateMissingException"/>.
         Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
-            string list, DateTime monthStart, int top);
+            string list, DateTime monthStart, int top, DateTime? from = null, DateTime? to = null);
         /// <summary>Active spaces of a space type with their state now (list "type"), or the spaces in use in a month (list "occupied").</summary>
         Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
             string list, string? spaceType, DateTime? monthStart, int top);
     }
+
+    /// <summary>
+    /// Rows of dbo.WN_FeeReceipts_CreateDueMonthly: the receipts created (the list itself) and, from its second result set,
+    /// the months that failed (InvoiceNumber, MonthNo, Error); empty before RC_04.
+    /// </summary>
+    public class MonthlyFeeReceiptRun : List<IDictionary<string, object?>>
+    {
+        public MonthlyFeeReceiptRun() { }
+        public MonthlyFeeReceiptRun(IEnumerable<IDictionary<string, object?>> created, IEnumerable<IDictionary<string, object?>>? failed = null)
+            : base(created) { Failed = (failed ?? Enumerable.Empty<IDictionary<string, object?>>()).ToList(); }
+
+        public List<IDictionary<string, object?>> Failed { get; init; } = new();
+    }
+
+    /// <summary>A dashboard procedure does not take a parameter yet: the named script has not run on this database.</summary>
+    public class DashboardDatabaseUpdateMissingException : Exception
+    {
+        public DashboardDatabaseUpdateMissingException(string message, Exception? inner = null) : base(message, inner) { }
+    }
 }
-
-
-
-
