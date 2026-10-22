@@ -125,7 +125,7 @@ namespace WorkNest.Application.Services
                     Months = Set(s, 2).Select(r => new CeoMoneyMonthDto
                         { Month = Str(r, "Month") ?? "", Invoiced = Dec(r, "Invoiced"), Collected = Dec(r, "Collected"), WhtOpen = DecOrNull(r, "WhtOpen") }).ToList(),
                     Aging = Set(s, 3).Select(r => new CeoAgingBucketDto
-                        { Bucket = Str(r, "BucketKey") ?? "", Label = Str(r, "Label") ?? "", Amount = Dec(r, "Amount"), Count = Int(r, "Invoices") }).ToList(),
+                        { Bucket = Str(r, "BucketKey") ?? "", Label = Str(r, "Label") ?? "", Amount = Dec(r, "Amount"), Count = Int(r, "Invoices"), Deposits = DecOrNull(r, "Deposits") }).ToList(),   // RC_06: Deposits
                     TopCustomers = Set(s, 4).Select(r => new CeoTopCustomerDto
                     {
                         CustomerId = Val(r, "CustomerId") is { } id ? Convert.ToInt32(id) : null,
@@ -353,6 +353,9 @@ namespace WorkNest.Application.Services
                     var bucketLabel = Buckets.First(b => b.Key == bucket).Label;
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
                         ("Outstanding by location", bucket == "not_due" ? "Unpaid invoices not due yet" : $"Unpaid invoices {bucketLabel} past due", "Outstanding", null);
+                    // RC_06: Value = rent owed, Value2 = security deposits owed (before RC_06 Value2 is null: the whole balance).
+                    if (dto.Rows.Any(r => r.Value2 != null))
+                        (dto.Subtitle, dto.ValueLabel, dto.Value2Label) = (dto.Subtitle + ", without security deposits", "Outstanding", "Security deposits");
                     break;
                 case "occupancy-type":
                     (dto.Title, dto.Subtitle, dto.ValueLabel, dto.Value2Label) =
@@ -711,7 +714,7 @@ namespace WorkNest.Application.Services
                 Customer = Str(r, "Customer"), Location = Str(r, "Location"),
                 InvoiceId = Val(r, "InvoiceId") is { } inv ? Convert.ToInt32(inv, En) : null, InvoiceNumber = Str(r, "InvoiceNumber"),
                 BookingId = Val(r, "BookingId") is { } b ? Convert.ToInt32(b, En) : null,
-                Amount = Dec(r, "Amount"), Method = Str(r, "Method")
+                Amount = Dec(r, "Amount"), Method = Str(r, "Method"), Deposit = DecOrNull(r, "Deposit")   // RC_06
             }).ToList();
 
             var parts = new List<string> { window };
@@ -723,6 +726,7 @@ namespace WorkNest.Application.Services
                 Title = $"Money received: {string.Join(", ", parts)}",
                 Total = Int(head, "Total"),
                 Amount = Dec(head, "Amount"),
+                Deposits = DecOrNull(head, "Deposits"),   // RC_06
                 Rows = rows
             });
         }

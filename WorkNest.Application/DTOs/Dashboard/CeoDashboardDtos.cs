@@ -109,8 +109,11 @@ namespace WorkNest.Application.DTOs.Dashboard
     {
         public string Bucket { get; set; } = "";
         public string Label { get; set; } = "";
+        /// <summary>RC_06: rent owed (without security deposits); before RC_06 the whole open balance.</summary>
         public decimal Amount { get; set; }
         public int Count { get; set; }
+        /// <summary>RC_06: security deposits owed in the bucket (not in Amount); null before RC_06.</summary>
+        public decimal? Deposits { get; set; }
     }
 
     public class CeoTopCustomerDto
@@ -743,6 +746,8 @@ namespace WorkNest.Application.DTOs.Dashboard
     public class CeoReceiptRecordsDto : CeoRecordsDto<CeoReceiptRecordDto>
     {
         public decimal Amount { get; set; }
+        /// <summary>RC_06: the security deposits inside Amount; null before RC_06.</summary>
+        public decimal? Deposits { get; set; }
     }
 
     /// <summary>CP_02: one fee receipt or paid payment (dbo.WN_Ceo_Records_Receipts).</summary>
@@ -764,5 +769,7 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal Amount { get; set; }
         /// <summary>Receipt payment type (Cash, Bank, Cheque...) or the payment method label.</summary>
         public string? Method { get; set; }
+        /// <summary>RC_06: the security deposit inside Amount; null before RC_06.</summary>
+        public decimal? Deposit { get; set; }
     }
 }
