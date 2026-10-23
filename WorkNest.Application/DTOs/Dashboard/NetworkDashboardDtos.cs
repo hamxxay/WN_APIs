@@ -78,6 +78,111 @@ namespace WorkNest.Application.DTOs.Dashboard
         public int? TopClientsRangeDays { get; set; }
         /// <summary>A short plain sentence when <see cref="TopClients"/> is null.</summary>
         public string? TopClientsMessage { get; set; }
+        /// <summary>
+        /// The Grandstream (GWN) network of the chosen location (F-7), or of every location the caller may see (All
+        /// locations); null when no GWN network is linked to the location (I-8). Independent of the UniFi part above.
+        /// </summary>
+        public GwnDashboardSectionDto? Gwn { get; set; }
+    }
+
+    /// <summary>Grandstream part of the Network section (contract GWN_CONTRACT.md). Never throws: Available = false + Message.</summary>
+    public sealed class GwnDashboardSectionDto
+    {
+        public bool Available { get; set; } = true;
+        public string? Message { get; set; }
+        /// <summary>When the API last read GWN (UTC).</summary>
+        public string? UpdatedAt { get; set; }
+        public List<GwnDashboardNetworkDto> Networks { get; set; } = new();
+        public GwnDashboardClientsDto? Clients { get; set; }
+        public GwnDashboardDevicesDto? Devices { get; set; }
+        /// <summary>Data through the GWN devices since midnight (network time).</summary>
+        public GwnDashboardUsageDto? UsageToday { get; set; }
+        public GwnDashboardTrafficDto? TrafficNow { get; set; }
+        /// <summary>Connected clients over the last 24 hours (GWN statistics, 5-minute steps).</summary>
+        public GwnDashboardCountSeriesDto? ClientHistory { get; set; }
+        /// <summary>Traffic over the last 24 hours (bits per second, 5-minute steps).</summary>
+        public GwnDashboardBandwidthDto? Bandwidth { get; set; }
+        /// <summary>Top 5 connected clients by data used this session, most first.</summary>
+        public List<GwnDashboardTopClientDto> TopClients { get; set; } = new();
+        public List<GwnDashboardAlertDto> Alerts { get; set; } = new();
+    }
+
+    public sealed class GwnDashboardNetworkDto
+    {
+        public long Id { get; set; }
+        public string Name { get; set; } = "";
+        public List<int> LocationIds { get; set; } = new();
+    }
+
+    public sealed class GwnDashboardClientsDto
+    {
+        public int Total { get; set; }
+        public int Band24 { get; set; }
+        public int Band5 { get; set; }
+        public int Wired { get; set; }
+        public int Weak { get; set; }
+        public int DeviceReported { get; set; }
+    }
+
+    public sealed class GwnDashboardDevicesDto
+    {
+        public int Total { get; set; }
+        public int Online { get; set; }
+        public int Offline { get; set; }
+        public List<GwnDashboardDeviceDto> List { get; set; } = new();
+    }
+
+    public sealed class GwnDashboardDeviceDto
+    {
+        public string Mac { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Model { get; set; } = "";
+        /// <summary>online | offline</summary>
+        public string Status { get; set; } = "";
+        public int Clients { get; set; }
+        /// <summary>As GWN reports it ("" when unknown).</summary>
+        public string Temperature { get; set; } = "";
+    }
+
+    public sealed class GwnDashboardUsageDto
+    {
+        public double? Download { get; set; }
+        public double? Upload { get; set; }
+        public double? Total { get; set; }
+    }
+
+    public sealed class GwnDashboardTrafficDto
+    {
+        public double? DownloadBps { get; set; }
+        public double? UploadBps { get; set; }
+    }
+
+    public sealed class GwnDashboardCountSeriesDto
+    {
+        public List<string?> Times { get; set; } = new();
+        public List<double?> Counts { get; set; } = new();
+    }
+
+    public sealed class GwnDashboardBandwidthDto
+    {
+        public List<string?> Times { get; set; } = new();
+        public List<double?> DownloadBps { get; set; } = new();
+        public List<double?> UploadBps { get; set; } = new();
+    }
+
+    public sealed class GwnDashboardTopClientDto
+    {
+        public string Mac { get; set; } = "";
+        public string Name { get; set; } = "";
+        public double Download { get; set; }
+        public double Upload { get; set; }
+        public double Total { get; set; }
+    }
+
+    public sealed class GwnDashboardAlertDto
+    {
+        public string Level { get; set; } = "";
+        public string Text { get; set; } = "";
     }
 
     /// <summary>One of the top data users (bytes; times UTC ISO 8601 with Z).</summary>

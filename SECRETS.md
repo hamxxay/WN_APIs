@@ -31,6 +31,15 @@
   "Firebase": {
     "ProjectId": "<firebase-project-id>",
     "RequireIdToken": false
+  },
+  "Gwn": {
+    "Enabled": true,
+    "Domain": "www.gwn.cloud",
+    "AppId": "<gwn-app-id>",
+    "SecretKey": "<gwn-secret-key>",
+    "Username": "<gdms-login>",
+    "Password": "<gdms-password>",
+    "RefreshSeconds": 60
   }
 }
 ```

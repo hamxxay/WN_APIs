@@ -34,19 +34,57 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IConfiguration _config;
         private readonly IServiceSwitch? _switches;
+        private readonly IGwnService? _gwn;
         private readonly ILogger<NetworkDashboardService> _logger;
 
         public NetworkDashboardService(IUnifiService unifi, IDbRepository db, IConfiguration config, ILogger<NetworkDashboardService> logger,
-            IServiceSwitch? switches = null)
+            IServiceSwitch? switches = null, IGwnService? gwn = null)
         {
             _unifi = unifi;
             _db = db;
             _config = config;
             _logger = logger;
             _switches = switches;
+            _gwn = gwn;
         }
 
         public async Task<NetworkDashboardDto> GetAsync(NetworkScope scope, CancellationToken ct = default)
+        {
+            var dto = await GetUnifiAsync(scope, ct);
+            dto.Gwn = await GetGwnAsync(scope, ct);
+            return dto;
+        }
+
+        /// <summary>
+        /// The Grandstream part: the GWN networks linked to the chosen location (F-7), or every one the caller may see
+        /// (All locations); null when none (I-8) or GWN is not part of this server. Never throws for GWN trouble.
+        /// </summary>
+        private async Task<GwnDashboardSectionDto?> GetGwnAsync(NetworkScope scope, CancellationToken ct)
+        {
+            if (_gwn == null) return null;
+            var locationId = scope.LocationId is > 0 ? scope.LocationId : null;
+            try
+            {
+                var networks = await _gwn.GetNetworksAsync(ct);
+                var visible = GwnNetworkScope.Visible(networks, scope.MyLocations?.ToList(), locationId);
+                // All locations: only networks linked to a location (an unlinked network belongs to no dashboard yet).
+                visible = visible.Where(n => n.LocationIds.Count > 0).ToList();
+                if (visible.Count == 0) return null;
+                return await _gwn.GetDashboardSectionAsync(visible, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Grandstream part of a dashboard failed: {Error}", ex.Message);
+                if (_gwn.UnavailableMessage != null || locationId == null) return null;
+                return new GwnDashboardSectionDto { Available = false, Message = GwnService.ReadFailedMessage };
+            }
+        }
+
+        private async Task<NetworkDashboardDto> GetUnifiAsync(NetworkScope scope, CancellationToken ct)
         {
             var locationId = scope.LocationId is > 0 ? scope.LocationId : null;
             try

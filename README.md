@@ -27,6 +27,7 @@ Production base URL: `https://aeo.eaccounting360.com.pk/WorkNest/api`. Swagger U
 | Mobile door unlock | `MobileAccessController` | `api/mobile/access` (verify, confirm, doors, open) |
 | Announcements | `AdminAnnouncementController`, `MobileAnnouncementController` | `api/admin/announcements`, `api/mobile/announcements`, `api/mobile/device-token` |
 | UniFi network | `UnifiController` | `api/unifi/*` (summary, clients, devices, Wi-Fi, WAN, ISP, usage, logs) |
+| Grandstream network (F-7) | `GwnController` | `api/gwn/*` (networks, overview, clients, devices, Wi-Fi, statistics; block / unblock and reboot for super admins, logged in `WN_GWN_ActionLog`). Contract: `Database/Gwn/GWN_CONTRACT.md` |
 | Dashboards and reports | `DashboardController`, `ReportsController` | `api/dashboard/*` (overview, summary, role, forecast), `api/admin/nav-badges`, `api/reports/weekly` |
 | WhatsApp | `WhatsAppWebhookController`, `WhatsAppInboxController` | `api/whatsapp/webhook` (Meta Cloud API), `api/whatsapp/conversations`, `contacts`, `broadcast` |
 
@@ -70,6 +71,7 @@ Registered in `Program.cs` (`WorkNest.API/Services`):
 | `AgreementReminderService` | Hourly: emails reminders for agreements awaiting signature (`AgreementReminders`) |
 | `WeeklyReportService` | Emails the weekly report to super admins (`Reports:Weekly`, default Monday 09:00 Pakistan time) |
 | `UnifiPollingService` | Keeps UniFi dashboard data fresh (`Unifi:Enabled`, `Unifi:RefreshSeconds`) |
+| `GwnPollingService` | Keeps the Grandstream (GWN) figures fresh (`GwnPolling` switch, `Gwn:Enabled`, `Gwn:RefreshSeconds`) |
 
 ## Authentication
 
@@ -94,6 +96,7 @@ Settings live in `WorkNest.API/appsettings.json` and `appsettings.Development.js
 | `PayFast` | Payment gateway |
 | `FileStorage`, `KycStorage` | Upload folders for signed agreements and KYC documents |
 | `Unifi` | UniFi network dashboard |
+| `Gwn` | Grandstream GWN Cloud: `Enabled`, `Domain`, `AppId`, `SecretKey`, `Username`, `Password`, `RefreshSeconds`, `DefaultNetworkLocations` (local appsettings only; without them every `api/gwn/*` answers `available: false`) |
 | `HikSync`, `HikAccessSuspension`, `Hikvision` | Hikvision sync, access suspension, API key for the HIK backend |
 | `WhatsApp` | WhatsApp Cloud API bot and inbox |
 | `RateLimiting` | Rate limit policies |
@@ -127,7 +130,7 @@ find WorkNest.API -maxdepth 1 -name 'D:*' -type d -empty -exec rmdir {} \;
 
 - SQL Server database `SAC400`. Tables use the `WN_` prefix (`WN_HIK_*` for Hikvision).
 - The app does not create or alter tables at startup.
-- Schema changes and stored procedures are kept in `Database/` as `.txt` scripts (each starts with `USE [SAC400]`), grouped by feature (`Agreements`, `Booking`, `HikSync`, `Invoicing`, `Reports`, `Unifi`, `Wht`). The DBA runs them manually; check the folder's README where present (for example `Database/Wht/README.md`) for run order.
+- Schema changes and stored procedures are kept in `Database/` as `.txt` scripts (each starts with `USE [SAC400]`), grouped by feature (`Agreements`, `Booking`, `Gwn`, `HikSync`, `Invoicing`, `Reports`, `Unifi`, `Wht`). The DBA runs them manually; check the folder's README where present (for example `Database/Wht/README.md`) for run order.
 - `Sp.sql` is a reference dump of the stored procedures. Compare with the live procedure before replacing one.
 
 ## Deploy (IIS on Windows)

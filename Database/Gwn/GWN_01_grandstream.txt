@@ -1,0 +1,88 @@
+-- ============================================================================================
+-- GWN_01: Grandstream (GWN Cloud) network for F-7 (dbo.WN_Locations Id 2). Run on the LIVE database (WorkNestAEO) and on
+-- the test database. Run as ONE statement in DBeaver (select all, then Ctrl+Enter).
+-- One transaction: if anything fails, nothing is changed. Safe to run again. Needs dbo.WN_ServiceSwitches (SS_01).
+--
+--   dbo.WN_GWN_NetworkLocations (new)  which WorkNest locations a GWN network serves (PK NetworkId + LocationId).
+--                                      Seeded with network 347087 'WorkNest F-7 Third Floor' -> location 2 (F-7).
+--                                      Location-bound staff only see the networks mapped to one of their locations.
+--   dbo.WN_GWN_ClientAliases (new)     a friendly name for a Wi-Fi client, by MAC ("AA:BB:CC:DD:EE:FF").
+--   dbo.WN_GWN_ActionLog (new)         every block / unblock / reboot a super admin asked for, with who, when and the result.
+--   dbo.WN_ServiceSwitches             + row GwnPolling (on): the API keeps the Grandstream network figures fresh.
+--                                      Off: the API stops polling GWN Cloud (CMS Administration > Services).
+-- Existing rows are never changed: a network mapping, alias or switch already there stays as it is.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NULL
+        THROW 50001, N'dbo.WN_ServiceSwitches is missing: run SS_01_service_switches first. Nothing changed.', 1;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WHERE Id = 2)
+        THROW 50002, N'dbo.WN_Locations has no Id 2 (F-7), so the Grandstream network cannot be mapped to it. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- 1. Which locations each GWN network serves.
+    IF OBJECT_ID(N'dbo.WN_GWN_NetworkLocations', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_GWN_NetworkLocations (
+            NetworkId    BIGINT         NOT NULL,
+            LocationId   INT            NOT NULL,
+            NetworkName  NVARCHAR(200)  NULL,
+            UpdatedBy    NVARCHAR(256)  NULL,
+            UpdatedAt    DATETIME2      NOT NULL CONSTRAINT DF_WN_GWN_NetworkLocations_UpdatedAt DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT PK_WN_GWN_NetworkLocations PRIMARY KEY (NetworkId, LocationId)
+        );');
+
+    -- 2. Friendly names for Wi-Fi clients.
+    IF OBJECT_ID(N'dbo.WN_GWN_ClientAliases', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_GWN_ClientAliases (
+            Mac        CHAR(17)       NOT NULL CONSTRAINT PK_WN_GWN_ClientAliases PRIMARY KEY,
+            Alias      NVARCHAR(100)  NULL,
+            UpdatedBy  NVARCHAR(256)  NULL,
+            UpdatedAt  DATETIME2      NOT NULL CONSTRAINT DF_WN_GWN_ClientAliases_UpdatedAt DEFAULT (SYSUTCDATETIME())
+        );');
+
+    -- 3. Block / unblock / reboot requests.
+    IF OBJECT_ID(N'dbo.WN_GWN_ActionLog', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_GWN_ActionLog (
+            Id         INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_GWN_ActionLog PRIMARY KEY,
+            NetworkId  BIGINT         NULL,
+            Action     NVARCHAR(30)   NOT NULL,   -- block | unblock | reboot
+            Target     NVARCHAR(64)   NULL,       -- client or device MAC
+            ByEmail    NVARCHAR(256)  NULL,
+            ByUserId   INT            NULL,
+            Ok         BIT            NOT NULL CONSTRAINT DF_WN_GWN_ActionLog_Ok DEFAULT (0),
+            Message    NVARCHAR(500)  NULL,
+            CreatedAt  DATETIME2      NOT NULL CONSTRAINT DF_WN_GWN_ActionLog_CreatedAt DEFAULT (SYSUTCDATETIME())
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_GWN_ActionLog') AND name = N'IX_WN_GWN_ActionLog_Network')
+        EXEC(N'CREATE INDEX IX_WN_GWN_ActionLog_Network ON dbo.WN_GWN_ActionLog (NetworkId, Id DESC);');
+
+    -- 4. F-7's network (dynamic SQL: the table may have been created just above in this same batch).
+    EXEC(N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_GWN_NetworkLocations WHERE NetworkId = 347087 AND LocationId = 2)
+        INSERT INTO dbo.WN_GWN_NetworkLocations (NetworkId, LocationId, NetworkName, UpdatedBy, UpdatedAt)
+        VALUES (347087, 2, N''WorkNest F-7 Third Floor'', N''GWN_01'', SYSUTCDATETIME());');
+
+    -- 5. The polling switch (on).
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_ServiceSwitches WHERE ServiceName = N'GwnPolling')
+        INSERT INTO dbo.WN_ServiceSwitches (ServiceName, IsEnabled, UpdatedBy, UpdatedAt)
+        VALUES (N'GwnPolling', 1, N'GWN_01', SYSUTCDATETIME());
+
+    COMMIT TRANSACTION;
+
+    EXEC(N'SELECT N''OK: Grandstream (GWN_01) installed.'' AS Result,
+           CASE WHEN OBJECT_ID(N''dbo.WN_GWN_NetworkLocations'', N''U'') IS NOT NULL THEN 1 ELSE 0 END AS NetworkLocationsTable,
+           CASE WHEN OBJECT_ID(N''dbo.WN_GWN_ClientAliases'', N''U'') IS NOT NULL THEN 1 ELSE 0 END AS ClientAliasesTable,
+           CASE WHEN OBJECT_ID(N''dbo.WN_GWN_ActionLog'', N''U'') IS NOT NULL THEN 1 ELSE 0 END AS ActionLogTable,
+           (SELECT COUNT(*) FROM dbo.WN_GWN_NetworkLocations) AS NetworkLocationRows,
+           (SELECT STRING_AGG(CONCAT(NetworkId, N'' -> '', LocationId, N'' ('', NetworkName, N'')''), N''; '')
+              FROM dbo.WN_GWN_NetworkLocations) AS NetworkLocations,
+           (SELECT COUNT(*) FROM dbo.WN_GWN_ClientAliases) AS ClientAliases,
+           (SELECT COUNT(*) FROM dbo.WN_GWN_ActionLog) AS ActionLogRows,
+           (SELECT IsEnabled FROM dbo.WN_ServiceSwitches WHERE ServiceName = N''GwnPolling'') AS GwnPollingOn;');
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

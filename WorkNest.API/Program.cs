@@ -193,6 +193,9 @@ try
     builder.Services.AddSingleton<IHikSyncRepository, HikSyncRepository>();
     builder.Services.AddSingleton<IHikSyncService, HikSyncService>();
     builder.Services.AddSingleton<IUnifiClient, UnifiClient>();
+    // Grandstream GWN Cloud (Gwn:* settings, local appsettings only): signed Northbound API client, shared token.
+    builder.Services.AddSingleton<IGwnClient>(sp => new WorkNest.Infrastructure.ExternalServices.Gwn.GwnClient(
+        sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<ILogger<WorkNest.Infrastructure.ExternalServices.Gwn.GwnClient>>()));
     // One Bill (EzPay / 1-Link): OneBill:* settings; dbo.WN_OneBill_*, script OB_01_one_bill.
     // Singleton, so the EzPay token is reused between invoices.
     builder.Services.AddSingleton<IOneBillService, WorkNest.Infrastructure.ExternalServices.OneBill.OneBillService>();
@@ -292,6 +295,11 @@ try
     builder.Services.AddSingleton<IUnifiService, UnifiService>();
     // Network (UniFi) section of the CEO / Sales Manager dashboards (api/ceo/network, api/sales-manager/network) and the
     // per-site locations (api/unifi/site-locations; dbo.WN_UNIFI_SiteLocations, script NET_01_unifi_site_locations).
+    // Grandstream GWN network (api/gwn/*, F-7): dbo.WN_GWN_NetworkLocations / ClientAliases / ActionLog (script
+    // GWN_01_grandstream); the CEO / Sales Manager Network section's Gwn part comes from the same service.
+    builder.Services.AddScoped<IGwnRepository, WorkNest.Infrastructure.Repositories.GwnRepository>();
+    builder.Services.AddSingleton<IGwnService>(sp => new GwnService(sp.GetRequiredService<IGwnClient>(),
+        sp.GetRequiredService<IServiceScopeFactory>(), sp.GetRequiredService<IConfiguration>(), sp.GetRequiredService<ILogger<GwnService>>()));
     builder.Services.AddScoped<INetworkDashboardService, NetworkDashboardService>();
     // On/off switch per background service (api/admin/services, super admin): dbo.WN_ServiceSwitches (script
     // SS_01_service_switches), cached 10 s. Singletons, because the hosted services below check them every cycle.
@@ -321,6 +329,7 @@ try
     builder.Services.AddHttpClient();
     builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();
     builder.Services.AddHostedService<UnifiPollingService>();
+    builder.Services.AddHostedService<GwnPollingService>();   // GwnPolling switch; Gwn:Enabled
     builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
     builder.Services.AddHostedService<MonthlyFeeReceiptService>();   // FeeReceipts:MonthlyEnabled (on by default)
 

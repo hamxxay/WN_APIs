@@ -53,6 +53,7 @@ namespace WorkNest.Application.Services
         public const string UnifiPolling = "UnifiPolling";
         public const string HikSync = "HikSync";
         public const string AgreementReminders = "AgreementReminders";
+        public const string GwnPolling = "GwnPolling";
 
         /// <summary>The services in the order the CMS lists them.</summary>
         public static readonly IReadOnlyList<BackgroundServiceInfo> All = new[]
@@ -93,6 +94,11 @@ namespace WorkNest.Application.Services
             new BackgroundServiceInfo(AgreementReminders, "Agreement Reminder",
                 "Every hour from 09:00 to 20:00 Pakistan time: e-mails customers whose agreement still waits for their signature (after 3 and 7 days).",
                 "AgreementReminders:Enabled", false, c => NotFalse(c["AgreementReminders:Enabled"])),
+            // Like GwnPollingService: off when Gwn:Enabled is "false", and it does nothing without the Gwn credentials.
+            // Seed row in GWN_01_grandstream (on).
+            new BackgroundServiceInfo(GwnPolling, "Grandstream Polling",
+                "Keeps the Grandstream (GWN, F-7) network figures fresh: devices, clients and Wi-Fi every minute, statistics every 5 minutes (needs the Gwn settings).",
+                "Gwn:Enabled", true, c => NotFalse(c["Gwn:Enabled"]) && !string.IsNullOrWhiteSpace(c["Gwn:AppId"])),
         };
 
         /// <summary>The service with this name (case ignored); null when there is none.</summary>
