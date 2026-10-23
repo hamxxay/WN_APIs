@@ -7,11 +7,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.InvoiceApproval;
 using WorkNest.Application.DTOs.Lists;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Infrastructure.ExternalServices.Pdf;
+using WorkNest.Common.Responses;
 
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
@@ -68,6 +70,9 @@ namespace WorkNest.API.Controllers
 
         // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+
+        // Super admin only (revert an approved invoice to Pending Approval).
+        private const string SuperAdminRoles = "super_admin,SuperAdmin";
 
         /// <summary>Signed-in user's email from the JWT only (the x-user-email header is no longer trusted).</summary>
         private string? ResolveUserEmail() => User.GetEmail();
@@ -1437,6 +1442,82 @@ namespace WorkNest.API.Controllers
             {
                 return StatusCode(500, new { isSuccessful = false, message = ex.Message });
             }
+        }
+
+        /// <summary>
+        /// Super admin moves one invoice from Approved (or NULL = approved) back to Pending Approval, so it is reviewed again
+        /// in the approval queue (dbo.WN_Invoices_RevertApproval, script INV_REVERT_01). Body: { "reason": "..." } (required,
+        /// at most 500 characters). Refused (400) when the invoice is deleted / cancelled, already pending, on 1Bill/EzPay or
+        /// has money against it (void the fee receipts first); 404 when there is no such invoice. The rules are checked here
+        /// first and again by the procedure with the invoice row locked. The invoice's still-pending e-mail retries are
+        /// cancelled (the customer already has the original e-mail; the next approval sends it again).
+        /// </summary>
+        [HttpPost("api/invoice/{id:int}/revert-approval")]
+        [Authorize(Roles = SuperAdminRoles)]
+        public async Task<IActionResult> RevertApproval(int id, [FromBody] RevertInvoiceApprovalRequest? req)
+        {
+            if (!User.IsSuperAdmin())
+                return StatusCode(403, ApiResponse.Fail(InvoiceApprovalRevertRules.ForbiddenMessage));
+            if (id <= 0)
+                return BadRequest(ApiResponse.Fail("Invalid invoice ID."));
+
+            var (reason, reasonError) = InvoiceApprovalRevertRules.ValidateReason(req?.Reason);
+            if (reasonError != null)
+                return BadRequest(ApiResponse.Fail(reasonError));
+
+            try
+            {
+                // Validate before the procedure: the same rules it checks again under the lock (race safety).
+                var state = await _db.GetInvoiceRevertStateDbAsync(id);
+                if (state == null)
+                    return NotFound(ApiResponse.Fail(InvoiceApprovalRevertRules.NotFoundMessage));
+                var ruleError = InvoiceApprovalRevertRules.Check(state);
+                if (ruleError != null)
+                    return BadRequest(ApiResponse.Fail(ruleError));
+
+                var email = ResolveUserEmail();
+                var userId = await ResolveRevertUserIdAsync(email);
+                if (userId == null)
+                    return Unauthorized(ApiResponse.Fail("User record not found."));
+
+                // The repository's connection sets the audit session context (AppUserId / AppUserEmail / SourceApp) for the
+                // signed-in user exactly as SetAuditContextAsync does, on the connection that runs the procedure.
+                var result = await _db.RevertInvoiceApprovalDbAsync(id, userId.Value, email, reason!);
+                if (result == null)
+                    return StatusCode(500, ApiResponse.Fail("The invoice could not be moved back to Pending Approval. Please try again."));
+
+                return Ok(ApiResponse.Ok(new
+                {
+                    invoiceId = result.InvoiceId,
+                    invoiceNumber = result.InvoiceNumber,
+                    approvalStatus = InvoiceApprovalRevertRules.PendingApproval,
+                    cancelledDeliveryRows = result.CancelledDeliveryRows
+                }, InvoiceApprovalRevertRules.SuccessMessage));
+            }
+            catch (InvoiceApprovalRevertException ex)
+            {
+                return ex.IsNotFound
+                    ? NotFound(ApiResponse.Fail(InvoiceApprovalRevertRules.NotFoundMessage))
+                    : BadRequest(ApiResponse.Fail(ex.Message));
+            }
+            catch (InvoiceApprovalRevertDatabaseMissingException ex)
+            {
+                return StatusCode(503, ApiResponse.Fail(ex.Message));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ApiResponse.Fail(ex.Message));
+            }
+        }
+
+        /// <summary>The signed-in user's id: the JWT id claim, else looked up by the JWT email (as ResolveUserIdAsync).</summary>
+        private async Task<int?> ResolveRevertUserIdAsync(string? email)
+        {
+            var idClaim = User.FindFirst("id")?.Value ?? User.FindFirst("userId")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(idClaim, out var parsedId) && parsedId > 0) return parsedId;
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            var (id, _) = await _db.GetUserIdByEmailAsync(email);
+            return id is > 0 ? id : null;
         }
 
         /// <summary>

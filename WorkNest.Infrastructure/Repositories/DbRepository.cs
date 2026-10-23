@@ -7488,6 +7488,91 @@ END";
             return (false, "The fee receipt could not be voided. Please try again.", receiptId, false, false, null);
         }
 
+        // ---- Invoice approval revert (INV_REVERT_01) ----
+
+        // SQL errors that mean the database update is not there: invalid column / object, procedure not found.
+        private static bool IsRevertApprovalMissing(SqlException ex) => ex.Number is 207 or 208 or 2812;
+
+        public async Task<WorkNest.Application.DTOs.InvoiceApproval.InvoiceRevertState?> GetInvoiceRevertStateDbAsync(int invoiceId)
+        {
+            // The same rules and status lookups as dbo.WN_Invoices_RevertApproval (which checks them again under a lock).
+            const string sql = @"
+                DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 2);
+                DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 3);
+                DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5);
+                DECLARE @DeletedId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Delete', 'Deleted') ORDER BY Id), 40);
+                SELECT i.Id, i.InvoiceNumber, i.ApprovalStatus,
+                       CAST(CASE WHEN ISNULL(i.StatusId, 0) IN (40, @DeletedId) THEN 1 ELSE 0 END AS BIT) AS IsDeleted,
+                       CAST(CASE WHEN ISNULL(i.StatusId, 0) IN (5, @CancelledId) THEN 1 ELSE 0 END AS BIT) AS IsCancelled,
+                       CAST(CASE WHEN ISNULL(i.OneBillStatus, 0) IN (1, 2) OR i.OneBillNumber IS NOT NULL OR i.EzPayInvoiceId IS NOT NULL
+                                 THEN 1 ELSE 0 END AS BIT) AS OnOneBill,
+                       CAST(CASE WHEN ISNULL(i.PaidTotal, 0) > 0
+                                   OR ISNULL(i.StatusId, 0) IN (2, @PaidId, 3, @PartialId)
+                                   OR EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts fr WITH (NOLOCK) WHERE fr.InvoiceIdGUID = i.PublicId AND ISNULL(fr.Status, 1) <> 0)
+                                   OR EXISTS (SELECT 1 FROM dbo.WN_Payments p WITH (NOLOCK) WHERE p.InvoiceId = i.Id AND p.StatusId = 2)
+                                   OR EXISTS (SELECT 1 FROM dbo.WN_OneBill_Payments op WITH (NOLOCK) WHERE op.InvoiceId = i.Id AND op.Outcome = 'Applied')
+                                 THEN 1 ELSE 0 END AS BIT) AS HasMoney
+                  FROM dbo.WN_Invoices i WITH (NOLOCK)
+                 WHERE i.Id = @InvoiceId;";
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = new SqlCommand(sql, c);
+                cmd.Parameters.Add("@InvoiceId", SqlDbType.Int).Value = invoiceId;
+                await using var r = await cmd.ExecuteReaderAsync();
+                if (!await r.ReadAsync()) return null;
+                var row = ToDict(r);
+                return new WorkNest.Application.DTOs.InvoiceApproval.InvoiceRevertState
+                {
+                    InvoiceId = Convert.ToInt32(row["Id"]),
+                    InvoiceNumber = row["InvoiceNumber"]?.ToString(),
+                    ApprovalStatus = row["ApprovalStatus"]?.ToString(),
+                    IsDeleted = Convert.ToBoolean(row["IsDeleted"]),
+                    IsCancelled = Convert.ToBoolean(row["IsCancelled"]),
+                    OnOneBill = Convert.ToBoolean(row["OnOneBill"]),
+                    HasMoney = Convert.ToBoolean(row["HasMoney"])
+                };
+            }
+            catch (SqlException ex) when (IsRevertApprovalMissing(ex))
+            {
+                throw new WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertDatabaseMissingException(ex);
+            }
+        }
+
+        public async Task<WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertResult?> RevertInvoiceApprovalDbAsync(int invoiceId, int userId, string? userEmail, string reason)
+        {
+            // Open() sets the audit session context (AppUserId / AppUserEmail / SourceApp) from the signed-in user, the same
+            // way InvoiceController.SetAuditContextAsync does, so TR_WN_Invoices_Audit records who made the change.
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Invoices_RevertApproval", c);
+                cmd.Parameters.Add("@InvoiceId", SqlDbType.Int).Value = invoiceId;
+                cmd.Parameters.Add("@UserId", SqlDbType.Int).Value = userId;
+                cmd.Parameters.Add("@UserEmail", SqlDbType.NVarChar, 256).Value = (object?)userEmail ?? DBNull.Value;
+                cmd.Parameters.Add("@Reason", SqlDbType.NVarChar, 500).Value = reason;
+                await using var r = await cmd.ExecuteReaderAsync();
+                if (!await r.ReadAsync()) return null;
+                var row = ToDict(r);
+                return new WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertResult
+                {
+                    InvoiceId = Convert.ToInt32(row["InvoiceId"]),
+                    InvoiceNumber = row["InvoiceNumber"]?.ToString(),
+                    OldApprovalStatus = row["OldApprovalStatus"]?.ToString(),
+                    NewApprovalStatus = row["NewApprovalStatus"]?.ToString() ?? WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertRules.PendingApproval,
+                    CancelledDeliveryRows = row["CancelledDeliveryRows"] is null ? 0 : Convert.ToInt32(row["CancelledDeliveryRows"])
+                };
+            }
+            catch (SqlException ex) when (ex.Number == 50000)   // RAISERROR in the procedure: state 1 = rule, 2 = not found
+            {
+                throw new WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertException(ex.Message, ex.State, ex);
+            }
+            catch (SqlException ex) when (IsRevertApprovalMissing(ex))
+            {
+                throw new WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertDatabaseMissingException(ex);
+            }
+        }
+
         public async Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds)
         {
             await using var c = await Open();

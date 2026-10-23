@@ -574,6 +574,17 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null);
         /// <summary>Voids the receipt and the later monthly receipts of its invoice (RC_02); VoidedCount is null before RC_02.</summary>
         Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview, int? VoidedCount)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds);
+
+        // Super admin moves an invoice from Approved back to Pending Approval (INV_REVERT_01). Both throw
+        // InvoiceApprovalRevertDatabaseMissingException when the approval columns / dbo.WN_Invoices_RevertApproval are missing.
+
+        /// <summary>The invoice's revert rules state (read before the procedure); null when there is no such invoice.</summary>
+        Task<WorkNest.Application.DTOs.InvoiceApproval.InvoiceRevertState?> GetInvoiceRevertStateDbAsync(int invoiceId);
+        /// <summary>
+        /// dbo.WN_Invoices_RevertApproval: checks the rules again with the invoice locked, sets PendingApproval, cancels the
+        /// invoice's pending e-mail retries and writes the audit row. A broken rule throws InvoiceApprovalRevertException.
+        /// </summary>
+        Task<WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertResult?> RevertInvoiceApprovalDbAsync(int invoiceId, int userId, string? userEmail, string reason);
         Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds);
         Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid, string? allowedLocationIds);
         /// <summary>

@@ -1,0 +1,204 @@
+-- ============================================================================================
+-- INV_REVERT_01: a super admin moves an approved invoice back to Pending Approval (POST api/invoice/{id}/revert-approval).
+-- Run as ONE statement in DBeaver: select all (Cmd+A), then Ctrl+Enter. No GO / USE needed.
+-- One transaction: if anything fails, nothing is changed. Safe to run again (CREATE OR ALTER). Changes no data.
+-- Creates ONE new procedure, dbo.WN_Invoices_RevertApproval. No existing procedure, function, table or column is changed.
+-- Needs the invoice approval columns (WN_Invoices.ApprovalStatus / ApprovedAt / ApprovedBy / ViewedAt / ViewedBy, used by
+-- dbo.WN_Invoices_GetApprovalQueue and dbo.WN_Invoices_ApproveSingle) and the 1Bill columns (OB_01): it stops with a
+-- message when they are missing.
+--
+-- dbo.WN_Invoices_RevertApproval @InvoiceId, @UserId, @UserEmail, @Reason:
+--   Allowed when ApprovalStatus is 'Approved' or NULL (NULL = approved, as everywhere else).
+--   Refused (RAISERROR state 1 -> HTTP 400) when the invoice is deleted (StatusId 40) or cancelled (5 / 'Cancelled'), is
+--   already PendingApproval, is on 1Bill/EzPay (OneBillStatus 1 claimed / 2 created, OneBillNumber or EzPayInvoiceId set),
+--   or has money against it (PaidTotal > 0, status Paid / Partial, an active fee receipt, a paid WN_Payments row or an
+--   applied 1Bill payment); also when the reason is empty. Not found -> state 2 (HTTP 404).
+--   Does, with the invoice row locked (UPDLOCK, HOLDLOCK): ApprovalStatus = 'PendingApproval', ApprovedAt / ApprovedBy /
+--   ViewedAt / ViewedBy = NULL, UpdatedOn = now; the invoice's WN_InvoiceDeliveryQueue rows still in Status 'Pending' ->
+--   'Cancelled' (the retry service only sends 'Pending', so re-approval does not e-mail the invoice twice); one
+--   WN_AuditLog row (EntityName WN_InvoiceApproval, Operation U, old / new approval values, reason, user).
+--   Returns one row: InvoiceId, InvoiceNumber, OldApprovalStatus, NewApprovalStatus, CancelledDeliveryRows.
+-- ============================================================================================
+SET XACT_ABORT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF COL_LENGTH(N'dbo.WN_Invoices', N'ApprovalStatus') IS NULL
+        THROW 50000, N'dbo.WN_Invoices.ApprovalStatus does not exist: the invoice approval update (approval queue) must be run on this database first.', 1;
+    IF COL_LENGTH(N'dbo.WN_Invoices', N'ApprovedAt') IS NULL OR COL_LENGTH(N'dbo.WN_Invoices', N'ApprovedBy') IS NULL
+       OR COL_LENGTH(N'dbo.WN_Invoices', N'ViewedAt') IS NULL OR COL_LENGTH(N'dbo.WN_Invoices', N'ViewedBy') IS NULL
+        THROW 50000, N'dbo.WN_Invoices.ApprovedAt / ApprovedBy / ViewedAt / ViewedBy are missing: the invoice approval update must be run on this database first.', 1;
+    IF COL_LENGTH(N'dbo.WN_Invoices', N'OneBillStatus') IS NULL OR COL_LENGTH(N'dbo.WN_Invoices', N'OneBillNumber') IS NULL
+       OR COL_LENGTH(N'dbo.WN_Invoices', N'EzPayInvoiceId') IS NULL
+        THROW 50000, N'dbo.WN_Invoices 1Bill columns are missing: run Database/OneBill/OB_01_one_bill.txt first.', 1;
+    IF OBJECT_ID(N'dbo.WN_OneBill_Payments', N'U') IS NULL
+        THROW 50000, N'dbo.WN_OneBill_Payments does not exist: run Database/OneBill/OB_03_one_bill_payments.txt first.', 1;
+    IF OBJECT_ID(N'dbo.WN_InvoiceDeliveryQueue', N'U') IS NULL
+        THROW 50000, N'dbo.WN_InvoiceDeliveryQueue does not exist on this database.', 1;
+    IF OBJECT_ID(N'dbo.WN_FeeReceipts', N'U') IS NULL
+        THROW 50000, N'dbo.WN_FeeReceipts does not exist: run Database/FeeReceipts/FeeReceipts_01_Table.txt first.', 1;
+    IF OBJECT_ID(N'dbo.WN_AuditLog', N'U') IS NULL
+        THROW 50000, N'dbo.WN_AuditLog does not exist: run Database/WN_AuditLog_Live_Setup.sql first.', 1;
+
+    -- dbo.WN_Invoices_RevertApproval (new)
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Invoices_RevertApproval
+    @InvoiceId INT,
+    @UserId    INT,
+    @UserEmail NVARCHAR(256) = NULL,
+    @Reason    NVARCHAR(500)
+AS
+BEGIN
+    -- INV_REVERT_01: a super admin moves one invoice from Approved (or NULL = approved) back to PendingApproval, so it is
+    -- reviewed again in the approval queue. In ONE transaction, with the invoice row locked: the rules are checked again
+    -- (the API checks the same ones first), ApprovalStatus = PendingApproval, ApprovedAt / ApprovedBy / ViewedAt /
+    -- ViewedBy cleared, the invoice''s still-pending e-mail retries (dbo.WN_InvoiceDeliveryQueue, Status Pending) set to
+    -- Cancelled so the next approval does not send the invoice twice, and one dbo.WN_AuditLog row (EntityName
+    -- WN_InvoiceApproval). Errors are RAISERROR(..., 16, state): state 1 = rule broken (HTTP 400), 2 = not found (404).
+    -- Returns one row: InvoiceId, InvoiceNumber, OldApprovalStatus, NewApprovalStatus, CancelledDeliveryRows.
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    -- Invoice statuses looked up in dbo.OrderStatus by description, with the legacy ids as fallback
+    -- (legacy: 1 Unpaid, 2 Paid, 3 Partial, 4 Overdue, 5 Cancelled; 40 = deleted).
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Partial'' ORDER BY Id), 3);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5);
+    DECLARE @DeletedId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN (''Delete'', ''Deleted'') ORDER BY Id), 40);
+
+    DECLARE
+        @Found          BIT = 0,
+        @InvoiceNumber  NVARCHAR(100),
+        @PublicId       UNIQUEIDENTIFIER,
+        @StatusId       INT,
+        @PaidTotal      DECIMAL(18,4),
+        @OldStatus      NVARCHAR(100),
+        @OldApprovedAt  DATETIME2,
+        @OldApprovedBy  INT,
+        @OldViewedAt    DATETIME2,
+        @OldViewedBy    INT,
+        @OneBillStatus  TINYINT,
+        @OneBillNumber  VARCHAR(30),
+        @EzPayInvoiceId BIGINT,
+        @Cancelled      INT = 0,
+        @Msg            NVARCHAR(2048);
+
+    SET @Reason = NULLIF(LTRIM(RTRIM(@Reason)), N'''');
+
+    BEGIN TRY
+        IF @Reason IS NULL
+            RAISERROR(''Enter the reason for moving this invoice back to Pending Approval.'', 16, 1);
+
+        BEGIN TRANSACTION;
+
+        -- Lock the invoice row to the end: approve / pay / 1Bill claim of this invoice wait until this is done.
+        SELECT
+            @Found          = 1,
+            @InvoiceNumber  = i.InvoiceNumber,
+            @PublicId       = i.PublicId,
+            @StatusId       = ISNULL(i.StatusId, 0),
+            @PaidTotal      = ISNULL(i.PaidTotal, 0),
+            @OldStatus      = i.ApprovalStatus,
+            @OldApprovedAt  = i.ApprovedAt,
+            @OldApprovedBy  = i.ApprovedBy,
+            @OldViewedAt    = i.ViewedAt,
+            @OldViewedBy    = i.ViewedBy,
+            @OneBillStatus  = i.OneBillStatus,
+            @OneBillNumber  = i.OneBillNumber,
+            @EzPayInvoiceId = i.EzPayInvoiceId
+        FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+        WHERE i.Id = @InvoiceId;
+
+        IF @Found = 0
+            RAISERROR(''Invoice not found.'', 16, 2);
+
+        IF @StatusId IN (40, @DeletedId)
+            RAISERROR(''This invoice is deleted and can''''t be reverted.'', 16, 1);
+
+        IF @StatusId IN (5, @CancelledId)
+            RAISERROR(''This invoice is cancelled and can''''t be reverted.'', 16, 1);
+
+        IF @OldStatus = ''PendingApproval''
+            RAISERROR(''This invoice is already Pending Approval.'', 16, 1);
+
+        IF @OldStatus IS NOT NULL AND @OldStatus <> ''Approved''
+        BEGIN
+            SET @Msg = N''Only approved invoices can be moved back to Pending Approval (this one is '''''' + REPLACE(@OldStatus, N''%'', N''%%'') + N'''''').'';
+            RAISERROR(@Msg, 16, 1);
+        END;
+
+        IF ISNULL(@OneBillStatus, 0) IN (1, 2) OR @OneBillNumber IS NOT NULL OR @EzPayInvoiceId IS NOT NULL
+            RAISERROR(''This invoice is already on 1Bill/EzPay and can''''t be reverted.'', 16, 1);
+
+        IF @PaidTotal > 0
+           OR @StatusId IN (2, @PaidId, 3, @PartialId)
+           OR EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts fr WITH (NOLOCK) WHERE fr.InvoiceIdGUID = @PublicId AND ISNULL(fr.Status, 1) <> 0)
+           OR EXISTS (SELECT 1 FROM dbo.WN_Payments p WITH (NOLOCK) WHERE p.InvoiceId = @InvoiceId AND p.StatusId = 2)
+           OR EXISTS (SELECT 1 FROM dbo.WN_OneBill_Payments op WITH (NOLOCK) WHERE op.InvoiceId = @InvoiceId AND op.Outcome = ''Applied'')
+            RAISERROR(''Payment has been received against this invoice. Void its fee receipt(s) first, then move it back to Pending Approval.'', 16, 1);
+
+        -- Audit identity: the parameters first, else the session context the API sets (as dbo.WN_CustomInvoice_Insert).
+        IF SESSION_CONTEXT(N''AppUserId'') IS NULL AND @UserId IS NOT NULL
+            EXEC sp_set_session_context @key = N''AppUserId'', @value = @UserId;   -- for TR_WN_Invoices_Audit
+        DECLARE @AuditUserId INT = COALESCE(@UserId, CAST(SESSION_CONTEXT(N''AppUserId'') AS INT), -1);
+        DECLARE @AuditEmail NVARCHAR(256) = COALESCE(NULLIF(LTRIM(RTRIM(@UserEmail)), N''''), CAST(SESSION_CONTEXT(N''AppUserEmail'') AS NVARCHAR(256)));
+        DECLARE @AuditSource NVARCHAR(50) = ISNULL(CAST(SESSION_CONTEXT(N''SourceApp'') AS NVARCHAR(50)), N''WebAPI'');
+
+        UPDATE dbo.WN_Invoices
+           SET ApprovalStatus = ''PendingApproval'',
+               ApprovedAt     = NULL,
+               ApprovedBy     = NULL,
+               ViewedAt       = NULL,
+               ViewedBy       = NULL,
+               UpdatedOn      = SYSUTCDATETIME()
+         WHERE Id = @InvoiceId;
+
+        -- E-mail retries still waiting (InvoiceDeliveryRetryService sends Status Pending only): the customer already has
+        -- the original e-mail, and the next approval sends the invoice again, so these would be a duplicate.
+        UPDATE dbo.WN_InvoiceDeliveryQueue
+           SET Status      = ''Cancelled'',
+               NextRetryAt = NULL,
+               LastError   = LEFT(CONCAT(N''Cancelled: invoice approval reverted to Pending Approval by '',
+                                         ISNULL(@AuditEmail, CONCAT(N''user '', @AuditUserId)), N''. '', @Reason), 4000)
+         WHERE InvoiceId = @InvoiceId
+           AND Status = ''Pending'';
+        SET @Cancelled = @@ROWCOUNT;
+
+        DECLARE @OldJson NVARCHAR(MAX) = (
+            SELECT ISNULL(@OldStatus, N''Approved'') AS approvalStatus, @OldApprovedAt AS approvedAt, @OldApprovedBy AS approvedBy,
+                   @OldViewedAt AS viewedAt, @OldViewedBy AS viewedBy
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER, INCLUDE_NULL_VALUES);
+        DECLARE @NewJson NVARCHAR(MAX) = (
+            SELECT N''PendingApproval'' AS approvalStatus, @Reason AS reason, @AuditUserId AS revertedBy,
+                   @Cancelled AS cancelledDeliveryRows
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER, INCLUDE_NULL_VALUES);
+
+        INSERT INTO dbo.WN_AuditLog (
+            EntityName, RecordId, Operation, OldValues, NewValues,
+            ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+        )
+        VALUES (
+            N''WN_InvoiceApproval'', CAST(@InvoiceId AS NVARCHAR(64)), ''U'', @OldJson, @NewJson,
+            NULL, NULL, NULL, @AuditUserId, @AuditEmail, SYSUTCDATETIME(), @AuditSource
+        );
+
+        COMMIT TRANSACTION;
+
+        SELECT @InvoiceId                     AS InvoiceId,
+               @InvoiceNumber                 AS InvoiceNumber,
+               ISNULL(@OldStatus, N''Approved'') AS OldApprovalStatus,
+               N''PendingApproval''             AS NewApprovalStatus,
+               @Cancelled                     AS CancelledDeliveryRows;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT 'Installed dbo.WN_Invoices_RevertApproval.' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
