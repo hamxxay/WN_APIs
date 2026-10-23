@@ -6413,9 +6413,15 @@ BEGIN
 
         IF @AppliedChargePercentage IS NULL OR @AppliedChargePercentage <= 0
         BEGIN
-            SELECT TOP 1 @AppliedChargePercentage = ISNULL(SupportChargesPercentage, 10.00)
-            FROM dbo.WN_SupportCharges WITH (NOLOCK)
-            WHERE IsActive = 1;
+            SELECT TOP 1 @AppliedChargePercentage = ISNULL(ChargePercentage, 10.00)
+            FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+            WHERE ChargeTypeId = 4
+              AND (StartDate IS NULL OR StartDate <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
+              AND (EndDate IS NULL OR EndDate > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
+            ORDER BY StartDate DESC;
+
+            IF @AppliedChargePercentage IS NULL OR @AppliedChargePercentage <= 0
+                SET @AppliedChargePercentage = 10.00;
         END
 
         IF @AppliedTaxPercentage IS NULL OR @AppliedTaxPercentage <= 0
@@ -7455,12 +7461,16 @@ BEGIN
 
         COMMIT TRANSACTION;
 
-        -- Return output resultset for callers
-        SELECT 
-            @InvoiceId              AS InvoiceId,
-            @GeneratedInvoiceNumber AS InvoiceNumber,
-            @GeneratedPublicId      AS PublicId,
-            @VoucherId              AS VoucherId;
+        -- Return output resultset for top-level callers only
+        IF @@NESTLEVEL <= 1
+        BEGIN
+            SELECT 
+                @InvoiceId              AS InvoiceId,
+                @GeneratedInvoiceNumber AS InvoiceNumber,
+                @GeneratedPublicId      AS PublicId,
+                @VoucherId              AS VoucherId,
+                @GrandTotal             AS TotalAmount;
+        END
 
         RETURN 0;
     END TRY

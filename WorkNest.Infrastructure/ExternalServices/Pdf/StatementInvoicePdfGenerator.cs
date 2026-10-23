@@ -41,6 +41,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public decimal? AppliedTaxPercentage { get; set; }
         public decimal SecurityDepositAmount { get; set; }
         public decimal WithholdingTaxRate { get; set; } = 15.00m;
+        public int? InvoiceTypeId { get; set; }
+        public bool IsRecurringInvoice => (InvoiceTypeId.HasValue && InvoiceTypeId.Value == 2)
+            || (!string.IsNullOrEmpty(InvoiceNumber) && InvoiceNumber.StartsWith("INV-REC", StringComparison.OrdinalIgnoreCase));
         /// <summary>WHT invoice (InvoiceTypeId 6): amounts are already grossed up, so the "if tax is withheld" terms are left out.</summary>
         public bool IsWhtInvoice { get; set; }
         public string CurrencyCode { get; set; } = "PKR";
@@ -156,7 +159,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 });
             }).GeneratePdf();
 
-            if (data.SalesTaxInvoice == null) return invoicePdf;
+            if (data.SalesTaxInvoice == null || (data.IsRecurringInvoice && (data.TaxTotal <= 0 && data.LineItems.Sum(i => i.VatAmount) <= 0))) return invoicePdf;
             // The sales-tax invoice follows the invoice in the same file. If it can't be added, the invoice alone is
             // still returned (the sales-tax invoice stays available to staff and to the customer when signed in).
             try
@@ -341,6 +344,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal totalLineVat = data.LineItems.Sum(i => i.VatAmount);
             decimal effectiveTaxTotal = data.TaxTotal > 0 ? data.TaxTotal : totalLineVat;
 
+            bool isRecurring = data.IsRecurringInvoice;
+
             decimal taxPercentage = data.AppliedTaxPercentage.HasValue
                 ? data.AppliedTaxPercentage.Value
                 : (data.VatRate > 0 ? (data.VatRate * 100m) : 16m);
@@ -348,31 +353,60 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             bool isExplicitlyNoTax = (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value == 0m)
                                   || (effectiveTaxTotal <= 0 && data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value == 0m);
 
-            bool hasTax = !isExplicitlyNoTax && (
-                effectiveTaxTotal > 0
-                || (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0)
-                || (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
-            );
+            bool hasTax;
+            if (isRecurring)
+            {
+                // Recurring invoices only have tax if explicitly billed with tax (TaxTotal > 0 or line VAT > 0).
+                // They must never pull support charges or tax from the parent booking agreement.
+                hasTax = effectiveTaxTotal > 0;
+            }
+            else
+            {
+                hasTax = !isExplicitlyNoTax && (
+                    effectiveTaxTotal > 0
+                    || (data.AppliedTaxPercentage.HasValue && data.AppliedTaxPercentage.Value > 0)
+                    || (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
+                );
+            }
 
             if (hasTax)
             {
                 decimal supportCharges = 0m;
                 decimal totalVat = 0m;
 
-                if (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
-                {
-                    supportCharges = data.SupportChargeAmount.Value;
-                    totalVat = effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round(supportCharges * (taxPercentage / 100m), 2);
-                }
-                else if (effectiveTaxTotal > 0 && taxPercentage > 0)
+                if (isRecurring)
                 {
                     totalVat = effectiveTaxTotal;
-                    supportCharges = Math.Round(totalVat / (taxPercentage / 100m), 2);
+                    if (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
+                    {
+                        supportCharges = data.SupportChargeAmount.Value;
+                    }
+                    else if (taxPercentage > 0)
+                    {
+                        supportCharges = Math.Round(totalVat / (taxPercentage / 100m), 2);
+                    }
+                    else
+                    {
+                        supportCharges = 0m;
+                    }
                 }
-                else if (rentTotal > 0 && (data.AppliedChargePercentage ?? 10m) > 0)
+                else
                 {
-                    supportCharges = Math.Round(rentTotal * ((data.AppliedChargePercentage ?? 10m) / 100m), 2);
-                    totalVat = Math.Round(supportCharges * (taxPercentage / 100m), 2);
+                    if (data.SupportChargeAmount.HasValue && data.SupportChargeAmount.Value > 0)
+                    {
+                        supportCharges = data.SupportChargeAmount.Value;
+                        totalVat = effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round(supportCharges * (taxPercentage / 100m), 2);
+                    }
+                    else if (effectiveTaxTotal > 0 && taxPercentage > 0)
+                    {
+                        totalVat = effectiveTaxTotal;
+                        supportCharges = Math.Round(totalVat / (taxPercentage / 100m), 2);
+                    }
+                    else if (rentTotal > 0 && (data.AppliedChargePercentage ?? 10m) > 0)
+                    {
+                        supportCharges = Math.Round(rentTotal * ((data.AppliedChargePercentage ?? 10m) / 100m), 2);
+                        totalVat = Math.Round(supportCharges * (taxPercentage / 100m), 2);
+                    }
                 }
 
                 decimal grandTotal = data.CurrentInvoiceTotal > 0
@@ -429,7 +463,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     }
                     else
                     {
-                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Sub Total:").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
+                        string rentLabel = isRecurring ? "Total Rent:" : "Sub Total:";
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text(rentLabel).FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalExclVat)).FontColor("#000000"); });
                     }
 
                     c.Item().LineHorizontal(1).LineColor("#000000");

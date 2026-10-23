@@ -293,8 +293,11 @@ namespace WorkNest.API.Services
                     dto.TaxTotal = reader.GetDecimal(reader.GetOrdinal("TaxTotal"));
                 if (HasColumn(reader, "WithholdingTaxRate") && !reader.IsDBNull(reader.GetOrdinal("WithholdingTaxRate")))
                     dto.WithholdingTaxRate = reader.GetDecimal(reader.GetOrdinal("WithholdingTaxRate"));
-                dto.IsWhtInvoice = HasColumn(reader, "InvoiceTypeId") && !reader.IsDBNull(reader.GetOrdinal("InvoiceTypeId"))
-                    && Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId"))) == 6;
+                if (HasColumn(reader, "InvoiceTypeId") && !reader.IsDBNull(reader.GetOrdinal("InvoiceTypeId")))
+                {
+                    dto.InvoiceTypeId = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId")));
+                    dto.IsWhtInvoice = dto.InvoiceTypeId == 6;
+                }
                 dto.CurrencyCode = reader.GetString(reader.GetOrdinal("CurrencyCode"));
                 dto.AccountName = reader.GetString(reader.GetOrdinal("AccountName"));
                 dto.AttnName = reader.IsDBNull(reader.GetOrdinal("AttnName")) ? "" : reader.GetString(reader.GetOrdinal("AttnName"));

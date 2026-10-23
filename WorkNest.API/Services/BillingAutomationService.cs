@@ -278,11 +278,27 @@ namespace WorkNest.API.Services
                         genCmd.Parameters.AddWithValue("@BillingPeriodEnd", nextPeriodEnd);
 
                         using var genReader = await genCmd.ExecuteReaderAsync(stoppingToken);
-                        if (await genReader.ReadAsync(stoppingToken))
+                        int invIdOrd = -1, numOrd = -1, totOrd = -1;
+                        do
                         {
-                            var invoiceId = genReader.GetInt32(genReader.GetOrdinal("InvoiceId"));
-                            var invoiceNo = genReader.GetString(genReader.GetOrdinal("InvoiceNumber"));
-                            var total = genReader.GetDecimal(genReader.GetOrdinal("TotalAmount"));
+                            if (await genReader.ReadAsync(stoppingToken))
+                            {
+                                try { invIdOrd = genReader.GetOrdinal("InvoiceId"); } catch { }
+                                try { numOrd = genReader.GetOrdinal("InvoiceNumber"); } catch { }
+                                try { totOrd = genReader.GetOrdinal("TotalAmount"); } catch { }
+
+                                if (invIdOrd >= 0 && !genReader.IsDBNull(invIdOrd))
+                                {
+                                    if (totOrd >= 0) break;
+                                }
+                            }
+                        } while (await genReader.NextResultAsync(stoppingToken));
+
+                        if (invIdOrd >= 0 && !genReader.IsDBNull(invIdOrd))
+                        {
+                            var invoiceId = genReader.GetInt32(invIdOrd);
+                            var invoiceNo = numOrd >= 0 && !genReader.IsDBNull(numOrd) ? genReader.GetString(numOrd) : "";
+                            var total = totOrd >= 0 && !genReader.IsDBNull(totOrd) ? genReader.GetDecimal(totOrd) : 0m;
 
                             _logger.LogInformation("Successfully generated recurring invoice {InvoiceNo} (ID: {InvoiceId}) for Booking {BookingId}. Total: PKR {Total}.", invoiceNo, invoiceId, b.BookingId, total);
                         }

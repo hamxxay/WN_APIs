@@ -432,8 +432,11 @@ namespace WorkNest.API.Controllers
                         dto.SupportChargeAmount = reader.GetDecimal(reader.GetOrdinal("SupportChargeAmount"));
                     if (HasColumn(reader, "SecurityDepositAmount") && !reader.IsDBNull(reader.GetOrdinal("SecurityDepositAmount")))
                         dto.SecurityDepositAmount = reader.GetDecimal(reader.GetOrdinal("SecurityDepositAmount"));
-                    dto.IsWhtInvoice = HasColumn(reader, "InvoiceTypeId") && !reader.IsDBNull(reader.GetOrdinal("InvoiceTypeId"))
-                        && Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId"))) == 6;
+                    if (HasColumn(reader, "InvoiceTypeId") && !reader.IsDBNull(reader.GetOrdinal("InvoiceTypeId")))
+                    {
+                        dto.InvoiceTypeId = Convert.ToInt32(reader.GetValue(reader.GetOrdinal("InvoiceTypeId")));
+                        dto.IsWhtInvoice = dto.InvoiceTypeId == 6;
+                    }
                     if (HasColumn(reader, "WithholdingTaxRate") && !reader.IsDBNull(reader.GetOrdinal("WithholdingTaxRate")))
                         dto.WithholdingTaxRate = reader.GetDecimal(reader.GetOrdinal("WithholdingTaxRate"));
                     if (HasColumn(reader, "LocationId") && !reader.IsDBNull(reader.GetOrdinal("LocationId")))
@@ -532,50 +535,85 @@ namespace WorkNest.API.Controllers
             // Same rule as the PDF (StatementInvoicePdfGenerator): the invoice's TaxTotal, else the lines' VAT.
             // Lines can carry no VAT while the invoice total does, which used to hide the Sales Tax Invoice link.
             decimal totalLineVat = dto.TaxTotal > 0 ? dto.TaxTotal : dto.LineItems.Sum(i => i.VatAmount);
-            bool hasTax = totalLineVat > 0 
+            bool isRecurring = dto.IsRecurringInvoice;
+
+            bool hasTax;
+            if (isRecurring)
+            {
+                // Recurring invoices only have tax if TaxTotal > 0 or line VAT > 0.
+                hasTax = totalLineVat > 0;
+            }
+            else
+            {
+                hasTax = totalLineVat > 0 
                        || (dto.AppliedTaxPercentage.HasValue && dto.AppliedTaxPercentage.Value > 0)
                        || (dto.SupportChargeAmount.HasValue && dto.SupportChargeAmount.Value > 0);
+            }
 
-            if (!hasTax && totalLineVat == 0)
+            if (!hasTax)
             {
-                dto.AppliedTaxPercentage = 0m;
-                dto.AppliedChargePercentage = 0m;
+                if (isRecurring)
+                {
+                    dto.SupportChargeAmount = 0m;
+                    dto.AppliedTaxPercentage = 0m;
+                    dto.AppliedChargePercentage = 0m;
+                }
+                else if (totalLineVat == 0)
+                {
+                    dto.AppliedTaxPercentage = 0m;
+                    dto.AppliedChargePercentage = 0m;
+                }
                 dto.SalesTaxInvoice = null;
             }
             else
             {
-            var stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
-            if (!stPublicId.HasValue)
-            {
-                string stInvoiceNumber = dto.InvoiceNumber.Replace("INV-", "ST-INV-");
-                decimal roomRentExcl = dto.LineItems.Where(i => !i.IsDeposit).Sum(i => i.PriceExclVat);
-                decimal stTaxRate = totalLineVat > 0 ? 16.00m : 0.00m;
-                decimal serviceChargeAmount = totalLineVat > 0 ? Math.Round(totalLineVat / 0.16m, 2) : 0m;
-                decimal roomRentAmount = Math.Max(0, roomRentExcl - serviceChargeAmount);
-                decimal stSubTotal = serviceChargeAmount;
-                decimal stGrandTotal = stSubTotal + totalLineVat;
+                var stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
+                if (!stPublicId.HasValue)
+                {
+                    string stInvoiceNumber = dto.InvoiceNumber.Replace("INV-", "ST-INV-");
+                    decimal roomRentExcl = dto.LineItems.Where(i => !i.IsDeposit).Sum(i => i.PriceExclVat);
+                    decimal stTaxRate = totalLineVat > 0 ? 16.00m : 0.00m;
+                    decimal serviceChargeAmount = totalLineVat > 0 ? Math.Round(totalLineVat / 0.16m, 2) : 0m;
+                    decimal roomRentAmount = Math.Max(0, roomRentExcl - serviceChargeAmount);
+                    decimal stSubTotal = serviceChargeAmount;
+                    decimal stGrandTotal = stSubTotal + totalLineVat;
 
-                using var autoStCmd = new SqlCommand("dbo.WN_EnsureCustomerSTInvoice", conn);
-                autoStCmd.CommandType = CommandType.StoredProcedure;
-                autoStCmd.Parameters.AddWithValue("@InvoiceId", id);
-                autoStCmd.Parameters.AddWithValue("@PublicId", DBNull.Value);
-                autoStCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
-                autoStCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
-                autoStCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
-                autoStCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
-                autoStCmd.Parameters.AddWithValue("@SubTotal", stSubTotal);
-                autoStCmd.Parameters.AddWithValue("@TaxAmount", totalLineVat);
-                autoStCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
-                await autoStCmd.ExecuteNonQueryAsync();
+                    using var autoStCmd = new SqlCommand("dbo.WN_EnsureCustomerSTInvoice", conn);
+                    autoStCmd.CommandType = CommandType.StoredProcedure;
+                    autoStCmd.Parameters.AddWithValue("@InvoiceId", id);
+                    autoStCmd.Parameters.AddWithValue("@PublicId", DBNull.Value);
+                    autoStCmd.Parameters.AddWithValue("@STInvoiceNumber", stInvoiceNumber);
+                    autoStCmd.Parameters.AddWithValue("@RoomRentAmount", roomRentAmount);
+                    autoStCmd.Parameters.AddWithValue("@ServiceChargeAmount", serviceChargeAmount);
+                    autoStCmd.Parameters.AddWithValue("@STTaxRate", stTaxRate);
+                    autoStCmd.Parameters.AddWithValue("@SubTotal", stSubTotal);
+                    autoStCmd.Parameters.AddWithValue("@TaxAmount", totalLineVat);
+                    autoStCmd.Parameters.AddWithValue("@GrandTotal", stGrandTotal);
+                    await autoStCmd.ExecuteNonQueryAsync();
 
-                stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
-            }
+                    stPublicId = await _db.GetSTInvoicePublicIdByInvoiceIdAsync(id);
+                }
 
-            // The sales-tax invoice for support services goes into the same PDF as extra pages. It used to be a link to
-            // an anonymous download, so anyone the PDF was forwarded to could open it.
-            dto.SalesTaxInvoice = stPublicId.HasValue && hasTax
-                ? await _db.GetCustomerSTInvoiceByPublicIdAsync(stPublicId.Value)
-                : null;
+                // The sales-tax invoice for support services goes into the same PDF as extra pages. It used to be a link to
+                // an anonymous download, so anyone the PDF was forwarded to could open it.
+                dto.SalesTaxInvoice = stPublicId.HasValue && hasTax
+                    ? await _db.GetCustomerSTInvoiceByPublicIdAsync(stPublicId.Value)
+                    : null;
+
+                // Reconcile SalesTaxInvoice for recurring invoices if loaded
+                if (isRecurring && dto.SalesTaxInvoice != null)
+                {
+                    decimal cycleTax = totalLineVat;
+                    decimal cycleServiceCharges = dto.SupportChargeAmount.HasValue && dto.SupportChargeAmount.Value > 0
+                        ? dto.SupportChargeAmount.Value
+                        : Math.Round(cycleTax / 0.16m, 2);
+
+                    dto.SalesTaxInvoice.TaxTotal = cycleTax;
+                    dto.SalesTaxInvoice.ServiceChargeTaxAmount = cycleTax;
+                    dto.SalesTaxInvoice.ServiceChargeAmount = cycleServiceCharges;
+                    dto.SalesTaxInvoice.SubTotal = cycleServiceCharges;
+                    dto.SalesTaxInvoice.GrandTotal = cycleServiceCharges + cycleTax;
+                }
             }
 
             dto.OneBillNumber = await _oneBill.GetNumberAsync(id);
@@ -1187,7 +1225,7 @@ namespace WorkNest.API.Controllers
         [EnableRateLimiting("pdf")]
         [HttpPost("api/invoice/{id:int}/send-email")]
         [Authorize(Roles = StaffRoles)]
-        public async Task<IActionResult> SendInvoiceEmail(int id)
+        public async Task<IActionResult> SendInvoiceEmail(int id, [FromQuery] bool force = false)
         {
             try
             {
@@ -1200,7 +1238,24 @@ namespace WorkNest.API.Controllers
                     var statusVal = (await chkCmd.ExecuteScalarAsync())?.ToString();
                     if (string.Equals(statusVal, "PendingApproval", StringComparison.OrdinalIgnoreCase))
                     {
-                        return BadRequest(new { isSuccessful = false, message = "This recurring invoice is pending approval and cannot be emailed until approved." });
+                        if (force)
+                        {
+                            var currentUserId = await ResolveUserIdAsync(conn);
+                            using var appCmd = new SqlCommand(@"
+                                UPDATE dbo.WN_Invoices 
+                                SET ApprovalStatus = 'Approved', 
+                                    ApprovedAt = SYSUTCDATETIME(), 
+                                    ApprovedBy = @UserId,
+                                    UpdatedOn = SYSUTCDATETIME()
+                                WHERE Id = @Id", conn);
+                            appCmd.Parameters.AddWithValue("@Id", id);
+                            appCmd.Parameters.AddWithValue("@UserId", (object?)currentUserId ?? DBNull.Value);
+                            await appCmd.ExecuteNonQueryAsync();
+                        }
+                        else
+                        {
+                            return BadRequest(new { isSuccessful = false, message = "This recurring invoice is pending approval and cannot be emailed until approved. Pass ?force=true to approve and send." });
+                        }
                     }
                 }
 
@@ -1785,6 +1840,283 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        /// <summary>
+        /// On-demand generation and optional delivery of a recurring invoice for an active booking.
+        /// Invokes dbo.WN_Invoice_CreateRecurring with duplicate detection, automatic next-period resolution,
+        /// and optional immediate approval and email delivery.
+        /// </summary>
+        [HttpPost("api/booking/{bookingId:int}/generate-recurring-invoice")]
+        [Authorize(Roles = StaffRoles)]
+        [RecordScope(RecordKind.Booking, "bookingId")]
+        public async Task<IActionResult> GenerateRecurringInvoiceForBooking(
+            int bookingId,
+            [FromBody] GenerateRecurringInvoiceRequest? request = null)
+        {
+            if (bookingId <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid booking ID." });
+
+            var lockResource = $"WN_RecurringInvoice_{bookingId}";
+            await using var lockConn = new SqlConnection(GetConnectionString());
+            await lockConn.OpenAsync();
+            bool lockTaken = false;
+            try
+            {
+                using (var getLock = new SqlCommand("sp_getapplock", lockConn))
+                {
+                    getLock.CommandType = CommandType.StoredProcedure;
+                    getLock.CommandTimeout = 60;
+                    getLock.Parameters.AddWithValue("@Resource", lockResource);
+                    getLock.Parameters.AddWithValue("@LockMode", "Exclusive");
+                    getLock.Parameters.AddWithValue("@LockOwner", "Session");
+                    getLock.Parameters.AddWithValue("@LockTimeout", 30000);
+                    var ret = getLock.Parameters.Add("@ReturnValue", SqlDbType.Int);
+                    ret.Direction = ParameterDirection.ReturnValue;
+                    await getLock.ExecuteNonQueryAsync();
+                    var code = ret.Value is int c ? c : -999;
+                    if (code < 0)
+                        return Conflict(new { isSuccessful = false, message = "A recurring invoice for this booking is already being processed - try again in a moment." });
+                    lockTaken = true;
+                }
+
+                using var conn = await OpenConnectionAsync();
+                await SetAuditContextAsync(conn);
+
+                // 1. Fetch booking info
+                DateTime contractStart, contractEnd;
+                int bookingStatusId;
+                using (var bCmd = new SqlCommand("SELECT StartOn, EndOn, BookingStatusId FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @BookingId", conn))
+                {
+                    bCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                    using var r = await bCmd.ExecuteReaderAsync();
+                    if (!await r.ReadAsync())
+                        return NotFound(new { isSuccessful = false, message = $"Booking #{bookingId} not found." });
+
+                    contractStart = r.IsDBNull(0) ? _clock.Today : r.GetDateTime(0);
+                    contractEnd = r.IsDBNull(1) ? contractStart.AddYears(1) : r.GetDateTime(1);
+                    bookingStatusId = Convert.ToInt32(r.GetValue(2));
+                }
+
+                if (!new[] { 1, 2, 5, 33 }.Contains(bookingStatusId))
+                {
+                    return BadRequest(new { isSuccessful = false, message = $"Booking #{bookingId} is not in an active status (Current status ID: {bookingStatusId})." });
+                }
+
+                // 2. Determine Period Start & End
+                DateTime periodStart;
+                if (request?.BillingPeriodStart.HasValue == true)
+                {
+                    periodStart = request.BillingPeriodStart.Value.Date;
+                }
+                else
+                {
+                    using var lastEndCmd = new SqlCommand("dbo.WN_GetBookingLastInvoicePeriodEnd", conn);
+                    lastEndCmd.CommandType = CommandType.StoredProcedure;
+                    lastEndCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                    var lastEndVal = await lastEndCmd.ExecuteScalarAsync();
+                    if (lastEndVal != null && lastEndVal != DBNull.Value)
+                    {
+                        periodStart = ((DateTime)lastEndVal).Date.AddDays(1);
+                    }
+                    else
+                    {
+                        periodStart = contractStart.Date;
+                    }
+                }
+
+                if (periodStart >= contractEnd.Date)
+                {
+                    return BadRequest(new { isSuccessful = false, message = $"The contract ended on {contractEnd:MMM d, yyyy}; there is no further recurring period to invoice." });
+                }
+
+                DateTime periodEnd;
+                if (request?.BillingPeriodEnd.HasValue == true)
+                {
+                    periodEnd = request.BillingPeriodEnd.Value.Date;
+                }
+                else
+                {
+                    DateTime rawEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(contractStart, periodStart, 1);
+                    periodEnd = rawEnd > contractEnd.Date ? contractEnd.Date : rawEnd;
+                }
+
+                // 3. Duplicate check
+                using (var checkCmd = new SqlCommand("dbo.WN_Invoice_CheckExistingBillingPeriod", conn))
+                {
+                    checkCmd.CommandType = CommandType.StoredProcedure;
+                    checkCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                    checkCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
+                    checkCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
+                    var res = await checkCmd.ExecuteScalarAsync();
+                    if (Convert.ToInt32(res) == 1)
+                    {
+                        using var exCmd = new SqlCommand(@"
+                            SELECT TOP 1 Id, InvoiceNumber, GrandTotal, ApprovalStatus
+                            FROM dbo.WN_Invoices WITH (NOLOCK)
+                            WHERE BookingId = @BookingId 
+                              AND BillingPeriodStart = @BillingPeriodStart 
+                              AND BillingPeriodEnd = @BillingPeriodEnd
+                              AND StatusId NOT IN (5, 40)
+                            ORDER BY Id DESC", conn);
+                        exCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                        exCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
+                        exCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
+
+                        int existingId = 0;
+                        string existingNo = "";
+                        decimal existingTotal = 0;
+                        string existingStatus = "";
+                        using var exReader = await exCmd.ExecuteReaderAsync();
+                        if (await exReader.ReadAsync())
+                        {
+                            existingId = exReader.GetInt32(0);
+                            existingNo = exReader.GetString(1);
+                            existingTotal = exReader.GetDecimal(2);
+                            existingStatus = exReader.IsDBNull(3) ? "Approved" : exReader.GetString(3);
+                        }
+
+                        if (request?.SendIfAlreadyExists == true && existingId > 0)
+                        {
+                            var sendRes = await SendInvoiceEmailCoreAsync(existingId, conn);
+                            return Ok(new
+                            {
+                                isSuccessful = true,
+                                alreadyExisted = true,
+                                invoiceId = existingId,
+                                invoiceNumber = existingNo,
+                                totalAmount = existingTotal,
+                                billingPeriodStart = periodStart,
+                                billingPeriodEnd = periodEnd,
+                                approvalStatus = existingStatus,
+                                emailSent = sendRes.Success,
+                                message = $"Invoice {existingNo} already exists for period [{periodStart:yyyy-MM-dd} to {periodEnd:yyyy-MM-dd}]. Email delivery result: {sendRes.Message}"
+                            });
+                        }
+
+                        return Ok(new
+                        {
+                            isSuccessful = true,
+                            alreadyExisted = true,
+                            invoiceId = existingId,
+                            invoiceNumber = existingNo,
+                            totalAmount = existingTotal,
+                            billingPeriodStart = periodStart,
+                            billingPeriodEnd = periodEnd,
+                            approvalStatus = existingStatus,
+                            emailSent = false,
+                            message = $"Invoice {existingNo} already exists for period [{periodStart:yyyy-MM-dd} to {periodEnd:yyyy-MM-dd}]. Pass sendIfAlreadyExists=true to resend."
+                        });
+                    }
+                }
+
+                // 4. Create Recurring Invoice via dbo.WN_Invoice_CreateRecurring
+                int createdInvoiceId;
+                string createdInvoiceNumber;
+                decimal createdTotal;
+                using (var genCmd = new SqlCommand("dbo.WN_Invoice_CreateRecurring", conn))
+                {
+                    genCmd.CommandType = CommandType.StoredProcedure;
+                    genCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                    genCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
+                    genCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
+
+                    using var genReader = await genCmd.ExecuteReaderAsync();
+                    int invIdOrd = -1, numOrd = -1, totOrd = -1;
+                    bool readOk = false;
+                    do
+                    {
+                        if (await genReader.ReadAsync())
+                        {
+                            try { invIdOrd = genReader.GetOrdinal("InvoiceId"); } catch { }
+                            try { numOrd = genReader.GetOrdinal("InvoiceNumber"); } catch { }
+                            try { totOrd = genReader.GetOrdinal("TotalAmount"); } catch { }
+
+                            if (invIdOrd >= 0 && !genReader.IsDBNull(invIdOrd))
+                            {
+                                readOk = true;
+                                if (totOrd >= 0) break;
+                            }
+                        }
+                    } while (await genReader.NextResultAsync());
+
+                    if (!readOk || invIdOrd < 0 || genReader.IsDBNull(invIdOrd))
+                    {
+                        return StatusCode(500, new { isSuccessful = false, message = "Recurring invoice generation returned null. Check booking details and active status." });
+                    }
+
+                    createdInvoiceId = genReader.GetInt32(invIdOrd);
+                    createdInvoiceNumber = numOrd >= 0 && !genReader.IsDBNull(numOrd) ? genReader.GetString(numOrd) : "";
+                    createdTotal = totOrd >= 0 && !genReader.IsDBNull(totOrd) ? genReader.GetDecimal(totOrd) : 0m;
+                }
+
+                // 5. Handle Auto-Approve and Send if requested
+                string approvalStatus = "PendingApproval";
+                bool emailSent = false;
+                string emailMessage = "";
+
+                if (request?.AutoApproveAndSend == true)
+                {
+                    var currentUserId = await ResolveUserIdAsync(conn);
+                    using (var appCmd = new SqlCommand(@"
+                        UPDATE dbo.WN_Invoices 
+                        SET ApprovalStatus = 'Approved', 
+                            ApprovedAt = SYSUTCDATETIME(), 
+                            ApprovedBy = @UserId,
+                            UpdatedOn = SYSUTCDATETIME()
+                        WHERE Id = @Id", conn))
+                    {
+                        appCmd.Parameters.AddWithValue("@Id", createdInvoiceId);
+                        appCmd.Parameters.AddWithValue("@UserId", (object?)currentUserId ?? DBNull.Value);
+                        await appCmd.ExecuteNonQueryAsync();
+                    }
+                    approvalStatus = "Approved";
+
+                    var sendRes = await SendInvoiceEmailCoreAsync(createdInvoiceId, conn);
+                    emailSent = sendRes.Success;
+                    emailMessage = sendRes.Message;
+                }
+
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    alreadyExisted = false,
+                    invoiceId = createdInvoiceId,
+                    invoiceNumber = createdInvoiceNumber,
+                    totalAmount = createdTotal,
+                    billingPeriodStart = periodStart,
+                    billingPeriodEnd = periodEnd,
+                    approvalStatus,
+                    emailSent,
+                    emailMessage = string.IsNullOrWhiteSpace(emailMessage) ? null : emailMessage,
+                    message = emailSent
+                        ? $"Recurring invoice {createdInvoiceNumber} generated, approved, and sent successfully."
+                        : (request?.AutoApproveAndSend == true
+                            ? $"Recurring invoice {createdInvoiceNumber} generated and approved, but email delivery failed ({emailMessage}). Queued for retry."
+                            : $"Recurring invoice {createdInvoiceNumber} generated successfully and placed in PendingApproval queue.")
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+            finally
+            {
+                if (lockTaken)
+                {
+                    try
+                    {
+                        using var releaseLock = new SqlCommand("sp_releaseapplock", lockConn);
+                        releaseLock.CommandType = CommandType.StoredProcedure;
+                        releaseLock.Parameters.AddWithValue("@Resource", lockResource);
+                        releaseLock.Parameters.AddWithValue("@LockOwner", "Session");
+                        await releaseLock.ExecuteNonQueryAsync();
+                    }
+                    catch
+                    {
+                        SqlConnection.ClearPool(lockConn);
+                    }
+                }
+            }
+        }
+
         [HttpPost("api/booking/{bookingId:int}/generate-next-invoice")]
         [Authorize(Roles = StaffRoles)]
         [RecordScope(RecordKind.Booking, "bookingId")]
@@ -2124,5 +2456,13 @@ namespace WorkNest.API.Controllers
         public decimal DiscountAmount { get; set; } = 0;
         public decimal TaxRate { get; set; } = 0.16m;
         public byte ChargeTypeId { get; set; } = 1;
+    }
+
+    public class GenerateRecurringInvoiceRequest
+    {
+        public DateTime? BillingPeriodStart { get; set; }
+        public DateTime? BillingPeriodEnd { get; set; }
+        public bool AutoApproveAndSend { get; set; } = false;
+        public bool SendIfAlreadyExists { get; set; } = false;
     }
 }
