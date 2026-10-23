@@ -345,6 +345,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal effectiveTaxTotal = data.TaxTotal > 0 ? data.TaxTotal : totalLineVat;
 
             bool isRecurring = data.IsRecurringInvoice;
+            string rentPeriodLabel = GetRentPeriodLabel(data);
 
             decimal taxPercentage = data.AppliedTaxPercentage.HasValue
                 ? data.AppliedTaxPercentage.Value
@@ -435,7 +436,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     c.Item().LineHorizontal(1).LineColor("#000000");
                     c.Item().Row(r =>
                     {
-                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total (inc. Tax):").Bold().FontSize(11).FontColor("#000000");
+                        r.RelativeItem().AlignRight().Text($"{rentPeriodLabel} invoice total (inc. Tax):").Bold().FontSize(11).FontColor("#000000");
                         r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
                     });
 
@@ -470,7 +471,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     c.Item().LineHorizontal(1).LineColor("#000000");
                     c.Item().Row(r =>
                     {
-                        r.RelativeItem().AlignRight().Text($"{data.InvoiceDate:MMMM yyyy} invoice total:").Bold().FontSize(11).FontColor("#000000");
+                        r.RelativeItem().AlignRight().Text($"{rentPeriodLabel} invoice total:").Bold().FontSize(11).FontColor("#000000");
                         r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, grandTotal)).Bold().FontSize(11).FontColor("#000000");
                     });
                 });
@@ -553,6 +554,40 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         private static bool IsDepositItem(StatementInvoiceLineItemDto item)
         {
             return item.IsDeposit || item.Description.Contains("Deposit", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static string GetRentPeriodLabel(StatementInvoicePdfDto data)
+        {
+            if (data.BillingPeriodStart.HasValue && data.BillingPeriodEnd.HasValue &&
+                (data.BillingPeriodStart.Value.Month != data.BillingPeriodEnd.Value.Month || data.BillingPeriodStart.Value.Year != data.BillingPeriodEnd.Value.Year))
+            {
+                return $"{data.BillingPeriodStart.Value:MMM yyyy} - {data.BillingPeriodEnd.Value:MMM yyyy}";
+            }
+
+            if (data.BillingPeriodStart.HasValue)
+            {
+                return $"{data.BillingPeriodStart.Value:MMMM yyyy}";
+            }
+
+            var lineDate = data.LineItems.FirstOrDefault(i => i.FromDate.HasValue && !IsDepositItem(i))?.FromDate
+                        ?? data.LineItems.FirstOrDefault(i => i.FromDate.HasValue)?.FromDate;
+            if (lineDate.HasValue)
+            {
+                return $"{lineDate.Value:MMMM yyyy}";
+            }
+
+            // Fallback: Check if recurring invoice number encodes the period (e.g., INV-REC-xxx-yyyyMMdd or INV-REC-xxx-yyyyMM)
+            if (!string.IsNullOrEmpty(data.InvoiceNumber) && data.InvoiceNumber.StartsWith("INV-REC", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = data.InvoiceNumber.Split('-');
+                if (parts.Length >= 4 && parts[^1].Length >= 6 &&
+                    DateTime.TryParseExact(parts[^1].Substring(0, 6), "yyyyMM", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedMonth))
+                {
+                    return $"{parsedMonth:MMMM yyyy}";
+                }
+            }
+
+            return $"{data.InvoiceDate:MMMM yyyy}";
         }
         #endregion
 
