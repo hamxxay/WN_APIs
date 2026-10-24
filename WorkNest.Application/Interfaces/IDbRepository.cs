@@ -613,6 +613,41 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Active spaces of a space type with their state now (list "type"), or the spaces in use in a month (list "occupied").</summary>
         Task<List<List<IDictionary<string, object?>>>?> GetOverviewDetailSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow,
             string list, string? spaceType, DateTime? monthStart, int top);
+
+        // --- Location scope of access cards / attendants / agreements (SEC_LOC_01) ---
+        /// <summary>Access card list (same columns as WN_AccessCards_GetList) limited to cards of these locations.</summary>
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAccessCardsInLocationsAsync(int page, int limit, string? search,
+            int? bookingId, int? customerId, int? spaceId, int? status, IReadOnlyCollection<int> locationIds);
+        /// <summary>True when the customer is the booking's customer (customer code, user or user email, as WN_AccessCards_PopulateAllBookings).</summary>
+        Task<bool> IsCustomerOfBookingAsync(int bookingId, int customerId);
+        /// <summary>True when the space is the booking's space (or one of its booked spaces by code).</summary>
+        Task<bool> IsSpaceOfBookingAsync(int bookingId, int spaceId);
+        /// <summary>True when the customer is the customer of the booking behind this booking detail.</summary>
+        Task<bool> IsCustomerOfBookingDetailAsync(int bookingDetailId, int customerId);
+        /// <summary>True when the person is an active attendant of the customer (WN_CustomerAttendants).</summary>
+        Task<bool> IsActiveCustomerAttendantAsync(int customerId, int personId);
+        /// <summary>True when the person (any person when null) is assigned to the booking detail for this customer
+        /// (WN_BookingAttendants); activeOnly = the assignment has not ended.</summary>
+        Task<bool> HasBookingAttendantAsync(int bookingDetailId, int customerId, int? personId, bool activeOnly);
+        /// <summary>Whether the person exists, the locations of the bookings they are assigned to, and the customers they are linked to.</summary>
+        Task<(bool Exists, List<int> BookingLocationIds, List<int> CustomerIds)> GetPersonScopeAsync(int personId);
+        /// <summary>Ids of the booking details whose booking's space is in one of these locations.</summary>
+        Task<HashSet<int>> GetBookingDetailIdsInLocationsAsync(IReadOnlyCollection<int> locationIds);
+        /// <summary>E-mails on file for the quotation's customer (WN_Customers.Email and the linked user's e-mail).</summary>
+        Task<List<string>> GetQuotationCustomerEmailsAsync(int quotationId);
+
+        // --- SEC_LOC_02: location-scoped lists. locationIds = CSV (LocationScopeLists.Csv), null = every location.
+        // A missing SEC_LOC_02 procedure (SQL error 2812) falls back to the old procedure when locationIds is null and
+        // throws LocationScopeUpdateMissingException otherwise (never unscoped rows for a location-bound caller).
+
+        /// <summary>dbo.WN_Challan_SearchScoped: WN_Challan_Search limited to bookings whose space is in the locations.</summary>
+        Task<IDictionary<string, object?>?> SearchChallanScopedDbAsync(string query, string? locationIds);
+        /// <summary>dbo.WN_Bookings_GetRecentScoped: WN_Bookings_GetRecent limited to bookings whose space is in the locations.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetRecentBookingsScopedAsync(int top, string? locationIds);
+        /// <summary>dbo.WN_Customers_SearchScoped: WN_Customers_Search limited to the locations' customers + customers with no location yet.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> SearchCustomersScopedAsync(string query, string? locationIds);
+        /// <summary>dbo.WN_Memberships_GetListScoped: WN_Memberships_GetList limited to members of the locations.</summary>
+        Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetMembershipsScopedAsync(int page, int limit, string? search, string? locationIds);
     }
 
     /// <summary>

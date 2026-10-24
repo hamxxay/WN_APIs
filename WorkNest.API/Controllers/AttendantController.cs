@@ -29,10 +29,13 @@ namespace WorkNest.API.Controllers
         private readonly IHikAccessSuspensionService _accessSuspension;
         private readonly IConfiguration _configuration;
         private readonly IBookingEmployeeService _employees;
+        private readonly IDbRepository _db;
 
         public AttendantController(IAttendantService attendants, IHikEnrollmentService hikEnrollment,
-            IHikAccessSuspensionService accessSuspension, IConfiguration configuration, IBookingEmployeeService employees)
+            IHikAccessSuspensionService accessSuspension, IConfiguration configuration, IBookingEmployeeService employees,
+            IDbRepository db)
         {
+            _db = db;
             _attendants = attendants;
             _hikEnrollment = hikEnrollment;
             _accessSuspension = accessSuspension;
@@ -49,6 +52,9 @@ namespace WorkNest.API.Controllers
         {
             if (request == null || request.CustomerId <= 0)
                 return BadRequest(new { message = "Valid CustomerId is required." });
+            // Location-bound staff: only customers of their own locations (the id is in the body, not the route).
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Customer, request.CustomerId.ToString()))
+                return NotFound(new { message = "Customer not found." });
             // Passports keep their own format; anything sent as (or defaulting to) CNIC must be 13 digits.
             if (!string.Equals(request.IdType, "Passport", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(request.IdNumber)
@@ -77,6 +83,8 @@ namespace WorkNest.API.Controllers
             var phoneError = WorkNest.Application.Helpers.Phone.Validate(request?.Phone);
             if (phoneError != null)
                 return BadRequest(new { message = phoneError });
+            if (!await PersonInScopeAsync(personId))
+                return NotFound(new { message = "Attendant not found." });
 
             await _attendants.UpdateAttendantAsync(personId, request!);
             return Ok(new { message = "Attendant contact details updated." });
@@ -149,6 +157,10 @@ namespace WorkNest.API.Controllers
             if (IsSalesExecutiveOnly() && await _employees.HasPendingRequestAsync(bookingDetailId, request.PersonId))
                 return BadRequest(new { message = "The customer added this person and they still need the CNIC check. Use Add User and enter their CNIC." });
 
+            // The customer must be this booked space's customer and the person one of that customer's people.
+            var partyError = await BookingDetailPartyErrorAsync(bookingDetailId, request.CustomerId, request.PersonId);
+            if (partyError != null) return BadRequest(new { message = partyError });
+
             if (IsSalesExecutiveOnly())
             {
                 var cap = await _attendants.CheckCapacityBeforeAssignAsync(bookingDetailId);
@@ -198,6 +210,8 @@ namespace WorkNest.API.Controllers
         {
             if (body == null || body.PersonId <= 0 || body.CustomerId <= 0)
                 return BadRequest(new { message = "Choose the person to add." });
+            var partyError = await BookingDetailPartyErrorAsync(bookingDetailId, body.CustomerId, body.PersonId);
+            if (partyError != null) return BadRequest(new { message = partyError });
             var cap = await _attendants.CheckCapacityBeforeAssignAsync(bookingDetailId);
             if (!cap.WouldExceedCapacity)
                 return BadRequest(new { message = $"{cap.SpaceName} still has free seats. Add the person directly." });
@@ -307,6 +321,19 @@ namespace WorkNest.API.Controllers
         {
             if (request == null || request.BookingDetailId <= 0 || request.CustomerId <= 0)
                 return BadRequest("BookingDetailId and CustomerId are required.");
+            // Location-bound staff: only booked spaces of their own locations (the id is in the body, not the route).
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.BookingDetail, request.BookingDetailId.ToString()))
+                return NotFound(new { message = "Booking not found." });
+            // The person / customer must already be on this booked space: otherwise the procedure would insert a new
+            // (enabled) access row for someone who was never assigned here.
+            if (request.PersonId.HasValue)
+            {
+                // Enabling needs a current assignment; disabling may also close an ended one.
+                if (!await _db.HasBookingAttendantAsync(request.BookingDetailId, request.CustomerId, request.PersonId, activeOnly: request.IsEnabled))
+                    return BadRequest(new { message = "This person is not assigned to this booked space for this customer." });
+            }
+            else if (!await _db.IsCustomerOfBookingDetailAsync(request.BookingDetailId, request.CustomerId))
+                return BadRequest(new { message = "This customer is not the customer of this booked space." });
 
             int rows = await _attendants.ToggleAccessStatusAsync(request);
 
@@ -427,9 +454,19 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/access-status/export")]
         public async Task<IActionResult> ExportAccessStatus()
         {
-            if (User.IsStaff() || HasValidHikvisionApiKey())
+            // The Hikvision machine caller keeps the full export.
+            if (HasValidHikvisionApiKey())
+                return Ok(await _attendants.GetAccessStatusExportAsync());
+
+            if (User.IsStaff())
             {
                 var data = await _attendants.GetAccessStatusExportAsync();
+                // Location-bound staff (admin / sales executive): only the booked spaces of their own locations.
+                if (User.IsLocationBoundRole())
+                {
+                    var mine = await _db.GetBookingDetailIdsInLocationsAsync(User.GetLocationIds());
+                    data = data.Where(r => mine.Contains(r.BookingDetailId)).ToList();
+                }
                 return Ok(data);
             }
 
@@ -448,6 +485,35 @@ namespace WorkNest.API.Controllers
             var supplied = apiKeyHeader.ToString();
             if (string.IsNullOrEmpty(supplied)) return false;
             return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(configuredKey), Encoding.UTF8.GetBytes(supplied));
+        }
+
+        /// <summary>
+        /// Location-bound staff may edit a person only when they are on a booking at one of their locations; a person on
+        /// no booking yet is reachable through a customer they are linked to (same rule as the customer record).
+        /// Everyone else: always.
+        /// </summary>
+        private async Task<bool> PersonInScopeAsync(int personId)
+        {
+            if (!User.IsLocationBoundRole()) return true;
+            var (exists, bookingLocations, customers) = await _db.GetPersonScopeAsync(personId);
+            if (!exists) return false;
+            var mine = User.GetLocationIds();
+            if (bookingLocations.Count > 0) return bookingLocations.Any(mine.Contains);
+            foreach (var customerId in customers)
+                if (await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Customer, customerId.ToString()))
+                    return true;
+            return false;
+        }
+
+        /// <summary>The body's customer must be the booked space's customer and the person one of that customer's people.</summary>
+        private async Task<string?> BookingDetailPartyErrorAsync(int bookingDetailId, int customerId, int personId)
+        {
+            if (customerId <= 0 || personId <= 0) return "Choose the customer and the person.";
+            if (!await _db.IsCustomerOfBookingDetailAsync(bookingDetailId, customerId))
+                return "This customer is not the customer of this booked space.";
+            if (!await _db.IsActiveCustomerAttendantAsync(customerId, personId))
+                return "This person is not one of this customer's people.";
+            return null;
         }
 
         /// <summary>The signed-in staff member's WN_Users.Id (null if they can't be matched).</summary>

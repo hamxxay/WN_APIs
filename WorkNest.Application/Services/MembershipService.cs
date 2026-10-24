@@ -1,3 +1,4 @@
+using WorkNest.Application.Helpers;
 using WorkNest.Application.DTOs.Membership;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
@@ -12,6 +13,12 @@ namespace WorkNest.Application.Services
         public async Task<(IEnumerable<object> Items, int Total)> GetMembershipsAsync(int page, int limit, string? search)
         {
             var (rows, total) = await _db.GetMembershipsAsync(page, limit, search);
+            return (rows.Cast<object>(), total);
+        }
+
+        public async Task<(IEnumerable<object> Items, int Total)> GetMembershipsAsync(int page, int limit, string? search, IReadOnlyCollection<int>? locationIds)
+        {
+            var (rows, total) = await _db.GetMembershipsScopedAsync(page, limit, search, LocationScopeLists.Csv(locationIds));
             return (rows.Cast<object>(), total);
         }
 

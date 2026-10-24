@@ -1,0 +1,351 @@
+-- ============================================================================================
+-- SEC_LOC_02: location scope for staff lists (location-bound staff: admin, sales executive, sales manager, access
+-- officer). NEW procedures only; no existing procedure, table or data is changed. Each takes
+-- @LocationIds NVARCHAR(MAX) = CSV of location ids (NULL = every location, the same rows as the old procedure).
+--
+--   dbo.WN_Challan_SearchScoped                  = WN_Challan_Search, bookings whose space is in @LocationIds
+--   dbo.WN_Bookings_GetRecentScoped              = WN_Bookings_GetRecent, bookings whose space is in @LocationIds
+--   dbo.WN_Customers_SearchScoped                = WN_Customers_Search, customers of @LocationIds (account location
+--                                                  or a booking there) + customers with no location yet
+--   dbo.WN_Memberships_GetListScoped             = WN_Memberships_GetList, members of @LocationIds
+--   dbo.WN_SecurityDeposit_CustomerReportScoped  = WN_SecurityDeposit_CustomerReport, deposits whose booking is in @LocationIds
+--   dbo.WN_SecurityDeposit_CustomerDetailScoped  = WN_SecurityDeposit_CustomerDetail, deposits whose booking is in @LocationIds
+--   dbo.WN_SecurityDeposit_CustomerLookupScoped  = the deposit report's customer drop-down, customers of @LocationIds
+--
+-- Until this has run the API keeps using the old procedures for super admins / CEO / receptionists, and answers
+-- location-bound staff 503 "Run SEC_LOC_02 on the database." on these lists.
+--
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- WN_Challan_SearchScoped
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Challan_SearchScoped
+    @Query       NVARCHAR(100),
+    @LocationIds NVARCHAR(MAX) = NULL  -- CSV of location ids (NULL = every location)
+AS
+BEGIN
+    -- SEC_LOC_02: dbo.WN_Challan_Search (same columns, match and order), limited to the bookings whose space is in
+    -- @LocationIds (location-bound staff). NULL = exactly dbo.WN_Challan_Search.
+    SET NOCOUNT ON;
+    SELECT TOP 1
+        b.Id                                            AS bookingId,
+        CAST(b.IdGUID AS NVARCHAR(36))                  AS bookingGuid,
+        b.ChallanNumber                                 AS challanNumber,
+        ISNULL((SELECT TOP 1 CASE WHEN cx.ValidUntil > b.ValidityDate OR b.ValidityDate IS NULL THEN cx.ValidUntil ELSE b.ValidityDate END FROM dbo.WN_Challans cx WITH (NOLOCK) WHERE cx.BookingId = b.Id ORDER BY cx.Id DESC), b.ValidityDate) AS currentExpiryDate,
+        b.BookingStatusId                               AS bookingStatus,
+        p.TransactionRef                                AS voucherNumber,
+        p.StatusId                                      AS voucherStatus,
+        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(cu.FirstName, '''') + '' '' + ISNULL(cu.LastName, ''''))), ''''), ISNULL(u.Name, u.Email)) AS customerName,
+        s.Name                                          AS spaceName,
+        b.StartOn                                       AS startDateTime,
+        b.EndOn                                         AS endDateTime,
+        b.TotalAmount                                   AS totalAmount
+    FROM dbo.WN_Bookings b
+    LEFT JOIN dbo.WN_Users u    ON u.Id = b.UserId
+    OUTER APPLY (SELECT TOP 1 c.FirstName, c.LastName FROM dbo.WN_Customers c WITH (NOLOCK)
+                  WHERE c.UserId = b.UserId ORDER BY c.Id DESC) cu
+    LEFT JOIN dbo.WN_Spaces s   ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_Payments p ON p.BookingIdInt = b.Id
+    WHERE (
+        CAST(b.Id AS NVARCHAR(20)) = @Query
+        OR b.ChallanNumber         = @Query
+        OR p.TransactionRef        = @Query
+        OR b.ChallanNumber LIKE ''%'' + @Query + ''%'')
+      AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x))
+    ORDER BY b.Id DESC;
+END;');
+
+    -- WN_Bookings_GetRecentScoped
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Bookings_GetRecentScoped
+    @Top         INT = 10,
+    @LocationIds NVARCHAR(MAX) = NULL  -- CSV of location ids (NULL = every location)
+AS
+BEGIN
+    -- SEC_LOC_02: dbo.WN_Bookings_GetRecent (same columns and order), limited to the bookings whose space is in
+    -- @LocationIds (location-bound staff). NULL = exactly dbo.WN_Bookings_GetRecent.
+    SET NOCOUNT ON;
+    SELECT TOP (@Top)
+        v.BookingId, v.BookingPublicId,
+        v.StartOn, v.EndOn,
+        v.BookingStatusCode, v.BookingStatusLabel,
+        v.UserName, v.UserEmail,
+        v.SpaceCode, v.SpaceName,
+        v.LocationName, v.CompanyName,
+        v.SeatPrice, v.RoomPrice, v.SecurityDeposit,
+        v.DiscountPercentage, v.DiscountAmount, v.SubtotalAmount, v.TotalAmount,
+        v.BillingPeriodCode,
+        v.ChallanNumber, v.BookedOn
+    FROM dbo.WN_vw_BookingSummary v
+    WHERE (@LocationIds IS NULL OR v.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x))
+    ORDER BY v.BookedOn DESC;
+END;');
+
+    -- WN_Customers_SearchScoped
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Customers_SearchScoped
+    @Query       NVARCHAR(255),
+    @LocationIds NVARCHAR(MAX) = NULL  -- CSV of location ids (NULL = every customer)
+AS
+BEGIN
+    -- SEC_LOC_02: dbo.WN_Customers_Search (same columns, search, TOP 20 and order) for location-bound staff: the
+    -- customers of @LocationIds (their user account''s location or a booking there, as WN_Customers_GetListFiltered)
+    -- plus the customers with no location yet (no located account, no booking), who stay open to every branch so a
+    -- first booking can be made. NULL = exactly dbo.WN_Customers_Search.
+    SET NOCOUNT ON;
+    SELECT TOP 20
+           c.Id, c.IdGUID, c.Code, c.FirstName, c.LastName, c.Company,
+           LTRIM(RTRIM(ISNULL(c.FirstName,'''') + '' '' + ISNULL(c.LastName,''''))) AS FullName,
+           c.Email, c.PhoneNumber, c.CnicOrPassport, c.Address,
+           c.CityId, ci.Description AS CityName, c.IsActive, c.Notes, c.CreatedAt,
+           c.NTN, c.SecpRegistrationNo
+    FROM dbo.WN_Customers c
+    LEFT JOIN dbo.City ci ON ci.Id = c.CityId
+    WHERE c.IsActive = 1 AND (
+           c.FirstName   LIKE ''%'' + @Query + ''%'' OR
+           c.LastName    LIKE ''%'' + @Query + ''%'' OR
+           c.Company     LIKE ''%'' + @Query + ''%'' OR
+           c.Email       LIKE ''%'' + @Query + ''%'' OR
+           c.Code        LIKE ''%'' + @Query + ''%'' OR
+           c.PhoneNumber LIKE ''%'' + @Query + ''%'' OR
+           c.NTN         LIKE ''%'' + @Query + ''%'')
+      AND (@LocationIds IS NULL
+           OR (EXISTS (SELECT 1 FROM dbo.WN_Users lu WITH (NOLOCK)
+                    WHERE lu.Id = c.UserId AND lu.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x))
+            OR EXISTS (SELECT 1 FROM dbo.WN_Bookings lb WITH (NOLOCK)
+                         JOIN dbo.WN_Spaces ls WITH (NOLOCK) ON ls.Id = lb.SpaceId
+                        WHERE (lb.CustomerCode = c.Code OR (c.UserId IS NOT NULL AND lb.UserId = c.UserId))
+                          AND ls.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x)))
+           OR (NOT EXISTS (SELECT 1 FROM dbo.WN_Users nu WITH (NOLOCK)
+                        WHERE nu.Id = c.UserId AND nu.LocationId IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM dbo.WN_Bookings nb WITH (NOLOCK)
+                              JOIN dbo.WN_Spaces ns WITH (NOLOCK) ON ns.Id = nb.SpaceId
+                             WHERE (nb.CustomerCode = c.Code OR (c.UserId IS NOT NULL AND nb.UserId = c.UserId))
+                               AND ns.LocationId IS NOT NULL)))
+    ORDER BY c.FirstName;
+END;');
+
+    -- WN_Memberships_GetListScoped
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Memberships_GetListScoped
+    @Page        INT           = 1,
+    @Limit       INT           = 20,
+    @Search      NVARCHAR(255) = NULL,
+    @LocationIds NVARCHAR(MAX) = NULL  -- CSV of location ids (NULL = every membership)
+AS
+BEGIN
+    -- SEC_LOC_02: dbo.WN_Memberships_GetList (same columns, search, order and TotalCount), limited to the memberships whose
+    -- member belongs to @LocationIds: the member''s location, extra locations (WN_UserLocations) and, for a customer
+    -- (role general), the locations of their bookings (same rule as the API''s single-membership scope).
+    -- NULL = exactly dbo.WN_Memberships_GetList.
+    SET NOCOUNT ON;
+    DECLARE @Offset INT = (@Page - 1) * @Limit;
+    DECLARE @sql NVARCHAR(MAX);
+    DECLARE @UserLocations NVARCHAR(400) = N'''';
+    IF OBJECT_ID(N''dbo.WN_UserLocations'', N''U'') IS NOT NULL
+        SET @UserLocations = N''UNION ALL SELECT ul.LocationId FROM dbo.WN_UserLocations ul WHERE ul.UserId = m.UserId'';
+
+    IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(''dbo.WN_Memberships'') AND name = ''StartOn'')
+        SET @sql = N''
+        SELECT m.Id, m.IdGUID AS PublicId,
+            m.UserId, u.Name AS UserName, u.Email AS UserEmail,
+            m.PlanId, mp.Name AS PlanName,
+            bp.Code AS BillingPeriodCode, bp.Label AS BillingPeriodLabel,
+            mp.Price AS PlanPrice,
+            m.StartOn, m.EndOn, m.StatusId,
+            m.AutoRenew, m.Notes, m.CreatedOn,
+            COUNT(*) OVER () AS TotalCount
+        FROM dbo.WN_Memberships m
+        JOIN dbo.WN_Users u ON u.Id = m.UserId
+        JOIN dbo.WN_MembershipPlans mp ON mp.Id = m.PlanId
+        JOIN dbo.WN_BillingPeriods bp ON bp.Id = mp.BillingPeriodId
+        WHERE (@Search IS NULL OR @Search = ''''''''
+               OR u.Name  LIKE ''''%''''+@Search+''''%''''
+               OR u.Email LIKE ''''%''''+@Search+''''%''''
+               OR mp.Name LIKE ''''%''''+@Search+''''%'''')
+          AND (@LocationIds IS NULL OR EXISTS (
+                SELECT 1 FROM (
+                    SELECT lu.LocationId FROM dbo.WN_Users lu WHERE lu.Id = m.UserId
+                    '' + @UserLocations + N''
+                    UNION ALL
+                    SELECT ls.LocationId
+                      FROM dbo.WN_Bookings lb
+                      JOIN dbo.WN_Spaces ls ON ls.Id = lb.SpaceId
+                     WHERE (lb.UserId = m.UserId
+                            OR lb.CustomerCode IN (SELECT lc.Code FROM dbo.WN_Customers lc WHERE lc.UserId = m.UserId))
+                       AND EXISTS (SELECT 1 FROM dbo.WN_Users gu JOIN dbo.WN_Roles gr ON gr.Id = gu.RoleId
+                                    WHERE gu.Id = m.UserId AND gr.RoleName = N''''general'''')
+                ) ml
+                WHERE ml.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '''','''') x)))
+        ORDER BY m.CreatedOn DESC
+        OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY'';
+    ELSE
+        SET @sql = N''
+        SELECT m.Id, NULL AS PublicId,
+            m.UserId, u.Name AS UserName, u.Email AS UserEmail,
+            m.PlanId, mp.Name AS PlanName,
+            NULL AS BillingPeriodCode, NULL AS BillingPeriodLabel,
+            mp.Price AS PlanPrice,
+            m.StartDate AS StartOn, m.EndDate AS EndOn,
+            CASE m.Status WHEN ''''Active'''' THEN 1 WHEN ''''Cancelled'''' THEN 3 ELSE 2 END AS StatusId,
+            CAST(0 AS BIT) AS AutoRenew, NULL AS Notes, m.CreatedAt AS CreatedOn,
+            COUNT(*) OVER () AS TotalCount
+        FROM dbo.WN_MemberShips_Temp m
+        JOIN dbo.WN_Users u ON u.Id = m.UserId
+        JOIN dbo.WN_MembershipPlans mp ON mp.Id = m.PlanId
+        WHERE m.IsActive = 1
+          AND (@Search IS NULL OR @Search = ''''''''
+               OR u.Name  LIKE ''''%''''+@Search+''''%''''
+               OR u.Email LIKE ''''%''''+@Search+''''%''''
+               OR mp.Name LIKE ''''%''''+@Search+''''%'''')
+          AND (@LocationIds IS NULL OR EXISTS (
+                SELECT 1 FROM (
+                    SELECT lu.LocationId FROM dbo.WN_Users lu WHERE lu.Id = m.UserId
+                    '' + @UserLocations + N''
+                    UNION ALL
+                    SELECT ls.LocationId
+                      FROM dbo.WN_Bookings lb
+                      JOIN dbo.WN_Spaces ls ON ls.Id = lb.SpaceId
+                     WHERE (lb.UserId = m.UserId
+                            OR lb.CustomerCode IN (SELECT lc.Code FROM dbo.WN_Customers lc WHERE lc.UserId = m.UserId))
+                       AND EXISTS (SELECT 1 FROM dbo.WN_Users gu JOIN dbo.WN_Roles gr ON gr.Id = gu.RoleId
+                                    WHERE gu.Id = m.UserId AND gr.RoleName = N''''general'''')
+                ) ml
+                WHERE ml.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '''','''') x)))
+        ORDER BY m.CreatedAt DESC
+        OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY'';
+
+    EXEC sp_executesql @sql,
+        N''@Search NVARCHAR(255), @Offset INT, @Limit INT, @LocationIds NVARCHAR(MAX)'',
+        @Search, @Offset, @Limit, @LocationIds;
+END;');
+
+    -- WN_SecurityDeposit_CustomerReportScoped
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_SecurityDeposit_CustomerReportScoped
+    @CustomerId  INT = NULL,
+    @FromDate    DATETIME2 = NULL,
+    @ToDate      DATETIME2 = NULL,
+    @LocationIds NVARCHAR(MAX) = NULL  -- CSV of location ids (NULL = every deposit)
+AS
+BEGIN
+    -- SEC_LOC_02: dbo.WN_SecurityDeposit_CustomerReport (same columns, totals and order), counting only the deposits whose
+    -- booking''s space is in @LocationIds (location-bound staff). NULL = exactly dbo.WN_SecurityDeposit_CustomerReport,
+    -- except that a @ToDate at midnight now works (the old procedure fails with error 9810: DATEADD MILLISECOND on a DATE).
+    SET NOCOUNT ON;
+
+    DECLARE @AdjustedToDate DATETIME2 = @ToDate;
+    IF @AdjustedToDate IS NOT NULL AND CAST(@AdjustedToDate AS TIME) = ''00:00:00''
+    BEGIN
+        SET @AdjustedToDate = DATEADD(MILLISECOND, -3, CAST(DATEADD(DAY, 1, CAST(@AdjustedToDate AS DATE)) AS DATETIME2));
+    END
+
+    SELECT
+        c.Id AS CustomerId,
+        c.Code AS CustomerCode,
+        LTRIM(RTRIM(CONCAT(c.FirstName, '' '', ISNULL(c.LastName, '''')))) AS CustomerName,
+        c.Company,
+        COUNT(sd.Id) AS DepositCount,
+        ISNULL(SUM(sd.Amount), 0) AS TotalReceived,
+        ISNULL(SUM(CASE WHEN sd.ReleasedOn IS NOT NULL THEN sd.Amount ELSE 0 END), 0) AS TotalReleased,
+        ISNULL(SUM(CASE WHEN sd.ForfeitedOn IS NOT NULL THEN sd.Amount ELSE 0 END), 0) AS TotalForfeited,
+        ISNULL(SUM(CASE WHEN sd.ReleasedOn IS NULL AND sd.ForfeitedOn IS NULL THEN sd.Amount ELSE 0 END), 0) AS BalanceHeld,
+        MAX(sd.HeldOn) AS LastHeldOn
+    FROM dbo.WN_SecurityDeposits sd WITH (NOLOCK)
+    INNER JOIN dbo.WN_Customers c WITH (NOLOCK)
+        ON (sd.CustomerId = c.Code OR sd.CustomerId = CAST(c.Id AS VARCHAR(50)))
+    WHERE (@CustomerId IS NULL OR c.Id = @CustomerId)
+      AND (@FromDate IS NULL OR sd.HeldOn >= @FromDate)
+      AND (@AdjustedToDate IS NULL OR sd.HeldOn <= @AdjustedToDate)
+      AND (@LocationIds IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Bookings lb WITH (NOLOCK)
+                                              JOIN dbo.WN_Spaces ls WITH (NOLOCK) ON ls.Id = lb.SpaceId
+                                             WHERE lb.Id = sd.BookingId AND ls.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x)))
+    GROUP BY
+        c.Id,
+        c.Code,
+        c.FirstName,
+        c.LastName,
+        c.Company
+    ORDER BY
+        CustomerName ASC;
+END;');
+
+    -- WN_SecurityDeposit_CustomerDetailScoped
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_SecurityDeposit_CustomerDetailScoped
+    @CustomerId  INT,
+    @FromDate    DATETIME2 = NULL,
+    @ToDate      DATETIME2 = NULL,
+    @LocationIds NVARCHAR(MAX) = NULL  -- CSV of location ids (NULL = every deposit)
+AS
+BEGIN
+    -- SEC_LOC_02: dbo.WN_SecurityDeposit_CustomerDetail (same columns and order), only the deposits whose booking''s space
+    -- is in @LocationIds (location-bound staff). NULL = exactly dbo.WN_SecurityDeposit_CustomerDetail, except that a
+    -- @ToDate at midnight now works (the old procedure fails with error 9810: DATEADD MILLISECOND on a DATE).
+    SET NOCOUNT ON;
+
+    DECLARE @AdjustedToDate DATETIME2 = @ToDate;
+    IF @AdjustedToDate IS NOT NULL AND CAST(@AdjustedToDate AS TIME) = ''00:00:00''
+    BEGIN
+        SET @AdjustedToDate = DATEADD(MILLISECOND, -3, CAST(DATEADD(DAY, 1, CAST(@AdjustedToDate AS DATE)) AS DATETIME2));
+    END
+
+    SELECT
+        sd.Id,
+        sd.BookingId,
+        sd.RefNo,
+        sd.Amount,
+        CASE
+            WHEN sd.ReleasedOn IS NOT NULL THEN ''Released''
+            WHEN sd.ForfeitedOn IS NOT NULL THEN ''Forfeited''
+            ELSE ''Held''
+        END AS [State],
+        sd.HeldOn,
+        sd.ReleasedOn,
+        sd.ForfeitedOn,
+        sd.ForfeitReason,
+        sd.Notes
+    FROM dbo.WN_SecurityDeposits sd WITH (NOLOCK)
+    INNER JOIN dbo.WN_Customers c WITH (NOLOCK)
+        ON (sd.CustomerId = c.Code OR sd.CustomerId = CAST(c.Id AS VARCHAR(50)))
+    WHERE c.Id = @CustomerId
+      AND (@FromDate IS NULL OR sd.HeldOn >= @FromDate)
+      AND (@AdjustedToDate IS NULL OR sd.HeldOn <= @AdjustedToDate)
+      AND (@LocationIds IS NULL OR EXISTS (SELECT 1 FROM dbo.WN_Bookings lb WITH (NOLOCK)
+                                              JOIN dbo.WN_Spaces ls WITH (NOLOCK) ON ls.Id = lb.SpaceId
+                                             WHERE lb.Id = sd.BookingId AND ls.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x)))
+    ORDER BY
+        sd.HeldOn DESC,
+        sd.Id DESC;
+END;');
+
+    -- WN_SecurityDeposit_CustomerLookupScoped
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_SecurityDeposit_CustomerLookupScoped
+    @LocationIds NVARCHAR(MAX) = NULL  -- CSV of location ids (NULL = every active customer)
+AS
+BEGIN
+    -- SEC_LOC_02: the security deposit report''s customer drop-down (the API''s former inline query: active customers by
+    -- name), limited to the customers of @LocationIds (their user account''s location or a booking there, as
+    -- WN_Customers_GetListFiltered). NULL = every active customer, as before.
+    SET NOCOUNT ON;
+    SELECT c.Id, c.Code, c.FirstName, c.LastName, c.Company
+      FROM dbo.WN_Customers c WITH (NOLOCK)
+     WHERE c.IsActive = 1
+       AND (@LocationIds IS NULL OR (EXISTS (SELECT 1 FROM dbo.WN_Users lu WITH (NOLOCK)
+                    WHERE lu.Id = c.UserId AND lu.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x))
+            OR EXISTS (SELECT 1 FROM dbo.WN_Bookings lb WITH (NOLOCK)
+                         JOIN dbo.WN_Spaces ls WITH (NOLOCK) ON ls.Id = lb.SpaceId
+                        WHERE (lb.CustomerCode = c.Code OR (c.UserId IS NOT NULL AND lb.UserId = c.UserId))
+                          AND ls.LocationId IN (SELECT TRY_CAST(x.value AS INT) FROM STRING_SPLIT(@LocationIds, '','') x))))
+     ORDER BY c.FirstName, c.LastName;
+END;');
+
+    COMMIT TRANSACTION;
+    SELECT N'SEC_LOC_02 installed: location-scoped challan search, recent bookings, customer search, memberships and security deposit report.' AS Result, DB_NAME() AS DatabaseName;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

@@ -3,9 +3,17 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Membership;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
+using WorkNest.Application.Helpers;
 
 namespace WorkNest.API.Controllers
 {
+    /// <summary>
+    /// Memberships. Location-bound staff (admin, sales executive) see and change only the memberships of members of their
+    /// locations: the list is limited (SEC_LOC_02 dbo.WN_Memberships_GetListScoped, 503 until that script has run) and a
+    /// membership of another location answers 404 (RecordScope / RecordScopeAttribute.AllowsAsync for the GUID routes).
+    /// </summary>
     [ApiController]
     [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")] // memberships: staff only
     public class MembershipController : ControllerBase
@@ -22,11 +30,19 @@ namespace WorkNest.API.Controllers
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null)
         {
-            var (items, total) = await _memberships.GetMembershipsAsync(page, limit, search);
-            return Ok(new PaginatedResponse<object> { Data = items, Total = total });
+            try
+            {
+                var (items, total) = await _memberships.GetMembershipsAsync(page, limit, search, User.ScopedLocationIds(null));
+                return Ok(new PaginatedResponse<object> { Data = items, Total = total });
+            }
+            catch (LocationScopeUpdateMissingException ex)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
+            }
         }
 
         [HttpGet("api/membership/{id:int}/summary")]
+        [RecordScope(RecordKind.Membership, "id")]
         public async Task<IActionResult> Summary(int id)
         {
             var result = await _memberships.GetMembershipSummaryAsync(id);
@@ -41,6 +57,8 @@ namespace WorkNest.API.Controllers
             var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
             if (match is null) return NotFound(ApiResponse.Fail("Membership not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Membership, id.ToString()))
+                return NotFound(ApiResponse.Fail("Membership not found"));
             var result = await _memberships.GetMembershipSummaryAsync(id);
             if (!result.IsSuccessful) return NotFound(result);
             return Ok(result);
@@ -51,6 +69,7 @@ namespace WorkNest.API.Controllers
             StatusCode(201, await _memberships.CreateMembershipAsync(request, null));
 
         [HttpPatch("api/membership/{id:int}/status")]
+        [RecordScope(RecordKind.Membership, "id")]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] MembershipStatusUpdateRequest request) =>
             Ok(await _memberships.UpdateMembershipStatusAsync(id, request.StatusId, null));
 
@@ -61,10 +80,13 @@ namespace WorkNest.API.Controllers
             var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
             if (match is null) return NotFound(ApiResponse.Fail("Membership not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Membership, id.ToString()))
+                return NotFound(ApiResponse.Fail("Membership not found"));
             return Ok(await _memberships.UpdateMembershipStatusAsync(id, request.StatusId, null));
         }
 
         [HttpDelete("api/membership/{id:int}")]
+        [RecordScope(RecordKind.Membership, "id")]
         [Authorize(Roles = AdminRoles)]
         public async Task<IActionResult> Delete(int id) =>
             Ok(await _memberships.DeleteMembershipAsync(id));
@@ -77,6 +99,8 @@ namespace WorkNest.API.Controllers
             var match = rows.FirstOrDefault(r => r.TryGetValue("PublicId", out var g) && g?.ToString() == publicId.ToString());
             if (match is null) return NotFound(ApiResponse.Fail("Membership not found"));
             var id = match.TryGetValue("Id", out var rid) ? Convert.ToInt32(rid) : 0;
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Membership, id.ToString()))
+                return NotFound(ApiResponse.Fail("Membership not found"));
             return Ok(await _memberships.DeleteMembershipAsync(id));
         }
     }

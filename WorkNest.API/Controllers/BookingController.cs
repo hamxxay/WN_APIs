@@ -85,10 +85,24 @@ namespace WorkNest.API.Controllers
             return Ok(await _bookings.GetMyBookingsAsync(email));
         }
 
+        /// <summary>
+        /// Latest bookings. Location-bound staff: only bookings whose space is in their locations (SEC_LOC_02
+        /// dbo.WN_Bookings_GetRecentScoped; 503 "Run SEC_LOC_02 on the database." until it has run).
+        /// </summary>
         [HttpGet("api/booking/recent")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
-        public async Task<IActionResult> Recent([FromQuery] int top = 10) =>
-            Ok(await _bookings.GetRecentBookingsAsync(top));
+        public async Task<IActionResult> Recent([FromQuery] int top = 10)
+        {
+            try
+            {
+                var rows = await _db.GetRecentBookingsScopedAsync(top, LocationScopeLists.Csv(User.ScopedLocationIds(null)));
+                return Ok(rows.Cast<object>());
+            }
+            catch (LocationScopeUpdateMissingException ex)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
+            }
+        }
 
         [HttpGet("api/booking/calendar")]
         [AllowAnonymous]

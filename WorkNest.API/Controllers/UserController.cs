@@ -118,6 +118,11 @@ namespace WorkNest.API.Controllers
                 && await _db.GetUserSignInStatusAsync(request.Email) is { IsActive: false } deleted
                 && await IsProtectedAsync(deleted.Id))
                 return OnlySuperAdmin();
+            // Bringing back a deleted account with a password sets the password of an existing (someone else's) account.
+            if (!string.IsNullOrWhiteSpace(request?.Password) && !CallerIsSuperAdmin()
+                && !string.IsNullOrWhiteSpace(request?.Email)
+                && await _db.GetUserSignInStatusAsync(request.Email) is { IsActive: false })
+                return OnlySuperAdminSetsPassword();
             try
             {
                 var result = await _users.CreateUserAsync(request!, null);
@@ -135,6 +140,7 @@ namespace WorkNest.API.Controllers
 
         [Authorize(Roles = ManageRoles)]
         [HttpPut("api/user/{id:int}")]
+        [KeepMissingLocation] // no LocationId sent = the user's location stays as it is (not the caller's location)
         public async Task<IActionResult> Update(int id, [FromBody] UserUpdateRequest request)
         {
             // Everyone may edit their own profile, but not their own role or locations (an admin can't promote
@@ -146,6 +152,8 @@ namespace WorkNest.API.Controllers
                 request.LocationIds = null;
                 return Ok(await _users.UpdateUserAsync(id, request));
             }
+            // Setting another user's password would let the caller sign in as them (account takeover).
+            if (!string.IsNullOrWhiteSpace(request?.Password) && !CallerIsSuperAdmin()) return OnlySuperAdminSetsPassword();
             if (GrantsAdminRole(request?.Role) || await IsProtectedAsync(id)) return OnlySuperAdmin();
             if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
                 return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
@@ -154,6 +162,7 @@ namespace WorkNest.API.Controllers
 
         [Authorize(Roles = ManageRoles)]
         [HttpPut("api/user/{publicId:guid}")]
+        [KeepMissingLocation]
         public async Task<IActionResult> UpdateByGuid(Guid publicId, [FromBody] UserUpdateRequest request)
         {
             var id = await ResolveIdAsync(publicId);
@@ -167,6 +176,7 @@ namespace WorkNest.API.Controllers
         {
             if (await IsSelfAsync(id)) return NotOnYourself("delete");
             if (await IsProtectedAsync(id)) return OnlySuperAdmin();
+            if (await HasNoLocationForBoundCallerAsync(id)) return NoLocationOnlySuperAdmin("delete");
             return Ok(await _users.DeleteUserAsync(id));
         }
 
@@ -185,6 +195,7 @@ namespace WorkNest.API.Controllers
         {
             if (await IsSelfAsync(id)) return NotOnYourself("activate");
             if (await IsProtectedAsync(id)) return OnlySuperAdmin();
+            if (await HasNoLocationForBoundCallerAsync(id)) return NoLocationOnlySuperAdmin("activate");
             return Ok(await _users.ActivateUserAsync(id));
         }
 
@@ -203,6 +214,7 @@ namespace WorkNest.API.Controllers
         {
             if (await IsSelfAsync(id)) return NotOnYourself("deactivate");
             if (await IsProtectedAsync(id)) return OnlySuperAdmin();
+            if (await HasNoLocationForBoundCallerAsync(id)) return NoLocationOnlySuperAdmin("deactivate");
             return Ok(await _users.DeactivateUserAsync(id));
         }
 
@@ -221,6 +233,7 @@ namespace WorkNest.API.Controllers
         {
             if (await IsSelfAsync(id)) return NotOnYourself("change the role of");
             if (GrantsAdminRole(request?.Role) || await IsProtectedAsync(id)) return OnlySuperAdmin();
+            if (await HasNoLocationForBoundCallerAsync(id)) return NoLocationOnlySuperAdmin("change the role of");
             return Ok(await _users.UpdateUserRoleAsync(id, request!));
         }
 
@@ -260,6 +273,28 @@ namespace WorkNest.API.Controllers
         private static bool IsProtectedRole(int roleId) =>
             Roles.IsSuperAdmin(roleId) || roleId == Roles.AdminId || Roles.IsCeo(roleId) || Roles.IsSalesManager(roleId)
             || Roles.IsAccessOfficer(roleId);
+
+        public const string OnlySuperAdminPasswordMessage = "Only a super admin can change another user's password.";
+
+        private IActionResult OnlySuperAdminSetsPassword() => StatusCode(403, ApiResponse.Fail(OnlySuperAdminPasswordMessage));
+
+        /// <summary>
+        /// True when the caller is location-bound (admin, sales executive, ...) and the user belongs to no location at all
+        /// (no own / extra location and, for a customer, no booking). [RecordScope] lets everyone reach such a user (e.g. a
+        /// customer with no booking yet), so a location-bound admin may read them but not delete, activate, deactivate or
+        /// re-role them.
+        /// </summary>
+        private async Task<bool> HasNoLocationForBoundCallerAsync(int id)
+        {
+            if (!User.IsLocationBoundRole()) return false;
+            var repo = HttpContext?.RequestServices?.GetService(typeof(IRecordScopeRepository)) as IRecordScopeRepository;
+            if (repo == null) return false;
+            var locations = await repo.GetLocationIdsAsync(RecordKind.User, id.ToString());
+            return locations is { Count: 0 };
+        }
+
+        private IActionResult NoLocationOnlySuperAdmin(string action) =>
+            StatusCode(403, ApiResponse.Fail($"This user has no booking at your locations; only a super admin can {action} them."));
 
         private IActionResult OnlySuperAdmin() =>
             StatusCode(403, ApiResponse.Fail("Only a Super Admin can create or change Admin, CEO, Sales Manager and Access Officer accounts."));

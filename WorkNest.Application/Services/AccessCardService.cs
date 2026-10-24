@@ -16,9 +16,12 @@ namespace WorkNest.Application.Services
             int? bookingId = null,
             int? customerId = null,
             int? spaceId = null,
-            int? status = null)
+            int? status = null,
+            IReadOnlyCollection<int>? locationIds = null)
         {
-            var (rows, total) = await _db.GetAccessCardsAsync(page, limit, search, bookingId, customerId, spaceId, status);
+            var (rows, total) = locationIds == null
+                ? await _db.GetAccessCardsAsync(page, limit, search, bookingId, customerId, spaceId, status)
+                : await _db.GetAccessCardsInLocationsAsync(page, limit, search, bookingId, customerId, spaceId, status, locationIds);
             return ApiResponse.Ok(new { page, limit, total, data = rows });
         }
 
@@ -79,6 +82,30 @@ namespace WorkNest.Application.Services
             await _db.DeleteAccessCardAsync(id);
             return ApiResponse.Ok("Access Card deleted successfully.");
         }
+
+        public async Task<(string? Error, int BookingId)> CheckCardPartiesAsync(AccessCardRequest request, string? existingId = null)
+        {
+            int bookingId = request.BookingId, customerId = request.CustomerId, spaceId = request.SpaceId;
+            if (existingId != null)
+            {
+                var existing = await _db.GetAccessCardByIdAsync(existingId);
+                if (existing is null) return (null, 0); // the update answers "not found" itself
+                // Nothing about the card's booking / customer / space changes: nothing to check.
+                if (bookingId <= 0 && customerId <= 0 && spaceId <= 0) return (null, 0);
+                if (bookingId <= 0) bookingId = IntOf(existing, "BookingId");
+                if (customerId <= 0) customerId = IntOf(existing, "CustomerId");
+                if (spaceId <= 0) spaceId = IntOf(existing, "SpaceId");
+            }
+            if (bookingId <= 0) return (null, 0); // create: "BookingId is required." comes from CreateAccessCardAsync
+            if (customerId > 0 && !await _db.IsCustomerOfBookingAsync(bookingId, customerId))
+                return ("This customer is not the customer of this booking.", bookingId);
+            if (spaceId > 0 && !await _db.IsSpaceOfBookingAsync(bookingId, spaceId))
+                return ("This space is not part of this booking.", bookingId);
+            return (null, bookingId);
+        }
+
+        private static int IntOf(IDictionary<string, object?> row, string key) =>
+            row.TryGetValue(key, out var v) && v is not null && v is not DBNull && int.TryParse(v.ToString(), out var n) ? n : 0;
 
         public async Task<ApiResponse> GenerateAccessCardsForBookingAsync(int bookingId, int? createdById = null)
         {
