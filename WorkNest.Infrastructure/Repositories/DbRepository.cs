@@ -989,7 +989,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             }
         }
 
-        public async Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null)
+        public async Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null, string? email = null)
         {
             await using var c = await Open();
             try
@@ -1005,9 +1005,10 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 cmd.Parameters.AddWithValue("@AvatarUrl", (object?)avatarUrl ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@Email", (object?)email ?? DBNull.Value);
                 await cmd.ExecuteNonQueryAsync();
             }
-            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Message.Contains("@LocationId") || ex.Message.Contains("too many arguments"))
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Message.Contains("@LocationId") || ex.Message.Contains("@Email") || ex.Message.Contains("too many arguments"))
             {
                 await using var fallback = SP("dbo.WN_Users_Update", c);
                 fallback.Parameters.AddWithValue("@Id", id);

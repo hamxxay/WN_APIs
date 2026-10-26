@@ -22,6 +22,7 @@ namespace WorkNest.Application.DTOs.User
     public class UserUpdateRequest
     {
         public string? Name { get; set; }
+        public string? Email { get; set; }
         public string? Phone { get; set; }
         public string? Role { get; set; }
         public int? CompanyId { get; set; }

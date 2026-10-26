@@ -11594,7 +11594,8 @@ CREATE OR ALTER PROCEDURE [dbo].[WN_Users_Update]
     @CnicOrPassport NVARCHAR(50)   = NULL,
     @AvatarUrl      NVARCHAR(500)  = NULL,
     @Notes          NVARCHAR(1000) = NULL,
-    @LocationId     INT            = NULL
+    @LocationId     INT            = NULL,
+    @Email          NVARCHAR(256)  = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -11607,7 +11608,8 @@ BEGIN
         CnicOrPassport = ISNULL(@CnicOrPassport,  CnicOrPassport),
         AvatarUrl      = ISNULL(@AvatarUrl,       AvatarUrl),
         Notes          = ISNULL(@Notes,           Notes),
-        LocationId     = ISNULL(@LocationId,      LocationId)
+        LocationId     = ISNULL(@LocationId,      LocationId),
+        Email          = ISNULL(@Email,           Email)
     WHERE Id = @Id;
     SELECT @@ROWCOUNT AS AffectedRows;
 END;

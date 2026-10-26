@@ -268,6 +268,19 @@ namespace WorkNest.Application.Services
             if (newPassword != null && (newPassword.Length < MinPasswordLength || newPassword.Length > MaxPasswordLength))
                 return ApiResponse.Fail($"The password must be {MinPasswordLength} to {MaxPasswordLength} characters.");
 
+            string? newEmail = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim();
+            if (newEmail != null)
+            {
+                if (!newEmail.Contains('@') || !newEmail.Contains('.'))
+                    return ApiResponse.Fail("Please enter a valid email address.");
+
+                var existingWithEmail = await _db.CheckUserEmailStatusAsync(newEmail);
+                if (existingWithEmail.HasValue && existingWithEmail.Value.Id.HasValue && existingWithEmail.Value.Id.Value != id)
+                {
+                    return ApiResponse.Fail("This email is already in use by another account.");
+                }
+            }
+
             var cnicError = Cnic.Validate(request.CnicOrPassport);
             if (cnicError != null) return ApiResponse.Fail(cnicError);
             var phoneError = Phone.Validate(request.Phone);
@@ -319,7 +332,7 @@ namespace WorkNest.Application.Services
 
             await _db.UpdateUserAsync(id, request.Name, request.Phone,
                 request.CompanyId, request.CityId, request.Address,
-                request.CnicOrPassport, request.AvatarUrl, request.Notes, finalLocationId);
+                request.CnicOrPassport, request.AvatarUrl, request.Notes, finalLocationId, newEmail);
 
             // Only touch the location list when the form sent one (or changed the role).
             string? warning = null;
