@@ -33,8 +33,13 @@ namespace WorkNest.Application.Services
         {
             ("/admin/agreements", "Agreements"), ("/admin/contacts", "Contacts"), ("/admin/bookings", "Bookings"),
             ("/admin/quotations", "Quotations"), ("/admin/kyc", "Kyc"), ("/admin/invoices", "Invoices"),
-            ("/admin/attendants", "AccessSuspended"), ("/admin/access-dashboard", "MachinesOffline")
+            ("/admin/attendants", "AccessSuspended"), ("/admin/access-dashboard", "MachinesOffline"),
+            // Simple Inquiries (INQ_01): the Tour Inquiries page's second tab; /admin/contacts stays the tour inquiries.
+            (GeneralInquiriesRoute, "ContactsGeneral")
         };
+
+        /// <summary>The nav-badges key of the New Simple Inquiries (Tour Inquiries page, category=general).</summary>
+        public const string GeneralInquiriesRoute = "/admin/contacts?category=general";
 
         /// <summary>Items waiting on staff right now, grouped by sidebar route.</summary>
         /// <param name="branchLocationIds">Location-bound staff's locations: tour inquiries and complaints of those branches plus
@@ -56,9 +61,11 @@ namespace WorkNest.Application.Services
             }
             // Tour inquiries marked "future prospect" whose follow-up date has come: alert on Tour Inquiries
             // (one item per inquiry + date, so a new follow-up date alerts again even after "mark as read").
-            if (result.TryGetValue("/admin/contacts", out var contactItems))
-                foreach (var (contactId, followUpOn) in await _db.GetDueContactFollowUpsAsync(_clock.Today, branchLocationIds))
-                    contactItems.Add($"followup:{contactId}:{followUpOn:yyyyMMdd}");
+            // Simple Inquiries (INQ_01) have their own badge, follow-ups included (same item format).
+            foreach (var (route, category) in new[] { ("/admin/contacts", "tour"), (GeneralInquiriesRoute, "general") })
+                if (result.TryGetValue(route, out var contactItems))
+                    foreach (var (contactId, followUpOn) in await _db.GetDueContactFollowUpsAsync(_clock.Today, branchLocationIds, category))
+                        contactItems.Add($"followup:{contactId}:{followUpOn:yyyyMMdd}");
             // New (open) complaints waiting on staff.
             result["/admin/complaints"] = (await _complaints.GetOpenIdsAsync(branchLocationIds)).Select(id => $"complaint:{id}").ToList();
             // WhatsApp conversations with unread customer messages (a new message alerts again).

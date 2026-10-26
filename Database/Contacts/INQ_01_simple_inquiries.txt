@@ -1,0 +1,507 @@
+USE [WorkNestAEO];
+-- For the test database change the first line to USE [SAC400];
+-- ============================================================================================
+-- INQ_01: Simple Inquiries (WhatsApp customers who typed free text instead of using the bot menu), 26/10/2026.
+--
+--   1. dbo.WN_Contacts                     + InquiryCategory NVARCHAR(20) NOT NULL DEFAULT 'tour' ('tour' | 'general').
+--                                            Existing rows become 'tour' (nothing else changes). Check: tour / general.
+--   2. dbo.WN_WhatsApp_Conversations       + FollowUpPendingSince DATETIME2 NULL  first unanswered free text at the main menu
+--                                            + FollowUpText NVARCHAR(2000) NULL   that free text (one message per line)
+--                                            + FollowUpSentAt DATETIME2 NULL      when "Our sales representative ..." was sent
+--                                            + FollowUpClaimedAt DATETIME2 NULL   an API instance is sending it (lease)
+--                                            + FollowUpInquiryId INT NULL         the general inquiry created for it
+--                                            Times use SYSDATETIME(), the same clock as LastIncomingAt.
+--   3. NEW dbo.WN_Contacts_GetListByCategory   = dbo.WN_Contacts_GetList + @Category (NULL = all) + column InquiryCategory.
+--   4. NEW dbo.WN_Contacts_GetRecentByCategory = dbo.WN_Contacts_GetRecent + @Category (NULL = all) + column InquiryCategory.
+--   5. NEW dbo.WN_WhatsApp_FollowUp_SetPending / _Clear / _GetPending / _Claim / _Complete / _Release
+--                                            the bot marks / clears a conversation, the API's WhatsAppFollowUp service
+--                                            sends the follow-up and creates ONE general inquiry (WN_Contacts row).
+--   6. dbo.WN_ServiceSwitches              + row WhatsAppFollowUp (on). Off: no follow-ups are sent (Services page).
+--   7. dbo.WN_Ceo_InquiryRows              (CHANGED) the live definition + only tour inquiries (CEO dashboard).
+--   8. dbo.WN_SalesMgr_InquiryRows         (CHANGED) the live definition + only tour inquiries (Sales Manager dashboard).
+--                                            Both check COL_LENGTH(InquiryCategory) in their dynamic SQL, as they do
+--                                            for the other optional columns.
+--
+-- Other existing procedures are NOT changed (the API uses the new ones, falling back to the old ones when they are missing).
+-- Needs CT_01 (WN_Contacts.InquiryType), BR_01 (WN_Contacts.LocationId), WN_WhatsApp.txt and SS_01 (service switches).
+-- Run as ONE statement in DBeaver (select all, execute). All or nothing: if any step fails nothing changes.
+-- Safe to run again. The last result lists every step.
+-- ============================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+
+DECLARE @Log TABLE (Step INT IDENTITY(1,1), Item NVARCHAR(200), Result NVARCHAR(400));
+
+BEGIN TRY
+    IF COL_LENGTH(N'dbo.WN_Contacts', N'InquiryType') IS NULL
+        THROW 50001, N'dbo.WN_Contacts.InquiryType is missing: run Database/Contact/CT_01_inquiry_type first. Nothing changed.', 1;
+    IF COL_LENGTH(N'dbo.WN_Contacts', N'LocationId') IS NULL
+        THROW 50002, N'dbo.WN_Contacts.LocationId is missing: run BR_01_branch_routing first. Nothing changed.', 1;
+    IF OBJECT_ID(N'dbo.WN_WhatsApp_Conversations', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_WhatsApp_BotState', N'U') IS NULL
+        THROW 50003, N'The WhatsApp tables are missing: run WN_WhatsApp first. Nothing changed.', 1;
+    IF OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NULL
+        THROW 50004, N'dbo.WN_ServiceSwitches is missing: run SS_01_service_switches first. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- 1. WN_Contacts.InquiryCategory ---------------------------------------------------------------
+    IF COL_LENGTH(N'dbo.WN_Contacts', N'InquiryCategory') IS NULL
+    BEGIN
+        EXEC(N'ALTER TABLE dbo.WN_Contacts ADD InquiryCategory NVARCHAR(20) NOT NULL
+               CONSTRAINT DF_WN_Contacts_InquiryCategory DEFAULT (N''tour'');');
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Column WN_Contacts.InquiryCategory', N'Added (existing rows = tour)');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Column WN_Contacts.InquiryCategory', N'Already there (not changed)');
+
+    IF OBJECT_ID(N'dbo.CK_WN_Contacts_InquiryCategory', N'C') IS NULL
+    BEGIN
+        EXEC(N'ALTER TABLE dbo.WN_Contacts WITH CHECK ADD CONSTRAINT CK_WN_Contacts_InquiryCategory
+              CHECK (InquiryCategory IN (N''tour'', N''general''));');
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Check CK_WN_Contacts_InquiryCategory', N'Added');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'1. Check CK_WN_Contacts_InquiryCategory', N'Already there (not changed)');
+
+    -- 2. Conversation follow-up columns -------------------------------------------------------------
+    IF COL_LENGTH(N'dbo.WN_WhatsApp_Conversations', N'FollowUpPendingSince') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_WhatsApp_Conversations ADD FollowUpPendingSince DATETIME2 NULL;');
+    IF COL_LENGTH(N'dbo.WN_WhatsApp_Conversations', N'FollowUpText') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_WhatsApp_Conversations ADD FollowUpText NVARCHAR(2000) NULL;');
+    IF COL_LENGTH(N'dbo.WN_WhatsApp_Conversations', N'FollowUpSentAt') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_WhatsApp_Conversations ADD FollowUpSentAt DATETIME2 NULL;');
+    IF COL_LENGTH(N'dbo.WN_WhatsApp_Conversations', N'FollowUpClaimedAt') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_WhatsApp_Conversations ADD FollowUpClaimedAt DATETIME2 NULL;');
+    IF COL_LENGTH(N'dbo.WN_WhatsApp_Conversations', N'FollowUpInquiryId') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_WhatsApp_Conversations ADD FollowUpInquiryId INT NULL;');
+    INSERT INTO @Log (Item, Result) VALUES (N'2. WN_WhatsApp_Conversations follow-up columns', N'Present (added when missing)');
+
+    -- 3. NEW list procedure with the category ----------------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Contacts_GetListByCategory]
+    @Page              INT           = 1,
+    @Limit             INT           = 20,
+    @Search            NVARCHAR(255) = NULL,
+    @InquiryType       NVARCHAR(20)  = NULL,
+    @LocationIds       NVARCHAR(MAX) = NULL,   -- branches to list, CSV of WN_Locations.Id (NULL = every inquiry; ''-1'' = none)
+    @IncludeNoLocation BIT           = 1,      -- with @LocationIds, also the inquiries without a branch
+    @Category          NVARCHAR(20)  = NULL    -- INQ_01: ''tour'' | ''general''; NULL / empty = every inquiry
+AS
+BEGIN
+    -- INQ_01: dbo.WN_Contacts_GetList + InquiryCategory (old website bookings in WN_BookTour are tour inquiries).
+    SET NOCOUNT ON;
+    DECLARE @Offset INT = (@Page - 1) * @Limit;
+    SET @LocationIds = NULLIF(REPLACE(LTRIM(RTRIM(@LocationIds)), N'' '', N''''), N'''');
+    SET @IncludeNoLocation = ISNULL(@IncludeNoLocation, 1);
+    SET @Category = NULLIF(LOWER(LTRIM(RTRIM(@Category))), N'''');
+    WITH Combined AS (
+        SELECT
+            bt.Id,
+            bt.IdGUID AS PublicId,
+            CAST(''Book Tour'' AS NVARCHAR(50)) AS ContactType,
+            CAST(NULL AS INT) AS UserId,
+            bt.Name,
+            bt.Email,
+            bt.PhoneNumber,
+            bt.Message,
+            CAST(ISNULL(bt.Status, 1) AS TINYINT) AS StatusId,
+            CAST(DATEADD(MINUTE, -DATEPART(TZOFFSET, SYSDATETIMEOFFSET()), bt.CreatedOn) AS DATETIME2) AS CreatedOn,
+            CAST(N''Website'' AS NVARCHAR(20)) AS InquiryType,
+            CAST(NULL AS NVARCHAR(200)) AS ReferenceName,
+            CAST(NULL AS INT) AS LocationId,
+            CAST(N''booktour'' AS NVARCHAR(20)) AS Source,
+            CAST(N''tour'' AS NVARCHAR(20)) AS InquiryCategory
+        FROM dbo.WN_BookTour bt WITH (NOLOCK)
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts c WITH (NOLOCK) WHERE c.PublicId = bt.IdGUID)
+        UNION ALL
+        SELECT
+            c.Id,
+            c.PublicId,
+            ISNULL(c.ContactType, ''Contact'') AS ContactType,
+            c.UserId,
+            c.Name,
+            c.Email,
+            c.PhoneNumber,
+            c.Message,
+            c.StatusId,
+            c.CreatedOn,
+            c.InquiryType,
+            c.ReferenceName,
+            c.LocationId,
+            CAST(N''contact'' AS NVARCHAR(20)) AS Source,
+            c.InquiryCategory
+        FROM dbo.WN_Contacts c WITH (NOLOCK)
+    ),
+    Filtered AS (
+        SELECT
+            Id, PublicId, ContactType, UserId, Name, Email, PhoneNumber, Message, StatusId, CreatedOn,
+            InquiryType, ReferenceName, LocationId, Source, InquiryCategory,
+            COUNT(*) OVER () AS TotalCount
+        FROM Combined
+        WHERE (@Search IS NULL OR @Search = ''''
+               OR Name LIKE ''%'' + @Search + ''%''
+               OR Email LIKE ''%'' + @Search + ''%''
+               OR PhoneNumber LIKE ''%'' + @Search + ''%''
+               OR Message LIKE ''%'' + @Search + ''%''
+               OR ReferenceName LIKE ''%'' + @Search + ''%'')
+          AND (@InquiryType IS NULL OR @InquiryType = '''' OR InquiryType = @InquiryType)
+          AND (@Category IS NULL OR InquiryCategory = @Category)
+          AND (@LocationIds IS NULL
+               OR (LocationId IS NULL AND @IncludeNoLocation = 1)
+               OR CHARINDEX(N'','' + CAST(LocationId AS NVARCHAR(20)) + N'','', N'','' + @LocationIds + N'','') > 0)
+    )
+    SELECT
+        f.Id, f.PublicId, f.ContactType, f.UserId, f.Name, f.Email, f.PhoneNumber, f.Message, f.StatusId, f.CreatedOn,
+        f.InquiryType, f.ReferenceName, f.TotalCount, f.LocationId, CAST(l.Name AS NVARCHAR(200)) AS LocationName, f.Source,
+        f.InquiryCategory
+    FROM Filtered f
+    LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = f.LocationId
+    ORDER BY f.CreatedOn DESC, f.Source, f.Id DESC
+    OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+END');
+    INSERT INTO @Log (Item, Result) VALUES (N'3. WN_Contacts_GetListByCategory', N'Created / updated');
+
+    -- 4. NEW recent procedure with the category --------------------------------------------------
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Contacts_GetRecentByCategory]
+    @Top               INT           = 10,
+    @LocationIds       NVARCHAR(MAX) = NULL,
+    @IncludeNoLocation BIT           = 1,
+    @Category          NVARCHAR(20)  = NULL    -- INQ_01: ''tour'' | ''general''; NULL / empty = every inquiry
+AS
+BEGIN
+    -- INQ_01: dbo.WN_Contacts_GetRecent + InquiryCategory.
+    SET NOCOUNT ON;
+    SET @LocationIds = NULLIF(REPLACE(LTRIM(RTRIM(@LocationIds)), N'' '', N''''), N'''');
+    SET @IncludeNoLocation = ISNULL(@IncludeNoLocation, 1);
+    SET @Category = NULLIF(LOWER(LTRIM(RTRIM(@Category))), N'''');
+    WITH Combined AS (
+        SELECT
+            bt.Id,
+            bt.IdGUID AS PublicId,
+            CAST(''Book Tour'' AS NVARCHAR(50)) AS ContactType,
+            CAST(NULL AS INT) AS UserId,
+            bt.Name,
+            bt.Email,
+            bt.PhoneNumber,
+            bt.Message,
+            CAST(ISNULL(bt.Status, 1) AS TINYINT) AS StatusId,
+            CAST(DATEADD(MINUTE, -DATEPART(TZOFFSET, SYSDATETIMEOFFSET()), bt.CreatedOn) AS DATETIME2) AS CreatedOn,
+            CAST(N''Website'' AS NVARCHAR(20)) AS InquiryType,
+            CAST(NULL AS NVARCHAR(200)) AS ReferenceName,
+            CAST(NULL AS INT) AS LocationId,
+            CAST(N''booktour'' AS NVARCHAR(20)) AS Source,
+            CAST(N''tour'' AS NVARCHAR(20)) AS InquiryCategory
+        FROM dbo.WN_BookTour bt WITH (NOLOCK)
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts c WITH (NOLOCK) WHERE c.PublicId = bt.IdGUID)
+        UNION ALL
+        SELECT
+            c.Id,
+            c.PublicId,
+            ISNULL(c.ContactType, ''Contact'') AS ContactType,
+            c.UserId,
+            c.Name,
+            c.Email,
+            c.PhoneNumber,
+            c.Message,
+            c.StatusId,
+            c.CreatedOn,
+            c.InquiryType,
+            c.ReferenceName,
+            c.LocationId,
+            CAST(N''contact'' AS NVARCHAR(20)) AS Source,
+            c.InquiryCategory
+        FROM dbo.WN_Contacts c WITH (NOLOCK)
+    )
+    SELECT TOP (@Top)
+        x.Id, x.PublicId, x.ContactType, x.Name, x.Email, x.PhoneNumber, x.Message, x.StatusId, x.CreatedOn, x.InquiryType,
+        x.ReferenceName, x.LocationId, CAST(l.Name AS NVARCHAR(200)) AS LocationName, x.Source, x.InquiryCategory
+    FROM Combined x
+    LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = x.LocationId
+    WHERE (@Category IS NULL OR x.InquiryCategory = @Category)
+      AND (@LocationIds IS NULL
+           OR (x.LocationId IS NULL AND @IncludeNoLocation = 1)
+           OR CHARINDEX(N'','' + CAST(x.LocationId AS NVARCHAR(20)) + N'','', N'','' + @LocationIds + N'','') > 0)
+    ORDER BY x.CreatedOn DESC;
+END');
+    INSERT INTO @Log (Item, Result) VALUES (N'4. WN_Contacts_GetRecentByCategory', N'Created / updated');
+
+    -- 5. Follow-up procedures --------------------------------------------------------------------
+    -- The bot: free text at the main menu that is not an option. Starts the pending state (first time) and adds the
+    -- text. Nothing happens when a follow-up was sent in the last 24 hours (one follow-up a day per customer).
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_WhatsApp_FollowUp_SetPending]
+    @ConversationId INT,
+    @Text           NVARCHAR(2000)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Now DATETIME2 = SYSDATETIME();
+    SET @Text = NULLIF(LTRIM(RTRIM(@Text)), N'''');
+    UPDATE dbo.WN_WhatsApp_Conversations SET
+        FollowUpText = LEFT(CASE WHEN FollowUpPendingSince IS NULL OR ISNULL(FollowUpText, N'''') = N'''' THEN @Text
+                                 WHEN @Text IS NULL THEN FollowUpText
+                                 ELSE FollowUpText + NCHAR(10) + @Text END, 2000),
+        FollowUpInquiryId = CASE WHEN FollowUpPendingSince IS NULL THEN NULL ELSE FollowUpInquiryId END,
+        FollowUpPendingSince = ISNULL(FollowUpPendingSince, @Now)
+    WHERE Id = @ConversationId
+      AND (FollowUpSentAt IS NULL OR FollowUpSentAt < DATEADD(HOUR, -24, @Now));
+    SELECT @@ROWCOUNT AS Updated;
+END');
+
+    -- The bot: a valid menu choice / any other bot flow. Forgets the pending state (a sent follow-up stays recorded).
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_WhatsApp_FollowUp_Clear]
+    @ConversationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_WhatsApp_Conversations SET
+        FollowUpPendingSince = NULL, FollowUpText = NULL, FollowUpClaimedAt = NULL
+    WHERE Id = @ConversationId AND (FollowUpPendingSince IS NOT NULL OR FollowUpClaimedAt IS NOT NULL);
+    SELECT @@ROWCOUNT AS Updated;
+END');
+
+    -- The service: every conversation waiting for a follow-up, with the database time (DbNow) to compare against.
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_WhatsApp_FollowUp_GetPending]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT cv.Id AS ConversationId, ct.PhoneNumber, ct.Name, cv.FollowUpPendingSince, cv.LastIncomingAt, cv.FollowUpSentAt,
+           cv.FollowUpClaimedAt, cv.FollowUpInquiryId, cv.FollowUpText, bs.State AS BotState, SYSDATETIME() AS DbNow
+    FROM dbo.WN_WhatsApp_Conversations cv WITH (NOLOCK)
+    JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
+    LEFT JOIN dbo.WN_WhatsApp_BotState bs WITH (NOLOCK) ON bs.PhoneNumber = ct.PhoneNumber
+    WHERE cv.FollowUpPendingSince IS NOT NULL
+    ORDER BY cv.FollowUpPendingSince;
+END');
+
+    -- The service: takes one due conversation (row lock + lease, so two API instances never both take it) and creates
+    -- its general inquiry once (FollowUpInquiryId: a retry after a failed send reuses it). Claimed = 0 + Reason otherwise.
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_WhatsApp_FollowUp_Claim]
+    @ConversationId INT,
+    @QuietSeconds   INT = 120,
+    @LeaseSeconds   INT = 300,
+    @LocationId     INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    DECLARE @Now DATETIME2 = SYSDATETIME();
+    DECLARE @Phone NVARCHAR(30), @Name NVARCHAR(200), @Text NVARCHAR(2000), @InquiryId INT, @Reason NVARCHAR(40) = N''not_found'';
+
+    BEGIN TRANSACTION;
+    SELECT @Phone = ct.PhoneNumber,
+           @Name = COALESCE(NULLIF(LTRIM(RTRIM(ct.Name)), N''''), ct.PhoneNumber),
+           @Text = cv.FollowUpText,
+           @InquiryId = cv.FollowUpInquiryId,
+           @Reason = CASE
+               WHEN cv.FollowUpPendingSince IS NULL THEN N''not_pending''
+               WHEN cv.LastIncomingAt IS NULL OR cv.LastIncomingAt > DATEADD(SECOND, -@QuietSeconds, @Now) THEN N''not_quiet''
+               WHEN cv.LastIncomingAt < DATEADD(HOUR, -24, @Now) THEN N''window_closed''
+               WHEN cv.FollowUpSentAt >= DATEADD(HOUR, -24, @Now) THEN N''sent_in_last_24h''
+               WHEN cv.FollowUpClaimedAt >= DATEADD(SECOND, -@LeaseSeconds, @Now) THEN N''claimed''
+               WHEN EXISTS (SELECT 1 FROM dbo.WN_WhatsApp_BotState bs WITH (NOLOCK)
+                             WHERE bs.PhoneNumber = ct.PhoneNumber AND bs.State <> N''main_menu'') THEN N''bot_in_use''
+               ELSE N'''' END
+    FROM dbo.WN_WhatsApp_Conversations cv WITH (UPDLOCK, ROWLOCK)
+    JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
+    WHERE cv.Id = @ConversationId;
+
+    IF @Reason = N''''
+    BEGIN
+        IF @InquiryId IS NULL
+        BEGIN
+            INSERT INTO dbo.WN_Contacts
+                (ContactType, UserId, Name, Email, PhoneNumber, Message, StatusId, InquiryType, InquiryCategory, LocationId)
+            VALUES
+                (N''contact'', NULL, LEFT(@Name, 200), N'''', @Phone, LEFT(ISNULL(NULLIF(@Text, N''''), N''(no text)''), 2000), 1,
+                 N''WhatsApp'', N''general'', (SELECT l.Id FROM dbo.WN_Locations l WITH (NOLOCK) WHERE l.Id = @LocationId));
+            SET @InquiryId = SCOPE_IDENTITY();
+        END
+        UPDATE dbo.WN_WhatsApp_Conversations SET FollowUpInquiryId = @InquiryId, FollowUpClaimedAt = @Now
+        WHERE Id = @ConversationId;
+    END
+    COMMIT TRANSACTION;
+
+    SELECT CAST(CASE WHEN @Reason = N'''' THEN 1 ELSE 0 END AS BIT) AS Claimed, NULLIF(@Reason, N'''') AS Reason,
+           @InquiryId AS InquiryId, (SELECT c.PublicId FROM dbo.WN_Contacts c WITH (NOLOCK) WHERE c.Id = @InquiryId) AS InquiryPublicId,
+           @Phone AS PhoneNumber, @Name AS Name, @Text AS FollowUpText;
+END');
+
+    -- The service: the follow-up was sent. Records it (24-hour cap) and ends the pending state.
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_WhatsApp_FollowUp_Complete]
+    @ConversationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_WhatsApp_Conversations SET
+        FollowUpSentAt = SYSDATETIME(), FollowUpPendingSince = NULL, FollowUpText = NULL, FollowUpClaimedAt = NULL
+    WHERE Id = @ConversationId;
+    SELECT @@ROWCOUNT AS Updated;
+END');
+
+    -- The service: the send failed. Gives the conversation back for the next tick (the inquiry is kept, not re-created).
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_WhatsApp_FollowUp_Release]
+    @ConversationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_WhatsApp_Conversations SET FollowUpClaimedAt = NULL WHERE Id = @ConversationId;
+    SELECT @@ROWCOUNT AS Updated;
+END');
+    INSERT INTO @Log (Item, Result) VALUES (N'5. WN_WhatsApp_FollowUp_SetPending / Clear / GetPending / Claim / Complete / Release', N'Created / updated');
+
+    -- 6. Service switch ---------------------------------------------------------------------------
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_ServiceSwitches WHERE ServiceName = N'WhatsAppFollowUp')
+    BEGIN
+        INSERT INTO dbo.WN_ServiceSwitches (ServiceName, IsEnabled, UpdatedBy, UpdatedAt)
+        VALUES (N'WhatsAppFollowUp', 1, N'INQ_01', SYSUTCDATETIME());
+        INSERT INTO @Log (Item, Result) VALUES (N'6. Service switch WhatsAppFollowUp', N'Added (on)');
+    END
+    ELSE
+        INSERT INTO @Log (Item, Result) VALUES (N'6. Service switch WhatsAppFollowUp', N'Already there (not changed)');
+
+    -- 7. WN_Ceo_InquiryRows: the live definition + only tour inquiries (guarded by COL_LENGTH, dynamic SQL as before) ----
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Ceo_InquiryRows
+    @From       DATETIME2 = NULL,   -- created on or after (NULL = no lower limit)
+    @To         DATETIME2 = NULL,   -- created before (NULL = no upper limit)
+    @LocationId INT = NULL,         -- QA_07: only the inquiries of this branch (WN_Contacts.LocationId); NULL = every
+                                    -- inquiry (as before QA_07)
+    @NoBranchOnly BIT = 0           -- CP_02: 1 = only the inquiries without a branch (with @LocationId NULL)
+AS
+BEGIN
+    -- CEO dashboard (read-only): tour inquiries exactly as the Tour Inquiries page lists them (dbo.WN_Contacts_GetList):
+    -- website bookings still kept in dbo.WN_BookTour (Type Website) plus dbo.WN_Contacts. On a database without the
+    -- CT_01 columns (WN_Contacts.InquiryType / ReferenceName) every inquiry has no Type (NotSet) instead of failing.
+    -- FeedbackOutcome / FeedbackReason = the latest dbo.WN_ContactFeedback row of the inquiry, when that table exists.
+    -- Branch (QA_07): an inquiry belongs to the location in WN_Contacts.LocationId (BR_01); the WN_BookTour bookings
+    -- have none. @LocationId = only that branch''s inquiries (as the Sales Manager dashboard with one location chosen);
+    -- NULL = every inquiry. On a database without that column every inquiry counts (as before QA_07).
+    -- Dynamic SQL so the procedure compiles whether or not those columns / tables exist.
+    SET NOCOUNT ON;
+    IF @LocationId <= 0 SET @LocationId = NULL;
+    IF COL_LENGTH(N''dbo.WN_Contacts'', N''LocationId'') IS NULL SET @LocationId = NULL;
+    DECLARE @HasType     BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''InquiryType'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasRef      BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''ReferenceName'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasLoc      BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''LocationId'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasBookTour BIT = CASE WHEN OBJECT_ID(N''dbo.WN_BookTour'', N''U'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasFeedback BIT = CASE WHEN OBJECT_ID(N''dbo.WN_ContactFeedback'', N''U'') IS NOT NULL THEN 1 ELSE 0 END;
+    -- INQ_01: only tour inquiries (WN_Contacts.InquiryCategory = ''tour''); Simple Inquiries (general) are left out.
+    DECLARE @HasCat      BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''InquiryCategory'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @Sql NVARCHAR(MAX) = N''
+        SELECT x.Id, x.Name, x.PhoneNumber, x.InquiryType, x.ReferenceName, x.StatusId, x.CreatedOn, ''
+        + CASE WHEN @HasFeedback = 1
+               THEN N''fb.Outcome AS FeedbackOutcome, fb.Reason AS FeedbackReason''
+               ELSE N''CAST(NULL AS NVARCHAR(50)) AS FeedbackOutcome, CAST(NULL AS NVARCHAR(1000)) AS FeedbackReason'' END + N''
+          FROM (''
+        + CASE WHEN @HasBookTour = 1 THEN N''
+                SELECT bt.Id, bt.Name, bt.PhoneNumber, ''
+                + CASE WHEN @HasType = 1 THEN N''CAST(N''''Website'''' AS NVARCHAR(20))'' ELSE N''CAST(NULL AS NVARCHAR(20))'' END + N'' AS InquiryType,
+                       CAST(NULL AS NVARCHAR(200)) AS ReferenceName, CAST(ISNULL(bt.Status, 1) AS INT) AS StatusId,
+                       CAST(DATEADD(MINUTE, @UtcMinutes, bt.CreatedOn) AS DATETIME2) AS CreatedOn, CAST(NULL AS INT) AS LocationId,   -- CP_02: GETDATE() -> UTC
+                       CAST(0 AS BIT) AS IsContact   -- CP_02
+                  FROM dbo.WN_BookTour bt WITH (NOLOCK)
+                 WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts c2 WITH (NOLOCK) WHERE c2.PublicId = bt.IdGUID)
+                UNION ALL'' ELSE N'''' END + N''
+                SELECT c.Id, c.Name, c.PhoneNumber, ''
+                + CASE WHEN @HasType = 1 THEN N''CAST(c.InquiryType AS NVARCHAR(20))'' ELSE N''CAST(NULL AS NVARCHAR(20))'' END + N'' AS InquiryType, ''
+                + CASE WHEN @HasRef = 1 THEN N''CAST(c.ReferenceName AS NVARCHAR(200))'' ELSE N''CAST(NULL AS NVARCHAR(200))'' END + N'' AS ReferenceName,
+                       CAST(c.StatusId AS INT) AS StatusId, CAST(c.CreatedOn AS DATETIME2) AS CreatedOn, ''
+                + CASE WHEN @HasLoc = 1 THEN N''CAST(c.LocationId AS INT)'' ELSE N''CAST(NULL AS INT)'' END + N'' AS LocationId,
+                       CAST(1 AS BIT) AS IsContact
+                  FROM dbo.WN_Contacts c WITH (NOLOCK)''
+        + CASE WHEN @HasCat = 1 THEN N''
+                 WHERE c.InquiryCategory = N''''tour'''''' ELSE N'''' END + N''
+               ) x''
+        + CASE WHEN @HasFeedback = 1 THEN N''
+          OUTER APPLY (SELECT TOP 1 f.Outcome, f.Reason FROM dbo.WN_ContactFeedback f WITH (NOLOCK)
+                        WHERE x.IsContact = 1 AND f.ContactId = x.Id ORDER BY f.Id DESC) fb'' ELSE N'''' END + N''
+         WHERE (@From IS NULL OR x.CreatedOn >= @From)
+           AND (@To IS NULL OR x.CreatedOn < @To)
+           AND (@LocationId IS NULL OR x.LocationId = @LocationId)
+           AND (@NoBranchOnly = 0 OR x.LocationId IS NULL);'';
+    -- CP_02: WN_BookTour.CreatedOn is the server clock (GETDATE()), WN_Contacts.CreatedOn is UTC: the website bookings
+    -- are moved to UTC by the server''s offset so both compare with the same (UTC) bounds.
+    DECLARE @UtcMinutes INT = -DATEDIFF(MINUTE, SYSUTCDATETIME(), SYSDATETIME());
+    SET @NoBranchOnly = ISNULL(@NoBranchOnly, 0);
+    IF @NoBranchOnly = 1 SET @LocationId = NULL;
+    EXEC sp_executesql @Sql, N''@From DATETIME2, @To DATETIME2, @LocationId INT, @NoBranchOnly BIT, @UtcMinutes INT'',
+         @From = @From, @To = @To, @LocationId = @LocationId, @NoBranchOnly = @NoBranchOnly, @UtcMinutes = @UtcMinutes;   -- CP_02
+END;');
+    INSERT INTO @Log (Item, Result) VALUES (N'7. WN_Ceo_InquiryRows', N'Updated: counts tour inquiries only');
+
+    -- 8. WN_SalesMgr_InquiryRows: the live definition + only tour inquiries (guarded by COL_LENGTH, dynamic SQL as before) ----
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_SalesMgr_InquiryRows
+    @From              DATETIME2 = NULL,       -- created on or after (NULL = no lower limit)
+    @To                DATETIME2 = NULL,       -- created before (NULL = no upper limit)
+    @LocationIds       NVARCHAR(MAX) = NULL,   -- BR_02: branches, CSV of WN_Locations.Id (NULL = every inquiry, as before)
+    @IncludeNoLocation BIT = 1                 -- BR_02: with @LocationIds, also the inquiries without a branch
+AS
+BEGIN
+    -- Sales Manager dashboard (read-only): tour inquiries exactly as the Tour Inquiries page lists them
+    -- (dbo.WN_Contacts_GetList, same as dbo.WN_Ceo_InquiryRows): website bookings still kept in dbo.WN_BookTour (Type
+    -- Website) plus dbo.WN_Contacts. InquiryType is Website, WhatsApp, WalkIn, Reference or NotSet (no Type; every
+    -- inquiry on a database without the CT_01 columns WN_Contacts.InquiryType / ReferenceName).
+    -- Branch (BR_02): an inquiry belongs to the location in WN_Contacts.LocationId (BR_01); NULL = no branch, and the
+    -- WN_BookTour bookings never have one. @LocationIds NULL: every inquiry (as before BR_02); otherwise the inquiries of
+    -- those locations, plus the ones without a branch when @IncludeNoLocation = 1 (as the Tour Inquiries page shows them
+    -- to location-bound staff). The result columns are the same as before BR_02.
+    -- Feedback* = the latest dbo.WN_ContactFeedback row of the inquiry (outcome, reason, follow-up date and who gave
+    -- it), when that table exists. Dynamic SQL so the procedure compiles whether or not those columns / tables exist.
+    SET NOCOUNT ON;
+    SET @LocationIds = NULLIF(REPLACE(LTRIM(RTRIM(@LocationIds)), N'' '', N''''), N'''');
+    SET @IncludeNoLocation = ISNULL(@IncludeNoLocation, 1);
+    DECLARE @HasType     BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''InquiryType'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasRef      BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''ReferenceName'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasLoc      BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''LocationId'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasBookTour BIT = CASE WHEN OBJECT_ID(N''dbo.WN_BookTour'', N''U'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @HasFeedback BIT = CASE WHEN OBJECT_ID(N''dbo.WN_ContactFeedback'', N''U'') IS NOT NULL THEN 1 ELSE 0 END;
+    -- INQ_01: only tour inquiries (WN_Contacts.InquiryCategory = ''tour''); Simple Inquiries (general) are left out.
+    DECLARE @HasCat      BIT = CASE WHEN COL_LENGTH(N''dbo.WN_Contacts'', N''InquiryCategory'') IS NOT NULL THEN 1 ELSE 0 END;
+    DECLARE @Sql NVARCHAR(MAX) = N''
+        SELECT x.Id, x.Name, x.PhoneNumber, COALESCE(NULLIF(LTRIM(RTRIM(x.InquiryType)), N''''''''), N''''NotSet'''') AS InquiryType,
+               x.ReferenceName, x.StatusId, x.CreatedOn, ''
+        + CASE WHEN @HasFeedback = 1
+               THEN N''LOWER(LTRIM(RTRIM(fb.Outcome))) AS FeedbackOutcome, fb.Reason AS FeedbackReason, fb.FollowUpOn,
+               fb.CreatedById AS FeedbackById''
+               ELSE N''CAST(NULL AS NVARCHAR(50)) AS FeedbackOutcome, CAST(NULL AS NVARCHAR(1000)) AS FeedbackReason,
+               CAST(NULL AS DATE) AS FollowUpOn, CAST(NULL AS INT) AS FeedbackById'' END + N''
+          FROM (''
+        + CASE WHEN @HasBookTour = 1 THEN N''
+                SELECT bt.Id, CAST(bt.Name AS NVARCHAR(400)) AS Name, CAST(bt.PhoneNumber AS NVARCHAR(200)) AS PhoneNumber, ''
+                + CASE WHEN @HasType = 1 THEN N''CAST(N''''Website'''' AS NVARCHAR(20))'' ELSE N''CAST(NULL AS NVARCHAR(20))'' END + N'' AS InquiryType,
+                       CAST(NULL AS NVARCHAR(200)) AS ReferenceName, CAST(ISNULL(bt.Status, 1) AS INT) AS StatusId,
+                       CAST(bt.CreatedOn AS DATETIME2) AS CreatedOn, CAST(NULL AS INT) AS LocationId
+                  FROM dbo.WN_BookTour bt WITH (NOLOCK)
+                 WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts c2 WITH (NOLOCK) WHERE c2.PublicId = bt.IdGUID)
+                UNION ALL'' ELSE N'''' END + N''
+                SELECT c.Id, CAST(c.Name AS NVARCHAR(400)) AS Name, CAST(c.PhoneNumber AS NVARCHAR(200)) AS PhoneNumber, ''
+                + CASE WHEN @HasType = 1 THEN N''CAST(c.InquiryType AS NVARCHAR(20))'' ELSE N''CAST(NULL AS NVARCHAR(20))'' END + N'' AS InquiryType, ''
+                + CASE WHEN @HasRef = 1 THEN N''CAST(c.ReferenceName AS NVARCHAR(200))'' ELSE N''CAST(NULL AS NVARCHAR(200))'' END + N'' AS ReferenceName,
+                       CAST(c.StatusId AS INT) AS StatusId, CAST(c.CreatedOn AS DATETIME2) AS CreatedOn, ''
+                + CASE WHEN @HasLoc = 1 THEN N''CAST(c.LocationId AS INT)'' ELSE N''CAST(NULL AS INT)'' END + N'' AS LocationId
+                  FROM dbo.WN_Contacts c WITH (NOLOCK)''
+        + CASE WHEN @HasCat = 1 THEN N''
+                 WHERE c.InquiryCategory = N''''tour'''''' ELSE N'''' END + N''
+               ) x''
+        + CASE WHEN @HasFeedback = 1 THEN N''
+          OUTER APPLY (SELECT TOP 1 f.Outcome, f.Reason, f.FollowUpOn, f.CreatedById FROM dbo.WN_ContactFeedback f WITH (NOLOCK)
+                        WHERE f.ContactId = x.Id ORDER BY f.Id DESC) fb'' ELSE N'''' END + N''
+         WHERE (@From IS NULL OR x.CreatedOn >= @From)
+           AND (@To IS NULL OR x.CreatedOn < @To)
+           AND (@LocationIds IS NULL
+                OR (x.LocationId IS NULL AND @IncludeNoLocation = 1)
+                OR x.LocationId IN (SELECT TRY_CAST(s.value AS INT) FROM STRING_SPLIT(@LocationIds, N'''','''') s));'';
+    EXEC sp_executesql @Sql, N''@From DATETIME2, @To DATETIME2, @LocationIds NVARCHAR(MAX), @IncludeNoLocation BIT'',
+         @From = @From, @To = @To, @LocationIds = @LocationIds, @IncludeNoLocation = @IncludeNoLocation;
+END;');
+    INSERT INTO @Log (Item, Result) VALUES (N'8. WN_SalesMgr_InquiryRows', N'Updated: counts tour inquiries only');
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    INSERT INTO @Log (Item, Result) VALUES (N'FAILED - nothing was changed',
+        ERROR_MESSAGE() + N' (line ' + CAST(ERROR_LINE() AS NVARCHAR(10)) + N')');
+END CATCH;
+
+SELECT Step, Item, Result, DB_NAME() AS DatabaseName FROM @Log ORDER BY Step;

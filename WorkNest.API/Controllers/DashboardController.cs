@@ -168,7 +168,8 @@ namespace WorkNest.API.Controllers
             "/admin", "/admin/dashboard", "/admin/kyc", "/admin/quotations", "/admin/agreements", "/admin/lease-templates", "/admin/invoices",
             "/admin/bookings", "/admin/attendants", "/admin/biometric-users", "/admin/machine-users",
             "/admin/contacts", "/admin/complaints", "/admin/whatsapp", "/admin/network", "/admin/network/clients", "/admin/network/devices",
-            "/admin/network/internet", "/admin/network/wifi"
+            "/admin/network/internet", "/admin/network/wifi",
+            WorkNest.Application.Services.DashboardService.GeneralInquiriesRoute   // Simple Inquiries (INQ_01)
         };
 
         /// <summary>
@@ -227,7 +228,8 @@ namespace WorkNest.API.Controllers
             var isAdmin = User.IsAdminOrSuperAdmin();
             var allowed = isAdmin
                 ? new[] { "/admin/agreements", "/admin/contacts", "/admin/bookings", "/admin/quotations", "/admin/kyc",
-                          "/admin/invoices", "/admin/attendants", "/admin/access-dashboard" }
+                          "/admin/invoices", "/admin/attendants", "/admin/access-dashboard",
+                          WorkNest.Application.Services.DashboardService.GeneralInquiriesRoute }
                 : SalesExecutiveRoutes.ToArray();
             var routes = request?.Routes is { Count: > 0 } r
                 ? r.Where(x => allowed.Contains(x, StringComparer.OrdinalIgnoreCase)).ToList()

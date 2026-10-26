@@ -75,4 +75,34 @@ namespace WorkNest.Application.DTOs.WhatsApp
         public string? Phone { get; set; }
         public string? MapsUrl { get; set; }
     }
+    /// <summary>A conversation waiting for the "sales representative" follow-up (dbo.WN_WhatsApp_FollowUp_GetPending, INQ_01).
+    /// Times are the database's clock (SYSDATETIME, like LastIncomingAt); <see cref="DbNow"/> is "now" on that clock.</summary>
+    public class WhatsAppFollowUpCandidate
+    {
+        public int ConversationId { get; set; }
+        public string PhoneNumber { get; set; } = string.Empty;
+        public string? Name { get; set; }
+        public DateTime PendingSince { get; set; }
+        public DateTime? LastIncomingAt { get; set; }
+        public DateTime? SentAt { get; set; }
+        public DateTime? ClaimedAt { get; set; }
+        public int? InquiryId { get; set; }
+        public string? Text { get; set; }
+        /// <summary>Where the customer is in the bot menu (null = no state saved).</summary>
+        public string? BotState { get; set; }
+        public DateTime DbNow { get; set; }
+    }
+
+    /// <summary>The answer of dbo.WN_WhatsApp_FollowUp_Claim: Claimed = this instance sends the follow-up; the general
+    /// inquiry (InquiryId) already exists. Not claimed: Reason (not_quiet, claimed, sent_in_last_24h, bot_in_use ...).</summary>
+    public class WhatsAppFollowUpClaim
+    {
+        public bool Claimed { get; set; }
+        public string? Reason { get; set; }
+        public int? InquiryId { get; set; }
+        public string? InquiryPublicId { get; set; }
+        public string PhoneNumber { get; set; } = string.Empty;
+        public string? Name { get; set; }
+        public string? Text { get; set; }
+    }
 }

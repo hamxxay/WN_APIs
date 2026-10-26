@@ -248,10 +248,14 @@ namespace WorkNest.Application.Interfaces
         /// scope is ignored (everyone sees every inquiry, as before); an asked-for branch filter throws
         /// <see cref="InvalidOperationException"/> (plain-language message), as the Type filter does before CT_01.
         /// </summary>
+        /// <paramref name="category"/> (INQ_01): "tour" | "general"; null = every inquiry. Every row has InquiryCategory.
+        /// Before INQ_01 (no dbo.WN_Contacts_GetListByCategory) the old list is used for null / "tour" (every inquiry is a
+        /// tour inquiry there); "general" returns no rows.
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
-            WorkNest.Application.Helpers.BranchFilter? branch = null);
-        /// <summary>Newest inquiries (with LocationId / LocationName); <paramref name="branch"/> as in <see cref="GetContactsAsync"/>.</summary>
-        Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top, WorkNest.Application.Helpers.BranchFilter? branch = null);
+            WorkNest.Application.Helpers.BranchFilter? branch = null, string? category = null);
+        /// <summary>Newest inquiries (with LocationId / LocationName); <paramref name="branch"/> / <paramref name="category"/> as in <see cref="GetContactsAsync"/>.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top, WorkNest.Application.Helpers.BranchFilter? branch = null,
+            string? category = null);
         /// <summary><paramref name="locationId"/>: the branch (BR_01); saved without it on a database without BR_01.</summary>
         Task<(int? Id, string? PublicId)> InsertContactAsync(string contactType, int? userId, string name, string email, string? phone, string? message,
             string? inquiryType = null, string? referenceName = null, int? locationId = null);
@@ -277,7 +281,9 @@ namespace WorkNest.Application.Interfaces
         Task<Dictionary<int, IDictionary<string, object?>>> GetLatestContactFeedbackAsync(IEnumerable<int> contactIds);
         /// <summary>Inquiries whose newest feedback is "future prospect" with a follow-up date on or before today.</summary>
         /// <paramref name="locationIds"/>: location-bound staff's locations (their inquiries + those without a branch); null = all.
-        Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today, IReadOnlyCollection<int>? locationIds = null);
+        /// <summary><paramref name="category"/>: only that inquiry category ("tour" / "general", INQ_01); null = all.</summary>
+        Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today, IReadOnlyCollection<int>? locationIds = null,
+            string? category = null);
 
         // --- Dashboard ---
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();

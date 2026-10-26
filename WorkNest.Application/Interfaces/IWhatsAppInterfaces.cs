@@ -33,6 +33,23 @@ namespace WorkNest.Application.Interfaces
         Task<List<WhatsAppConversationDto>> GetBroadcastTargetsAsync(string? tag);
         /// <summary>Conversations with unread customer messages (sidebar badge).</summary>
         Task<List<(int ConversationId, DateTime LastMessageAt)>> GetUnreadConversationsAsync();
+
+        // ---- Simple inquiries: the "sales representative" follow-up (INQ_01; every call is a no-op before INQ_01) ----
+
+        /// <summary>Free text at the main menu that is not an option: starts the pending state (first time) and adds the text.
+        /// Nothing happens when a follow-up was sent in the last 24 hours.</summary>
+        Task SetFollowUpPendingAsync(int conversationId, string text);
+        /// <summary>A valid menu choice / any other bot flow: forgets the pending state.</summary>
+        Task ClearFollowUpPendingAsync(int conversationId);
+        /// <summary>Every conversation with a pending follow-up (empty before INQ_01).</summary>
+        Task<List<WhatsAppFollowUpCandidate>> GetFollowUpCandidatesAsync();
+        /// <summary>Takes one due conversation for this instance (row lock + lease) and creates its general inquiry once.
+        /// Null before INQ_01.</summary>
+        Task<WhatsAppFollowUpClaim?> ClaimFollowUpAsync(int conversationId, int quietSeconds, int leaseSeconds);
+        /// <summary>The follow-up was sent: records it (24-hour cap) and ends the pending state.</summary>
+        Task CompleteFollowUpAsync(int conversationId);
+        /// <summary>The send failed: frees the conversation for the next tick (its inquiry is kept, not created again).</summary>
+        Task ReleaseFollowUpAsync(int conversationId);
     }
 
     /// <summary>Runs the WorkNest WhatsApp bot for one incoming message (menu, Book a Tour, complaints, directions).</summary>

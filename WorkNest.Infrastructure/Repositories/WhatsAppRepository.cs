@@ -238,6 +238,98 @@ namespace WorkNest.Infrastructure.Repositories
             return list;
         }
 
+        // ---- Simple inquiries: follow-up (procedures of Database/Contacts/INQ_01_simple_inquiries). 2812 = procedure
+        // missing (INQ_01 not run): the bot and the service carry on without follow-ups. ----
+
+        private static SqlCommand FollowUpCommand(SqlConnection c, string procedure, int conversationId)
+        {
+            var cmd = new SqlCommand(procedure, c) { CommandType = CommandType.StoredProcedure };
+            cmd.Parameters.Add("@ConversationId", SqlDbType.Int).Value = conversationId;
+            return cmd;
+        }
+
+        private async Task ExecFollowUpAsync(string procedure, int conversationId, Action<SqlCommand>? extra = null)
+        {
+            try
+            {
+                await using var c = await OpenAsync();
+                await using var cmd = FollowUpCommand(c, procedure, conversationId);
+                extra?.Invoke(cmd);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { } // INQ_01 not run yet
+        }
+
+        public Task SetFollowUpPendingAsync(int conversationId, string text) =>
+            ExecFollowUpAsync("dbo.WN_WhatsApp_FollowUp_SetPending", conversationId,
+                cmd => cmd.Parameters.Add("@Text", SqlDbType.NVarChar, 2000).Value = text.Length > 2000 ? text[..2000] : text);
+
+        public Task ClearFollowUpPendingAsync(int conversationId) =>
+            ExecFollowUpAsync("dbo.WN_WhatsApp_FollowUp_Clear", conversationId);
+
+        public Task CompleteFollowUpAsync(int conversationId) =>
+            ExecFollowUpAsync("dbo.WN_WhatsApp_FollowUp_Complete", conversationId);
+
+        public Task ReleaseFollowUpAsync(int conversationId) =>
+            ExecFollowUpAsync("dbo.WN_WhatsApp_FollowUp_Release", conversationId);
+
+        public async Task<List<WhatsAppFollowUpCandidate>> GetFollowUpCandidatesAsync()
+        {
+            var list = new List<WhatsAppFollowUpCandidate>();
+            try
+            {
+                await using var c = await OpenAsync();
+                await using var cmd = new SqlCommand("dbo.WN_WhatsApp_FollowUp_GetPending", c) { CommandType = CommandType.StoredProcedure };
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    string? S(string k) => r[k] is DBNull ? null : r[k].ToString();
+                    DateTime? D(string k) => r[k] is DateTime d ? d : null;
+                    list.Add(new WhatsAppFollowUpCandidate
+                    {
+                        ConversationId = Convert.ToInt32(r["ConversationId"]),
+                        PhoneNumber = S("PhoneNumber") ?? "",
+                        Name = S("Name"),
+                        PendingSince = D("FollowUpPendingSince") ?? DateTime.MinValue,
+                        LastIncomingAt = D("LastIncomingAt"),
+                        SentAt = D("FollowUpSentAt"),
+                        ClaimedAt = D("FollowUpClaimedAt"),
+                        InquiryId = r["FollowUpInquiryId"] is DBNull ? null : Convert.ToInt32(r["FollowUpInquiryId"]),
+                        Text = S("FollowUpText"),
+                        BotState = S("BotState"),
+                        DbNow = D("DbNow") ?? DateTime.Now
+                    });
+                }
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { } // INQ_01 not run yet
+            return list;
+        }
+
+        public async Task<WhatsAppFollowUpClaim?> ClaimFollowUpAsync(int conversationId, int quietSeconds, int leaseSeconds)
+        {
+            try
+            {
+                await using var c = await OpenAsync();
+                await using var cmd = FollowUpCommand(c, "dbo.WN_WhatsApp_FollowUp_Claim", conversationId);
+                cmd.Parameters.Add("@QuietSeconds", SqlDbType.Int).Value = quietSeconds;
+                cmd.Parameters.Add("@LeaseSeconds", SqlDbType.Int).Value = leaseSeconds;
+                await using var r = await cmd.ExecuteReaderAsync();
+                if (!await r.ReadAsync()) return null;
+                string? S(string k) => r[k] is DBNull ? null : r[k].ToString();
+                return new WhatsAppFollowUpClaim
+                {
+                    Claimed = r["Claimed"] is bool b && b,
+                    Reason = S("Reason"),
+                    InquiryId = r["InquiryId"] is DBNull ? null : Convert.ToInt32(r["InquiryId"]),
+                    InquiryPublicId = S("InquiryPublicId"),
+                    PhoneNumber = S("PhoneNumber") ?? "",
+                    Name = S("Name"),
+                    Text = S("FollowUpText")
+                };
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { return null; } // INQ_01 not run yet
+        }
+
         private static WhatsAppConversationDto MapConversation(SqlDataReader r)
         {
             string? S(string k) => r[k] is DBNull ? null : r[k].ToString();

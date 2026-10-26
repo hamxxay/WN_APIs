@@ -54,6 +54,7 @@ namespace WorkNest.Application.Services
         public const string HikSync = "HikSync";
         public const string AgreementReminders = "AgreementReminders";
         public const string GwnPolling = "GwnPolling";
+        public const string WhatsAppFollowUp = "WhatsAppFollowUp";
 
         /// <summary>The services in the order the CMS lists them.</summary>
         public static readonly IReadOnlyList<BackgroundServiceInfo> All = new[]
@@ -99,6 +100,10 @@ namespace WorkNest.Application.Services
             new BackgroundServiceInfo(GwnPolling, "Grandstream Polling",
                 "Keeps the Grandstream (GWN, F-7) network figures fresh: devices, clients and Wi-Fi every minute, statistics every 5 minutes (needs the Gwn settings).",
                 "Gwn:Enabled", true, c => NotFalse(c["Gwn:Enabled"]) && !string.IsNullOrWhiteSpace(c["Gwn:AppId"])),
+            // WhatsAppFollowUpService; seed row in Database/Contacts/INQ_01_simple_inquiries (on).
+            new BackgroundServiceInfo(WhatsAppFollowUp, "WhatsApp Follow-Up",
+                "Every 30 seconds: a WhatsApp customer who typed a message instead of choosing a bot menu option and then went quiet for 2 minutes gets \"Our sales representative will contact you shortly.\" and appears under Tour Inquiries > Simple Inquiries (at most once a day per customer).",
+                "WhatsApp:FollowUpEnabled", true, c => NotFalse(c["WhatsApp:FollowUpEnabled"])),
         };
 
         /// <summary>The service with this name (case ignored); null when there is none.</summary>

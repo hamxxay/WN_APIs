@@ -12,6 +12,29 @@ namespace WorkNest.Infrastructure.Repositories
     internal static class BranchSql
     {
         private static bool? _contactsHaveLocation;
+        private static bool? _contactsHaveCategory;
+
+        /// <summary>dbo.WN_Contacts.InquiryCategory exists (INQ_01_simple_inquiries).</summary>
+        public static async Task<bool> ContactsHaveCategoryAsync(SqlConnection open)
+        {
+            if (_contactsHaveCategory == true) return true;  // once present it never goes away; a missing column is re-checked
+            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH('dbo.WN_Contacts', 'InquiryCategory') IS NULL THEN 0 ELSE 1 END;", open);
+            _contactsHaveCategory = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+            return _contactsHaveCategory.Value;
+        }
+
+        /// <summary>
+        /// " AND alias.InquiryCategory = N'tour'" (or general) once INQ_01 has added the column; "" without a category or
+        /// before INQ_01 (every inquiry is a tour inquiry there, so a "general" filter then matches nothing).
+        /// The category is one of the two constants, never user text.
+        /// </summary>
+        public static string ContactsCategory(bool hasColumn, string alias, string? category)
+        {
+            if (category is null) return "";
+            if (category != "tour" && category != "general") throw new ArgumentException("Unknown inquiry category.", nameof(category));
+            if (!hasColumn) return category == "general" ? " AND 1 = 0" : "";
+            return $" AND {alias}.InquiryCategory = N'{category}'";
+        }
 
         public static async Task<bool> ContactsHaveLocationAsync(SqlConnection open)
         {

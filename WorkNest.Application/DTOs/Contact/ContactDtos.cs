@@ -31,6 +31,27 @@ namespace WorkNest.Application.DTOs.Contact
         public string? ReferenceName { get; set; }
     }
 
+    /// <summary>
+    /// dbo.WN_Contacts.InquiryCategory (INQ_01): "tour" = Tour Inquiries (every inquiry before INQ_01), "general" = Simple
+    /// Inquiries (WhatsApp customers who typed free text instead of using the bot menu).
+    /// </summary>
+    public static class InquiryCategories
+    {
+        public const string Tour = "tour", General = "general";
+
+        /// <summary>"tour" / "general" for any common spelling ("Tour", "simple", "General"); null when empty or unknown.</summary>
+        public static string? Normalize(string? value)
+        {
+            var v = new string((value ?? "").Where(char.IsLetter).ToArray()).ToLowerInvariant();
+            return v switch
+            {
+                "tour" or "tours" or "tourinquiry" or "tourinquiries" => Tour,
+                "general" or "simple" or "simpleinquiry" or "simpleinquiries" => General,
+                _ => null
+            };
+        }
+    }
+
     /// <summary>Where a tour inquiry came from (dbo.WN_Contacts.InquiryType).</summary>
     public static class InquiryTypes
     {

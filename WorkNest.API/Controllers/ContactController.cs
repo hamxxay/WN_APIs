@@ -31,6 +31,9 @@ namespace WorkNest.API.Controllers
         /// Tour inquiries; every row has locationId / locationName (null = no branch). Location-bound staff (admin, sales
         /// executive) see their branches plus the inquiries without a branch; others see all. locationId: only that branch
         /// (403 when it is not one of the user's), 0 = only the inquiries without a branch.
+        /// category: tour (default; also when omitted or not recognised) | general (Simple Inquiries: WhatsApp customers who
+        /// typed free text; "simple" works too).
+        /// Every row has inquiryCategory.
         /// </summary>
         [HttpGet("api/contact")]
         [Authorize(Roles = StaffRoles)]
@@ -39,16 +42,17 @@ namespace WorkNest.API.Controllers
             [FromQuery] int limit = 10,
             [FromQuery] string? search = null,
             [FromQuery] string? type = null,
-            [FromQuery] int? locationId = null)
+            [FromQuery] int? locationId = null,
+            [FromQuery] string? category = null)
         {
             var branch = User.GetBranchScope().ForList(locationId);
             if (branch is null) return StatusCode(403, ApiResponse.Fail(BranchMessages.ListForbidden));
             try
             {
-                var (items, total) = await _contacts.GetContactsAsync(page, limit, search, type, branch);
+                var (items, total) = await _contacts.GetContactsAsync(page, limit, search, type, branch, category);
                 return Ok(new PaginatedResponse<object> { Data = items, Total = total });
             }
-            catch (InvalidOperationException ex) { return BadRequest(ApiResponse.Fail(ex.Message)); } // Type / branch filter before CT_01 / BR_01
+            catch (InvalidOperationException ex) { return BadRequest(ApiResponse.Fail(ex.Message)); } // Type / branch / general before CT_01 / BR_01 / INQ_01
         }
 
         [EnableRateLimiting("public-forms")]

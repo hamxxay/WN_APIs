@@ -6,9 +6,10 @@ namespace WorkNest.Application.Interfaces
 {
     public interface IContactService
     {
-        /// <summary>Tour inquiries; <paramref name="branch"/> = the branch filter (null = every inquiry). Rows have locationId / locationName.</summary>
+        /// <summary>Tour inquiries; <paramref name="branch"/> = the branch filter (null = every inquiry). Rows have locationId / locationName
+        /// and inquiryCategory. <paramref name="category"/>: "tour" (also when null / empty) or "general" (Simple Inquiries, INQ_01).</summary>
         Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
-            BranchFilter? branch = null);
+            BranchFilter? branch = null, string? category = null);
         Task<IEnumerable<object>> GetRecentContactsAsync(int top, BranchFilter? branch = null);
         /// <summary>
         /// The branch of a new inquiry (<paramref name="change"/> false) or of an existing one being changed, by the

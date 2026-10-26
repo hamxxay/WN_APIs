@@ -22,9 +22,11 @@ namespace WorkNest.Application.Services
         }
 
         public async Task<(IEnumerable<object> Items, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
-            BranchFilter? branch = null)
+            BranchFilter? branch = null, string? category = null)
         {
-            var (rows, total) = await _db.GetContactsAsync(page, limit, search, InquiryTypes.Normalize(inquiryType), branch);
+            // Omitted = tour: older app builds and every existing caller keep seeing only tour inquiries.
+            var cat = InquiryCategories.Normalize(category) ?? InquiryCategories.Tour;
+            var (rows, total) = await _db.GetContactsAsync(page, limit, search, InquiryTypes.Normalize(inquiryType), branch, cat);
             var list = rows.ToList();
             // Source / Key / CanChangeBranch / IsNew: the old website bookings (WN_BookTour) and WN_Contacts number their
             // rows separately, so an Id can be on two rows; the key and the writes tell them apart.
@@ -154,7 +156,8 @@ namespace WorkNest.Application.Services
 
         public async Task<IEnumerable<object>> GetRecentContactsAsync(int top, BranchFilter? branch = null)
         {
-            var rows = (await _db.GetRecentContactsAsync(top, branch) ?? Enumerable.Empty<IDictionary<string, object?>>()).ToList();
+            // "Newest tour inquiries": Simple Inquiries (INQ_01) are left out.
+            var rows = (await _db.GetRecentContactsAsync(top, branch, InquiryCategories.Tour) ?? Enumerable.Empty<IDictionary<string, object?>>()).ToList();
             foreach (var row in rows) InquiryRows.Annotate(row);   // Source / Key / IsNew, as the list
             return rows.Cast<object>();
         }

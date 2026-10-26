@@ -103,6 +103,9 @@ namespace WorkNest.Application.Services
             public string? ComplaintCategory { get; set; }
         }
 
+        /// <summary>See <see cref="Turn.FollowUp"/>.</summary>
+        internal enum FollowUpAction { Keep, Clear, Start }
+
         private sealed class Turn
         {
             public string State = "main_menu";
@@ -111,6 +114,14 @@ namespace WorkNest.Application.Services
             public readonly List<(Branch Branch, WhatsAppBranchOptions Options)> Pins = new();
             /// <summary>First message from this customer, or the first after a quiet spell: greet, never "invalid option".</summary>
             public bool NewSession;
+            /// <summary>
+            /// Simple inquiries (INQ_01): what this message does to the "sales representative" follow-up.
+            /// Clear (default) = a valid choice / any bot flow; Start = free text at the main menu that is not an option
+            /// ("Please select a valid option"), <see cref="FollowUpText"/> is collected; Keep = greetings, "menu" / "0",
+            /// the welcome after a quiet spell, non-text messages and our own failures leave it as it is.
+            /// </summary>
+            public FollowUpAction FollowUp = FollowUpAction.Clear;
+            public string? FollowUpText;
             public void Reset(string state = "main_menu") { State = state; Data = new BotData(); }
         }
 
@@ -146,7 +157,10 @@ namespace WorkNest.Application.Services
 
             var branches = await GetBranchesAsync();
             if (messageType != "text")
+            {
+                turn.FollowUp = FollowUpAction.Keep;
                 turn.Texts.Add("Currently, I can process text messages only.\n\nPlease send a text message.\n\n" + MainMenu(branches));
+            }
             else
             {
                 var stateBefore = turn.State;
@@ -161,6 +175,7 @@ namespace WorkNest.Application.Services
                     // (their answers are kept) and get the sales numbers.
                     _logger.LogError(ex, "WhatsApp bot: the reply to {Phone} at step {State} failed", phone, stateBefore);
                     turn.State = stateBefore;
+                    turn.FollowUp = FollowUpAction.Keep;
                     turn.Texts.Clear();
                     turn.Pins.Clear();
                     turn.Texts.Add(SomethingWentWrong(branches));
@@ -168,6 +183,7 @@ namespace WorkNest.Application.Services
             }
 
             await _repo.SaveBotStateAsync(phone, turn.State, JsonSerializer.Serialize(turn.Data, Json));
+            await SaveFollowUpAsync(conversationId, phone, turn);
 
             // Map pins first, then the text (as the Python bot did).
             foreach (var (branch, opts) in turn.Pins)
@@ -194,6 +210,7 @@ namespace WorkNest.Application.Services
             // Anywhere: back to the menu.
             if (lower is "menu" or "home" or "start" or "0")
             {
+                t.FollowUp = FollowUpAction.Keep;   // only shows the menu: neither starts nor ends a pending follow-up
                 t.Reset();
                 t.Texts.Add(MainMenu(branches));
                 return;
@@ -202,6 +219,7 @@ namespace WorkNest.Application.Services
             // "Hi" while the bot waits for a menu number starts over, instead of "Please select a valid category".
             if (!FreeTextStates.Contains(t.State) && IsGreeting(lower))
             {
+                t.FollowUp = FollowUpAction.Keep;
                 t.Reset();
                 t.Texts.Add("Hello!\n\n" + MainMenu(branches));
                 return;
@@ -371,6 +389,7 @@ namespace WorkNest.Application.Services
             t.Reset();
             if (IsGreeting(lower))
             {
+                t.FollowUp = FollowUpAction.Keep;
                 t.Texts.Add("Hello!\n\n" + MainMenu(branches));
             }
             else if (message == "1" || lower is "book" or "booking" or "book a tour" or "tour")
@@ -406,11 +425,35 @@ namespace WorkNest.Application.Services
             else if (t.NewSession)
             {
                 // First message (or first after a while) that isn't a menu choice: just welcome them.
+                t.FollowUp = FollowUpAction.Keep;
                 t.Texts.Add(MainMenu(branches));
             }
             else
             {
+                // Free text instead of a menu number: a sales representative follows up after a quiet spell
+                // (WhatsAppFollowUpService) and it becomes a Simple Inquiry.
+                t.FollowUp = FollowUpAction.Start;
+                t.FollowUpText = message;
                 t.Texts.Add("Please select a valid option.\n\n" + MainMenu(branches));
+            }
+        }
+
+        /// <summary>
+        /// Records the follow-up state in the database (dbo.WN_WhatsApp_Conversations, INQ_01), so it survives restarts and
+        /// is shared by every API instance. A failure here never stops the reply (it is logged).
+        /// </summary>
+        private async Task SaveFollowUpAsync(int conversationId, string phone, Turn turn)
+        {
+            try
+            {
+                if (turn.FollowUp == FollowUpAction.Start && !string.IsNullOrWhiteSpace(turn.FollowUpText))
+                    await _repo.SetFollowUpPendingAsync(conversationId, turn.FollowUpText!.Trim());
+                else if (turn.FollowUp == FollowUpAction.Clear)
+                    await _repo.ClearFollowUpPendingAsync(conversationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "WhatsApp bot: saving the follow-up state of {Phone} failed", phone);
             }
         }
 

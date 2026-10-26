@@ -63,8 +63,13 @@ namespace WorkNest.Application.Helpers
             row["Source"] = source;
             row["Key"] = KeyOf(source, IdOf(row));
             // Branch and Type are columns of WN_Contacts only: the old website bookings can't be changed until QA_05 copies them.
+            // InquiryCategory (INQ_01): "tour" | "general"; rows read before INQ_01 are all tour inquiries.
+            var category = row.TryGetValue("InquiryCategory", out var c) && c is not null and not DBNull
+                           && string.Equals(Convert.ToString(c)?.Trim(), "general", StringComparison.OrdinalIgnoreCase) ? "general" : "tour";
+            row["InquiryCategory"] = category;
             row["CanChangeBranch"] = source == Contact;
-            row["CanChangeType"] = source == Contact;
+            // A Simple Inquiry has no inquiry type to change (the CMS / app hide the pencil).
+            row["CanChangeType"] = source == Contact && category == "tour";
             row["IsNew"] = IsNewStatus(row.TryGetValue("StatusId", out var st) ? st : null);
         }
 

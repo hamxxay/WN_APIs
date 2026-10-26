@@ -58,13 +58,17 @@ namespace WorkNest.Infrastructure.Repositories
 
         private const string CustomerName = @"COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, NULLIF(u.Name, ''), NULLIF(u.UserName, ''), 'Customer')";
 
-        /// <summary>Tour inquiries in scope (BR_01): of these locations + those without a branch; "" before BR_01 or for all locations.</summary>
+        /// <summary>
+        /// Tour inquiries in scope (BR_01): of these locations + those without a branch, and (INQ_01) only tour inquiries,
+        /// never the Simple Inquiries (InquiryCategory 'general'). "" before BR_01 / INQ_01 for all locations. A non-empty
+        /// filter also makes the feedback counts check that their inquiry is one of these (EXISTS).
+        /// </summary>
         private async Task<string> ContactsInScopeAsync(string alias, IReadOnlyCollection<int>? locationIds)
         {
-            if (locationIds is null) return "";
             await using var c = new SqlConnection(_connectionString);
             await c.OpenAsync();
-            return BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), alias, locationIds);
+            var branch = locationIds is null ? "" : BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), alias, locationIds);
+            return branch + BranchSql.ContactsCategory(await BranchSql.ContactsHaveCategoryAsync(c), alias, "tour");
         }
 
         /// <param name="periodEnd">A custom range (DASH_01): the day after its last day; null = to date (month / quarter / year).</param>

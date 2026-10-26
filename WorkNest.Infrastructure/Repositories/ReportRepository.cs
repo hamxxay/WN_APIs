@@ -124,13 +124,21 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@Months", SqlDbType.Int).Value = months;
                 });
 
-        public Task<List<List<IDictionary<string, object?>>>> GetWeeklyExtrasAsync(DateTime weekStart, DateTime now) =>
-            QueryAsync($@"
+        public async Task<List<List<IDictionary<string, object?>>>> GetWeeklyExtrasAsync(DateTime weekStart, DateTime now)
+        {
+            // INQ_01: tour inquiries only (the Simple Inquiries, InquiryCategory 'general', are not counted).
+            string tourOnly;
+            await using (var c = new SqlConnection(_connectionString))
+            {
+                await c.OpenAsync();
+                tourOnly = BranchSql.ContactsCategory(await BranchSql.ContactsHaveCategoryAsync(c), "ct", "tour");
+            }
+            return await QueryAsync($@"
                 DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) time from the app clock
                 DECLARE @In30 DATETIME2(0) = DATEADD(DAY, 30, @Now), @In60 DATETIME2(0) = DATEADD(DAY, 60, @Now);
 
                 -- [0] tour inquiries received in the last 7 days (not tied to a location)
-                SELECT COUNT(*) AS NewInquiries FROM dbo.WN_Contacts WITH (NOLOCK) WHERE CreatedOn >= @WeekStart;
+                SELECT COUNT(*) AS NewInquiries FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.CreatedOn >= @WeekStart{tourOnly};
 
                 -- [1] running leases expiring in the next 30 / 60 days, per location
                 SELECT s.LocationId,
@@ -157,6 +165,7 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@WeekStart", SqlDbType.DateTime2).Value = weekStart;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = now;
                 });
+        }
 
         public async Task<List<string>> GetSuperAdminEmailsAsync()
         {

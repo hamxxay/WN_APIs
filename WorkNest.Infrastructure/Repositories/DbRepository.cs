@@ -1,4 +1,5 @@
 using WorkNest.Application.DTOs.Quotation;
+using WorkNest.Application.DTOs.Contact;
 
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -2795,24 +2796,52 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         // --- Contact ---
 
         public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetContactsAsync(int page, int limit, string? search, string? inquiryType = null,
-            BranchFilter? branch = null)
+            BranchFilter? branch = null, string? category = null)
         {
             var scoped = branch is { IsNone: false } ? branch : null;
             List<IDictionary<string, object?>> rows;
             try
             {
-                rows = await ReadContactListAsync(page, limit, search, inquiryType, scoped);
+                // INQ_01: the category-aware list (the old dbo.WN_Contacts_GetList is not changed).
+                rows = await ReadContactListByCategoryAsync(page, limit, search, inquiryType, scoped, category);
             }
-            catch (SqlException ex) when (ex.Number == 8144 && scoped is not null)
+            catch (SqlException ex) when (ex.Number == 2812)
             {
-                // "Too many arguments": the database does not have BR_01 yet (WN_Contacts_GetList without @LocationIds).
-                if (scoped.Requested)
-                    throw new InvalidOperationException("Filtering by branch needs the database update BR_01_branch_routing.");
-                rows = await ReadContactListAsync(page, limit, search, inquiryType, null);   // everyone sees every inquiry, as before
+                // No INQ_01 yet: every inquiry is a tour inquiry, so the old list answers "all" and "tour" alike, and there
+                // are no Simple Inquiries (an empty page, so the CMS / app tab simply shows none).
+                if (category == InquiryCategories.General)
+                    return (new List<IDictionary<string, object?>>(), 0);
+                try
+                {
+                    rows = await ReadContactListAsync(page, limit, search, inquiryType, scoped);
+                }
+                catch (SqlException ex2) when (ex2.Number == 8144 && scoped is not null)
+                {
+                    // "Too many arguments": the database does not have BR_01 yet (WN_Contacts_GetList without @LocationIds).
+                    if (scoped.Requested)
+                        throw new InvalidOperationException("Filtering by branch needs the database update BR_01_branch_routing.");
+                    rows = await ReadContactListAsync(page, limit, search, inquiryType, null);   // everyone sees every inquiry, as before
+                }
             }
             AddLocationColumns(rows);
             int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
             return (rows, total);
+        }
+
+        /// <summary>dbo.WN_Contacts_GetListByCategory (INQ_01): the list + @Category (null = all) + column InquiryCategory.</summary>
+        private async Task<List<IDictionary<string, object?>>> ReadContactListByCategoryAsync(int page, int limit, string? search, string? inquiryType,
+            BranchFilter? branch, string? category)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Contacts_GetListByCategory", c);
+            cmd.Parameters.AddWithValue("@Page", page);
+            cmd.Parameters.AddWithValue("@Limit", limit);
+            cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+            cmd.Parameters.Add("@InquiryType", SqlDbType.NVarChar, 20).Value = string.IsNullOrWhiteSpace(inquiryType) ? DBNull.Value : inquiryType;
+            AddBranchParameters(cmd, branch);
+            cmd.Parameters.Add("@Category", SqlDbType.NVarChar, 20).Value = (object?)category ?? DBNull.Value;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
         }
 
         private async Task<List<IDictionary<string, object?>>> ReadContactListAsync(int page, int limit, string? search, string? inquiryType, BranchFilter? branch)
@@ -2844,30 +2873,52 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.Add("@IncludeNoLocation", SqlDbType.Bit).Value = branch.IncludeUnassigned;
         }
 
-        /// <summary>Rows read before BR_01 have no branch columns: add them empty, so every row has locationId / locationName.</summary>
+        /// <summary>Rows read before BR_01 have no branch columns: add them empty, so every row has locationId / locationName.
+        /// Rows read before INQ_01 have no InquiryCategory: every inquiry there is a tour inquiry.</summary>
         private static void AddLocationColumns(IEnumerable<IDictionary<string, object?>> rows)
         {
             foreach (var row in rows)
             {
                 if (!row.ContainsKey("LocationId")) row["LocationId"] = null;
                 if (!row.ContainsKey("LocationName")) row["LocationName"] = null;
+                if (!row.TryGetValue("InquiryCategory", out var cat) || cat is null or DBNull) row["InquiryCategory"] = InquiryCategories.Tour;
             }
         }
 
-        public async Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top, BranchFilter? branch = null)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetRecentContactsAsync(int top, BranchFilter? branch = null, string? category = null)
         {
             var scoped = branch is { IsNone: false } ? branch : null;
             List<IDictionary<string, object?>> rows;
             try
             {
-                rows = await ReadRecentContactsAsync(top, scoped);
+                rows = await ReadRecentContactsByCategoryAsync(top, scoped, category);   // INQ_01
             }
-            catch (SqlException ex) when (ex.Number == 8144 && scoped is not null)
+            catch (SqlException ex) when (ex.Number == 2812)
             {
-                rows = await ReadRecentContactsAsync(top, null);   // no BR_01 yet: every inquiry, as before
+                // No INQ_01 yet: every inquiry is a tour inquiry; nothing is "general".
+                if (category == InquiryCategories.General) return new List<IDictionary<string, object?>>();
+                try
+                {
+                    rows = await ReadRecentContactsAsync(top, scoped);
+                }
+                catch (SqlException ex2) when (ex2.Number == 8144 && scoped is not null)
+                {
+                    rows = await ReadRecentContactsAsync(top, null);   // no BR_01 yet: every inquiry, as before
+                }
             }
             AddLocationColumns(rows);
             return rows;
+        }
+
+        private async Task<List<IDictionary<string, object?>>> ReadRecentContactsByCategoryAsync(int top, BranchFilter? branch, string? category)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Contacts_GetRecentByCategory", c);
+            cmd.Parameters.AddWithValue("@Top", top);
+            AddBranchParameters(cmd, branch);
+            cmd.Parameters.Add("@Category", SqlDbType.NVarChar, 20).Value = (object?)category ?? DBNull.Value;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
         }
 
         private async Task<List<IDictionary<string, object?>>> ReadRecentContactsAsync(int top, BranchFilter? branch)
@@ -3029,14 +3080,16 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return result;
         }
 
-        public async Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today, IReadOnlyCollection<int>? locationIds = null)
+        public async Task<List<(int ContactId, DateTime FollowUpOn)>> GetDueContactFollowUpsAsync(DateTime today, IReadOnlyCollection<int>? locationIds = null,
+            string? category = null)
         {
             var list = new List<(int, DateTime)>();
             try
             {
                 await using var c = await Open();
                 // Location-bound staff: their inquiries + those without a branch (once BR_01 has added the column).
-                var branch = BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), "ct", locationIds);
+                var branch = BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), "ct", locationIds)
+                             + BranchSql.ContactsCategory(await BranchSql.ContactsHaveCategoryAsync(c), "ct", category);
                 await using var cmd = new SqlCommand($@"
                     SELECT f.ContactId, f.FollowUpOn
                     FROM (SELECT ContactId, Outcome, FollowUpOn, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) AS rn
@@ -3388,6 +3441,9 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             var machinesLoc = DeviceLocationSql.Filter(await DeviceLocationSql.HasColumnAsync(c), "hd", locationIds);
             // Tour inquiries of the caller's locations and those without a branch (once BR_01 has added WN_Contacts.LocationId).
             var contactsLoc = BranchSql.Contacts(await BranchSql.ContactsHaveLocationAsync(c), "ct", branchLocationIds);
+            // INQ_01: the Tour Inquiries badge counts tour inquiries only; new Simple Inquiries have their own badge.
+            var hasCategory = await BranchSql.ContactsHaveCategoryAsync(c);
+            var tourOnly = BranchSql.ContactsCategory(hasCategory, "ct", InquiryCategories.Tour);
             var sql = $@"
                 DECLARE @Items TABLE (K VARCHAR(20) NOT NULL, ItemKey NVARCHAR(100) NOT NULL);
 
@@ -3425,8 +3481,12 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 -- contact + book-tour messages still New (WN_Contacts_Insert writes StatusId 1), plus the old website bookings
                 -- still only in WN_BookTour (no branch; status 0 / 1 / empty = New, as the list shows them): the same
                 -- inquiries as the Tour Inquiries New filter and the dashboard figure. Their keys start with bt.
-                SELECT 'Contacts', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{contactsLoc}
-                UNION ALL
+                SELECT 'Contacts', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK) WHERE ct.StatusId = 1{contactsLoc}{tourOnly}
+                UNION ALL{(hasCategory ? $@"
+                -- Simple Inquiries (INQ_01): WhatsApp customers who typed free text, still New.
+                SELECT 'ContactsGeneral', CAST(ct.Id AS NVARCHAR(20)) FROM dbo.WN_Contacts ct WITH (NOLOCK)
+                 WHERE ct.StatusId = 1{contactsLoc}{BranchSql.ContactsCategory(true, "ct", InquiryCategories.General)}
+                UNION ALL" : "")}
                 SELECT 'Contacts', CONCAT('bt', bt.Id) FROM dbo.WN_BookTour bt WITH (NOLOCK) WHERE {BranchSql.OldWebsiteNewWhere}
                 UNION ALL
                 -- bookings waiting for confirmation (same rule as the dashboard's PendingConfirmations)
