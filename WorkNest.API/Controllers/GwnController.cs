@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
 using WorkNest.Application.DTOs.Gwn;
 using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
@@ -21,7 +22,8 @@ namespace WorkNest.API.Controllers
     /// GWN errors: 502 with a plain message.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive,network_engineer,NetworkEngineer")]
+    [NetworkEngineerAllowed]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public class GwnController : ControllerBase
     {
@@ -148,7 +150,7 @@ namespace WorkNest.API.Controllers
 
         /// <summary>Renames a client: body { mac, name }; an empty name removes the alias. Admin / super admin.</summary>
         [HttpPost("api/gwn/alias")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> SetAlias([FromBody] JsonElement body) => Run(async () =>
         {
             if (_gwn.UnavailableMessage is { } off) return Unavailable(off);
@@ -162,7 +164,7 @@ namespace WorkNest.API.Controllers
         /// written to dbo.WN_GWN_ActionLog.
         /// </summary>
         [HttpPost("api/gwn/client/block")]
-        [Authorize(Roles = "super_admin,SuperAdmin")]
+        [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> BlockClient([FromBody] JsonElement body) =>
             WithNetwork(LongField(body, "net"), IntField(body, "locationId"), async n =>
             {
@@ -171,11 +173,11 @@ namespace WorkNest.API.Controllers
                 if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("block", out var b) || b.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                     return BadRequest(ApiResponse.Fail("Say whether the client should be blocked (true or false)."));
                 return Ok(ApiResponse.Ok(await _gwn.BlockClientAsync(n.Id, mac!, b.GetBoolean(), Email(), UserId())));
-            }, superAdminOnly: true);
+            });
 
         /// <summary>Reboots a GWN device of the network: body { net, mac }. Super admin only; logged in dbo.WN_GWN_ActionLog.</summary>
         [HttpPost("api/gwn/device/reboot")]
-        [Authorize(Roles = "super_admin,SuperAdmin")]
+        [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> RebootDevice([FromBody] JsonElement body) =>
             WithNetwork(LongField(body, "net"), IntField(body, "locationId"), async n =>
             {
@@ -183,14 +185,30 @@ namespace WorkNest.API.Controllers
                 if (!IsMac(mac)) return BadRequest(ApiResponse.Fail(InvalidMacMessage));
                 var result = await _gwn.RebootDeviceAsync(n.Id, mac!, Email(), UserId());
                 return result == null ? NotFound(ApiResponse.Fail("Device not found in this network.")) : Ok(ApiResponse.Ok(result));
-            }, superAdminOnly: true);
+            });
 
-        /// <summary>Latest block / unblock / reboot actions (net = one network; top 1–500, default 50). Super admin only.</summary>
+        /// <summary>Latest block / unblock / reboot actions (net = one network; top 1–500, default 50). Super admin and network engineers.</summary>
         [HttpGet("api/gwn/actions")]
-        [Authorize(Roles = "super_admin,SuperAdmin")]
+        [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> GetActions([FromQuery] long? net = null, [FromQuery] int? top = null) => Run(async () =>
         {
-            if (!User.IsSuperAdmin()) return Forbidden("Only a super admin can see the Grandstream action log.");
+            var mine = MyLocations();
+            if (mine != null)
+            {
+                var visible = await VisibleAsync();
+                if (net is > 0)
+                {
+                    if (!visible.Any(n => n.Id == net)) return Forbidden(OtherLocationMessage);
+                }
+                else
+                {
+                    if (visible.Count == 0) return Forbidden(NoNetworkMessage);
+                }
+            }
+            else if (!User.IsSuperAdmin())
+            {
+                return Forbidden("Only a super admin can see the Grandstream action log.");
+            }
             return Ok(ApiResponse.Ok(await _gwn.GetActionsAsync(net is > 0 ? net : null, top is > 0 ? Math.Min(top.Value, 500) : 50)));
         });
 

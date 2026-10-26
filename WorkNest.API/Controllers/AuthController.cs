@@ -208,6 +208,7 @@ namespace WorkNest.API.Controllers
         [CeoAllowed] // the CEO's own profile
         [SalesManagerAllowed] // and the Sales Manager's
         [AccessOfficerAllowed] // and the Access Officer's
+        [NetworkEngineerAllowed] // and the Network Engineer's
         public async Task<IActionResult> Me()
         {
             // Only the signed-in user's own profile (it used to accept any email in an x-user-email header, without a login).
@@ -227,6 +228,7 @@ namespace WorkNest.API.Controllers
         [CeoAllowed] // own name / phone only (the app's and CMS's profile screen)
         [SalesManagerAllowed]
         [AccessOfficerAllowed]
+        [NetworkEngineerAllowed]
         public async Task<IActionResult> UpdateMe([FromBody] UpdateMyProfileRequest request)
         {
             // Only the signed-in user's own profile, identified from the JWT.

@@ -40,6 +40,7 @@ namespace WorkNest.API.Controllers
         [CeoAllowed]
         [SalesManagerAllowed]
         [AccessOfficerAllowed]
+        [NetworkEngineerAllowed]
         public async Task<IActionResult> DeleteCheck() =>
             Answer(await _deletion.CheckAsync(User.GetEmail(), UserIdClaim(), HttpContext.RequestAborted));
 
@@ -52,6 +53,7 @@ namespace WorkNest.API.Controllers
         [CeoAllowed]
         [SalesManagerAllowed]
         [AccessOfficerAllowed]
+        [NetworkEngineerAllowed]
         public async Task<IActionResult> Delete([FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] AccountDeleteRequest? request)
         {
             var email = User.GetEmail();

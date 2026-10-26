@@ -140,6 +140,17 @@ namespace WorkNest.API.Extensions
         }
 
         /// <summary>
+        /// The Network Engineer: full access to network pages, limited to the locations a Super Admin assigned
+        /// (location_id + location_ids), and only the endpoints marked [NetworkEngineerAllowed]
+        /// (NetworkEngineerAccessFilter answers 403 everywhere else). Not staff.
+        /// </summary>
+        public static bool IsNetworkEngineer(this ClaimsPrincipal user)
+        {
+            if (user?.Identity?.IsAuthenticated != true) return false;
+            return user.IsInRole(Roles.NetworkEngineer) || Roles.IsNetworkEngineer(user.GetRole());
+        }
+
+        /// <summary>
         /// Staff = admin, super admin, sales executive, receptionist (same role names as the [Authorize] attributes).
         /// Customers (role "general") are not staff.
         /// </summary>

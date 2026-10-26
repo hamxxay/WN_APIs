@@ -14,7 +14,8 @@ namespace WorkNest.API.Controllers
     /// (e.g. /api/summary → api/unifi/summary). Console errors return 502 { error }.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive,network_engineer,NetworkEngineer")]
+    [NetworkEngineerAllowed]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [TypeFilter(typeof(UnifiLocationScopeFilter))] // admins / sales executives of other locations get 403
     public class UnifiController : ControllerBase
@@ -97,7 +98,7 @@ namespace WorkNest.API.Controllers
         /// (api/ceo/network/speedtest).
         /// </summary>
         [HttpPost("api/unifi/speedtest")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // uses the line's full bandwidth for ~30s
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,network_engineer,NetworkEngineer")] // uses the line's full bandwidth for ~30s
         public Task<IActionResult> StartSpeedtest([FromQuery] string? wan = null) => Run(() => _unifi.StartSpeedtestAsync(wan));
 
         /// <summary>
@@ -123,7 +124,7 @@ namespace WorkNest.API.Controllers
         /// Renames a client: body { mac, name }; an empty name restores the UniFi name. Admin / super admin only.
         /// </summary>
         [HttpPost("api/unifi/alias")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> SetAlias([FromBody] JsonElement body) => Run(async () =>
         {
             var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
@@ -182,13 +183,13 @@ namespace WorkNest.API.Controllers
                 : null;
             var result = await _unifi.UpdateMacFilterAsync(wlanId, Field(body, "action") ?? "", Field(body, "mac"),
                 Field(body, "policy"), Field(body, "reason"), email, userId, macs, Field(body, "name"), Field(body, "roomNo"),
-                devicesOnly: !User.IsAdminOrSuperAdmin());
+                devicesOnly: !(User.IsAdminOrSuperAdmin() || User.IsNetworkEngineer()));
             return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
         });
 
         /// <summary>Shows or hides the SSID name: body { hidden: true | false, reason }. Admin / super admin; logged.</summary>
         [HttpPost("api/unifi/ssids/{wlanId}/visibility")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> SetSsidVisibility(string wlanId, [FromBody] JsonElement body) => Run(async () =>
         {
             if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("hidden", out var h) || h.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
@@ -206,7 +207,7 @@ namespace WorkNest.API.Controllers
 
         /// <summary>Creates a speed profile: body { name, downMbps, upMbps }. Super admin only.</summary>
         [HttpPost("api/unifi/speed-profiles")]
-        [Authorize(Roles = "super_admin,SuperAdmin")]
+        [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> CreateSpeedProfile([FromBody] JsonElement body) => Run(async () =>
         {
             var result = await _unifi.CreateSpeedProfileAsync(Field(body, "name"), IntField(body, "downMbps"), IntField(body, "upMbps"));
@@ -218,7 +219,7 @@ namespace WorkNest.API.Controllers
         /// Super admin only; logged.
         /// </summary>
         [HttpPost("api/unifi/ssids/{wlanId}/speed-profile")]
-        [Authorize(Roles = "super_admin,SuperAdmin")]
+        [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> SetSsidSpeedProfile(string wlanId, [FromBody] JsonElement body) => Run(async () =>
         {
             var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;

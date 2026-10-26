@@ -43,12 +43,14 @@ try
     // CeoAccessFilter: a CEO account gets 403 on every endpoint not marked [CeoAllowed] (it only views the CEO dashboard).
     // SalesManagerAccessFilter: likewise a Sales Manager gets 403 on every endpoint not marked [SalesManagerAllowed].
     // AccessOfficerAccessFilter: and an Access Officer on every endpoint not marked [AccessOfficerAllowed].
+    // NetworkEngineerAccessFilter: and a Network Engineer on every endpoint not marked [NetworkEngineerAllowed].
     builder.Services.AddControllers(o =>
         {
             o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
             o.Filters.Add<WorkNest.API.Filters.CeoAccessFilter>();
             o.Filters.Add<WorkNest.API.Filters.SalesManagerAccessFilter>();
             o.Filters.Add<WorkNest.API.Filters.AccessOfficerAccessFilter>();
+            o.Filters.Add<WorkNest.API.Filters.NetworkEngineerAccessFilter>();
         })
         .AddJsonOptions(o =>
         {

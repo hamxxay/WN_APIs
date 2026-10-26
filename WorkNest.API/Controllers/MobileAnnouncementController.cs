@@ -84,6 +84,7 @@ namespace WorkNest.API.Controllers
         [CeoAllowed] // the app registers the push token for every signed-in user, the CEO too
         [SalesManagerAllowed] // and the Sales Manager
         [AccessOfficerAllowed] // and the Access Officer
+        [NetworkEngineerAllowed] // and the Network Engineer
         public async Task<IActionResult> RegisterDeviceToken(
             [FromBody] DeviceTokenRequest request)
         {

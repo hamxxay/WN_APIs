@@ -995,8 +995,17 @@ namespace WorkNest.API.Controllers
                 // One Bill number. Null for other locations, or when EzPay failed (the One Bill sync retries it).
                 var oneBillNumber = await _oneBill.EnsureAsync(newInvoiceId);
 
+                string approvalStatus = "PendingApproval";
+                using (var statusCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WHERE Id = @Id", conn))
+                {
+                    statusCmd.Parameters.AddWithValue("@Id", newInvoiceId);
+                    var statusVal = await statusCmd.ExecuteScalarAsync();
+                    if (statusVal != null && statusVal != DBNull.Value)
+                        approvalStatus = statusVal.ToString()!;
+                }
+
                 string emailNotice = "";
-                if (req.SendEmail)
+                if (req.SendEmail && approvalStatus == "Approved")
                 {
                     string targetEmail = "";
                     string customerName = "";
@@ -1062,14 +1071,21 @@ namespace WorkNest.API.Controllers
                         }
                     }
                 }
+                else if (req.SendEmail && approvalStatus == "PendingApproval")
+                {
+                    emailNotice = " Invoice is in the PendingApproval queue and will be emailed once approved.";
+                }
 
                 return Ok(new
                 {
                     isSuccessful = true,
-                    message = "Custom invoice created successfully." + emailNotice,
+                    message = approvalStatus == "PendingApproval"
+                        ? $"Custom invoice {invoiceNumber} created and placed in PendingApproval queue." + emailNotice
+                        : "Custom invoice created successfully." + emailNotice,
                     invoiceId = newInvoiceId,
                     invoiceNumber = invoiceNumber,
                     grandTotal = grandTotal,
+                    approvalStatus = approvalStatus,
                     oneBillNumber = oneBillNumber
                 });
             }
