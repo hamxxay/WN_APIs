@@ -46,6 +46,21 @@ namespace WorkNest.API.Controllers
             _storageSettings = storageSettings.Value;
         }
 
+        public const string OverrideEmailNotAllowed = "Only a super admin can send the agreement to another e-mail.";
+
+        /// <summary>
+        /// Sending the agreement to an e-mail other than the customer's own (OverrideEmail) is for super admins only;
+        /// anyone else may only name one of the customer's e-mails on file. Null = fine.
+        /// </summary>
+        public static async Task<string?> OverrideEmailErrorAsync(ClaimsPrincipal user, IAgreementService agreements, int quotationId, string? overrideEmail)
+        {
+            if (string.IsNullOrWhiteSpace(overrideEmail)) return null;
+            if (user.IsSuperAdmin() || user.IsInRole("super_admin") || user.IsInRole("SuperAdmin")) return null;
+            var known = await agreements.GetQuotationCustomerEmailsAsync(quotationId) ?? Array.Empty<string>();
+            var wanted = overrideEmail.Trim();
+            return known.Any(e => string.Equals(e?.Trim(), wanted, StringComparison.OrdinalIgnoreCase)) ? null : OverrideEmailNotAllowed;
+        }
+
         private int? ResolveActorId()
         {
             var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
@@ -65,6 +80,12 @@ namespace WorkNest.API.Controllers
             {
                 if (request == null || request.QuotationId <= 0)
                     return BadRequest(new { isSuccessful = false, message = "Valid QuotationId is required." });
+                // Location-bound staff: only quotations of their own locations (the id is in the body, not the route).
+                if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Quotation, request.QuotationId.ToString()))
+                    return NotFound(new { isSuccessful = false, message = "Quotation not found." });
+                var emailError = await OverrideEmailErrorAsync(User, _agreement, request.QuotationId, request.OverrideEmail);
+                if (emailError != null)
+                    return BadRequest(new { isSuccessful = false, message = emailError });
 
                 var cnicError = WorkNest.Application.Helpers.Cnic.Validate(request.Cnic);
                 if (cnicError != null)

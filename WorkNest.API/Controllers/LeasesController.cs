@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Agreement;
 using WorkNest.Application.Interfaces;
 using Microsoft.AspNetCore.RateLimiting;
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
 {
@@ -40,6 +42,16 @@ namespace WorkNest.API.Controllers
                 if (request == null || request.QuotationId <= 0)
                 {
                     return BadRequest(new { isSuccessful = false, message = "Valid QuotationId is required." });
+                }
+                // Location-bound staff: only quotations of their own locations (the id is in the body, not the route).
+                if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Quotation, request.QuotationId.ToString()))
+                {
+                    return NotFound(new { isSuccessful = false, message = "Quotation not found." });
+                }
+                var emailError = await AgreementController.OverrideEmailErrorAsync(User, _agreementService, request.QuotationId, request.OverrideEmail);
+                if (emailError != null)
+                {
+                    return BadRequest(new { isSuccessful = false, message = emailError });
                 }
 
                 int? actorId = ResolveActorId();

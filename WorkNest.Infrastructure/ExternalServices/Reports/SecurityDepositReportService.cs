@@ -3,11 +3,18 @@ using ClosedXML.Excel;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.DTOs.Reports;
+using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Infrastructure.ExternalServices.Reports
 {
+    /// <summary>
+    /// Security deposit report. Location-bound staff pass their locations: the SEC_LOC_02 procedures
+    /// (dbo.WN_SecurityDeposit_*Scoped) keep only the deposits whose booking is in them. Without a scope (null) the
+    /// scoped procedures answer exactly like the old ones, which are still used while SEC_LOC_02 has not run (SQL error
+    /// 2812); a scoped call then throws <see cref="LocationScopeUpdateMissingException"/> instead of unscoped rows.
+    /// </summary>
     public class SecurityDepositReportService : ISecurityDepositReportService
     {
         private readonly string _connectionString;
@@ -18,7 +25,35 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
         }
 
-        public async Task<ApiResponse> GetCustomerSummaryAsync(SecurityDepositReportFilterDto filter)
+        /// <summary>
+        /// Runs the SEC_LOC_02 procedure <paramref name="scoped"/> with @LocationIds; when it is missing (2812) runs
+        /// <paramref name="old"/> for callers without a scope, and throws for a location-bound caller.
+        /// </summary>
+        private static async Task<SqlDataReader> ExecuteScopedAsync(SqlConnection connection, string scoped, string? locationIds,
+            Action<SqlParameterCollection> addParameters, Func<SqlCommand> old)
+        {
+            try
+            {
+                var cmd = new SqlCommand(scoped, connection) { CommandType = CommandType.StoredProcedure };
+                addParameters(cmd.Parameters);
+                cmd.Parameters.Add(new SqlParameter("@LocationIds", SqlDbType.NVarChar, -1) { Value = (object?)locationIds ?? DBNull.Value });
+                return await cmd.ExecuteReaderAsync();
+            }
+            catch (SqlException ex) when (ex.Number == 2812) // procedure missing: SEC_LOC_02 not run
+            {
+                if (locationIds != null) throw new LocationScopeUpdateMissingException(ex);
+            }
+            return await old().ExecuteReaderAsync();
+        }
+
+        private static SqlCommand OldProcedure(SqlConnection connection, string name, Action<SqlParameterCollection> addParameters)
+        {
+            var cmd = new SqlCommand(name, connection) { CommandType = CommandType.StoredProcedure };
+            addParameters(cmd.Parameters);
+            return cmd;
+        }
+
+        public async Task<ApiResponse> GetCustomerSummaryAsync(SecurityDepositReportFilterDto filter, IReadOnlyCollection<int>? locationIds = null)
         {
             if (filter.FromDate.HasValue && filter.ToDate.HasValue && filter.FromDate.Value > filter.ToDate.Value)
             {
@@ -30,16 +65,16 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            await using var cmd = new SqlCommand("dbo.WN_SecurityDeposit_CustomerReport", connection)
+            void Parameters(SqlParameterCollection p)
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                p.Add(new SqlParameter("@CustomerId", SqlDbType.Int) { Value = (object?)filter.CustomerId ?? DBNull.Value });
+                p.Add(new SqlParameter("@FromDate", SqlDbType.DateTime2) { Value = (object?)filter.FromDate ?? DBNull.Value });
+                p.Add(new SqlParameter("@ToDate", SqlDbType.DateTime2) { Value = (object?)filter.ToDate ?? DBNull.Value });
+            }
 
-            cmd.Parameters.Add(new SqlParameter("@CustomerId", SqlDbType.Int) { Value = (object?)filter.CustomerId ?? DBNull.Value });
-            cmd.Parameters.Add(new SqlParameter("@FromDate", SqlDbType.DateTime2) { Value = (object?)filter.FromDate ?? DBNull.Value });
-            cmd.Parameters.Add(new SqlParameter("@ToDate", SqlDbType.DateTime2) { Value = (object?)filter.ToDate ?? DBNull.Value });
-
-            await using var reader = await cmd.ExecuteReaderAsync();
+            await using var reader = await ExecuteScopedAsync(connection, "dbo.WN_SecurityDeposit_CustomerReportScoped",
+                LocationScopeLists.Csv(locationIds), Parameters,
+                () => OldProcedure(connection, "dbo.WN_SecurityDeposit_CustomerReport", Parameters));
             while (await reader.ReadAsync())
             {
                 list.Add(new SecurityDepositSummaryDto
@@ -60,7 +95,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             return ApiResponse.Ok(list);
         }
 
-        public async Task<ApiResponse> GetCustomerDetailAsync(int customerId, DateTime? fromDate, DateTime? toDate)
+        public async Task<ApiResponse> GetCustomerDetailAsync(int customerId, DateTime? fromDate, DateTime? toDate, IReadOnlyCollection<int>? locationIds = null)
         {
             if (fromDate.HasValue && toDate.HasValue && fromDate.Value > toDate.Value)
             {
@@ -72,16 +107,16 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            await using var cmd = new SqlCommand("dbo.WN_SecurityDeposit_CustomerDetail", connection)
+            void Parameters(SqlParameterCollection p)
             {
-                CommandType = CommandType.StoredProcedure
-            };
+                p.Add(new SqlParameter("@CustomerId", SqlDbType.Int) { Value = customerId });
+                p.Add(new SqlParameter("@FromDate", SqlDbType.DateTime2) { Value = (object?)fromDate ?? DBNull.Value });
+                p.Add(new SqlParameter("@ToDate", SqlDbType.DateTime2) { Value = (object?)toDate ?? DBNull.Value });
+            }
 
-            cmd.Parameters.Add(new SqlParameter("@CustomerId", SqlDbType.Int) { Value = customerId });
-            cmd.Parameters.Add(new SqlParameter("@FromDate", SqlDbType.DateTime2) { Value = (object?)fromDate ?? DBNull.Value });
-            cmd.Parameters.Add(new SqlParameter("@ToDate", SqlDbType.DateTime2) { Value = (object?)toDate ?? DBNull.Value });
-
-            await using var reader = await cmd.ExecuteReaderAsync();
+            await using var reader = await ExecuteScopedAsync(connection, "dbo.WN_SecurityDeposit_CustomerDetailScoped",
+                LocationScopeLists.Csv(locationIds), Parameters,
+                () => OldProcedure(connection, "dbo.WN_SecurityDeposit_CustomerDetail", Parameters));
             while (await reader.ReadAsync())
             {
                 list.Add(new SecurityDepositDetailDto
@@ -102,7 +137,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             return ApiResponse.Ok(list);
         }
 
-        public async Task<ApiResponse> GetCustomerLookupAsync()
+        public async Task<ApiResponse> GetCustomerLookupAsync(IReadOnlyCollection<int>? locationIds = null)
         {
             var list = new List<CustomerReportDropdownDto>();
 
@@ -115,8 +150,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
                 WHERE IsActive = 1
                 ORDER BY FirstName, LastName;";
 
-            await using var cmd = new SqlCommand(sql, connection);
-            await using var reader = await cmd.ExecuteReaderAsync();
+            await using var reader = await ExecuteScopedAsync(connection, "dbo.WN_SecurityDeposit_CustomerLookupScoped",
+                LocationScopeLists.Csv(locationIds), _ => { }, () => new SqlCommand(sql, connection));
             while (await reader.ReadAsync())
             {
                 var id = reader.GetInt32(0);
@@ -141,9 +176,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             return ApiResponse.Ok(list);
         }
 
-        public async Task<byte[]> ExportExcelAsync(SecurityDepositReportFilterDto filter)
+        public async Task<byte[]> ExportExcelAsync(SecurityDepositReportFilterDto filter, IReadOnlyCollection<int>? locationIds = null)
         {
-            var response = await GetCustomerSummaryAsync(filter);
+            var response = await GetCustomerSummaryAsync(filter, locationIds);
             var records = response.Data as List<SecurityDepositSummaryDto> ?? new List<SecurityDepositSummaryDto>();
 
             using var workbook = new XLWorkbook();
@@ -245,9 +280,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Reports
             return stream.ToArray();
         }
 
-        public async Task<byte[]> ExportCustomerDetailExcelAsync(int customerId, DateTime? fromDate, DateTime? toDate)
+        public async Task<byte[]> ExportCustomerDetailExcelAsync(int customerId, DateTime? fromDate, DateTime? toDate, IReadOnlyCollection<int>? locationIds = null)
         {
-            var response = await GetCustomerDetailAsync(customerId, fromDate, toDate);
+            var response = await GetCustomerDetailAsync(customerId, fromDate, toDate, locationIds);
             var records = response.Data as List<SecurityDepositDetailDto> ?? new List<SecurityDepositDetailDto>();
 
             using var workbook = new XLWorkbook();

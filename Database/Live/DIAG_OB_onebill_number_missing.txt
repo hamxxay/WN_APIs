@@ -1,0 +1,42 @@
+-- ============================================================================================
+-- DIAG_OB: why an F-7 invoice has no 1Bill number on its PDF. READ ONLY (changes nothing). Run on the LIVE database
+-- (WorkNestAEO) in DBeaver: select all, Ctrl+Enter. Optionally put one invoice number in @InvoiceNumber.
+--
+-- The invoice PDF prints the 1Bill number only when EzPay accepted the bill (WN_Invoices.OneBillStatus = 2).
+-- Column "Why no 1Bill number" gives the first reason, in the same order as dbo.WN_OneBill_ClaimInvoice checks.
+-- ============================================================================================
+DECLARE @InvoiceNumber NVARCHAR(50) = NULL;   -- e.g. N'INV-REC-12-20261101'; NULL = the latest 50 F-7 invoices
+
+SELECT TOP 50
+       i.Id, i.InvoiceNumber, i.CreatedOn, i.StatusId, os.Description AS PaymentStatus,
+       ISNULL(i.ApprovalStatus, N'(approved)') AS Approval, i.GrandTotal, i.PaidTotal,
+       i.OneBillStatus, i.OneBillNumber, i.OneBillAttempts, i.OneBillClaimedOn, i.OneBillError, i.EzPayInvoiceId,
+       COALESCE(ci.LocationId, s.LocationId, u.LocationId) AS LocationId,
+       l.OneBillBillerCode, l.OneBillPrefix, l.OneBillFrom,
+       CASE
+           WHEN i.OneBillStatus = 2 THEN N'OK: has a 1Bill number (should print)'
+           WHEN COALESCE(ci.LocationId, s.LocationId, u.LocationId) IS NULL THEN N'No location found for the invoice'
+           WHEN NULLIF(LTRIM(RTRIM(l.OneBillBillerCode)), N'') IS NULL THEN N'Location has no OneBillBillerCode (not on 1Bill)'
+           WHEN NULLIF(LTRIM(RTRIM(l.OneBillPrefix)), N'') IS NULL THEN N'Location has no OneBillPrefix'
+           WHEN i.CreatedOn < ISNULL(l.OneBillFrom, i.CreatedOn) THEN N'Created before OneBillFrom (1Bill start date)'
+           WHEN i.StatusId IN (40, 5, 2, 62) THEN N'Deleted / cancelled / paid'
+           WHEN ISNULL(i.ApprovalStatus, N'') = N'PendingApproval' THEN N'Pending approval (sent to EzPay only after approval)'
+           WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN N'Nothing due'
+           WHEN ISNULL(i.OneBillAttempts, 0) >= 5 THEN N'EzPay refused 5 times: see OneBillError'
+           WHEN i.OneBillStatus = 1 THEN N'Being sent now (or stuck: check OneBillClaimedOn / OneBillError)'
+           WHEN i.OneBillError IS NOT NULL THEN N'EzPay refused: see OneBillError (will retry)'
+           ELSE N'Eligible but never sent: is OneBill:Enabled true in the live API appsettings, and the API restarted?'
+       END AS [Why no 1Bill number]
+  FROM dbo.WN_Invoices i WITH (NOLOCK)
+  LEFT JOIN dbo.OrderStatus os WITH (NOLOCK) ON os.Id = i.StatusId
+  LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = i.Id
+  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+  LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+  LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+ WHERE (@InvoiceNumber IS NULL AND COALESCE(ci.LocationId, s.LocationId, u.LocationId) = 2)
+    OR i.InvoiceNumber = @InvoiceNumber
+ ORDER BY i.Id DESC;
+
+-- F-7's 1Bill set-up.
+SELECT Id, Name, OneBillBillerCode, OneBillPrefix, OneBillFrom FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id = 2;

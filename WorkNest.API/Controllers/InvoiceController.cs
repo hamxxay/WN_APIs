@@ -701,7 +701,7 @@ namespace WorkNest.API.Controllers
         /// Soft deletes an invoice by setting StatusId to 40 (InvoiceStatus.Deleted).
         /// </summary>
         [HttpDelete("api/invoice/{id:int}")]
-        [Authorize(Roles = StaffRoles)]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // admins only (not sales executives / receptionists); [RecordScope] still applies
         public async Task<IActionResult> SoftDelete(int id)
         {
             if (id <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid invoice ID." });
@@ -732,7 +732,7 @@ namespace WorkNest.API.Controllers
         /// Soft deletes an invoice by public GUID by setting StatusId to 40 (InvoiceStatus.Deleted).
         /// </summary>
         [HttpDelete("api/invoice/{publicId:guid}")]
-        [Authorize(Roles = StaffRoles)]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // admins only (not sales executives / receptionists); [RecordScope] still applies
         public async Task<IActionResult> SoftDeleteByGuid(Guid publicId)
         {
             try

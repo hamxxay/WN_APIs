@@ -7758,9 +7758,272 @@ SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) 
                 p.Add("@MonthStart", SqlDbType.Date).Value = (object?)monthStart?.Date ?? DBNull.Value;
                 p.Add("@Top", SqlDbType.Int).Value = top;
             });
+
+        // --- Location scope of access cards / attendants / agreements (SEC_LOC_01) ---
+
+        /// <summary>Adds one int parameter per location and returns "@SecLoc0,@SecLoc1,..." ("NULL" = matches nothing).</summary>
+        private static string SecLocInList(SqlCommand cmd, IReadOnlyCollection<int> locationIds)
+        {
+            var names = new List<string>();
+            foreach (var id in locationIds.Where(i => i > 0).Distinct())
+            {
+                var name = "@SecLoc" + names.Count;
+                cmd.Parameters.Add(name, SqlDbType.Int).Value = id;
+                names.Add(name);
+            }
+            return names.Count == 0 ? "NULL" : string.Join(",", names);
+        }
+
+        public async Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetAccessCardsInLocationsAsync(int page, int limit, string? search,
+            int? bookingId, int? customerId, int? spaceId, int? status, IReadOnlyCollection<int> locationIds)
+        {
+            page = page < 1 ? 1 : page;
+            limit = limit < 1 ? 20 : limit;
+            await using var c = await Open();
+            await using var cmd = new SqlCommand { Connection = c };
+            var inList = SecLocInList(cmd, locationIds);
+            // Same columns / filters as dbo.WN_AccessCards_GetList, plus the card's location (own, else its space's,
+            // else its booking's space's: same rule as RecordScope AccessCard).
+            cmd.CommandText = $@"
+                SELECT ac.Id, ac.IdGUID, ac.LocationId, l.Name AS LocationName, ac.CustomerId,
+                    COALESCE(NULLIF(RTRIM(LTRIM(ISNULL(cu.FirstName, '') + ' ' + ISNULL(cu.LastName, ''))), ''), u.Name, 'Customer') AS CustomerName,
+                    COALESCE(cu.Email, u.Email) AS CustomerEmail,
+                    ac.BookingId, ac.SpaceId, s.Name AS SpaceName, s.Code AS SpaceCode, ac.CardNumber, ac.StartDate, ac.EndDate, ac.Status,
+                    CASE WHEN ac.Status = 1 THEN 'Active' WHEN ac.Status = 2 THEN 'Restricted' WHEN ac.Status = 3 THEN 'Inactive' ELSE 'Unknown' END AS StatusLabel,
+                    ac.CreatedOn, ac.UpdatedOn, COUNT(*) OVER() AS TotalCount
+                FROM dbo.WN_AccessCards ac WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = ac.LocationId
+                LEFT JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = ac.CustomerId
+                LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId
+                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = ac.SpaceId
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = ac.BookingId
+                LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId
+                WHERE COALESCE(ac.LocationId, s.LocationId, sb.LocationId) IN ({inList})
+                  AND (@BookingId IS NULL OR ac.BookingId = @BookingId)
+                  AND (@CustomerId IS NULL OR ac.CustomerId = @CustomerId)
+                  AND (@SpaceId IS NULL OR ac.SpaceId = @SpaceId)
+                  AND (@Status IS NULL OR ac.Status = @Status)
+                  AND (@Search IS NULL OR @Search = ''
+                       OR ac.CardNumber LIKE '%' + @Search + '%' OR cu.FirstName LIKE '%' + @Search + '%'
+                       OR cu.LastName LIKE '%' + @Search + '%' OR cu.Email LIKE '%' + @Search + '%' OR s.Name LIKE '%' + @Search + '%')
+                ORDER BY ac.Id DESC
+                OFFSET (@Page - 1) * @Limit ROWS FETCH NEXT @Limit ROWS ONLY;";
+            cmd.Parameters.Add("@Page", SqlDbType.Int).Value = page;
+            cmd.Parameters.Add("@Limit", SqlDbType.Int).Value = limit;
+            cmd.Parameters.Add("@Search", SqlDbType.NVarChar, 255).Value = (object?)search ?? DBNull.Value;
+            cmd.Parameters.Add("@BookingId", SqlDbType.Int).Value = (object?)bookingId ?? DBNull.Value;
+            cmd.Parameters.Add("@CustomerId", SqlDbType.Int).Value = (object?)customerId ?? DBNull.Value;
+            cmd.Parameters.Add("@SpaceId", SqlDbType.Int).Value = (object?)spaceId ?? DBNull.Value;
+            cmd.Parameters.Add("@Status", SqlDbType.Int).Value = (object?)status ?? DBNull.Value;
+            await using var r = await cmd.ExecuteReaderAsync();
+            var rows = await ReadAll(r);
+            int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) && t != null ? Convert.ToInt32(t) : rows.Count;
+            return (rows, total);
+        }
+
+        private async Task<bool> SecLocExistsAsync(string sql, Action<SqlParameterCollection> addParams)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(sql, c);
+            addParams(cmd.Parameters);
+            var v = await cmd.ExecuteScalarAsync();
+            return v is not null && v is not DBNull && Convert.ToInt32(v) == 1;
+        }
+
+        public Task<bool> IsCustomerOfBookingAsync(int bookingId, int customerId) => SecLocExistsAsync(@"
+            SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
+                  JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Id = @CustomerId
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+                 WHERE b.Id = @BookingId
+                   AND (c.Code = b.CustomerCode OR (c.UserId IS NOT NULL AND c.UserId = b.UserId) OR (u.Email IS NOT NULL AND c.Email = u.Email))
+            ) THEN 1 ELSE 0 END;", p =>
+            {
+                p.Add("@BookingId", SqlDbType.Int).Value = bookingId;
+                p.Add("@CustomerId", SqlDbType.Int).Value = customerId;
+            });
+
+        public Task<bool> IsSpaceOfBookingAsync(int bookingId, int spaceId) => SecLocExistsAsync(@"
+            SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
+                 WHERE b.Id = @BookingId
+                   AND (b.SpaceId = @SpaceId OR EXISTS (
+                        SELECT 1 FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                          JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = d.SpaceCode
+                         WHERE d.BookingGuid = b.IdGUID AND s.Id = @SpaceId))
+            ) THEN 1 ELSE 0 END;", p =>
+            {
+                p.Add("@BookingId", SqlDbType.Int).Value = bookingId;
+                p.Add("@SpaceId", SqlDbType.Int).Value = spaceId;
+            });
+
+        public Task<bool> IsCustomerOfBookingDetailAsync(int bookingDetailId, int customerId) => SecLocExistsAsync(@"
+            SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                  JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Id = @CustomerId
+                  LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = d.BookingGuid
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+                 WHERE d.Id = @BookingDetailId
+                   AND (c.Code = d.CustomerCode OR c.Code = b.CustomerCode
+                        OR (c.UserId IS NOT NULL AND c.UserId = b.UserId) OR (u.Email IS NOT NULL AND c.Email = u.Email))
+            ) THEN 1 ELSE 0 END;", p =>
+            {
+                p.Add("@BookingDetailId", SqlDbType.Int).Value = bookingDetailId;
+                p.Add("@CustomerId", SqlDbType.Int).Value = customerId;
+            });
+
+        public Task<bool> IsActiveCustomerAttendantAsync(int customerId, int personId) => SecLocExistsAsync(@"
+            SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM dbo.WN_CustomerAttendants ca WITH (NOLOCK)
+                 WHERE ca.CustomerId = @CustomerId AND ca.PersonId = @PersonId AND ca.IsActive = 1
+            ) THEN 1 ELSE 0 END;", p =>
+            {
+                p.Add("@CustomerId", SqlDbType.Int).Value = customerId;
+                p.Add("@PersonId", SqlDbType.Int).Value = personId;
+            });
+
+        public Task<bool> HasBookingAttendantAsync(int bookingDetailId, int customerId, int? personId, bool activeOnly) => SecLocExistsAsync(@"
+            SELECT CASE WHEN EXISTS (
+                SELECT 1 FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+                 WHERE ba.BookingDetailId = @BookingDetailId AND ba.CustomerId = @CustomerId
+                   AND (@PersonId IS NULL OR ba.PersonId = @PersonId)
+                   AND (@ActiveOnly = 0 OR ba.AssignedTo IS NULL
+                        OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
+            ) THEN 1 ELSE 0 END;", p =>
+            {
+                p.Add("@BookingDetailId", SqlDbType.Int).Value = bookingDetailId;
+                p.Add("@CustomerId", SqlDbType.Int).Value = customerId;
+                p.Add("@PersonId", SqlDbType.Int).Value = (object?)personId ?? DBNull.Value;
+                p.Add("@ActiveOnly", SqlDbType.Bit).Value = activeOnly;
+            });
+
+        public async Task<(bool Exists, List<int> BookingLocationIds, List<int> CustomerIds)> GetPersonScopeAsync(int personId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT COUNT(1) FROM dbo.WN_Persons p WITH (NOLOCK) WHERE p.PersonId = @PersonId;
+                SELECT DISTINCT s.LocationId
+                  FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+                  JOIN dbo.WN_BookingDetails d WITH (NOLOCK) ON d.Id = ba.BookingDetailId
+                  JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = d.BookingGuid
+                  JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                 WHERE ba.PersonId = @PersonId AND s.LocationId IS NOT NULL;
+                SELECT DISTINCT ca.CustomerId FROM dbo.WN_CustomerAttendants ca WITH (NOLOCK) WHERE ca.PersonId = @PersonId;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@PersonId", SqlDbType.Int).Value = personId;
+            await using var r = await cmd.ExecuteReaderAsync();
+            var exists = await r.ReadAsync() && r.GetInt32(0) > 0;
+            var locations = new List<int>();
+            var customers = new List<int>();
+            if (await r.NextResultAsync())
+                while (await r.ReadAsync()) locations.Add(Convert.ToInt32(r.GetValue(0)));
+            if (await r.NextResultAsync())
+                while (await r.ReadAsync()) customers.Add(Convert.ToInt32(r.GetValue(0)));
+            return (exists, locations, customers);
+        }
+
+        public async Task<HashSet<int>> GetBookingDetailIdsInLocationsAsync(IReadOnlyCollection<int> locationIds)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand { Connection = c };
+            var inList = SecLocInList(cmd, locationIds);
+            cmd.CommandText = $@"
+                SELECT d.Id FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                  JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = d.BookingGuid
+                  JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                 WHERE s.LocationId IN ({inList});";
+            var ids = new HashSet<int>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) ids.Add(r.GetInt32(0));
+            return ids;
+        }
+
+        public async Task<List<string>> GetQuotationCustomerEmailsAsync(int quotationId)
+        {
+            await using var c = await Open();
+            const string sql = @"
+                SELECT cu.Email FROM dbo.WN_Quotations q WITH (NOLOCK)
+                  JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
+                 WHERE q.Id = @QuotationId AND NULLIF(LTRIM(RTRIM(cu.Email)), '') IS NOT NULL
+                UNION
+                SELECT u.Email FROM dbo.WN_Quotations q WITH (NOLOCK)
+                  JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
+                  JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId
+                 WHERE q.Id = @QuotationId AND NULLIF(LTRIM(RTRIM(u.Email)), '') IS NOT NULL;";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@QuotationId", SqlDbType.Int).Value = quotationId;
+            var emails = new List<string>();
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) emails.Add(r.GetString(0).Trim());
+            return emails;
+        }
+
+        // --- SEC_LOC_02: location-scoped lists (Database/Security/SEC_LOC_02_lists) ---
+
+        /// <summary>
+        /// Runs a SEC_LOC_02 procedure. When it is missing (SQL error 2812, script not run): callers without a scope
+        /// (locationIds null) get the old procedure's answer; a location-bound caller gets
+        /// <see cref="LocationScopeUpdateMissingException"/> (503), never unscoped rows.
+        /// </summary>
+        private static async Task<T> ScopedOrOldAsync<T>(string? locationIds, Func<Task<T>> scoped, Func<Task<T>> old)
+        {
+            try
+            {
+                return await scoped();
+            }
+            catch (SqlException ex) when (ex.Number == 2812)
+            {
+                if (locationIds != null) throw new LocationScopeUpdateMissingException(ex);
+            }
+            return await old();
+        }
+
+        public Task<IDictionary<string, object?>?> SearchChallanScopedDbAsync(string query, string? locationIds) =>
+            ScopedOrOldAsync(locationIds, async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Challan_SearchScoped", c);
+                cmd.Parameters.Add("@Query", SqlDbType.NVarChar, 100).Value = query;
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = (object?)locationIds ?? DBNull.Value;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await r.ReadAsync() ? ToDict(r) : null;
+            }, () => SearchChallanDbAsync(query));
+
+        public Task<IEnumerable<IDictionary<string, object?>>> GetRecentBookingsScopedAsync(int top, string? locationIds) =>
+            ScopedOrOldAsync(locationIds, async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Bookings_GetRecentScoped", c);
+                cmd.Parameters.AddWithValue("@Top", top);
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = (object?)locationIds ?? DBNull.Value;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return (IEnumerable<IDictionary<string, object?>>)await ReadAll(r);
+            }, () => GetRecentBookingsAsync(top));
+
+        public Task<IEnumerable<IDictionary<string, object?>>> SearchCustomersScopedAsync(string query, string? locationIds) =>
+            ScopedOrOldAsync(locationIds, async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Customers_SearchScoped", c);
+                cmd.Parameters.AddWithValue("@Query", query);
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = (object?)locationIds ?? DBNull.Value;
+                await using var r = await cmd.ExecuteReaderAsync();
+                return (IEnumerable<IDictionary<string, object?>>)await ReadAll(r);
+            }, () => SearchCustomersAsync(query));
+
+        public Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetMembershipsScopedAsync(int page, int limit, string? search, string? locationIds) =>
+            ScopedOrOldAsync(locationIds, async () =>
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Memberships_GetListScoped", c);
+                cmd.Parameters.AddWithValue("@Page", page);
+                cmd.Parameters.AddWithValue("@Limit", limit);
+                cmd.Parameters.AddWithValue("@Search", (object?)search ?? DBNull.Value);
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = (object?)locationIds ?? DBNull.Value;
+                await using var r = await cmd.ExecuteReaderAsync();
+                var rows = await ReadAll(r);
+                int total = rows.Count > 0 && rows[0].TryGetValue("TotalCount", out var t) ? Convert.ToInt32(t) : rows.Count;
+                return ((IEnumerable<IDictionary<string, object?>>)rows, total);
+            }, () => GetMembershipsAsync(page, limit, search));
     }
 }
-
-
-
-

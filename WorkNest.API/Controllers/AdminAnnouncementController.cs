@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Announcement;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
+using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
 {
@@ -57,6 +59,9 @@ namespace WorkNest.API.Controllers
             if (request == null)
                 return BadRequest(ApiResponse.Fail("Invalid request body."));
 
+            var scopeError = await CheckTargetsInScopeAsync(request);
+            if (scopeError != null) return scopeError;
+
             var currentUserId = await ResolveCurrentUserIdAsync();
             var result = await _announcementService.CreateAnnouncementAsync(request, currentUserId);
 
@@ -64,6 +69,34 @@ namespace WorkNest.API.Controllers
                 return BadRequest(result);
 
             return StatusCode(201, result);
+        }
+
+        public const string AllNotAllowed = "You can only send announcements to your own locations. Choose a location, a space or recipients.";
+        public const string TargetNotAllowed = "You can only send announcements to your own locations.";
+
+        /// <summary>
+        /// Location-bound staff (admin, sales executive): no announcement to everyone (TargetScope "All", also what an
+        /// unknown scope becomes) = 400, and every LocationId / SpaceId / CustomUserIds target sent must be in their
+        /// locations (403). Null = allowed. Everyone else is not checked.
+        /// </summary>
+        private async Task<IActionResult?> CheckTargetsInScopeAsync(CreateAnnouncementRequest request)
+        {
+            if (!User.IsLocationBoundRole()) return null;
+
+            var scope = request.TargetScope;
+            if (scope is not ("Location" or "Space" or "CustomList"))
+                return BadRequest(ApiResponse.Fail(AllNotAllowed));
+
+            var checks = new List<(RecordKind Kind, int Id)>();
+            if (request.LocationId is > 0) checks.Add((RecordKind.Location, request.LocationId.Value));
+            if (request.SpaceId is > 0) checks.Add((RecordKind.Space, request.SpaceId.Value));
+            if (request.CustomUserIds != null)
+                checks.AddRange(request.CustomUserIds.Where(id => id > 0).Distinct().Select(id => (RecordKind.User, id)));
+
+            foreach (var (kind, id) in checks)
+                if (!await RecordScopeAttribute.AllowsAsync(HttpContext, kind, id.ToString()))
+                    return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(TargetNotAllowed));
+            return null;
         }
 
         [HttpGet]

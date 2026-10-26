@@ -229,6 +229,16 @@ namespace WorkNest.Application.Services
             return (mergedPdf, dto);
         }
 
+        public async Task<IReadOnlyCollection<string>> GetQuotationCustomerEmailsAsync(int quotationId)
+        {
+            var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in await _db.GetQuotationCustomerEmailsAsync(quotationId) ?? new List<string>())
+                if (!string.IsNullOrWhiteSpace(e)) emails.Add(e.Trim());
+            var q = await _quotations.GetQuotationByIdAsync(quotationId);
+            if (!string.IsNullOrWhiteSpace(q?.CustomerEmail)) emails.Add(q!.CustomerEmail!.Trim());
+            return emails;
+        }
+
         public async Task<AgreementResponseDto> SendAgreementAsync(SendAgreementRequest request, int? userId)
         {
             var genReq = new GenerateLeaseAgreementRequest
