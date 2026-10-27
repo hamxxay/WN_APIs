@@ -427,7 +427,7 @@ namespace WorkNest.Application.Services
             q.TotalAmount = calc.TotalPayable;
             q.Fields = calc.Fields;
 
-            // Sync Details lines for Room Rent if WHT gross-up is applied
+            // Sync Details lines for Office Rent if WHT gross-up is applied
             if (calc.IsWhtInvoice && q.Details != null && q.Details.Count > 0)
             {
                 var rentLine = q.Details.FirstOrDefault(d => string.Equals(d.FeeType, "RoomRent", StringComparison.OrdinalIgnoreCase));

@@ -23,7 +23,7 @@ namespace WorkNest.Application.DTOs.CustomInvoice
         /// <summary>Billing period: both dates or neither (no period).</summary>
         public DateTime? PeriodFrom { get; set; }
         public DateTime? PeriodTo { get; set; }
-        /// <summary>Room rent, excluding tax.</summary>
+        /// <summary>Office rent, excluding tax.</summary>
         public decimal? RentAmount { get; set; }
         public decimal? ServiceCharge { get; set; }
         /// <summary>Tax rate on the service charge, in percent (0-100).</summary>

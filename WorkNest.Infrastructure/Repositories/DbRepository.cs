@@ -1361,7 +1361,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             {
                 int bookingId = Convert.ToInt32(bidObj);
 
-                // Calculate discount amount against room rent subtotal
+                // Calculate discount amount against office rent subtotal
                 decimal subtotal = result.TryGetValue("SubtotalAmount", out var sa) && sa is not null ? Convert.ToDecimal(sa) : 0;
                 decimal discountAmount = 0;
                 if (discountType == "Amount" || discountType == "Fixed")

@@ -26,7 +26,7 @@ namespace WorkNest.Application.DTOs.Payment
         public string TariffHeading { get; set; } = "9805.9200";
         public string TariffLabel { get; set; } = "Business Support Services";
 
-        public string RoomRentDescription { get; set; } = "Room Rent (Exclusive of Service Charge)";
+        public string RoomRentDescription { get; set; } = " (Exclusive of Service Charge)";
         public decimal RoomRentAmount { get; set; }
         public decimal RoomRentTaxRate { get; set; }
         public decimal RoomRentTaxAmount { get; set; }

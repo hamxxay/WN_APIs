@@ -300,7 +300,7 @@ namespace WorkNest.Application.Services
             string randomStr = Guid.NewGuid().ToString().Substring(0, 6).ToUpper();
             string quotationNumber = $"WN-QT-{todayStr}-{randomStr}";
 
-            // Calculate discount and total amounts against room rent subtotal
+            // Calculate discount and total amounts against office rent subtotal
             decimal discountAmount = (discountType == "Amount" || discountType == "Fixed")
                 ? Math.Min(discountValue, subtotal)
                 : Math.Round(subtotal * (discountValue / 100m), 2);

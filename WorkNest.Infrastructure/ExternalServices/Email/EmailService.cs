@@ -447,12 +447,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                         {
                             new WorkNest.Infrastructure.ExternalServices.Pdf.StatementInvoiceLineItemDto
                             {
-                                Description = $"Room Rent Capacity Overage Surcharge - {spaceName} ({excessSeatCount} excess seat{(excessSeatCount > 1 ? "s" : "")} for {attendantName})",
+                                Description = $"Office Rent Capacity Overage Surcharge - {spaceName} ({excessSeatCount} excess seat{(excessSeatCount > 1 ? "s" : "")} for {attendantName})",
                                 FromDate = billingStart ?? WorkNest.Application.Services.BusinessClock.Default.Today,
                                 ToDate = billingEnd ?? WorkNest.Application.Services.BusinessClock.Default.Today.AddMonths(1),
                                 PriceExclVat = surchargeAmount,
                                 VatAmount = taxAmount,
-                                Category = "Room Rent Surcharge"
+                                Category = "Office Rent Surcharge"
                             }
                         }
                     };

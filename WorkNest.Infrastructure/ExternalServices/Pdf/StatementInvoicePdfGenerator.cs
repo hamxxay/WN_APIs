@@ -521,7 +521,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                     ? data.CurrentInvoiceTotal
                     : (hasTax ? (totalExclVat + (effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round((data.SupportChargeAmount ?? 0m) * (taxPercentage / 100m), 2))) : totalExclVat);
                 decimal secDeposit = depositTotal > 0 ? depositTotal : data.SecurityDepositAmount;
-                // Same rule as a WHT invoice: only the room rent (rent + support) is grossed up; PST and the security
+                // Same rule as a WHT invoice: only the office rent (rent + support) is grossed up; PST and the security
                 // deposit are added unchanged. (Was: the PST was grossed up too.)
                 decimal pstInTotal = hasTax
                     ? (effectiveTaxTotal > 0 ? effectiveTaxTotal : Math.Round((data.SupportChargeAmount ?? 0m) * (taxPercentage / 100m), 2))
