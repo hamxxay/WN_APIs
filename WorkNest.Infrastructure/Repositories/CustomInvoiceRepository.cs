@@ -164,7 +164,7 @@ namespace WorkNest.Infrastructure.Repositories
                 // The ids are ints read from dbo.WN_CustomInvoice_GetList, never user text. The chosen location
                 // (WN_CustomInvoices, CI_01) or else the booking's.
                 var rows = await QueryTextAsync($@"
-                    SELECT i.Id AS InvoiceId, COALESCE(ci.LocationId, s.LocationId) AS LocationId
+                    SELECT i.Id AS InvoiceId, COALESCE(i.LocationId, ci.LocationId, s.LocationId) AS LocationId
                       FROM dbo.WN_Invoices i WITH (NOLOCK)
                       LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = i.Id
                       LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId

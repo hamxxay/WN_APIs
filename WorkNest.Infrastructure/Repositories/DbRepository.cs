@@ -1432,7 +1432,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     SET SecurityDepositAmount = @SDR,
                         SecurityDepositMonths = @SDM,
                         DiscountTotal = @DA,
-                        GrandTotal = SubTotal - @DA + ISNULL(TaxTotal, 0) + @SDR
+                        GrandTotal = SubTotal - @DA + ISNULL(TaxTotal, 0) + @SDR,
+                        LocationId = COALESCE(LocationId, (SELECT COALESCE(s.LocationId, f.LocationId) FROM dbo.WN_Bookings b LEFT JOIN dbo.WN_Spaces s ON s.Id = b.SpaceId LEFT JOIN dbo.WN_Floors f ON f.Id = b.FloorId WHERE b.Id = @BID))
                     WHERE BookingId = @BID;
 
                     UPDATE dbo.WN_InvoiceLines
@@ -1786,7 +1787,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             await using var c = await Open();
             // Owner rule = IsInvoiceOwnedByDbAsync (invoice user, else its booking's user), so every row's PDF opens.
             const string sql = @"
-                SELECT i.Id, i.PublicId, i.InvoiceNumber, i.BookingId, i.InvoiceTypeId,
+                SELECT i.Id, i.PublicId, i.InvoiceNumber, i.BookingId, i.LocationId, i.InvoiceTypeId,
                        i.IssuedOn, i.DueOn,
                        COALESCE(i.BillingPeriodStart, b.StartOn) AS PeriodStart,
                        COALESCE(i.BillingPeriodEnd, b.EndOn) AS PeriodEnd,
@@ -1801,7 +1802,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   LEFT JOIN dbo.OrderStatus os WITH (NOLOCK) ON os.Id = i.StatusId
                   LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
                   LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-                  LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
+                  LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = COALESCE(i.LocationId, s.LocationId)
                  WHERE u.Email = @Email
                    AND (b.Id IS NULL OR ISNULL(b.IsDeleted, 0) = 0)
                    AND ISNULL(i.StatusId, 0) <> 40

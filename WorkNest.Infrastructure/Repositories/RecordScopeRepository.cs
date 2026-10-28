@@ -27,7 +27,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         // A payment's location comes from its booking, or from the booking of the invoice it pays.
         private const string PaymentSql = @"
-            SELECT COALESCE(s.LocationId, s2.LocationId) AS LocationId
+            SELECT COALESCE(s.LocationId, i.LocationId, s2.LocationId) AS LocationId
               FROM dbo.WN_Payments p WITH (NOLOCK)
               LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = p.BookingIdInt
               LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
@@ -128,12 +128,12 @@ namespace WorkNest.Infrastructure.Repositories
         // The custom-invoice part runs only when WN_CustomInvoices.LocationId exists (dynamic SQL, so a database
         // without the column still compiles the batch); the invoice ids passed to it are INTs from @I, never user text.
         private const string InvoiceSql = @"
-            DECLARE @I TABLE (Id INT, BookingId INT NULL, UserId INT NULL);
-            INSERT INTO @I SELECT i.Id, i.BookingId, i.UserId FROM dbo.WN_Invoices i WITH (NOLOCK)
+            DECLARE @I TABLE (Id INT, BookingId INT NULL, UserId INT NULL, LocationId INT NULL);
+            INSERT INTO @I SELECT i.Id, i.BookingId, i.UserId, i.LocationId FROM dbo.WN_Invoices i WITH (NOLOCK)
              WHERE (@Id IS NOT NULL AND i.Id = @Id)
                 OR (@Guid IS NOT NULL AND (i.PublicId = @Guid OR i.Id IN (
                        SELECT st.CustomerInvoiceId FROM dbo.WN_CustomerSTInvoice st WITH (NOLOCK) WHERE st.PublicId = @Guid)));
-            SELECT s.LocationId FROM @I x
+            SELECT COALESCE(x.LocationId, s.LocationId) AS LocationId FROM @I x
               LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = x.BookingId
               LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
             UNION ALL
@@ -231,7 +231,7 @@ namespace WorkNest.Infrastructure.Repositories
                   LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = p.InvoiceId
                   LEFT JOIN dbo.WN_Bookings b2 WITH (NOLOCK) ON b2.Id = i.BookingId
                   LEFT JOIN dbo.WN_Spaces s2 WITH (NOLOCK) ON s2.Id = b2.SpaceId
-                 WHERE COALESCE(s.LocationId, s2.LocationId) IN ({string.Join(",", ids)});", c);
+                 WHERE COALESCE(s.LocationId, i.LocationId, s2.LocationId) IN ({string.Join(",", ids)});", c);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync()) result.Add(r.GetInt32(0));
             return result;
