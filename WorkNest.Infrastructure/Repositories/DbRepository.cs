@@ -7848,7 +7848,7 @@ SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) 
             cmd.CommandText = $@"
                 SELECT ac.Id, ac.IdGUID, ac.LocationId, l.Name AS LocationName, ac.CustomerId,
                     COALESCE(NULLIF(RTRIM(LTRIM(ISNULL(cu.FirstName, '') + ' ' + ISNULL(cu.LastName, ''))), ''), u.Name, 'Customer') AS CustomerName,
-                    COALESCE(cu.Email, u.Email) AS CustomerEmail,
+                    cu.Email AS CustomerEmail,
                     ac.BookingId, ac.SpaceId, s.Name AS SpaceName, s.Code AS SpaceCode, ac.CardNumber, ac.StartDate, ac.EndDate, ac.Status,
                     CASE WHEN ac.Status = 1 THEN 'Active' WHEN ac.Status = 2 THEN 'Restricted' WHEN ac.Status = 3 THEN 'Inactive' ELSE 'Unknown' END AS StatusLabel,
                     ac.CreatedOn, ac.UpdatedOn, COUNT(*) OVER() AS TotalCount
@@ -8005,12 +8005,7 @@ SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) 
             const string sql = @"
                 SELECT cu.Email FROM dbo.WN_Quotations q WITH (NOLOCK)
                   JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
-                 WHERE q.Id = @QuotationId AND NULLIF(LTRIM(RTRIM(cu.Email)), '') IS NOT NULL
-                UNION
-                SELECT u.Email FROM dbo.WN_Quotations q WITH (NOLOCK)
-                  JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
-                  JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId
-                 WHERE q.Id = @QuotationId AND NULLIF(LTRIM(RTRIM(u.Email)), '') IS NOT NULL;";
+                 WHERE q.Id = @QuotationId AND NULLIF(LTRIM(RTRIM(cu.Email)), '') IS NOT NULL;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.Add("@QuotationId", SqlDbType.Int).Value = quotationId;
             var emails = new List<string>();

@@ -699,16 +699,56 @@ namespace WorkNest.API.Controllers
 
         /// <summary>
         /// Soft deletes an invoice by setting StatusId to 40 (InvoiceStatus.Deleted).
+        /// For unapproved (PendingApproval) invoices, sales executives and admins may delete them.
         /// </summary>
         [HttpDelete("api/invoice/{id:int}")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")] // admins only (not sales executives / receptionists); [RecordScope] still applies
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [RecordScope(RecordKind.Invoice, "id")]
         public async Task<IActionResult> SoftDelete(int id)
         {
             if (id <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid invoice ID." });
 
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Invoice, id.ToString()))
+                return StatusCode(403, new { isSuccessful = false, message = "Location mismatch. You cannot delete invoices outside your assigned location." });
+
             try
             {
                 using var conn = await OpenConnectionAsync();
+
+                // Check invoice approval status first
+                using var checkCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", conn);
+                checkCmd.Parameters.AddWithValue("@Id", id);
+                var appStatusObj = await checkCmd.ExecuteScalarAsync();
+                if (appStatusObj == null)
+                    return NotFound(new { isSuccessful = false, message = "Invoice not found." });
+
+                var appStatus = appStatusObj == DBNull.Value || appStatusObj == null ? null : appStatusObj.ToString();
+                var isSalesExec = User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
+                var isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsSuperAdmin();
+
+                if (isSalesExec && !isAdmin && appStatus != "PendingApproval")
+                {
+                    return StatusCode(403, new { isSuccessful = false, message = "Sales executives may only delete unapproved invoices." });
+                }
+
+                if (appStatus == "PendingApproval")
+                {
+                    var userId = await ResolveUserIdAsync(conn);
+                    await SetAuditContextAsync(conn);
+
+                    using var delCmd = new SqlCommand("dbo.WN_Invoices_DeleteUnapproved", conn);
+                    delCmd.CommandType = CommandType.StoredProcedure;
+                    delCmd.Parameters.AddWithValue("@InvoiceId", id);
+                    delCmd.Parameters.AddWithValue("@UserId", (object?)userId ?? DBNull.Value);
+
+                    var rowsAffected = Convert.ToInt32(await delCmd.ExecuteScalarAsync());
+                    if (rowsAffected == 0)
+                        return BadRequest(new { isSuccessful = false, message = "Invoice could not be deleted." });
+
+                    return Ok(new { isSuccessful = true, message = "Unapproved invoice deleted successfully." });
+                }
+
+                await SetAuditContextAsync(conn);
                 using var cmd = new SqlCommand(@"
                     UPDATE dbo.WN_Invoices 
                     SET StatusId = 40, UpdatedOn = SYSUTCDATETIME() 
@@ -721,6 +761,12 @@ namespace WorkNest.API.Controllers
                     return NotFound(new { isSuccessful = false, message = "Invoice not found." });
 
                 return Ok(new { isSuccessful = true, message = "Invoice deleted successfully." });
+            }
+            catch (SqlException ex) when (ex.Number == 50000)
+            {
+                if (ex.State == 2)
+                    return NotFound(new { isSuccessful = false, message = ex.Message });
+                return BadRequest(new { isSuccessful = false, message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -1453,6 +1499,60 @@ namespace WorkNest.API.Controllers
                         ? "Invoice approved and email sent successfully."
                         : $"Invoice approved, but email delivery failed ({sendResult.Message}). Queued for background retry."
                 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { isSuccessful = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Deletes an unapproved (PendingApproval) invoice from the approval queue.
+        /// Available to sales executives, branch admins, and super admins for their scoped location.
+        /// </summary>
+        [HttpDelete("api/invoice/{id:int}/unapproved")]
+        [HttpPost("api/invoice/{id:int}/reject")]
+        [Authorize(Roles = "sales_executive,SalesExecutive,admin,Admin,super_admin,SuperAdmin")]
+        [RecordScope(RecordKind.Invoice, "id")]
+        public async Task<IActionResult> DeleteUnapprovedInvoice(int id)
+        {
+            if (id <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid invoice ID." });
+
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Invoice, id.ToString()))
+                return StatusCode(403, new { isSuccessful = false, message = "Location mismatch. You cannot delete invoices outside your assigned location." });
+
+            try
+            {
+                using var conn = await OpenConnectionAsync();
+                var userId = await ResolveUserIdAsync(conn);
+                if (userId == null)
+                    return Unauthorized(new { isSuccessful = false, message = "User record not found." });
+
+                await SetAuditContextAsync(conn);
+
+                using var cmd = new SqlCommand("dbo.WN_Invoices_DeleteUnapproved", conn);
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.Parameters.AddWithValue("@InvoiceId", id);
+                cmd.Parameters.AddWithValue("@UserId", userId.Value);
+
+                var rowsAffected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
+
+                if (rowsAffected == 0)
+                {
+                    return BadRequest(new { isSuccessful = false, message = "Invoice could not be deleted. It may have already been approved or removed." });
+                }
+
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    message = "Unapproved invoice deleted successfully."
+                });
+            }
+            catch (SqlException ex) when (ex.Number == 50000)
+            {
+                if (ex.State == 2)
+                    return NotFound(new { isSuccessful = false, message = ex.Message });
+                return BadRequest(new { isSuccessful = false, message = ex.Message });
             }
             catch (Exception ex)
             {

@@ -4883,42 +4883,89 @@ GO
 
 -- 9. WN_Customers_Update
 CREATE OR ALTER PROCEDURE [dbo].[WN_Customers_Update]
-    @IdGUID         UNIQUEIDENTIFIER = NULL,
-    @Id             INT              = NULL,
-    @FirstName      NVARCHAR(100)  = NULL,
-    @LastName       NVARCHAR(100)  = NULL,
-    @Email          NVARCHAR(255)  = NULL,
-    @PhoneNumber    NVARCHAR(50)   = NULL,
-    @CnicOrPassport NVARCHAR(50)   = NULL,
-    @Address        NVARCHAR(500)  = NULL,
-    @CityId         INT            = NULL,
-    @Notes          NVARCHAR(1000) = NULL,
-    @IsActive       BIT            = NULL,
-    @Company        NVARCHAR(255)  = NULL
+    @IdGUID             UNIQUEIDENTIFIER = NULL,
+    @Id                 INT              = NULL,
+    @FirstName          NVARCHAR(100)  = NULL,
+    @LastName           NVARCHAR(100)  = NULL,
+    @Email              NVARCHAR(255)  = NULL,
+    @PhoneNumber        NVARCHAR(50)   = NULL,
+    @CnicOrPassport     NVARCHAR(50)   = NULL,
+    @Address            NVARCHAR(500)  = NULL,
+    @CityId             INT            = NULL,
+    @Notes              NVARCHAR(1000) = NULL,
+    @IsActive           BIT            = NULL,
+    @Company            NVARCHAR(255)  = NULL,
+    @NTN                NVARCHAR(100)  = NULL,
+    @SecpRegistrationNo NVARCHAR(100)  = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET QUOTED_IDENTIFIER ON;
 
-    UPDATE dbo.WN_Customers SET
-        FirstName      = ISNULL(@FirstName,      FirstName),
-        LastName       = ISNULL(@LastName,        LastName),
-        Company        = ISNULL(@Company,         Company),
-        Email          = ISNULL(@Email,           Email),
-        PhoneNumber    = ISNULL(@PhoneNumber,     PhoneNumber),
-        CnicOrPassport = ISNULL(@CnicOrPassport,  CnicOrPassport),
-        Address        = ISNULL(@Address,         Address),
-        CityId         = ISNULL(@CityId,          CityId),
-        Notes          = ISNULL(@Notes,           Notes),
-        IsActive       = ISNULL(@IsActive,        IsActive),
-        UpdatedAt      = GETDATE()
+    -- Retrieve current linked UserId
+    DECLARE @UserId INT = NULL;
+    SELECT TOP 1 @UserId = UserId
+    FROM dbo.WN_Customers
     WHERE (@IdGUID IS NOT NULL AND IdGUID = @IdGUID)
        OR (@Id IS NOT NULL AND Id = @Id);
 
+    -- If customer had no linked UserId, find existing user by email and associate them
+    IF @UserId IS NULL
+    BEGIN
+        SELECT TOP 1 @UserId = u.Id
+        FROM dbo.WN_Users u
+        INNER JOIN dbo.WN_Customers c ON LOWER(LTRIM(RTRIM(c.Email))) = LOWER(LTRIM(RTRIM(u.Email)))
+        WHERE (@IdGUID IS NOT NULL AND c.IdGUID = @IdGUID)
+           OR (@Id IS NOT NULL AND c.Id = @Id);
+
+        IF @UserId IS NOT NULL
+        BEGIN
+            UPDATE dbo.WN_Customers
+            SET UserId = @UserId
+            WHERE (@IdGUID IS NOT NULL AND IdGUID = @IdGUID)
+               OR (@Id IS NOT NULL AND Id = @Id);
+        END
+    END
+
+    -- Update Customer Record
+    UPDATE dbo.WN_Customers SET
+        FirstName          = ISNULL(@FirstName,          FirstName),
+        LastName           = ISNULL(@LastName,           LastName),
+        Company            = ISNULL(@Company,            Company),
+        Email              = ISNULL(@Email,              Email),
+        PhoneNumber        = ISNULL(@PhoneNumber,        PhoneNumber),
+        CnicOrPassport     = ISNULL(@CnicOrPassport,     CnicOrPassport),
+        Address            = ISNULL(@Address,            Address),
+        CityId             = ISNULL(@CityId,             CityId),
+        Notes              = ISNULL(@Notes,              Notes),
+        IsActive           = ISNULL(@IsActive,           IsActive),
+        NTN                = ISNULL(@NTN,                NTN),
+        SecpRegistrationNo = ISNULL(@SecpRegistrationNo, SecpRegistrationNo),
+        UpdatedAt          = GETDATE()
+    WHERE (@IdGUID IS NOT NULL AND IdGUID = @IdGUID)
+       OR (@Id IS NOT NULL AND Id = @Id);
+
+    -- Synchronize linked User Record in dbo.WN_Users
+    IF @UserId IS NOT NULL AND @UserId > 0
+    BEGIN
+        DECLARE @FullName NVARCHAR(200) = LTRIM(RTRIM(ISNULL(@FirstName, '') + ' ' + ISNULL(@LastName, '')));
+        UPDATE dbo.WN_Users SET
+            Email          = ISNULL(@Email,          Email),
+            UserName       = ISNULL(@Email,          UserName),
+            PhoneNumber    = ISNULL(@PhoneNumber,    PhoneNumber),
+            Name           = CASE WHEN @FullName <> '' THEN @FullName ELSE Name END,
+            Address        = ISNULL(@Address,        Address),
+            CityId         = ISNULL(@CityId,         CityId),
+            CnicOrPassport = ISNULL(@CnicOrPassport, CnicOrPassport)
+        WHERE Id = @UserId;
+    END;
+
+    -- Return updated customer details including UserId
     SELECT c.Id, c.IdGUID, c.Code, c.FirstName, c.LastName, c.Company,
            LTRIM(RTRIM(ISNULL(c.FirstName,'') + ' ' + ISNULL(c.LastName,''))) AS FullName,
            c.Email, c.PhoneNumber, c.CnicOrPassport, c.Address,
-           c.CityId, ci.Description AS CityName, c.IsActive, c.Notes, c.CreatedAt
+           c.CityId, ci.Description AS CityName, c.IsActive, c.Notes, c.CreatedAt,
+           c.NTN, c.SecpRegistrationNo, c.UserId
     FROM dbo.WN_Customers c
     LEFT JOIN dbo.City ci ON ci.Id = c.CityId
     WHERE (@IdGUID IS NOT NULL AND c.IdGUID = @IdGUID)

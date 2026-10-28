@@ -191,6 +191,14 @@ namespace WorkNest.Application.Services
                 request.Ntn, request.SecpRegistrationNo);
             if (updated is null)
                 return ApiResponse.Fail("Customer not found or update failed.");
+
+            // Keep linked user account in sync so email/phone upsert lookups (SyncUserAsync)
+            // do not miss the existing user record and create a duplicate user account.
+            if (updated.TryGetValue("UserId", out var uidObj) && uidObj != null && int.TryParse(uidObj.ToString(), out var userId) && userId > 0)
+            {
+                var fullName = PersonName.Join(request.FirstName, request.LastName);
+                await _db.UpdateUserAsync(userId, fullName, request.PhoneNumber, null, request.CityId, request.Address, request.CnicOrPassport, null, null, null, request.Email);
+            }
             return ApiResponse.Ok(updated, "Customer updated successfully.");
         }
 
