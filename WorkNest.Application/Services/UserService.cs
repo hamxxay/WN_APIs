@@ -179,7 +179,16 @@ namespace WorkNest.Application.Services
                         request.Address,
                         request.CityId,
                         request.Notes,
-                        null);
+                        null,
+                        id);
+                }
+                else if (id.HasValue && (!existingCustomer.TryGetValue("UserId", out var existingUid) || existingUid is null || Convert.ToInt32(existingUid) == 0))
+                {
+                    var custGuid = existingCustomer.TryGetValue("IdGUID", out var cg) ? cg?.ToString() : null;
+                    if (!string.IsNullOrWhiteSpace(custGuid))
+                    {
+                        await _db.UpdateCustomerAsync(custGuid, null, null, request.Email, request.Phone, request.CnicOrPassport, request.Address, request.CityId, request.Notes, null);
+                    }
                 }
             }
             catch (Exception ex)
@@ -235,11 +244,20 @@ namespace WorkNest.Application.Services
             string? warning = null;
             try
             {
-                if (await _db.GetCustomerByEmailAsync(request.Email) is null)
+                var existingCustomer = await _db.GetCustomerByEmailAsync(request.Email);
+                if (existingCustomer is null)
                 {
                     var nameParts = (request.Name ?? "").Split(' ', 2);
                     await _db.CreateCustomerAsync(nameParts[0], nameParts.Length > 1 ? nameParts[1] : null, request.Email,
-                        request.Phone, request.CnicOrPassport, request.Address, request.CityId, request.Notes, null);
+                        request.Phone, request.CnicOrPassport, request.Address, request.CityId, request.Notes, null, id);
+                }
+                else if (!existingCustomer.TryGetValue("UserId", out var existingUid) || existingUid is null || Convert.ToInt32(existingUid) == 0)
+                {
+                    var custGuid = existingCustomer.TryGetValue("IdGUID", out var cg) ? cg?.ToString() : null;
+                    if (!string.IsNullOrWhiteSpace(custGuid))
+                    {
+                        await _db.UpdateCustomerAsync(custGuid, null, null, request.Email, request.Phone, request.CnicOrPassport, request.Address, request.CityId, request.Notes, null);
+                    }
                 }
             }
             catch (Exception ex)
