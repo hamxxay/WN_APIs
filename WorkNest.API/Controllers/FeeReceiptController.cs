@@ -76,7 +76,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetUnpaidInvoices(
             [FromQuery] string? search = null,
             [FromQuery] int? locationId = null,
-            [FromQuery] int top = 50)
+            [FromQuery] int top = 200)
         {
             var allowedLocations = ResolveAllowedLocations();
             var result = await _service.GetUnpaidInvoicesAsync(search, locationId, allowedLocations, top);

@@ -21135,6 +21135,11 @@ CREATE PROCEDURE [dbo].[WN_Roles_GetAll]
 AS
 BEGIN
     SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Roles WITH (NOLOCK) WHERE Id = 20 OR RoleName = N'network_engineer')
+    BEGIN
+        INSERT INTO dbo.WN_Roles (Id, RoleName, DisplayName, IsActive, CreatedAt)
+        VALUES (20, N'network_engineer', N'Network Engineer', 1, SYSUTCDATETIME());
+    END
     SELECT Id, RoleName, DisplayName, IsActive, CreatedAt
     FROM dbo.WN_Roles
     WHERE IsActive = 1
@@ -21152,6 +21157,11 @@ BEGIN
     -- Active roles, ordered by Id (read-only): the Users page role picker (GET api/roles) and the role name shown to
     -- people (roleDisplayName on sign-in and api/auth/me). Names come from DisplayName, never from code.
     SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Roles WITH (NOLOCK) WHERE Id = 20 OR RoleName = N'network_engineer')
+    BEGIN
+        INSERT INTO dbo.WN_Roles (Id, RoleName, DisplayName, IsActive, CreatedAt)
+        VALUES (20, N'network_engineer', N'Network Engineer', 1, SYSUTCDATETIME());
+    END
     SELECT Id, RoleName, DisplayName
       FROM dbo.WN_Roles WITH (NOLOCK)
      WHERE IsActive = 1

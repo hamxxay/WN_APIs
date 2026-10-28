@@ -1,4 +1,5 @@
 using WorkNest.Application.Interfaces;
+using WorkNest.Common.Constants;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Services
@@ -56,12 +57,16 @@ namespace WorkNest.Application.Services
                 if (Fresh()) return _roles;
                 var rows = await _db.GetRolesAsync();
                 _missing = rows == null;
-                _roles = rows?.Select(r => new RoleItem(
+                var list = rows?.Select(r => new RoleItem(
                         Convert.ToInt32(r["Id"]),
                         Convert.ToString(r.TryGetValue("RoleName", out var n) ? n : null) ?? "",
                         Convert.ToString(r.TryGetValue("DisplayName", out var d) ? d : null) ?? ""))
-                    .OrderBy(r => r.Id)
                     .ToList();
+                if (list != null && !list.Any(r => r.Id == Roles.NetworkEngineerId || string.Equals(r.RoleName, Roles.NetworkEngineer, StringComparison.OrdinalIgnoreCase)))
+                {
+                    list.Add(new RoleItem(Roles.NetworkEngineerId, Roles.NetworkEngineer, "Network Engineer"));
+                }
+                _roles = list?.OrderBy(r => r.Id).ToList();
                 _loadedAt = DateTime.UtcNow;
                 return _roles;
             }

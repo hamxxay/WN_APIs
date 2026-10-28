@@ -128,6 +128,7 @@ namespace WorkNest.Application.Helpers
                 .Select(m =>
                 {
                     m.Row["ListStatus"] = m.ListStatus;
+                    m.Row["StatusLabel"] = m.ListStatus;
                     m.Row["TotalCount"] = matching.Count;
                     return m.Row;
                 })

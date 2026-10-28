@@ -4337,6 +4337,16 @@ END";
             try
             {
                 await using var c = await Open();
+                await using var ensureCmd = new SqlCommand(@"
+                    IF OBJECT_ID(N'dbo.WN_Roles', N'U') IS NOT NULL
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM dbo.WN_Roles WHERE Id = 20 OR RoleName = N'network_engineer')
+                            INSERT INTO dbo.WN_Roles (Id, RoleName, DisplayName, IsActive, CreatedAt)
+                            VALUES (20, N'network_engineer', N'Network Engineer', 1, SYSUTCDATETIME());
+                        ELSE
+                            UPDATE dbo.WN_Roles SET IsActive = 1 WHERE (Id = 20 OR RoleName = N'network_engineer') AND IsActive = 0;
+                    END", c);
+                try { await ensureCmd.ExecuteNonQueryAsync(); } catch { }
                 await using var cmd = SP("dbo.WN_Roles_GetList", c);
                 await using var r = await cmd.ExecuteReaderAsync();
                 return await ReadAll(r);
@@ -4680,15 +4690,24 @@ END";
                     i.InvoiceTypeId,
                     i.Notes,
                     i.CreatedOn,
-                    COALESCE(
+                    CASE
+                        WHEN bs.BaseStatus IN ('Paid', 'Cancelled') THEN bs.BaseStatus
+                        WHEN ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) <= 0 THEN 'Paid'
+                        WHEN bs.BaseStatus IN ('Unpaid', 'Partial') AND i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) THEN 'Overdue'
+                        WHEN ISNULL(i.PaidTotal, 0) > 0 THEN 'Partial'
+                        ELSE bs.BaseStatus
+                    END AS StatusLabel
+                FROM dbo.WN_Invoices i WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                CROSS APPLY (
+                    SELECT COALESCE(
                         -- legacy values on older rows
                         CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
                         -- OrderStatus IDs (looked up, not hard-coded)
                         (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
                            FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
-                        'Unknown') AS StatusLabel
-                FROM dbo.WN_Invoices i WITH (NOLOCK)
-                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                        'Unknown') AS BaseStatus
+                ) bs
                 {whereClause}
                 ORDER BY i.Id DESC
                 OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY";

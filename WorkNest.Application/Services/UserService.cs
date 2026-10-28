@@ -18,15 +18,17 @@ namespace WorkNest.Application.Services
 
         private const string SalesManagerLocationRequired = "A Sales Manager needs at least one location.";
         private const string AccessOfficerLocationRequired = "An Access Officer needs at least one location.";
+        private const string NetworkEngineerLocationRequired = "A Network Engineer needs at least one location.";
 
         /// <summary>
         /// Roles that only work at their locations and must be given one (nothing is saved without it): a Sales Manager
-        /// sees only their locations' figures, an Access Officer only finds people on their locations' bookings. Null for
-        /// the other roles (their older rules stay as they were).
+        /// sees only their locations' figures, an Access Officer only finds people on their locations' bookings, a Network
+        /// Engineer only manages their locations' networks. Null for the other roles (their older rules stay as they were).
         /// </summary>
         private static string? LocationRequiredFor(int roleId) =>
             Roles.IsSalesManager(roleId) ? SalesManagerLocationRequired
             : Roles.IsAccessOfficer(roleId) ? AccessOfficerLocationRequired
+            : Roles.IsNetworkEngineer(roleId) ? NetworkEngineerLocationRequired
             : null;
 
         public async Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null)
@@ -327,7 +329,7 @@ namespace WorkNest.Application.Services
                         }
                         else if (LocationRequiredFor(roleId) is { } locationRequired)
                         {
-                            // A Sales Manager / Access Officer works only at their locations: one is required (nothing is saved).
+                            // A Sales Manager / Access Officer / Network Engineer works only at their locations: one is required (nothing is saved).
                             return ApiResponse.Fail(locationRequired);
                         }
                     }

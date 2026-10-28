@@ -39,10 +39,11 @@ namespace WorkNest.Application.Services
             _clock = clock;
         }
 
-        public async Task<ApiResponse> GetUnpaidInvoicesAsync(string? search, int? locationId, List<int>? allowedLocationIds, int top = 50)
+        public async Task<ApiResponse> GetUnpaidInvoicesAsync(string? search, int? locationId, List<int>? allowedLocationIds, int top = 200)
         {
+            var today = _clock.Today;
             var rows = await _db.GetFeeReceiptUnpaidInvoicesDbAsync(CleanSearch(search), locationId, ToCsv(allowedLocationIds), top);
-            var items = rows.Select(MapToUnpaidInvoiceDto).ToList();
+            var items = rows.Select(r => MapToUnpaidInvoiceDto(r, today)).ToList();
             return ApiResponse.Ok(items);
         }
 
@@ -253,13 +254,32 @@ namespace WorkNest.Application.Services
             return s.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
         }
 
-        public static FeeReceiptUnpaidInvoiceDto MapToUnpaidInvoiceDto(IDictionary<string, object?> r)
+        public static FeeReceiptUnpaidInvoiceDto MapToUnpaidInvoiceDto(IDictionary<string, object?> r) =>
+            MapToUnpaidInvoiceDto(r, null);
+
+        public static FeeReceiptUnpaidInvoiceDto MapToUnpaidInvoiceDto(IDictionary<string, object?> r, DateTime? today)
         {
             // InvoiceTypeId: 0 when the procedure does not return it (older database).
             var invoiceTypeId = GetInt(r, "InvoiceTypeId");
             var isCustom = invoiceTypeId == CustomInvoiceTypeId;
             var isWht = invoiceTypeId == 6 || GetDecimal(r, "WHTAmount") > 0;
             var allowPartial = (Value(r, "AllowPartial") != null ? GetBool(r, "AllowPartial") : !isWht) && !isCustom && !isWht;
+            var dueOn = GetDateTime(r, "DueOn");
+            var amountPaid = Math.Round(GetDecimal(r, "AmountPaid", GetDecimal(r, "PaidTotal")), 2);
+            var statusLabel = GetString(r, "StatusLabel", "Unpaid");
+            var paymentStatus = GetString(r, "PaymentStatus", amountPaid > 0 ? "Partial" : "Unpaid");
+            if (today.HasValue && dueOn != default && dueOn.Date < today.Value.Date)
+            {
+                if (string.Equals(statusLabel, "Unpaid", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(statusLabel, "Partial", StringComparison.OrdinalIgnoreCase))
+                {
+                    statusLabel = "Overdue";
+                }
+                if (amountPaid <= 0 && string.Equals(paymentStatus, "Unpaid", StringComparison.OrdinalIgnoreCase))
+                {
+                    paymentStatus = "Overdue";
+                }
+            }
             return new FeeReceiptUnpaidInvoiceDto
             {
                 InvoiceId = GetInt(r, "InvoiceId"),
@@ -273,7 +293,7 @@ namespace WorkNest.Application.Services
                 CustomerCompany = GetStringOrNull(r, "CustomerCompany"),
                 CustomerIdGUID = GetGuidOrNull(r, "CustomerIdGUID"),
                 IssuedOn = GetDateTime(r, "IssuedOn"),
-                DueOn = GetDateTime(r, "DueOn"),
+                DueOn = dueOn,
                 RoomRentExclTax = GetDecimal(r, "RoomRentExclTax"),
                 ServiceCharges = GetDecimal(r, "ServiceCharges"),
                 TaxOnServiceCharges = GetDecimal(r, "TaxOnServiceCharges"),
@@ -292,14 +312,14 @@ namespace WorkNest.Application.Services
                 CompanyId = GetIntOrNull(r, "CompanyId"),
                 BranchId = GetIntOrNull(r, "BranchId"),
                 StatusId = GetInt(r, "StatusId"),
-                StatusLabel = GetString(r, "StatusLabel", "Unpaid"),
+                StatusLabel = statusLabel,
                 // FR_01 columns; before the database update: nothing paid (the list then has only unpaid invoices) and
                 // no part payments.
-                AmountPaid = Math.Round(GetDecimal(r, "AmountPaid", GetDecimal(r, "PaidTotal")), 2),
+                AmountPaid = amountPaid,
                 BalanceAmount = Value(r, "BalanceAmount") is not null
                     ? GetDecimal(r, "BalanceAmount")
                     : Math.Max(0, Math.Round(GetDecimal(r, "NetReceivableAmount") - GetDecimal(r, "PaidTotal"), 2)),
-                PaymentStatus = GetString(r, "PaymentStatus", "Unpaid"),
+                PaymentStatus = paymentStatus,
                 // Custom invoices are paid in full only, whatever the procedure says (LIVE answers 1 for type 7).
                 AllowPartial = allowPartial
             };
