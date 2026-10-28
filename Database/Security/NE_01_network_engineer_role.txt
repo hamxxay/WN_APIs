@@ -1,0 +1,33 @@
+-- ============================================================================================
+-- NE_01: the Network Engineer role (network_engineer, RoleId 20 = Roles.NetworkEngineerId in the API).
+-- Adds the dbo.WN_Roles row (Id 20, 'network_engineer', 'Network Engineer', active) when it is missing; no other
+-- table, procedure or row is changed. dbo.WN_Roles.Id is not an identity column, so the id is given explicitly.
+--
+-- A Network Engineer signs in to the CMS and sees only the Network pages (UniFi / Grandstream GWN) of the
+-- location(s) a Super Admin assigns (WN_Users.LocationId plus WN_UserLocations). Only a Super Admin creates them.
+--
+-- The API caches the role list (RoleService, up to 5 minutes): restart the API after running this so the role
+-- shows up in the CMS user screens straight away.
+--
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again (no change when the row exists).
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET NOCOUNT ON;
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Roles WITH (UPDLOCK, HOLDLOCK) WHERE Id = 20 OR RoleName = N'network_engineer')
+        INSERT INTO dbo.WN_Roles (Id, RoleName, DisplayName, IsActive, CreatedAt)
+        VALUES (20, N'network_engineer', N'Network Engineer', 1, GETUTCDATE());
+
+    COMMIT TRANSACTION;
+    SELECT N'NE_01 done: Network Engineer role present.' AS Result, r.Id, r.RoleName, r.DisplayName, r.IsActive,
+           DB_NAME() AS DatabaseName
+      FROM dbo.WN_Roles r
+     WHERE r.Id = 20;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

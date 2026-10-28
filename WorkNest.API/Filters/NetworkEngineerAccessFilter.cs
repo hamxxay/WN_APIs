@@ -9,7 +9,8 @@ namespace WorkNest.API.Filters
     /// <summary>
     /// Marks the endpoints a Network Engineer account may call besides the anonymous ones (sign-in, Google sign-in,
     /// sign-out): the Network pages (api/unifi/*, api/gwn/*), the signed-in user's own profile (GET / PUT api/auth/me,
-    /// api/account/*) and the app's push token (POST api/mobile/device-token). Everything else answers 403 to a Network
+    /// api/account/*), the app's push token (POST api/mobile/device-token) and the location and space lists the Network
+    /// pages read (GET api/location, GET api/space; own locations only). Everything else answers 403 to a Network
     /// Engineer, see <see cref="NetworkEngineerAccessFilter"/>.
     /// </summary>
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]

@@ -99,7 +99,8 @@ namespace WorkNest.API.Controllers
         /// </summary>
         [HttpPost("api/unifi/speedtest")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,network_engineer,NetworkEngineer")] // uses the line's full bandwidth for ~30s
-        public Task<IActionResult> StartSpeedtest([FromQuery] string? wan = null) => Run(() => _unifi.StartSpeedtestAsync(wan));
+        public Task<IActionResult> StartSpeedtest([FromQuery] string? wan = null) => Run(async () =>
+            CanManageNetwork() ? Ok(await _unifi.StartSpeedtestAsync(wan)) : Forbidden(AdminOrEngineerMessage));
 
         /// <summary>
         /// Status / result of the running speed test.
@@ -121,12 +122,13 @@ namespace WorkNest.API.Controllers
         public Task<IActionResult> GetConfig() => Run(() => _unifi.GetConfigAsync());
 
         /// <summary>
-        /// Renames a client: body { mac, name }; an empty name restores the UniFi name. Admin / super admin only.
+        /// Renames a client: body { mac, name }; an empty name restores the UniFi name. Admin / super admin / network engineer only.
         /// </summary>
         [HttpPost("api/unifi/alias")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> SetAlias([FromBody] JsonElement body) => Run(async () =>
         {
+            if (!CanManageNetwork()) return Forbidden(AdminOrEngineerMessage);
             var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
             var result = await _unifi.SetAliasAsync(Field(body, "mac"), Field(body, "name"), email);
             return result == null ? BadRequest(new { error = "Invalid MAC" }) : Ok(result);
@@ -170,7 +172,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Changes one SSID's MAC filter: body { action: add | remove | block | unblock | mode, mac, name, roomNo, policy, macs, reason }.
         /// block / unblock act on this SSID only; mode sets allow | deny | off. Logged in WN_UNIFI_MacFilterLog.
-        /// Admins / super admins: everything. Sales executives: add / remove devices on an "Allowed devices only" SSID.
+        /// Admins / super admins / network engineers: everything. Sales executives: add / remove devices on an "Allowed devices only" SSID.
         /// </summary>
         [HttpPost("api/unifi/ssids/{wlanId}/mac-filter")]
         public Task<IActionResult> UpdateMacFilter(string wlanId, [FromBody] JsonElement body) => Run(async () =>
@@ -187,11 +189,12 @@ namespace WorkNest.API.Controllers
             return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
         });
 
-        /// <summary>Shows or hides the SSID name: body { hidden: true | false, reason }. Admin / super admin; logged.</summary>
+        /// <summary>Shows or hides the SSID name: body { hidden: true | false, reason }. Admin / super admin / network engineer; logged.</summary>
         [HttpPost("api/unifi/ssids/{wlanId}/visibility")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> SetSsidVisibility(string wlanId, [FromBody] JsonElement body) => Run(async () =>
         {
+            if (!CanManageNetwork()) return Forbidden(AdminOrEngineerMessage);
             if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("hidden", out var h) || h.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                 return BadRequest(new { error = "Say whether the SSID should be hidden (true or false)." });
             var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
@@ -205,23 +208,25 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/unifi/speed-profiles")]
         public Task<IActionResult> GetSpeedProfiles() => Run(() => _unifi.GetSpeedProfilesAsync());
 
-        /// <summary>Creates a speed profile: body { name, downMbps, upMbps }. Super admin only.</summary>
+        /// <summary>Creates a speed profile: body { name, downMbps, upMbps }. Super admin / network engineer only.</summary>
         [HttpPost("api/unifi/speed-profiles")]
         [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> CreateSpeedProfile([FromBody] JsonElement body) => Run(async () =>
         {
+            if (!IsSuperAdminOrEngineer()) return Forbidden(SuperAdminOrEngineerMessage);
             var result = await _unifi.CreateSpeedProfileAsync(Field(body, "name"), IntField(body, "downMbps"), IntField(body, "upMbps"));
             return result.ContainsKey("error") ? BadRequest(result) : Ok(result);
         });
 
         /// <summary>
         /// Puts the SSID on a speed profile: body { profileId, reason }; no profileId = no limit (Default).
-        /// Super admin only; logged.
+        /// Super admin / network engineer only; logged.
         /// </summary>
         [HttpPost("api/unifi/ssids/{wlanId}/speed-profile")]
         [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> SetSsidSpeedProfile(string wlanId, [FromBody] JsonElement body) => Run(async () =>
         {
+            if (!IsSuperAdminOrEngineer()) return Forbidden(SuperAdminOrEngineerMessage);
             var email = User.FindFirst(ClaimTypes.Email)?.Value ?? User.FindFirst("email")?.Value;
             var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("id")?.Value;
             int? userId = int.TryParse(idClaim, out var uid) ? uid : null;
@@ -301,6 +306,14 @@ namespace WorkNest.API.Controllers
         // ---- Helpers --------------------------------------------------------------
 
         private Task<IActionResult> Run<T>(Func<Task<T>> action) => Run(async () => (IActionResult)Ok(await action()));
+
+        public const string AdminOrEngineerMessage = "Only an admin, a super admin or a network engineer can do this.";
+        public const string SuperAdminOrEngineerMessage = "Only a super admin or a network engineer can do this.";
+
+        // In-method role checks matching each change's [Authorize] roles (sales executives / admins called past the attribute get 403).
+        private bool CanManageNetwork() => User.IsAdminOrSuperAdmin() || User.IsNetworkEngineer();
+        private bool IsSuperAdminOrEngineer() => User.IsSuperAdmin() || User.IsNetworkEngineer();
+        private IActionResult Forbidden(string message) => StatusCode(StatusCodes.Status403Forbidden, new { error = message }); // IActionResult: keeps Run(...) from wrapping it in Ok
 
         // Console / cloud failures are returned as 502 { error } like the Node server.
         private async Task<IActionResult> Run(Func<Task<IActionResult>> action)

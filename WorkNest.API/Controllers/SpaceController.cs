@@ -80,6 +80,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/space")]
+        [NetworkEngineerAllowed] // the SSIDs page's room picker (own locations' spaces only, as other location-bound staff)
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
