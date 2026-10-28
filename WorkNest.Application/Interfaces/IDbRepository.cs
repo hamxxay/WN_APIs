@@ -229,6 +229,8 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetSpaceStatusForConfigAsync(int configId);
         Task<(List<string> Deleted, List<string> Blocked)> DeleteSpacesFromConfigAsync(int configId, string? spaceGuids);
         Task<IDictionary<string, object?>?> GetActivePricingForSpaceAsync(int spaceId);
+        /// <summary>The space's WN_SpaceConfig row (PricePerHour / PricePerDay / PricePerMonth / SecurityDeposit): its location + space type, else a space type of the same category at that location (PRC_02). Null when none.</summary>
+        Task<IDictionary<string, object?>?> GetSpaceConfigPriceAsync(int spaceId);
 
         // --- Amenity ---
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAmenitiesAsync();

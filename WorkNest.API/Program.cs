@@ -266,6 +266,9 @@ try
     builder.Services.AddScoped<IAuditLogRepository, WorkNest.Infrastructure.Repositories.AuditLogRepository>();
     builder.Services.AddScoped<ILoginHistoryService, WorkNest.Infrastructure.Repositories.LoginHistoryService>();
     builder.Services.AddScoped<ILoginHistoryRepository, WorkNest.Infrastructure.Repositories.LoginHistoryRepository>();
+    // Cross-site sign-in codes (api/auth/handoff): dbo.WN_AuthHandoff (script AUTH_HANDOFF_01_login_handoff); 503 before it.
+    builder.Services.AddScoped<IAuthHandoffRepository, WorkNest.Infrastructure.Repositories.AuthHandoffRepository>();
+    builder.Services.AddScoped<IAuthHandoffService, AuthHandoffService>();
     builder.Services.AddScoped<IForecastService, ForecastService>();
     builder.Services.AddScoped<IWeeklyReportGenerator, WeeklyReportGenerator>();
     builder.Services.AddScoped<IPlanFeatureService, PlanFeatureService>();
@@ -284,6 +287,8 @@ try
     builder.Services.AddScoped<IAttendantService, AttendantService>();
     builder.Services.AddScoped<IBookingEmployeeRepository, WorkNest.Infrastructure.Repositories.BookingEmployeeRepository>(); // customer "Employees" (EMP_01)
     builder.Services.AddScoped<IBookingEmployeeService, BookingEmployeeService>();
+    builder.Services.AddScoped<IAttendanceRepository, WorkNest.Infrastructure.Repositories.AttendanceRepository>(); // customer attendance (ATT_01)
+    builder.Services.AddScoped<IAttendanceService, AttendanceService>();
     builder.Services.AddScoped<IAnnouncementService, AnnouncementService>();
     builder.Services.AddScoped<IHikDeviceService, HikDeviceService>();
     builder.Services.AddScoped<IHikEnrollmentService, HikEnrollmentService>();

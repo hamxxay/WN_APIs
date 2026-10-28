@@ -34,6 +34,83 @@ namespace WorkNest.Application.DTOs.HikDevice
         public string? LastSeen { get; set; }
     }
 
+    /// <summary>One machine for the CMS edit form (admin / super admin). Never carries the password.</summary>
+    public class HikDeviceDetailDto : HikDeviceDto
+    {
+        [JsonPropertyName("host")]
+        public string Host { get; set; } = string.Empty;
+
+        /// <summary>Failover IP / host, tried when Host does not answer.</summary>
+        [JsonPropertyName("host2")]
+        public string? Host2 { get; set; }
+
+        [JsonPropertyName("port")]
+        public int Port { get; set; }
+
+        [JsonPropertyName("useHttps")]
+        public bool UseHttps { get; set; }
+
+        [JsonPropertyName("username")]
+        public string? Username { get; set; }
+
+        [JsonPropertyName("model")]
+        public string? Model { get; set; }
+
+        [JsonPropertyName("serial")]
+        public string? Serial { get; set; }
+    }
+
+    /// <summary>A machine group (WN_HIK_Groups). A group starting with "Entrance" marks entrance doors.</summary>
+    public class HikDeviceGroupDto
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("name")]
+        public string Name { get; set; } = string.Empty;
+
+        [JsonPropertyName("isEntrance")]
+        public bool IsEntrance { get; set; }
+
+        [JsonPropertyName("machines")]
+        public int Machines { get; set; }
+    }
+
+    /// <summary>
+    /// Body of POST / PUT api/hik/devices. Add: Name, Host, Username, Password and LocationId are required. Edit: a
+    /// field left null is kept, an empty Password keeps the saved one, "" clears Host2 / Location / Grp / Code.
+    /// </summary>
+    public class HikDeviceSaveRequest
+    {
+        public string? Name { get; set; }
+        public string? Host { get; set; }
+        public string? Host2 { get; set; }
+        /// <summary>Default 80 (443 with HTTPS).</summary>
+        public int? Port { get; set; }
+        public bool? UseHttps { get; set; }
+        public string? Username { get; set; }
+        public string? Password { get; set; }
+        /// <summary>Area / label, e.g. "Entrance" or "Room 313" (WN_HIK_Devices.Location).</summary>
+        public string? Location { get; set; }
+        /// <summary>Group name; a new name creates the group.</summary>
+        public string? Grp { get; set; }
+        /// <summary>Room number the machine opens (e.g. "313"), used to match booked rooms. Empty for entrance / common doors.</summary>
+        public string? Code { get; set; }
+        /// <summary>WorkNest location (WN_Locations.Id).</summary>
+        public int? LocationId { get; set; }
+    }
+
+    /// <summary>Result of an add / edit / delete: HTTP status, message and (add / edit) the saved machine.</summary>
+    public class HikDeviceSaveOutcome
+    {
+        public int StatusCode { get; set; } = 200;
+        public bool IsSuccessful => StatusCode is >= 200 and < 300;
+        public string Message { get; set; } = string.Empty;
+        public HikDeviceDetailDto? Device { get; set; }
+        /// <summary>The connection test run after the save (null when it could not run).</summary>
+        public HikDeviceTestResult? Test { get; set; }
+    }
+
     public class HikDeviceRosterItemDto
     {
         [JsonPropertyName("device_id")]

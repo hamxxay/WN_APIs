@@ -10,12 +10,13 @@ namespace WorkNest.API.Controllers
 {
     /// <summary>
     /// "Employees" on a customer's own booking (website My Bookings, app booking detail). Only the customer who booked
-    /// it (role general; WN_Bookings.UserId, or the booking is invoiced to their customer record) - anyone else, also
+    /// it (any signed-in account, also a staff account that booked; WN_Bookings.UserId, or the booking is invoiced to
+    /// their customer record) - anyone else, also
     /// an employee with their own login, gets 404. People they add wait for a CNIC check by sales at the branch, then
     /// they are the booking's attendants (CMS Attendants &amp; Access). Customers never enrol fingerprints / faces / cards.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "general,General")]
+    [Authorize] // ownership is checked per booking / customer, so a staff account that is also a customer works too
     public class CustomerEmployeeController : ControllerBase
     {
         private readonly IBookingEmployeeService _employees;

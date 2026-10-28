@@ -505,7 +505,7 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(result, "Admin booking created.");
         }
 
-        /// <summary>Standard per-seat monthly price (s.Price, as WN_Bookings_Insert uses), capacity, category and type name of a space.</summary>
+        /// <summary>Standard per-seat monthly price (the space's WN_SpaceConfig price, as WN_Bookings_Insert charges it; other categories: s.Price), capacity, category and type name of a space.</summary>
         private async Task<(decimal StandardPerSeat, int Capacity, string CategoryCode, string Name, string SpaceTypeName)> GetSpacePricingAsync(int spaceId)
         {
             var (rows, _) = await _db.GetSpacesAsync(1, 10000, null);
@@ -514,6 +514,14 @@ namespace WorkNest.Application.Services
             decimal price = row.TryGetValue("Price", out var p) && p is not null ? Convert.ToDecimal(p) : 0m;
             int cap = row.TryGetValue("Capacity", out var c) && c is not null ? Convert.ToInt32(c) : 1;
             string category = row.TryGetValue("CategoryCode", out var cc) ? cc?.ToString() ?? "" : "";
+            // PRC_02: meeting room, private office and shared space are priced by WN_SpaceConfig (location + space type), no
+            // fallback to the space's own price; a missing / 0 price stays 0 (WN_Bookings_Insert then refuses the booking).
+            if (SpaceConfigPricing.PeriodOf(category) is not null)
+            {
+                var cfg = await _db.GetSpaceConfigPriceAsync(spaceId);
+                price = cfg is null ? 0m : SpaceConfigPricing.SeatPrice(category,
+                    SpaceConfigPricing.Money(cfg, "PricePerHour"), SpaceConfigPricing.Money(cfg, "PricePerMonth"));
+            }
             string name = row.TryGetValue("Name", out var n) ? n?.ToString() ?? "this space" : "this space";
             string typeName = row.TryGetValue("SpaceTypeName", out var tn) ? tn?.ToString() ?? "" : "";
             return (price, Math.Max(1, cap), category, name, typeName);

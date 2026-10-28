@@ -3877,6 +3877,25 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return await r.ReadAsync() ? ToDict(r) : null;
         }
 
+        public async Task<IDictionary<string, object?>?> GetSpaceConfigPriceAsync(int spaceId)
+        {
+            // Same row WN_Bookings_Insert charges from (PRC_02): the space's location + space type, else a space type of the
+            // same category at that location.
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(@"
+                SELECT TOP 1 pc.PricePerHour, pc.PricePerDay, pc.PricePerMonth, pc.SecurityDeposit
+                FROM dbo.WN_SpaceConfig pc WITH (NOLOCK)
+                JOIN dbo.WN_Spaces      s   WITH (NOLOCK) ON s.Id   = @SpaceId
+                JOIN dbo.WN_SpaceTypes  st  WITH (NOLOCK) ON st.Id  = s.SpaceTypeId
+                LEFT JOIN dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id = pc.SpaceTypeId
+                WHERE pc.LocationId = s.LocationId AND pc.Status = 1
+                  AND (pc.SpaceTypeId = s.SpaceTypeId OR pst.CategoryId = st.CategoryId)
+                ORDER BY CASE WHEN pc.SpaceTypeId = s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC", c);
+            cmd.Parameters.AddWithValue("@SpaceId", spaceId);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? ToDict(r) : null;
+        }
+
         public async Task<(IDictionary<string, object?>? Header, IEnumerable<IDictionary<string, object?>> Lines)> GetBookingDetailsAsync(string bookingIdentifier, string? userEmail)
         {
             await using var c = await Open();

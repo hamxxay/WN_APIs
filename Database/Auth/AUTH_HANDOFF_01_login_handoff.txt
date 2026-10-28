@@ -1,0 +1,83 @@
+-- ============================================================================================
+-- AUTH_HANDOFF_01: Cross-site sign-in (worknestpk.com <-> cms.worknestpk.com).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again. Needs nothing else.
+--
+-- Staff who sign in on worknestpk.com are sent to the CMS already signed in; customers who sign in on the CMS are sent
+-- to worknestpk.com already signed in. The signed-in site asks the API for a one-time code (api/auth/handoff), the
+-- other site redeems it (api/auth/handoff/redeem) for its own new session. Until this script has run the API answers
+-- 503 and the sites send the user to the other site's sign-in page, as before.
+--
+--   dbo.WN_AuthHandoff (new)      one code: only its SHA-256 (CodeHash), the user, the site it opens (Target 'cms' |
+--                                 'web'), when it expires (60 seconds) and when it was used (NULL = not yet). UTC.
+--   dbo.WN_AuthHandoff_Create     stores a new code; also deletes codes that expired more than a day ago.
+--   dbo.WN_AuthHandoff_Redeem     marks an unused code used in one UPDATE (a code is never accepted twice, also with
+--                                 several API servers) and returns it with its user's Email / IsActive; no row = unknown
+--                                 or already used. The API then checks expiry, target and the user.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_Users', N'U') IS NULL
+        THROW 50001, N'dbo.WN_Users is missing: wrong database? Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- 1. Codes.
+    IF OBJECT_ID(N'dbo.WN_AuthHandoff', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_AuthHandoff (
+            Id         BIGINT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_AuthHandoff PRIMARY KEY,
+            CodeHash   BINARY(32)   NOT NULL,
+            UserId     INT          NOT NULL,
+            Target     VARCHAR(10)  NOT NULL,
+            CreatedAt  DATETIME2(3) NOT NULL CONSTRAINT DF_WN_AuthHandoff_CreatedAt DEFAULT (SYSUTCDATETIME()),
+            ExpiresAt  DATETIME2(3) NOT NULL,
+            UsedAt     DATETIME2(3) NULL,
+            CONSTRAINT UQ_WN_AuthHandoff_CodeHash UNIQUE (CodeHash),
+            CONSTRAINT CK_WN_AuthHandoff_Target CHECK (Target IN (''cms'', ''web''))
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_AuthHandoff') AND name = N'IX_WN_AuthHandoff_ExpiresAt')
+        EXEC(N'CREATE INDEX IX_WN_AuthHandoff_ExpiresAt ON dbo.WN_AuthHandoff (ExpiresAt);');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_AuthHandoff_Create
+    @UserId     INT,
+    @CodeHash   BINARY(32),
+    @Target     VARCHAR(10),
+    @TtlSeconds INT = 60
+AS
+BEGIN
+    -- AUTH_HANDOFF_01: stores a new one-time code (its SHA-256 only) for @UserId to open @Target (''cms'' | ''web'').
+    SET NOCOUNT ON;
+    IF @TtlSeconds IS NULL OR @TtlSeconds < 1 OR @TtlSeconds > 300 SET @TtlSeconds = 60;
+    -- Housekeeping: codes are worthless a minute after they were made; keep a day for troubleshooting.
+    DELETE FROM dbo.WN_AuthHandoff WHERE ExpiresAt < DATEADD(DAY, -1, SYSUTCDATETIME());
+    INSERT INTO dbo.WN_AuthHandoff (CodeHash, UserId, Target, ExpiresAt)
+    VALUES (@CodeHash, @UserId, LOWER(@Target), DATEADD(SECOND, @TtlSeconds, SYSUTCDATETIME()));
+    SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS Id;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_AuthHandoff_Redeem
+    @CodeHash BINARY(32)
+AS
+BEGIN
+    -- AUTH_HANDOFF_01: marks the code used, only while it is unused (one atomic UPDATE: two requests with the same code
+    -- never both get it), and returns it with its user. Expired / wrong-site codes are spent too; the API refuses them.
+    SET NOCOUNT ON;
+    DECLARE @Used TABLE (UserId INT, Target VARCHAR(10), ExpiresAt DATETIME2(3), UsedAt DATETIME2(3));
+    UPDATE h SET UsedAt = SYSUTCDATETIME()
+    OUTPUT inserted.UserId, inserted.Target, inserted.ExpiresAt, inserted.UsedAt INTO @Used
+      FROM dbo.WN_AuthHandoff h WITH (ROWLOCK, UPDLOCK)
+     WHERE h.CodeHash = @CodeHash AND h.UsedAt IS NULL;
+    SELECT x.UserId, x.Target, x.ExpiresAt, x.UsedAt, u.Email, CAST(ISNULL(u.IsActive, 0) AS BIT) AS IsActive
+      FROM @Used x
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = x.UserId;
+END;');
+
+    COMMIT TRANSACTION;
+    SELECT N'OK: cross-site sign-in codes installed (AUTH_HANDOFF_01).' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

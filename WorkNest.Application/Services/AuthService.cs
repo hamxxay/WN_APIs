@@ -184,9 +184,7 @@ namespace WorkNest.Application.Services
                 });
             }
 
-            var locationIds = row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : new List<int>();
-            var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
-                locationIds.Count > 0 ? locationIds : null);
+            var session = await SessionDataAsync(row, publicId, request.Email, role, locationId);
 
             var resolvedUserId = (row != null && row.TryGetValue("Id", out var rUid) && rUid is not null)
                 ? Convert.ToInt32(rUid) 
@@ -196,8 +194,49 @@ namespace WorkNest.Application.Services
             // unverified Firebase sign-ins through (CheckFirebaseSignInAsync).
             await RecordQuietly("LOGIN", resolvedUserId, request.Email, null);
 
-            return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role },
-                roleDisplayName = await RoleDisplayNameAsync(role), locationId, locationIds, token }, "Login successful.");
+            return ApiResponse.Ok(session, "Login successful.");
+        }
+
+        /// <summary>
+        /// Signs in a user handed over from the other WorkNest site (api/auth/handoff/redeem, after the one-time code was
+        /// checked): the same token and response body as LoginAsync gives an existing account. Refused (ACCOUNT_DISABLED)
+        /// when there is no active user with this email any more, and while the account is locked out.
+        /// </summary>
+        public async Task<ApiResponse> HandoffLoginAsync(string email)
+        {
+            var row = await _db.GetUserByEmailAsync(email);
+            if (row is null) return Refused(SignInRefusal.AccountDisabled());
+            var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
+
+            if (row.TryGetValue("LockoutEnd", out var lo) && lo != null && lo != DBNull.Value
+                && DateTimeOffset.TryParse(lo.ToString(), out var lockoutEnd) && lockoutEnd > DateTimeOffset.UtcNow)
+            {
+                await RecordQuietly("FAILED", userId, email, "LockedOut");
+                return ApiResponse.Fail("Account is locked out.");
+            }
+
+            var publicId = (row.TryGetValue("IdGUID", out var idg) && idg is not null && !string.IsNullOrWhiteSpace(idg.ToString()))
+                ? idg.ToString()
+                : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
+            var role = Roles.FromRow(row);
+            int? locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : null;
+            var session = await SessionDataAsync(row, publicId, email, role, locationId);
+
+            await RecordQuietly("LOGIN", userId, email, null);
+            return ApiResponse.Ok(session, "Login successful.");
+        }
+
+        /// <summary>
+        /// data of a successful sign-in (login, google-login, handoff): the API token for the user and what the sites
+        /// store with it. Location-bound roles get every allowed location (row = their WN_Users row; null for a new user).
+        /// </summary>
+        private async Task<object> SessionDataAsync(IDictionary<string, object?>? row, string? publicId, string email, string role, int? locationId)
+        {
+            var locationIds = row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : new List<int>();
+            var token = _jwt.GenerateToken(publicId ?? "", email, role, locationId,
+                locationIds.Count > 0 ? locationIds : null);
+            return new { id = publicId, email, role, roles = new[] { role },
+                roleDisplayName = await RoleDisplayNameAsync(role), locationId, locationIds, token };
         }
 
         /// <summary>
@@ -356,15 +395,12 @@ namespace WorkNest.Application.Services
                     await EnsureCustomerAsync(request.Email, name, null, newId);
                 }
 
-                var locationIds = row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : new List<int>();
-                var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
-                    locationIds.Count > 0 ? locationIds : null);
+                var session = await SessionDataAsync(row, publicId, request.Email, role, locationId);
 
                 if (interactive)
                     await RecordQuietly("LOGIN", resolvedUserId, request.Email, null);
 
-                return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role },
-                    roleDisplayName = await RoleDisplayNameAsync(role), locationId, locationIds, token }, "Google login successful.");
+                return ApiResponse.Ok(session, "Google login successful.");
             }
             catch (Exception ex)
             {

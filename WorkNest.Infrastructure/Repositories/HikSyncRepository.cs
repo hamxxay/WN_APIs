@@ -79,8 +79,79 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<HikSyncDevice?> GetDeviceAsync(int id) =>
             (await SpAsync("WN_HIK_Sync_Devices_Get", ("@DeviceId", id))).Select(MapDevice).FirstOrDefault();
 
-        public Task SetDeviceOnlineAsync(int deviceId, bool online) =>
-            SpAsync("WN_HIK_Device_SetOnline", ("@device_id", deviceId), ("@online", online ? 1 : 0));
+        public Task SetDeviceOnlineAsync(int deviceId, bool online, string? model = null, string? serial = null) =>
+            SpAsync("WN_HIK_Device_SetOnline", ("@device_id", deviceId), ("@online", online ? 1 : 0),
+                ("@model", Cut(model, 64)), ("@serial", Cut(serial, 64)));
+
+        private static string? Cut(string? s, int max) =>
+            string.IsNullOrWhiteSpace(s) ? null : (s.Trim().Length > max ? s.Trim()[..max] : s.Trim());
+
+        // ---- machine management (HIK_DEV_01) ---------------------------------------------------
+
+        /// <summary>A HIK_DEV_01 procedure, mapping "not installed" (2812 procedure / 208 table missing) to its exception.</summary>
+        private async Task<List<IDictionary<string, object?>>> DevSpAsync(string procedure, params (string Name, object? Value)[] ps)
+        {
+            try { return await SpAsync(procedure, ps); }
+            catch (SqlException ex) when (ex.Number is 2812 or 208) { throw new HikDeviceManagementNotInstalledException(ex); }
+        }
+
+        public async Task<HikDeviceDetailDto?> GetDeviceDetailAsync(int id)
+        {
+            var r = (await DevSpAsync("WN_HIK_Device_GetById", ("@Id", id))).FirstOrDefault();
+            if (r == null) return null;
+            return new HikDeviceDetailDto
+            {
+                Id = Int(r, "Id"),
+                Name = Str(r, "Device_Name") ?? $"Device {Int(r, "Id")}",
+                Host = Str(r, "Host") ?? string.Empty,
+                Host2 = Str(r, "Host2"),
+                Port = Int(r, "Port"),
+                UseHttps = r.TryGetValue("Use_https", out var https) && https != null && Convert.ToBoolean(https),
+                Username = Str(r, "Username"),
+                Location = Str(r, "Location"),
+                Code = Str(r, "Code"),
+                Grp = Str(r, "GroupName")?.Trim(),
+                LocationId = r.TryGetValue("LocationId", out var loc) && loc != null ? Convert.ToInt32(loc) : null,
+                LocationName = Str(r, "LocationName"),
+                Model = Str(r, "Model"),
+                Serial = Str(r, "Serial"),
+                Online = r.TryGetValue("Online", out var on) && on != null && Convert.ToBoolean(on) ? 1 : 0,
+                LastSeen = Date(r, "Last_seen")?.ToString("yyyy-MM-ddTHH:mm:ss")
+            };
+        }
+
+        public async Task<List<HikDeviceGroupDto>> GetDeviceGroupsAsync() =>
+            (await DevSpAsync("WN_HIK_Device_GetGroups")).Select(r => new HikDeviceGroupDto
+            {
+                Id = Int(r, "Id"),
+                Name = Str(r, "Name") ?? string.Empty,
+                IsEntrance = r.TryGetValue("IsEntrance", out var e) && e != null && Convert.ToBoolean(e),
+                Machines = Int(r, "Machines")
+            }).ToList();
+
+        public async Task<(string Result, int? Id)> AddDeviceAsync(HikDeviceSaveRequest q, int port)
+        {
+            var r = (await DevSpAsync("WN_HIK_Device_Add",
+                ("@Name", q.Name), ("@Host", q.Host), ("@Host2", q.Host2), ("@Port", port), ("@UseHttps", q.UseHttps == true),
+                ("@Username", q.Username), ("@Password", q.Password), ("@Location", q.Location), ("@Grp", q.Grp),
+                ("@Code", q.Code), ("@LocationId", q.LocationId))).FirstOrDefault();
+            return (r == null ? "Failed" : Str(r, "Result") ?? "Failed", r != null && Int(r, "Id") > 0 ? Int(r, "Id") : null);
+        }
+
+        public async Task<(string Result, int? Id)> UpdateDeviceAsync(int id, HikDeviceSaveRequest q)
+        {
+            var r = (await DevSpAsync("WN_HIK_Device_Update",
+                ("@Id", id), ("@Name", q.Name), ("@Host", q.Host), ("@Host2", q.Host2), ("@Port", q.Port), ("@UseHttps", q.UseHttps),
+                ("@Username", q.Username), ("@Password", q.Password), ("@Location", q.Location), ("@Grp", q.Grp),
+                ("@Code", q.Code), ("@LocationId", q.LocationId))).FirstOrDefault();
+            return (r == null ? "Failed" : Str(r, "Result") ?? "Failed", r != null && Int(r, "Id") > 0 ? Int(r, "Id") : null);
+        }
+
+        public async Task<(string Result, string? Name)> DeleteDeviceAsync(int id)
+        {
+            var r = (await DevSpAsync("WN_HIK_Device_Delete", ("@Id", id))).FirstOrDefault();
+            return (r == null ? "Failed" : Str(r, "Result") ?? "Failed", r == null ? null : Str(r, "Device_Name"));
+        }
 
         public Task LogAsync(int? employeeId, int? deviceId, string action, bool ok, string? detail) =>
             SpAsync("WN_HIK_Log_Write", ("@employee_id", employeeId), ("@device_id", deviceId), ("@action", action), ("@ok", ok ? 1 : 0), ("@detail", detail));

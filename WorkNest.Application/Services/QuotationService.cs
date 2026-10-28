@@ -45,36 +45,27 @@ namespace WorkNest.Application.Services
             decimal maxDiscountPercent = spaceRow.ContainsKey("MaxDiscountPercent") && spaceRow["MaxDiscountPercent"] != null ? Convert.ToDecimal(spaceRow["MaxDiscountPercent"]) : 20.00m;
             string category = spaceRow["SpaceTypeName"]?.ToString() ?? "";
 
-            // Try active pricing plan first
-            var pricing = await _db.GetActivePricingForSpaceAsync(spaceId);
-            decimal seatPrice = pricing != null && pricing.ContainsKey("SeatPrice") ? Convert.ToDecimal(pricing["SeatPrice"]) : 0;
-            decimal secDeposit = pricing != null && pricing.ContainsKey("SecurityDeposit") ? Convert.ToDecimal(pricing["SecurityDeposit"]) : 0;
+            // PRC_02: the price is the space's WN_SpaceConfig row (location + space type), as WN_Bookings_Insert charges it:
+            // PricePerMonth per seat (private office, shared space), PricePerHour (meeting room). 0 / missing = no price (no
+            // fallback to WN_SpacePricing or fixed amounts); CreateQuotationAsync then asks for a price.
+            var cfg = await _db.GetSpaceConfigPriceAsync(spaceId);
+            decimal secDeposit = SpaceConfigPricing.Money(cfg, "SecurityDeposit");
+            decimal hourly = SpaceConfigPricing.Money(cfg, "PricePerHour");
+            decimal daily = SpaceConfigPricing.Money(cfg, "PricePerDay");
+            decimal monthly = SpaceConfigPricing.Money(cfg, "PricePerMonth");
 
-            decimal hourly = spaceRow.ContainsKey("PricePerHour") && spaceRow["PricePerHour"] != null ? Convert.ToDecimal(spaceRow["PricePerHour"]) : 0;
-            decimal daily = spaceRow.ContainsKey("PricePerDay") && spaceRow["PricePerDay"] != null ? Convert.ToDecimal(spaceRow["PricePerDay"]) : 0;
-            decimal monthly = spaceRow.ContainsKey("PricePerMonth") && spaceRow["PricePerMonth"] != null ? Convert.ToDecimal(spaceRow["PricePerMonth"]) : 0;
-
-            if (seatPrice > 0)
-            {
-                monthly = seatPrice;
-            }
-
-            // Fallback values matching frontend manage.ts logic
             if (category.Contains("Private") || category.Contains("private"))
             {
                 category = "PrivateOffice";
-                if (monthly == 0) monthly = 35000;
                 if (secDeposit == 0) secDeposit = monthly * capacity;
             }
             else if (category.Contains("Shared") || category.Contains("shared") || category.Contains("Coworking") || category.Contains("coworking"))
             {
                 category = "SharedSpace";
-                if (monthly == 0) monthly = 30000;
             }
             else if (category.Contains("Meeting") || category.Contains("meeting") || category.Contains("Conference") || category.Contains("conference"))
             {
                 category = "MeetingRoom";
-                if (hourly == 0) hourly = 6000;
             }
 
             return (hourly, daily, monthly, secDeposit, category, spaceName, spaceCode, capacity, maxDiscountPercent, spaceRow["SpaceTypeName"]?.ToString() ?? "");
@@ -86,6 +77,13 @@ namespace WorkNest.Application.Services
             SecurityDepositRules.EnsureValidMonths(request.SecurityDepositMonths);
 
             var spaceDetails = await ResolveSpaceDetailsAsync(request.SpaceId);
+
+            // No price in the space configuration: a quotation needs one (a base price entered by staff for offices / shared spaces).
+            bool noConfigPrice = spaceDetails.Category == "MeetingRoom"
+                ? spaceDetails.Hourly <= 0 && spaceDetails.Daily <= 0
+                : spaceDetails.Monthly <= 0;
+            if (noConfigPrice && !(request.PerSeatBasePrice.HasValue && request.PerSeatBasePrice.Value > 0 && spaceDetails.Category != "MeetingRoom"))
+                throw new ArgumentException($"No price is set for {spaceDetails.SpaceName} in the space configuration, so it cannot be quoted. Set its price first.");
 
             // Base price validation: can only be increased, NOT decreased below standard space rate
             if (request.PerSeatBasePrice.HasValue && request.PerSeatBasePrice.Value > 0)
