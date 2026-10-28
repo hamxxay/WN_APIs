@@ -673,22 +673,14 @@ namespace WorkNest.API.Controllers
                 {
                     using var labelCmd = new SqlCommand(@"
                         SELECT CASE
-                            WHEN bs.BaseStatus IN ('Paid', 'Cancelled') THEN bs.BaseStatus
-                            WHEN ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) <= 0 THEN 'Paid'
-                            WHEN bs.BaseStatus IN ('Unpaid', 'Partial') AND i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) THEN 'Overdue'
-                            WHEN ISNULL(i.PaidTotal, 0) > 0 THEN 'Partial'
-                            ELSE bs.BaseStatus
+                            WHEN i.StatusId IN (5, 40) THEN 'Cancelled'
+                            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 'Paid'
+                            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN
+                                CASE WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) THEN 'Overdue' ELSE 'Partial' END
+                            WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) THEN 'Overdue'
+                            ELSE 'Unpaid'
                         END AS StatusLabel
                           FROM dbo.WN_Invoices i WITH (NOLOCK)
-                         CROSS APPLY (
-                             SELECT COALESCE(
-                                 -- legacy values on older rows
-                                 CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
-                                 -- OrderStatus IDs (looked up, not hard-coded)
-                                 (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
-                                    FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
-                                 'Unknown') AS BaseStatus
-                         ) bs
                          WHERE i.Id = @InvoiceId;", conn);
                     labelCmd.Parameters.Add("@InvoiceId", SqlDbType.Int).Value = id;
                     var label = await labelCmd.ExecuteScalarAsync();

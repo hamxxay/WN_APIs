@@ -23,6 +23,7 @@ namespace WorkNest.API.Filters
         {
             var user = context.HttpContext.User;
             if (user.IsLocationBoundRole()
+                && !user.IsNetworkEngineer()
                 && context.ActionDescriptor.EndpointMetadata.OfType<AnyUnifiLocationAttribute>().Any() == false
                 && !await UnifiScope.AllowsAsync(_unifi, user))
             {
@@ -38,7 +39,7 @@ namespace WorkNest.API.Filters
         /// <summary>True when the user may see the UniFi network (super admin, no location saved, or a shared location).</summary>
         public static async Task<bool> AllowsAsync(IUnifiService unifi, System.Security.Claims.ClaimsPrincipal user)
         {
-            if (!user.IsLocationBoundRole()) return true;
+            if (!user.IsLocationBoundRole() || user.IsNetworkEngineer()) return true;
             var networkLocations = await unifi.GetLocationIdsAsync();
             if (networkLocations.Count == 0) return true;
             return user.GetLocationIds().Any(networkLocations.Contains);
