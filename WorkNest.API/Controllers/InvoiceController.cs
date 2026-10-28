@@ -668,25 +668,6 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
-                // WN_GetInvoiceDetailsById has no StatusLabel: the same label the invoice list (WN_GetInvoicesList) shows.
-                if (!invoice.ContainsKey("StatusLabel"))
-                {
-                    using var labelCmd = new SqlCommand(@"
-                        SELECT CASE
-                            WHEN i.StatusId IN (5, 40) THEN 'Cancelled'
-                            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 'Paid'
-                            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN
-                                CASE WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) THEN 'Overdue' ELSE 'Partial' END
-                            WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE) THEN 'Overdue'
-                            ELSE 'Unpaid'
-                        END AS StatusLabel
-                          FROM dbo.WN_Invoices i WITH (NOLOCK)
-                         WHERE i.Id = @InvoiceId;", conn);
-                    labelCmd.Parameters.Add("@InvoiceId", SqlDbType.Int).Value = id;
-                    var label = await labelCmd.ExecuteScalarAsync();
-                    invoice["StatusLabel"] = label is null or DBNull ? null : label.ToString();
-                }
-
                 // Only once the invoice exists on EzPay (the raw column is set as soon as it is being sent).
                 invoice["OneBillNumber"] = await _oneBill.GetNumberAsync(id);
                 invoice["lines"] = lines;
