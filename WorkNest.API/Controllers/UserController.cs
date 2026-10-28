@@ -229,16 +229,20 @@ namespace WorkNest.API.Controllers
 
         [Authorize(Roles = ManageRoles)]
         [HttpPatch("api/user/{id:int}/role")]
+        [KeepMissingLocation]
         public async Task<IActionResult> UpdateRole(int id, [FromBody] UserRoleUpdateRequest request)
         {
             if (await IsSelfAsync(id)) return NotOnYourself("change the role of");
             if (GrantsAdminRole(request?.Role) || await IsProtectedAsync(id)) return OnlySuperAdmin();
+            if (AssignsForeignLocation(request?.LocationId, request?.LocationIds))
+                return BadRequest(ApiResponse.Fail("You can only assign locations you are assigned to yourself."));
             if (await HasNoLocationForBoundCallerAsync(id)) return NoLocationOnlySuperAdmin("change the role of");
             return Ok(await _users.UpdateUserRoleAsync(id, request!));
         }
 
         [Authorize(Roles = ManageRoles)]
         [HttpPatch("api/user/{publicId:guid}/role")]
+        [KeepMissingLocation]
         public async Task<IActionResult> UpdateRoleByGuid(Guid publicId, [FromBody] UserRoleUpdateRequest request)
         {
             var id = await ResolveIdAsync(publicId);

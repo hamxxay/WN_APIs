@@ -184,8 +184,9 @@ namespace WorkNest.Application.Services
                 });
             }
 
+            var locationIds = row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : new List<int>();
             var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
-                row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
+                locationIds.Count > 0 ? locationIds : null);
 
             var resolvedUserId = (row != null && row.TryGetValue("Id", out var rUid) && rUid is not null)
                 ? Convert.ToInt32(rUid) 
@@ -196,7 +197,7 @@ namespace WorkNest.Application.Services
             await RecordQuietly("LOGIN", resolvedUserId, request.Email, null);
 
             return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role },
-                roleDisplayName = await RoleDisplayNameAsync(role), locationId, token }, "Login successful.");
+                roleDisplayName = await RoleDisplayNameAsync(role), locationId, locationIds, token }, "Login successful.");
         }
 
         /// <summary>
@@ -355,14 +356,15 @@ namespace WorkNest.Application.Services
                     await EnsureCustomerAsync(request.Email, name, null, newId);
                 }
 
+                var locationIds = row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : new List<int>();
                 var token = _jwt.GenerateToken(publicId ?? "", request.Email, role, locationId,
-                row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : null);
+                    locationIds.Count > 0 ? locationIds : null);
 
                 if (interactive)
                     await RecordQuietly("LOGIN", resolvedUserId, request.Email, null);
 
                 return ApiResponse.Ok(new { id = publicId, email = request.Email, role, roles = new[] { role },
-                    roleDisplayName = await RoleDisplayNameAsync(role), locationId, token }, "Google login successful.");
+                    roleDisplayName = await RoleDisplayNameAsync(role), locationId, locationIds, token }, "Google login successful.");
             }
             catch (Exception ex)
             {

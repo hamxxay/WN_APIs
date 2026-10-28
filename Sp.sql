@@ -24374,10 +24374,12 @@ BEGIN
         u.RoleId, u.CompanyId, co.CompanyName AS CompanyName,
         u.CityId, ci.Description AS CityName,
         u.Address, u.CnicOrPassport, u.AvatarUrl,
-        u.IsActive, u.Notes, u.CreatedOn
+        u.IsActive, u.Notes, u.CreatedOn,
+        u.LocationId, l.Name AS LocationName
     FROM dbo.WN_Users u WITH (NOLOCK)
-    LEFT JOIN dbo.Company co WITH (NOLOCK) ON co.Id = u.CompanyId
+    LEFT JOIN dbo.Company      co WITH (NOLOCK) ON co.Id = u.CompanyId
     LEFT JOIN dbo.City         ci WITH (NOLOCK) ON ci.Id = u.CityId
+    LEFT JOIN dbo.WN_Locations l  WITH (NOLOCK) ON l.Id = u.LocationId
     WHERE u.Id = @Id;
 END;
 GO
@@ -24398,10 +24400,12 @@ BEGIN
         u.RoleId, u.CompanyId, co.CompanyName AS CompanyName,
         u.CityId, ci.Description AS CityName,
         u.Address, u.CnicOrPassport, u.AvatarUrl,
-        u.IsActive, u.Notes, u.CreatedOn
+        u.IsActive, u.Notes, u.CreatedOn,
+        u.LocationId, l.Name AS LocationName
     FROM dbo.WN_Users u WITH (NOLOCK)
-    LEFT JOIN dbo.Company co WITH (NOLOCK) ON co.Id = u.CompanyId
+    LEFT JOIN dbo.Company      co WITH (NOLOCK) ON co.Id = u.CompanyId
     LEFT JOIN dbo.City         ci WITH (NOLOCK) ON ci.Id = u.CityId
+    LEFT JOIN dbo.WN_Locations l  WITH (NOLOCK) ON l.Id = u.LocationId
     WHERE u.IdGUID = @PublicId;
 END;
 GO
@@ -24479,7 +24483,10 @@ BEGIN
     LEFT JOIN dbo.City         ci WITH (NOLOCK) ON ci.Id = u.CityId
     LEFT JOIN dbo.WN_Locations l  WITH (NOLOCK) ON l.Id = u.LocationId
     WHERE u.IsActive = 1
-      AND (@LocationId IS NULL OR u.LocationId = @LocationId)
+      AND (@LocationId IS NULL
+           OR u.LocationId = @LocationId
+           OR EXISTS (SELECT 1 FROM dbo.WN_UserLocations ul WITH (NOLOCK)
+                       WHERE ul.UserId = u.Id AND ul.LocationId = @LocationId))
       AND (@Search IS NULL OR @Search = ''
            OR u.Name        LIKE '%' + @Search + '%'
            OR u.Email       LIKE '%' + @Search + '%'

@@ -103,18 +103,25 @@ namespace WorkNest.Application.Services
         {
             var row = await _db.GetUserByIdAsync(id);
             if (row is null) return ApiResponse.Fail("User not found");
+            var extra = await _db.GetUserLocationsMapAsync(new[] { id });
+            var locations = AllLocations(row, extra);
+            var role = Roles.FromRow(row);
             return ApiResponse.Ok(new
             {
-                id           = row.TryGetValue("Id",           out var i)  ? i  : null,
-                publicId     = row.TryGetValue("PublicId",     out var g)  ? g?.ToString() : null,
-                email        = row.TryGetValue("Email",        out var e)  ? e?.ToString() : null,
-                name         = row.TryGetValue("Name",         out var n)  ? n?.ToString() : null,
-                phone        = row.TryGetValue("PhoneNumber",  out var p)  ? p?.ToString() : null,
-                isActive     = row.TryGetValue("IsActive",     out var a)  ? Convert.ToBoolean(a) : true,
-                createdOn    = row.TryGetValue("CreatedOn",    out var c)  ? c  : null,
-                role         = Roles.FromRow(row),
-                locationId   = row.TryGetValue("LocationId",   out var loc)&& loc is not null ? Convert.ToInt32(loc) : (int?)null,
-                locationName = row.TryGetValue("LocationName", out var ln) ? ln?.ToString() : null,
+                id              = row.TryGetValue("Id",           out var i)  ? i  : null,
+                publicId        = row.TryGetValue("PublicId",     out var g)  ? g?.ToString() : null,
+                email           = row.TryGetValue("Email",        out var e)  ? e?.ToString() : null,
+                name            = row.TryGetValue("Name",         out var n)  ? n?.ToString() : null,
+                phone           = row.TryGetValue("PhoneNumber",  out var p)  ? p?.ToString() : null,
+                isActive        = row.TryGetValue("IsActive",     out var a)  ? Convert.ToBoolean(a) : true,
+                createdOn       = row.TryGetValue("CreatedOn",    out var c)  ? c  : null,
+                role            = role,
+                roleDisplayName = _roles is null ? null : await _roles.GetDisplayNameAsync(Roles.ParseRoleId(role)),
+                locationId      = row.TryGetValue("LocationId",   out var loc)&& loc is not null ? Convert.ToInt32(loc) : (int?)null,
+                locationIds     = locations.Select(x => x.Id).ToList(),
+                locationName    = locations.Count > 0
+                    ? string.Join(", ", locations.Select(x => x.Name).Where(x => x.Length > 0))
+                    : (row.TryGetValue("LocationName", out var ln) ? ln?.ToString() : null),
             });
         }
 
@@ -395,7 +402,7 @@ namespace WorkNest.Application.Services
                 return ApiResponse.Fail("Role is required.");
 
             int roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
-            int? finalLocationId = request.LocationId;
+            int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
 
             if (!Roles.IsLocationBoundRole(roleId))
             {
@@ -420,7 +427,10 @@ namespace WorkNest.Application.Services
             }
 
             await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId);
-            return ApiResponse.Ok("Role and location binding updated.");
+            string? warning = null;
+            if (request.LocationIds != null || !Roles.IsLocationBoundRole(roleId))
+                warning = await SaveLocationsAsync(id, roleId, finalLocationId, request.LocationIds, null);
+            return ApiResponse.Ok(warning ?? "Role and location binding updated.");
         }
     }
 }
