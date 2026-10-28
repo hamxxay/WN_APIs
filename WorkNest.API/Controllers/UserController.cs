@@ -92,8 +92,8 @@ namespace WorkNest.API.Controllers
         }
 
         // ── User management (write) — admin / super admin only ─────────────────────
-        // Only a super admin may create, change or remove a super admin, an admin, a CEO, a Sales Manager or an Access Officer,
-        // or grant those roles.
+        // Only a super admin may create, change or remove a super admin, an admin, a CEO, a Sales Manager, an Access Officer or a
+        // Network Engineer, or grant those roles.
         private const string ManageRoles = "admin,Admin,super_admin,SuperAdmin";
 
         /// <summary>An admin tied to locations may only hand out those locations (super admins: any).</summary>
@@ -250,7 +250,7 @@ namespace WorkNest.API.Controllers
             User.IsInRole("super_admin") || User.IsInRole("SuperAdmin") || User.IsSuperAdmin();
 
         /// <summary>
-        /// Only a Super Admin creates, promotes or changes Admins, CEOs, Sales Managers, Access Officers (and Super Admins). An Admin
+        /// Only a Super Admin creates, promotes or changes Admins, CEOs, Sales Managers, Access Officers, Network Engineers (and Super Admins). An Admin
         /// manages Sales Executives and customers, giving them one, some or all of the Admin's own locations, and edits
         /// their own profile (not their own role, locations or status).
         /// </summary>
@@ -260,7 +260,7 @@ namespace WorkNest.API.Controllers
             return IsProtectedRole(Roles.ParseRoleId(role));
         }
 
-        /// <summary>True when a non-super-admin targets an existing Admin, CEO, Sales Manager, Access Officer or Super Admin account.</summary>
+        /// <summary>True when a non-super-admin targets an existing Admin, CEO, Sales Manager, Access Officer, Network Engineer or Super Admin account.</summary>
         private async Task<bool> IsProtectedAsync(int id)
         {
             if (CallerIsSuperAdmin()) return false;
@@ -269,10 +269,13 @@ namespace WorkNest.API.Controllers
             return IsProtectedRole(Convert.ToInt32(roleId));
         }
 
-        /// <summary>Roles only a Super Admin may give, change or take away: Super Admin, Admin, CEO, Sales Manager, Access Officer.</summary>
+        /// <summary>
+        /// Roles only a Super Admin may give, change or take away: Super Admin, Admin, CEO, Sales Manager, Access Officer,
+        /// Network Engineer.
+        /// </summary>
         private static bool IsProtectedRole(int roleId) =>
             Roles.IsSuperAdmin(roleId) || roleId == Roles.AdminId || Roles.IsCeo(roleId) || Roles.IsSalesManager(roleId)
-            || Roles.IsAccessOfficer(roleId);
+            || Roles.IsAccessOfficer(roleId) || Roles.IsNetworkEngineer(roleId);
 
         public const string OnlySuperAdminPasswordMessage = "Only a super admin can change another user's password.";
 
@@ -297,7 +300,7 @@ namespace WorkNest.API.Controllers
             StatusCode(403, ApiResponse.Fail($"This user has no booking at your locations; only a super admin can {action} them."));
 
         private IActionResult OnlySuperAdmin() =>
-            StatusCode(403, ApiResponse.Fail("Only a Super Admin can create or change Admin, CEO, Sales Manager and Access Officer accounts."));
+            StatusCode(403, ApiResponse.Fail("Only a Super Admin can create or change Admin, CEO, Sales Manager, Access Officer and Network Engineer accounts."));
 
         /// <summary>True when the user record is the signed-in user's own account (matched on the JWT email).</summary>
         private async Task<bool> IsSelfAsync(int id)

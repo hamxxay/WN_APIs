@@ -15,8 +15,9 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// Grandstream GWN network pages (CMS /admin/network/gwn/*), contract Database/Gwn/GWN_CONTRACT.md. Same read roles as
     /// UnifiController. Location-bound staff (admin, sales executive) only see the networks linked to one of their
-    /// locations in dbo.WN_GWN_NetworkLocations (403 otherwise); super admins see every network. Block / unblock, reboot,
-    /// the action log and the network-location edit are super admin only. Answers { isSuccessful, message, data }.
+    /// locations in dbo.WN_GWN_NetworkLocations (403 otherwise); super admins see every network. Network engineers read
+    /// like location-bound staff. Block / unblock, reboot and the action log are for super admins and network engineers
+    /// (their own locations' networks); the network-location edit is super admin only. Answers { isSuccessful, message, data }.
     /// <c>net</c> = GWN network id (default: the first network the caller may see); <c>locationId</c> = the network of that
     /// location instead. GWN not set up / turned off: 200 with data { available: false, message } on every endpoint.
     /// GWN errors: 502 with a plain message.
@@ -27,6 +28,7 @@ namespace WorkNest.API.Controllers
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public class GwnController : ControllerBase
     {
+        public const string NetworkChangesMessage = "Only a super admin or a network engineer can do this.";
         public const string OtherLocationMessage = "The network belongs to another location.";
         public const string NoNetworkMessage = "No Grandstream network is linked to your locations.";
         public const string NetworkNotFoundMessage = "This Grandstream network was not found.";
@@ -160,8 +162,8 @@ namespace WorkNest.API.Controllers
         });
 
         /// <summary>
-        /// Blocks / unblocks a client on GWN: body { net, mac, block: true | false }. Super admin only; every attempt is
-        /// written to dbo.WN_GWN_ActionLog.
+        /// Blocks / unblocks a client on GWN: body { net, mac, block: true | false }. Super admin or network engineer (own
+        /// locations); every attempt is written to dbo.WN_GWN_ActionLog.
         /// </summary>
         [HttpPost("api/gwn/client/block")]
         [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
@@ -173,9 +175,9 @@ namespace WorkNest.API.Controllers
                 if (body.ValueKind != JsonValueKind.Object || !body.TryGetProperty("block", out var b) || b.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
                     return BadRequest(ApiResponse.Fail("Say whether the client should be blocked (true or false)."));
                 return Ok(ApiResponse.Ok(await _gwn.BlockClientAsync(n.Id, mac!, b.GetBoolean(), Email(), UserId())));
-            });
+            }, networkChangesOnly: true);
 
-        /// <summary>Reboots a GWN device of the network: body { net, mac }. Super admin only; logged in dbo.WN_GWN_ActionLog.</summary>
+        /// <summary>Reboots a GWN device of the network: body { net, mac }. Super admin or network engineer (own locations); logged in dbo.WN_GWN_ActionLog.</summary>
         [HttpPost("api/gwn/device/reboot")]
         [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> RebootDevice([FromBody] JsonElement body) =>
@@ -185,17 +187,19 @@ namespace WorkNest.API.Controllers
                 if (!IsMac(mac)) return BadRequest(ApiResponse.Fail(InvalidMacMessage));
                 var result = await _gwn.RebootDeviceAsync(n.Id, mac!, Email(), UserId());
                 return result == null ? NotFound(ApiResponse.Fail("Device not found in this network.")) : Ok(ApiResponse.Ok(result));
-            });
+            }, networkChangesOnly: true);
 
         /// <summary>Latest block / unblock / reboot actions (net = one network; top 1–500, default 50). Super admin and network engineers.</summary>
         [HttpGet("api/gwn/actions")]
         [Authorize(Roles = "super_admin,SuperAdmin,network_engineer,NetworkEngineer")]
         public Task<IActionResult> GetActions([FromQuery] long? net = null, [FromQuery] int? top = null) => Run(async () =>
         {
+            if (!CanChangeNetwork()) return Forbidden("Only a super admin or a network engineer can see the Grandstream action log.");
             var mine = MyLocations();
+            List<GwnNetworkDto>? visible = null;
             if (mine != null)
             {
-                var visible = await VisibleAsync();
+                visible = await VisibleAsync();
                 if (net is > 0)
                 {
                     if (!visible.Any(n => n.Id == net)) return Forbidden(OtherLocationMessage);
@@ -205,11 +209,10 @@ namespace WorkNest.API.Controllers
                     if (visible.Count == 0) return Forbidden(NoNetworkMessage);
                 }
             }
-            else if (!User.IsSuperAdmin())
-            {
-                return Forbidden("Only a super admin can see the Grandstream action log.");
-            }
-            return Ok(ApiResponse.Ok(await _gwn.GetActionsAsync(net is > 0 ? net : null, top is > 0 ? Math.Min(top.Value, 500) : 50)));
+            var actions = await _gwn.GetActionsAsync(net is > 0 ? net : null, top is > 0 ? Math.Min(top.Value, 500) : 50);
+            // A network engineer without net: only the actions on the networks of their locations.
+            if (visible != null) actions = actions.Where(x => visible.Any(n => n.Id == x.NetworkId)).ToList();
+            return Ok(ApiResponse.Ok(actions));
         });
 
         /// <summary>Each GWN network this user may see and its locations ({ available, canEdit, networks }).</summary>
@@ -249,6 +252,9 @@ namespace WorkNest.API.Controllers
         /// <summary>The caller's locations; null = every location (not location-bound: super admin).</summary>
         private List<int>? MyLocations() => User.IsLocationBoundRole() ? User.GetLocationIds() : null;
 
+        /// <summary>Block / unblock, reboot and the action log: super admins and network engineers only (admins and sales executives get 403).</summary>
+        private bool CanChangeNetwork() => User.IsSuperAdmin() || User.IsNetworkEngineer();
+
         private async Task<List<GwnNetworkDto>> VisibleAsync() =>
             GwnNetworkScope.Visible(await _gwn.GetNetworksAsync(HttpContext?.RequestAborted ?? default), MyLocations(), null);
 
@@ -256,9 +262,9 @@ namespace WorkNest.API.Controllers
         /// Resolves the network asked for (net, else the location's network, else the first one the caller may see) and
         /// runs the action with it; 403 for a network of another location, 404 for one that does not exist.
         /// </summary>
-        private Task<IActionResult> WithNetwork(long? net, int? locationId, Func<GwnNetworkDto, Task<IActionResult>> action, bool superAdminOnly = false) => Run(async () =>
+        private Task<IActionResult> WithNetwork(long? net, int? locationId, Func<GwnNetworkDto, Task<IActionResult>> action, bool networkChangesOnly = false) => Run(async () =>
         {
-            if (superAdminOnly && !User.IsSuperAdmin()) return Forbidden("Only a super admin can do this.");
+            if (networkChangesOnly && !CanChangeNetwork()) return Forbidden(NetworkChangesMessage);
             if (_gwn.UnavailableMessage is { } off) return Unavailable(off);
             var all = await _gwn.GetNetworksAsync(HttpContext?.RequestAborted ?? default);
             var mine = MyLocations();

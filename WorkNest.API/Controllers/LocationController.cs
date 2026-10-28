@@ -50,6 +50,7 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("api/location")]
         [AllowAnonymous]
+        [NetworkEngineerAllowed] // the Network pages' location names (own locations only, as other location-bound staff)
         public async Task<IActionResult> List(
             [FromQuery] int page = 1,
             [FromQuery] int limit = 10,
