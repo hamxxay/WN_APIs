@@ -1,0 +1,289 @@
+-- ============================================================================================
+-- NET_ALERT_01: Network outage e-mail alerts (CMS Administration > Network Alerts).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again. Needs SS_01 (dbo.WN_ServiceSwitches).
+--
+-- The API (NetworkAlertService, switch NetworkAlerts, every 60 s) e-mails a location's recipients when, at that location,
+--   hik   a Hikvision access machine is offline  (dbo.WN_HIK_Devices.Online, kept up to date by HIK Sync),
+--   wan   an internet line is down / the line is on backup  (UniFi gateway),
+--   unifi a UniFi access point / switch / gateway is offline,
+--   gwn   a Grandstream device is offline,
+-- has been down for 5 minutes. One combined e-mail per location per check; a reminder every 6 hours while still down;
+-- one "back online" e-mail when it recovers. Two API instances never send the same alert (per-location lease).
+--
+--   dbo.WN_NetworkAlertRecipients (new)  per location, the e-mail addresses that get its alerts (IsActive = 0: paused).
+--   dbo.WN_NetworkAlertState (new)       one row per item that is / was down: DownSince, FirstAlertAt, LastReminderAt,
+--                                        RecoveredAt (NULL = still down or recovery e-mail not sent yet).
+--   dbo.WN_NetworkAlertLocks (new)       per-location lease (ClaimedAt) + LastRunAt, so only one API instance checks a location.
+--   dbo.WN_NetworkAlertLog (new)         every alert e-mail sent (and failed / held), newest 50 shown in the CMS.
+--   dbo.WN_ServiceSwitches               + row NetworkAlerts (on).
+--   dbo.WN_NetworkAlert_Recipients_Get / _Recipient_Add / _Recipient_Set / _Recipient_Delete   the CMS list.
+--   dbo.WN_NetworkAlert_Locations_GetActive   locations with at least one active recipient (the service's work list).
+--   dbo.WN_NetworkAlert_Claim / _Release       the per-location lease.
+--   dbo.WN_NetworkAlert_HikDevices_Get         the location's machines with Online / Last_seen.
+--   dbo.WN_NetworkAlert_State_Get / _State_Save  state of the location's items.
+--   dbo.WN_NetworkAlert_Log_Add / _Log_Get     the sent-alerts log.
+-- Seed: I-8 (WN_Locations Id 1) -> usamazahid70@gmail.com.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NULL
+        THROW 50001, N'dbo.WN_ServiceSwitches is missing: run SS_01_service_switches first. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- 1. The switch (on).
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_ServiceSwitches WHERE ServiceName = N'NetworkAlerts')
+        INSERT INTO dbo.WN_ServiceSwitches (ServiceName, IsEnabled) VALUES (N'NetworkAlerts', 1);
+
+    -- 2. Recipients.
+    IF OBJECT_ID(N'dbo.WN_NetworkAlertRecipients', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_NetworkAlertRecipients (
+            Id          INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_NetworkAlertRecipients PRIMARY KEY,
+            LocationId  INT            NOT NULL,
+            Email       NVARCHAR(256)  NOT NULL,
+            IsActive    BIT            NOT NULL CONSTRAINT DF_WN_NetworkAlertRecipients_IsActive DEFAULT (1),
+            CreatedOn   DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_NetworkAlertRecipients_CreatedOn DEFAULT (SYSUTCDATETIME()),
+            CreatedBy   NVARCHAR(256)  NULL
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_NetworkAlertRecipients') AND name = N'UX_WN_NetworkAlertRecipients_Location_Email')
+        EXEC(N'CREATE UNIQUE INDEX UX_WN_NetworkAlertRecipients_Location_Email ON dbo.WN_NetworkAlertRecipients (LocationId, Email);');
+
+    -- 3. State of each item that is / was down.
+    IF OBJECT_ID(N'dbo.WN_NetworkAlertState', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_NetworkAlertState (
+            Id              INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_NetworkAlertState PRIMARY KEY,
+            Kind            NVARCHAR(10)   NOT NULL,
+            ItemKey         NVARCHAR(200)  NOT NULL,
+            LocationId      INT            NOT NULL,
+            Name            NVARCHAR(200)  NOT NULL,
+            Detail          NVARCHAR(500)  NULL,
+            DownSince       DATETIME2(0)   NOT NULL,
+            FirstAlertAt    DATETIME2(0)   NULL,
+            LastReminderAt  DATETIME2(0)   NULL,
+            RecoveredAt     DATETIME2(0)   NULL,
+            UpdatedAt       DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_NetworkAlertState_UpdatedAt DEFAULT (SYSUTCDATETIME()),
+            CONSTRAINT CK_WN_NetworkAlertState_Kind CHECK (Kind IN (N''hik'', N''wan'', N''unifi'', N''gwn''))
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_NetworkAlertState') AND name = N'UX_WN_NetworkAlertState_Item')
+        EXEC(N'CREATE UNIQUE INDEX UX_WN_NetworkAlertState_Item ON dbo.WN_NetworkAlertState (LocationId, Kind, ItemKey);');
+
+    -- 4. Per-location lease.
+    IF OBJECT_ID(N'dbo.WN_NetworkAlertLocks', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_NetworkAlertLocks (
+            LocationId  INT          NOT NULL CONSTRAINT PK_WN_NetworkAlertLocks PRIMARY KEY,
+            ClaimedAt   DATETIME2(0) NULL,
+            LastRunAt   DATETIME2(0) NULL
+        );');
+
+    -- 5. Sent alerts.
+    IF OBJECT_ID(N'dbo.WN_NetworkAlertLog', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_NetworkAlertLog (
+            Id          INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_NetworkAlertLog PRIMARY KEY,
+            LocationId  INT            NOT NULL,
+            Kind        NVARCHAR(20)   NOT NULL,
+            Subject     NVARCHAR(300)  NOT NULL,
+            Summary     NVARCHAR(1000) NOT NULL,
+            Recipients  NVARCHAR(1000) NOT NULL,
+            Status      NVARCHAR(10)   NOT NULL,
+            Error       NVARCHAR(500)  NULL,
+            SentAt      DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_NetworkAlertLog_SentAt DEFAULT (SYSUTCDATETIME())
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_NetworkAlertLog') AND name = N'IX_WN_NetworkAlertLog_SentAt')
+        EXEC(N'CREATE INDEX IX_WN_NetworkAlertLog_SentAt ON dbo.WN_NetworkAlertLog (SentAt DESC);');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Recipients_Get
+    @LocationId INT = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: the alert recipients, per location (NULL = every location), with the location name.
+    SET NOCOUNT ON;
+    SELECT r.Id, r.LocationId, l.Name AS LocationName, r.Email, r.IsActive, r.CreatedOn, r.CreatedBy
+      FROM dbo.WN_NetworkAlertRecipients r WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = r.LocationId
+     WHERE @LocationId IS NULL OR r.LocationId = @LocationId
+     ORDER BY r.LocationId, r.Email;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Recipient_Add
+    @LocationId INT,
+    @Email      NVARCHAR(256),
+    @CreatedBy  NVARCHAR(256) = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: adds one recipient (active). 50011 = no such location; 50010 = already in the list.
+    SET NOCOUNT ON;
+    SET @Email = LOWER(LTRIM(RTRIM(@Email)));
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WHERE Id = @LocationId)
+        THROW 50011, N''Location not found.'', 1;
+    IF EXISTS (SELECT 1 FROM dbo.WN_NetworkAlertRecipients WHERE LocationId = @LocationId AND Email = @Email)
+        THROW 50010, N''This e-mail is already in the list.'', 1;
+    INSERT INTO dbo.WN_NetworkAlertRecipients (LocationId, Email, CreatedBy) VALUES (@LocationId, @Email, LEFT(@CreatedBy, 256));
+    SELECT r.Id, r.LocationId, l.Name AS LocationName, r.Email, r.IsActive, r.CreatedOn, r.CreatedBy
+      FROM dbo.WN_NetworkAlertRecipients r
+      LEFT JOIN dbo.WN_Locations l ON l.Id = r.LocationId
+     WHERE r.Id = SCOPE_IDENTITY();
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Recipient_Set
+    @Id       INT,
+    @IsActive BIT
+AS
+BEGIN
+    -- NET_ALERT_01: turns one recipient on / off. Returns the rows changed (0 = not found).
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_NetworkAlertRecipients SET IsActive = @IsActive WHERE Id = @Id;
+    SELECT @@ROWCOUNT AS Changed;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Recipient_Delete
+    @Id INT
+AS
+BEGIN
+    -- NET_ALERT_01: removes one recipient. Returns the rows removed (0 = not found).
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_NetworkAlertRecipients WHERE Id = @Id;
+    SELECT @@ROWCOUNT AS Removed;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Locations_GetActive
+AS
+BEGIN
+    -- NET_ALERT_01: one row per active recipient of every location that has one (the service''s work list).
+    SET NOCOUNT ON;
+    SELECT r.LocationId, ISNULL(l.Name, CONCAT(N''Location '', r.LocationId)) AS LocationName, r.Email
+      FROM dbo.WN_NetworkAlertRecipients r WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = r.LocationId
+     WHERE r.IsActive = 1
+     ORDER BY r.LocationId, r.Email;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Claim
+    @LocationId     INT,
+    @LeaseSeconds   INT = 300,
+    @MinGapSeconds  INT = 30
+AS
+BEGIN
+    -- NET_ALERT_01: one API instance takes the location for this check. Claimed = 1 only when nobody holds a live lease
+    -- (ClaimedAt within @LeaseSeconds) and the last check ended at least @MinGapSeconds ago, so two instances ticking at
+    -- the same moment never both check it. DbNow = the database clock (UTC) the check works with.
+    SET NOCOUNT ON;
+    DECLARE @Now DATETIME2(0) = SYSUTCDATETIME();
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_NetworkAlertLocks WHERE LocationId = @LocationId)
+    BEGIN TRY
+        INSERT INTO dbo.WN_NetworkAlertLocks (LocationId) VALUES (@LocationId);
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() NOT IN (2601, 2627) THROW;
+    END CATCH;
+    UPDATE dbo.WN_NetworkAlertLocks
+       SET ClaimedAt = @Now
+     WHERE LocationId = @LocationId
+       AND (ClaimedAt IS NULL OR ClaimedAt < DATEADD(SECOND, -@LeaseSeconds, @Now))
+       AND (LastRunAt IS NULL OR LastRunAt <= DATEADD(SECOND, -@MinGapSeconds, @Now));
+    SELECT CAST(CASE WHEN @@ROWCOUNT > 0 THEN 1 ELSE 0 END AS BIT) AS Claimed, @Now AS DbNow;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Release
+    @LocationId INT
+AS
+BEGIN
+    -- NET_ALERT_01: ends the check: the lease is free again, LastRunAt = now.
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_NetworkAlertLocks SET ClaimedAt = NULL, LastRunAt = SYSUTCDATETIME() WHERE LocationId = @LocationId;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_HikDevices_Get
+    @LocationId INT
+AS
+BEGIN
+    -- NET_ALERT_01: the location''s access machines. Online is refreshed by HIK Sync (every 2 minutes for machines that
+    -- were online); Last_seen (server time) is the last time one answered.
+    SET NOCOUNT ON;
+    SELECT Id, Device_Name AS Name, Host, Online, Last_seen AS LastSeen
+      FROM dbo.WN_HIK_Devices WITH (NOLOCK)
+     WHERE LocationId = @LocationId
+     ORDER BY Device_Name;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_State_Get
+    @LocationId INT
+AS
+BEGIN
+    -- NET_ALERT_01: the location''s items that are down, or recovered without the "back online" e-mail yet (RecoveredAt NULL).
+    SET NOCOUNT ON;
+    SELECT Kind, ItemKey, LocationId, Name, Detail, DownSince, FirstAlertAt, LastReminderAt, RecoveredAt
+      FROM dbo.WN_NetworkAlertState WITH (NOLOCK)
+     WHERE LocationId = @LocationId AND RecoveredAt IS NULL
+     ORDER BY Kind, Name;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_State_Save
+    @Kind           NVARCHAR(10),
+    @ItemKey        NVARCHAR(200),
+    @LocationId     INT,
+    @Name           NVARCHAR(200),
+    @Detail         NVARCHAR(500) = NULL,
+    @DownSince      DATETIME2(0),
+    @FirstAlertAt   DATETIME2(0) = NULL,
+    @LastReminderAt DATETIME2(0) = NULL,
+    @RecoveredAt    DATETIME2(0) = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: writes one item''s whole state (insert, or update the row of this location / kind / key).
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_NetworkAlertState WITH (UPDLOCK, HOLDLOCK)
+       SET Name = @Name, Detail = @Detail, DownSince = @DownSince, FirstAlertAt = @FirstAlertAt,
+           LastReminderAt = @LastReminderAt, RecoveredAt = @RecoveredAt, UpdatedAt = SYSUTCDATETIME()
+     WHERE LocationId = @LocationId AND Kind = @Kind AND ItemKey = @ItemKey;
+    IF @@ROWCOUNT = 0
+        INSERT INTO dbo.WN_NetworkAlertState (Kind, ItemKey, LocationId, Name, Detail, DownSince, FirstAlertAt, LastReminderAt, RecoveredAt)
+        VALUES (@Kind, @ItemKey, @LocationId, @Name, @Detail, @DownSince, @FirstAlertAt, @LastReminderAt, @RecoveredAt);
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Log_Add
+    @LocationId INT,
+    @Kind       NVARCHAR(20),
+    @Subject    NVARCHAR(300),
+    @Summary    NVARCHAR(1000),
+    @Recipients NVARCHAR(1000),
+    @Status     NVARCHAR(10),
+    @Error      NVARCHAR(500) = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: records one alert e-mail (Kind alert | reminder | recovery | test; Status Sent | Held | Failed).
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_NetworkAlertLog (LocationId, Kind, Subject, Summary, Recipients, Status, Error)
+    VALUES (@LocationId, LEFT(@Kind, 20), LEFT(@Subject, 300), LEFT(@Summary, 1000), LEFT(@Recipients, 1000), LEFT(@Status, 10), LEFT(@Error, 500));
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS Id;
+END;');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Log_Get
+    @Top INT = 50
+AS
+BEGIN
+    -- NET_ALERT_01: the newest @Top alert e-mails (SentAt is UTC).
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 50;
+    SELECT TOP (@Top) g.Id, g.LocationId, l.Name AS LocationName, g.Kind, g.Subject, g.Summary, g.Recipients, g.Status, g.Error, g.SentAt
+      FROM dbo.WN_NetworkAlertLog g WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = g.LocationId
+     ORDER BY g.Id DESC;
+END;');
+
+    -- 6. Seed: I-8 (location 1) -> usamazahid70@gmail.com.
+    IF EXISTS (SELECT 1 FROM dbo.WN_Locations WHERE Id = 1)
+       AND NOT EXISTS (SELECT 1 FROM dbo.WN_NetworkAlertRecipients WHERE LocationId = 1 AND Email = N'usamazahid70@gmail.com')
+        EXEC(N'INSERT INTO dbo.WN_NetworkAlertRecipients (LocationId, Email, CreatedBy) VALUES (1, N''usamazahid70@gmail.com'', N''NET_ALERT_01'');');
+
+    COMMIT TRANSACTION;
+    SELECT N'OK: Network alerts installed (NET_ALERT_01).' AS Result,
+           (SELECT IsEnabled FROM dbo.WN_ServiceSwitches WHERE ServiceName = N'NetworkAlerts') AS NetworkAlertsOn,
+           (SELECT COUNT(*) FROM dbo.WN_NetworkAlertRecipients WHERE IsActive = 1) AS ActiveRecipients;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

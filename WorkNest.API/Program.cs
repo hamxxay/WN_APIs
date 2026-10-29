@@ -229,6 +229,8 @@ try
     builder.Services.AddScoped<IWhatsAppInboxService, WhatsAppInboxService>();
     builder.Services.AddScoped<IWhatsAppBotService, WhatsAppBotService>();
     builder.Services.AddScoped<WhatsAppFollowUpProcessor>();   // Simple Inquiries follow-up (INQ_01), run by WhatsAppFollowUpService
+    builder.Services.AddSingleton<INetworkAlertRepository, WorkNest.Infrastructure.Repositories.NetworkAlertRepository>();   // network outage alerts (NET_ALERT_01)
+    builder.Services.AddScoped<NetworkAlertProcessor>();   // run by NetworkAlertService
     // The bot's branch list (active WN_Locations), shared by all requests: re-read every 10 minutes, 3 s time limit.
     builder.Services.AddSingleton<WhatsAppBranchCache>();
     builder.Services.AddScoped<IGalleryService, GalleryService>();
@@ -339,6 +341,7 @@ try
     builder.Services.AddHostedService<UnifiPollingService>();
     builder.Services.AddHostedService<GwnPollingService>();   // GwnPolling switch; Gwn:Enabled
     builder.Services.AddHostedService<WhatsAppFollowUpService>();   // WhatsAppFollowUp switch; WhatsApp:FollowUpQuietSeconds (120) / FollowUpTickSeconds (30)
+    builder.Services.AddHostedService<NetworkAlertService>();   // NetworkAlerts switch; NetworkAlerts:DownMinutes (5) / ReminderHours (6) / TickSeconds (60)
     builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
     builder.Services.AddHostedService<MonthlyFeeReceiptService>();   // FeeReceipts:MonthlyEnabled (on by default)
 
