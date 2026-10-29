@@ -681,10 +681,10 @@ namespace WorkNest.API.Controllers
 
         /// <summary>
         /// Soft deletes an invoice by setting StatusId to 40 (InvoiceStatus.Deleted).
-        /// For unapproved (PendingApproval) invoices, sales executives and admins may delete them.
+        /// Admins and super admins only (not sales executives / receptionists); unapproved (PendingApproval) invoices are deleted outright.
         /// </summary>
         [HttpDelete("api/invoice/{id:int}")]
-        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
         [RecordScope(RecordKind.Invoice, "id")]
         public async Task<IActionResult> SoftDelete(int id)
         {
@@ -705,14 +705,6 @@ namespace WorkNest.API.Controllers
                     return NotFound(new { isSuccessful = false, message = "Invoice not found." });
 
                 var appStatus = appStatusObj == DBNull.Value || appStatusObj == null ? null : appStatusObj.ToString();
-                var isSalesExec = User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
-                var isAdmin = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsSuperAdmin();
-
-                if (isSalesExec && !isAdmin && appStatus != "PendingApproval")
-                {
-                    return StatusCode(403, new { isSuccessful = false, message = "Sales executives may only delete unapproved invoices." });
-                }
-
                 if (appStatus == "PendingApproval")
                 {
                     var userId = await ResolveUserIdAsync(conn);
@@ -1554,7 +1546,8 @@ namespace WorkNest.API.Controllers
         [Authorize(Roles = SuperAdminRoles)]
         public async Task<IActionResult> RevertApproval(int id, [FromBody] RevertInvoiceApprovalRequest? req)
         {
-            if (!User.IsSuperAdmin())
+            // Same spellings as [Authorize(Roles = SuperAdminRoles)] above (the role claim may be super_admin or SuperAdmin).
+            if (!(User.IsSuperAdmin() || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin")))
                 return StatusCode(403, ApiResponse.Fail(InvoiceApprovalRevertRules.ForbiddenMessage));
             if (id <= 0)
                 return BadRequest(ApiResponse.Fail("Invalid invoice ID."));
