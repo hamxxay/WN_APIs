@@ -401,7 +401,8 @@ namespace WorkNest.Application.Services
             {
                 int months = request.BillingPeriodMonths ?? request.AdvanceRentMonths ?? 1;
                 if (months <= 0) months = 1;
-                endOn = startOn.AddMonths(months);
+                // Inclusive end date: a booking starting on the 1st ends on the last day of the month, not the 1st of the next.
+                endOn = startOn.AddMonths(months).AddDays(-1);
             }
 
             int? actorId = null;
