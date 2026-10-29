@@ -12,6 +12,11 @@ namespace WorkNest.Application.Interfaces
         Task<ApiResponse> LoginAsync(UserLoginRequest request, bool firebaseVerified = false);
         Task<ApiResponse> GoogleLoginAsync(GoogleLoginRequest request);
         /// <summary>
+        /// Signs in a user handed over from the other WorkNest site (api/auth/handoff/redeem): the same response as
+        /// LoginAsync. Called only after the one-time code was checked.
+        /// </summary>
+        Task<ApiResponse> HandoffLoginAsync(string email);
+        /// <summary>
         /// Whether a verified Firebase token may sign in as its email: null = yes, else the refusal to send as a 403
         /// (EMAIL_NOT_VERIFIED / ACCOUNT_DISABLED). Called for every endpoint that takes a Firebase token.
         /// </summary>

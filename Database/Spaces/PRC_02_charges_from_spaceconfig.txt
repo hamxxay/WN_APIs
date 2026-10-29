@@ -1,0 +1,1206 @@
+-- ============================================================================================
+-- PRC_02: what a space is CHARGED comes from dbo.WN_SpaceConfig (per location + space type), the same source as the prices
+-- customers see (PRC_01). Run AFTER PRC_01 (or on its own: the two do not depend on each other).
+-- Owner's rules (the space's category, WN_SpaceCategories.Code):
+--   MeetingRoom / Meeting / Conference  rent = PricePerHour x hours, billing period Hourly.
+--   PrivateOffice / Private             rent per month = PricePerMonth per seat x the office's seats (Capacity), Monthly.
+--   SharedSpace / Shared                rent per month = PricePerMonth per seat, Monthly.
+--   0 / NULL                            no price: the booking is refused with a clear message (a quotation that carries its
+--                                       own price, @OverrideSubtotal / @OverrideUnitPrice / @PerSeatBasePrice, is still booked).
+-- The config row is the space's LocationId + SpaceTypeId (WN_SpaceConfig.SpaceCategory text is not used), else a row of the same
+-- location for a space type of the same category. Any other category keeps WN_Spaces.Price.
+--
+--   WN_Bookings_Insert                  seat price + billing period from WN_SpaceConfig (was WN_Spaces.Price / BillingPeriodId);
+--                                       a private office with no @Capacity is charged for all its seats. Staff bookings,
+--                                       the app's smart booking and quotation conversion all go through it.
+--   WN_Bookings_InsertSmart             picks spaces by their config price; no WN_SpacePricing row needed any more (PricingId 0).
+--   WN_Bookings_GetSmartAvailable       SeatPrice / RoomPrice / SecurityDeposit / BillingPeriodCode / Bookable from WN_SpaceConfig.
+--   WN_Bookings_GetAvailableSpaces      same prices for the staff space picker (GET api/space/available-by-type, booking/available-spaces).
+--   WN_Bookings_GetAvailableSpacesForReassignment   same prices for the staff reassignment picker.
+-- Not changed on purpose: WN_Bookings_Update (an existing booking keeps the price it was created with: it only edits dates and
+-- notes) and WN_Bookings_Reassign (keeps the booking's price). Existing bookings and their invoices are never re-priced.
+-- Not changed (still read the old sources, see the hand-over notes): WN_GetBookingInvoiceDetails, WN_CreateAdvanceInvoice /
+-- WN_vw_BookingSummary, WN_AssignAttendantToBooking, WN_Spaces_GetAvailableByType, WN_Booking_GetAvailableSpaces (old, unused).
+--
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+    IF COL_LENGTH(N'dbo.WN_SpaceConfig', N'PricePerHour') IS NULL
+       OR COL_LENGTH(N'dbo.WN_SpaceConfig', N'PricePerMonth') IS NULL
+       OR COL_LENGTH(N'dbo.WN_SpaceConfig', N'LocationId') IS NULL
+       OR COL_LENGTH(N'dbo.WN_SpaceConfig', N'SpaceTypeId') IS NULL
+       OR COL_LENGTH(N'dbo.WN_SpaceConfig', N'Status') IS NULL
+        THROW 50001, N'dbo.WN_SpaceConfig has not got PricePerHour / PricePerMonth / LocationId / SpaceTypeId / Status on this database. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- WN_Bookings_Insert
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_Insert]
+(
+	 @UserId int = NULL
+	,@SpaceId int
+	,@PricingId int = 0
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Notes nvarchar(MAX) = NULL
+	,@CreatedById int = NULL
+	,@UserEmail nvarchar(255) = NULL
+	,@CustomerEmail nvarchar(255) = NULL
+	,@CustomerFirstName nvarchar(100) = NULL
+	,@CustomerLastName nvarchar(100) = NULL
+	,@CustomerPhone nvarchar(50) = NULL
+	,@CustomerCnic nvarchar(50) = NULL
+	,@CustomerAddress nvarchar(500) = NULL
+	,@CustomerCityId int = NULL
+	,@CustomerNotes nvarchar(MAX) = NULL
+	,@DiscountPercentage decimal(5, 2) = 0.0
+	,@DiscountAmount decimal(18, 2) = 0.0
+	,@DiscountType nvarchar(20) = ''Percentage''
+	,@BillingPeriodMonths int = NULL
+	,@SecurityDepositMonths int = NULL
+	,@AdvanceRentMonths int = NULL
+	,@SupportChargesId tinyint = NULL
+	,@Capacity int = NULL
+	,@OverrideDuration decimal(18, 2) = NULL
+	,@OverrideSubtotal decimal(18, 2) = NULL
+	,@OverrideUnitPrice decimal(18, 2) = NULL
+	,@CustomerCode nvarchar(50) = NULL
+	,@ShiftType nvarchar(20) = ''24_7''
+	,@PerSeatBasePrice decimal(18, 2) = NULL
+	,@SecurityDepositAmount decimal(18, 2) = NULL
+)
+AS
+BEGIN
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	BEGIN TRANSACTION;
+	BEGIN TRY
+		DECLARE @NormalizedShift nvarchar(20) = CASE
+			WHEN @ShiftType IS NULL OR @ShiftType='''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+			WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+			WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+			ELSE LOWER(@ShiftType)
+		END;
+		IF @SecurityDepositMonths IS NOT NULL AND (@SecurityDepositMonths < 0 OR @SecurityDepositMonths > 3)
+			RAISERROR(''Security deposit must be 0, 1, 2 or 3 months.'', 16, 1);
+		IF EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk WITH (UPDLOCK, HOLDLOCK)
+			WHERE bk.SpaceId=@SpaceId
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift=''24_7'' OR ISNULL(bk.ShiftType, ''24_7'')=''24_7'' OR @NormalizedShift=ISNULL(bk.ShiftType, ''24_7''))
+		)
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,''Space is already booked for the selected date range and shift.'' AS ErrorMessage;
+			RETURN;
+		END
+		IF @UserId IS NULL
+		BEGIN
+			IF @UserEmail IS NOT NULL AND @UserEmail <> ''''
+			BEGIN
+				SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email=@UserEmail;
+			END
+			IF @UserId IS NULL AND @CustomerEmail IS NOT NULL AND @CustomerEmail <> ''''
+			BEGIN
+				SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email=@CustomerEmail;
+				IF @UserId IS NULL
+				BEGIN
+					SELECT TOP 1 @UserId = UserId FROM dbo.WN_Customers WHERE Email=@CustomerEmail;
+				END
+			END
+		END
+		IF @CustomerCode IS NULL AND @UserId IS NOT NULL
+		BEGIN
+			SELECT TOP 1 @CustomerCode = Code FROM dbo.WN_Customers WHERE UserId=@UserId;
+		END
+		IF @CustomerCode IS NULL AND @UserId IS NOT NULL
+		BEGIN
+			SELECT TOP 1 @CustomerCode = c.Code
+			FROM dbo.WN_Customers c JOIN
+				dbo.WN_Users u ON LOWER(LTRIM(RTRIM(u.Email)))=LOWER(LTRIM(RTRIM(c.Email)))
+			WHERE u.Id=@UserId AND c.Email IS NOT NULL AND LTRIM(RTRIM(c.Email)) <> '''';
+		END
+		IF @CustomerCode IS NULL AND COALESCE(NULLIF(LTRIM(RTRIM(@CustomerEmail)), ''''), NULLIF(LTRIM(RTRIM(@UserEmail)), '''')) IS NOT NULL
+		BEGIN
+			SELECT TOP 1 @CustomerCode = Code
+			FROM dbo.WN_Customers
+			WHERE LOWER(LTRIM(RTRIM(Email)))=LOWER(COALESCE(NULLIF(LTRIM(RTRIM(@CustomerEmail)), ''''), NULLIF(LTRIM(RTRIM(@UserEmail)), '''')));
+		END
+		DECLARE @CategoryCode nvarchar(50) = NULL;
+		DECLARE @LocationId int = NULL;
+		DECLARE @BillingPeriodCode nvarchar(20) = ''Monthly'';
+		DECLARE @SeatPrice decimal(18, 2) = 0.0;
+		DECLARE @SecurityDeposit decimal(18, 2) = 0.0;
+		DECLARE @AccountReceivableId int = NULL;
+		DECLARE @RentAccountId int = NULL;
+		DECLARE @ServicesIncomeId int = NULL;
+		DECLARE @SalesTaxId int = NULL;
+		DECLARE @SecurityReceivedId int = NULL;
+		DECLARE @ResolvedPricingId int = @PricingId;
+		SELECT TOP 1
+			 @CategoryCode = sc.Code
+			,@LocationId = s.LocationId
+			,@BillingPeriodCode = ISNULL(bp.Code, ''Monthly'')
+			,@SeatPrice = ISNULL(s.Price, 0.0)
+			,@AccountReceivableId = COALESCE(s.AccountReceivableId, st.AccountReceivableId)
+			,@RentAccountId = COALESCE(s.RentAccountId, st.RentAccountId)
+			,@ServicesIncomeId = COALESCE(s.ServicesIncomeId, st.ServicesIncomeId)
+			,@SalesTaxId = COALESCE(s.SalesTaxId, st.SalesTaxId)
+			,@SecurityReceivedId = COALESCE(s.SecurityReceivedId, st.SecurityReceivedId, s.SecurityRecivedId)
+		FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId LEFT JOIN
+			dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id=s.BillingPeriodId
+		WHERE s.Id=@SpaceId;
+		-- PRC_02: what a space is charged comes from WN_SpaceConfig (the space''s location + space type, else a space type of
+		-- the same category there), no longer from WN_Spaces.Price. Meeting room (MeetingRoom / Meeting / Conference):
+		-- PricePerHour, Hourly. Private office: PricePerMonth per seat (x Capacity below; the office''s seats when none is
+		-- sent), Monthly. Shared space: PricePerMonth per seat, Monthly. 0 / NULL = no price: the booking is refused, unless
+		-- the caller sets the price itself (@OverrideSubtotal, @OverrideUnitPrice or @PerSeatBasePrice, i.e. a quotation).
+		-- Other categories keep WN_Spaces.Price. Existing bookings are never re-priced (WN_Bookings_Update leaves the price).
+		DECLARE @ConfigPeriod nvarchar(20) = CASE
+			WHEN @CategoryCode IN (''PrivateOffice'', ''Private'', ''SharedSpace'', ''Shared'') THEN ''Monthly''
+			WHEN @CategoryCode IN (''MeetingRoom'', ''Meeting'', ''Conference'') THEN ''Hourly''
+		END;
+		IF @ConfigPeriod IS NOT NULL
+		BEGIN
+			DECLARE @ConfigPrice decimal(18, 2) = NULL;
+			SELECT TOP 1 @ConfigPrice = CASE WHEN @ConfigPeriod=''Monthly'' THEN NULLIF(pc.PricePerMonth, 0) ELSE NULLIF(pc.PricePerHour, 0) END
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) JOIN
+				dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=@SpaceId JOIN
+				dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC;
+			IF @ConfigPrice IS NULL AND ISNULL(@OverrideSubtotal, 0) <= 0 AND ISNULL(@OverrideUnitPrice, 0) <= 0 AND ISNULL(@PerSeatBasePrice, 0) <= 0
+			BEGIN
+				DECLARE @ConfigError nvarchar(300) = N''No '' + LOWER(@ConfigPeriod) + N'' price is set for this space in the space configuration (WN_SpaceConfig), so it cannot be booked.'';
+				THROW 50030, @ConfigError, 1;
+			END
+			SET @SeatPrice = ISNULL(@ConfigPrice, 0.0);
+			SET @BillingPeriodCode = @ConfigPeriod;
+			IF @CategoryCode IN (''PrivateOffice'', ''Private'') AND ISNULL(@Capacity, 0) <= 0
+				SELECT @Capacity = Capacity
+				FROM dbo.WN_Spaces WITH (NOLOCK)
+				WHERE Id=@SpaceId;
+		END
+		IF @PerSeatBasePrice IS NOT NULL AND @PerSeatBasePrice > @SeatPrice
+			SET @SeatPrice = @PerSeatBasePrice;
+		IF (@RentAccountId IS NULL OR @SecurityReceivedId IS NULL OR @AccountReceivableId IS NULL OR @SalesTaxId IS NULL OR @ServicesIncomeId IS NULL)
+		BEGIN
+			SELECT TOP 1
+				 @AccountReceivableId = COALESCE(@AccountReceivableId, cfg.AccountReceivableId)
+				,@RentAccountId = COALESCE(@RentAccountId, cfg.RentAccountId)
+				,@ServicesIncomeId = COALESCE(@ServicesIncomeId, cfg.ServicesIncomeId)
+				,@SalesTaxId = COALESCE(@SalesTaxId, cfg.SalesTaxId)
+				,@SecurityReceivedId = COALESCE(@SecurityReceivedId, cfg.SecurityReceivedId)
+			FROM dbo.WN_SpaceConfig cfg WITH (NOLOCK)
+			WHERE cfg.SpaceTypeId=(SELECT SpaceTypeId FROM dbo.WN_Spaces WHERE Id=@SpaceId)
+				AND (cfg.LocationId=@LocationId OR cfg.LocationId IS NULL)
+			ORDER BY CASE WHEN cfg.LocationId=@LocationId THEN 0 ELSE 1 END;
+		END
+		IF @RentAccountId IS NULL
+			SELECT TOP 1 @RentAccountId = RentAccountId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date));
+		IF @SecurityReceivedId IS NULL
+			SELECT TOP 1 @SecurityReceivedId = SecurityReceivedId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=2 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date));
+		IF @SalesTaxId IS NULL
+			SELECT TOP 1 @SalesTaxId = SalesTaxId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=3 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date));
+		IF @ServicesIncomeId IS NULL
+			SELECT TOP 1 @ServicesIncomeId = ServicesIncomeId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=4 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date));
+		IF @AccountReceivableId IS NULL
+			SELECT TOP 1 @AccountReceivableId = AccountReceivableId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date));
+		DECLARE @Duration decimal(18, 2) = 1.0;
+		DECLARE @RentAmount decimal(18, 2) = 0.0;
+		DECLARE @AdvMonths int = 1;
+		DECLARE @SecMonths int = 0;
+		DECLARE @BillPeriodMonths int = 1;
+		IF @BillingPeriodCode=''Daily''
+		BEGIN
+			SET @Duration = CAST(DATEDIFF(day, @StartOn, @EndOn) AS decimal(18, 2));
+			IF @Duration <= 0
+				SET @Duration = 1.0;
+			SET @RentAmount = @SeatPrice * @Duration * ISNULL(@Capacity, 1);
+			SET @AdvMonths = 0;
+			SET @SecMonths = 0;
+			SET @BillPeriodMonths = 0;
+		END
+		ELSE IF @BillingPeriodCode=''Hourly''
+		BEGIN
+			SET @Duration = CAST(DATEDIFF(hour, @StartOn, @EndOn) AS decimal(18, 2));
+			IF @Duration <= 0
+				SET @Duration = 1.0;
+			SET @RentAmount = @SeatPrice * @Duration * ISNULL(@Capacity, 1);
+			SET @AdvMonths = 0;
+			SET @SecMonths = 0;
+			SET @BillPeriodMonths = 0;
+		END
+		ELSE
+		BEGIN
+			IF @BillingPeriodMonths IS NOT NULL AND @BillingPeriodMonths > 0
+				SET @Duration = CAST(@BillingPeriodMonths AS decimal(18, 2));
+			ELSE
+				SET @Duration = CAST(DATEDIFF(month, @StartOn, @EndOn) AS decimal(18, 2));
+			IF @Duration <= 0
+				SET @Duration = 1.0;
+			IF @CategoryCode IN (''PrivateOffice'', ''Private'')
+			BEGIN
+				SET @RentAmount = @SeatPrice * ISNULL(@Capacity, 1) * ISNULL(@AdvanceRentMonths, 1);
+			END
+			ELSE
+			BEGIN
+				SET @RentAmount = @SeatPrice * ISNULL(@AdvanceRentMonths, 1);
+			END
+			SET @AdvMonths = ISNULL(@AdvanceRentMonths, 1);
+			SET @SecMonths = CASE
+				WHEN @CategoryCode IN (''PrivateOffice'', ''Private'') OR ISNULL(@SecurityDepositAmount, 0) > 0 THEN ISNULL(@SecurityDepositMonths, 0)
+				ELSE 0
+			END;
+			SET @BillPeriodMonths = ISNULL(@BillingPeriodMonths, 1);
+		END
+		IF @OverrideDuration IS NOT NULL AND @OverrideDuration > 0
+			SET @Duration = @OverrideDuration;
+		IF @OverrideSubtotal IS NOT NULL AND @OverrideSubtotal > 0
+			SET @RentAmount = @OverrideSubtotal;
+		DECLARE @MonthlyRent decimal(18, 2) = 0.0;
+		IF @CategoryCode IN (''PrivateOffice'', ''Private'')
+			SET @MonthlyRent = @SeatPrice * ISNULL(@Capacity, 1);
+		ELSE
+			SET @MonthlyRent = @SeatPrice;
+		IF (@MonthlyRent <= 0 OR @MonthlyRent IS NULL) AND @OverrideSubtotal IS NOT NULL AND @OverrideSubtotal > 0 AND ISNULL(@AdvMonths, 1) > 0
+		BEGIN
+			SET @MonthlyRent = ROUND(@OverrideSubtotal / ISNULL(@AdvMonths, 1), 2);
+		END
+		DECLARE @DiscountAmt decimal(18, 2) = ISNULL(@DiscountAmount, 0);
+		IF @DiscountAmt <= 0 AND ISNULL(@DiscountPercentage, 0) > 0
+			SET @DiscountAmt = ROUND(@RentAmount * (@DiscountPercentage / 100.0), 2);
+		ELSE IF @DiscountAmt > 0 AND ISNULL(@DiscountPercentage, 0) <= 0 AND @RentAmount > 0
+			SET @DiscountPercentage = ROUND((@DiscountAmt / @RentAmount) * 100.0, 2);
+		DECLARE @DiscountOnRent decimal(18, 2) = 0.00;
+		DECLARE @DiscountOnDeposit decimal(18, 2) = 0.00;
+		IF @DiscountAmt > 0
+			SET @DiscountOnRent = CASE WHEN @DiscountAmt <= @RentAmount THEN @DiscountAmt ELSE @RentAmount END;
+		DECLARE @DepositDiscountFraction decimal(18, 10) = CASE
+			WHEN ISNULL(@DiscountAmount, 0) <= 0 AND ISNULL(@DiscountPercentage, 0) > 0 THEN @DiscountPercentage / 100.0
+			WHEN @RentAmount > 0 THEN @DiscountOnRent / @RentAmount
+			ELSE 0
+		END;
+		IF @DepositDiscountFraction > 1
+			SET @DepositDiscountFraction = 1;
+		IF @DepositDiscountFraction < 0
+			SET @DepositDiscountFraction = 0;
+		SET @SecurityDeposit = CASE
+			WHEN @BillingPeriodCode IN (''Daily'', ''Hourly'') THEN 0.00
+			WHEN ISNULL(@SecurityDepositAmount, 0) > 0 THEN ROUND(@SecurityDepositAmount, 2)
+			WHEN @SecMonths > 0 THEN ROUND(@MonthlyRent * @SecMonths * (1.0 - @DepositDiscountFraction), 2)
+			ELSE 0.00
+		END;
+		DECLARE @DiscountedRent decimal(18, 2) = @RentAmount - @DiscountOnRent;
+		DECLARE @DiscountedDeposit decimal(18, 2) = @SecurityDeposit - @DiscountOnDeposit;
+		DECLARE @TotalDiscountAmount decimal(18, 2) = @DiscountOnRent + @DiscountOnDeposit;
+		DECLARE @SupportChargeAmount decimal(18, 2) = 0.00;
+		DECLARE @TaxAmount decimal(18, 2) = 0.00;
+		DECLARE @AppliedChargePercentage decimal(5, 2) = 0.00;
+		DECLARE @AppliedTaxPercentage decimal(5, 2) = 0.00;
+		IF @SupportChargesId IS NOT NULL AND @CategoryCode IN (''PrivateOffice'', ''Private'')
+		BEGIN
+			DECLARE @ChargePercentage decimal(5, 2);
+			DECLARE @TaxApplicable bit = 0;
+			DECLARE @ProvinceId int = NULL;
+			SELECT TOP 1 @ProvinceId = loc.ProvinceId FROM dbo.WN_Locations loc WITH (NOLOCK) WHERE loc.Id=@LocationId;
+			DECLARE @BookingDateAnchor date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date);
+			SELECT TOP 1 @ChargePercentage = ChargePercentage
+			FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+			WHERE ChargeTypeId=@SupportChargesId
+				AND StartDate <= @BookingDateAnchor
+				AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
+			ORDER BY StartDate DESC;
+			IF @ChargePercentage IS NULL
+				SET @ChargePercentage = 10.00;
+			SET @AppliedChargePercentage = @ChargePercentage;
+			SET @SupportChargeAmount = ROUND(@RentAmount * (@ChargePercentage / 100.0), 2);
+			IF @ProvinceId IS NOT NULL
+			BEGIN
+				SELECT TOP 1 @TaxApplicable = ISNULL(TaxApplicable, 0)
+				FROM dbo.WN_ProvinceChargeTypeTax WITH (NOLOCK)
+				WHERE ProvinceId=@ProvinceId AND ChargeTypeId=@SupportChargesId;
+				IF @TaxApplicable=1
+				BEGIN
+					SELECT TOP 1 @AppliedTaxPercentage = ISNULL(TaxPercentage, 16.00)
+					FROM dbo.WN_Tax WITH (NOLOCK)
+					WHERE ProvinceId=@ProvinceId
+						AND StartDate <= @BookingDateAnchor
+						AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
+					ORDER BY StartDate DESC;
+				END
+				ELSE
+				BEGIN
+					SET @AppliedTaxPercentage = 0.00;
+				END
+			END
+			ELSE
+			BEGIN
+				SET @TaxApplicable = 0;
+				SET @AppliedTaxPercentage = 0.00;
+			END
+			IF @TaxApplicable=1 AND @AppliedTaxPercentage > 0
+			BEGIN
+				SET @TaxAmount = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
+			END
+			ELSE
+			BEGIN
+				SET @TaxAmount = 0.00;
+			END
+		END
+		DECLARE @TotalAmount decimal(18, 2) = @DiscountedRent + @DiscountedDeposit + @SupportChargeAmount + @TaxAmount;
+		DECLARE @ChallanNum nvarchar(50) = ''WN-'' + CONVERT(nvarchar(8), CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS datetime2(0)), 112) + ''-'' + RIGHT(CAST(ABS(CHECKSUM(NEWID())) AS nvarchar(10)), 4);
+		DECLARE @ChallanTries int = 0;
+		WHILE EXISTS (SELECT 1 FROM dbo.WN_Challans WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber=@ChallanNum)
+			OR EXISTS (SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber=@ChallanNum)
+		BEGIN
+			SET @ChallanTries = @ChallanTries + 1;
+			IF @ChallanTries > 200
+				THROW 50020, ''Could not generate a unique challan number. Please try again.'', 1;
+			SET @ChallanNum = LEFT(@ChallanNum, 12) + RIGHT(''0000'' + CAST(ABS(CHECKSUM(NEWID())) % 10000 AS nvarchar(4)), 4);
+		END
+		DECLARE @ChallanValidUntil datetime2 = DATEADD(day, 7, CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS datetime2(0)));
+		DECLARE @CreatedByGuid uniqueidentifier = NULL;
+		IF @CreatedById IS NOT NULL
+			SELECT @CreatedByGuid = IdGUID FROM dbo.WN_Users WHERE Id=@CreatedById;
+		INSERT INTO [dbo].[WN_Bookings]
+		(
+			 [IdGUID]
+			,[BookingDate]
+			,[CustomerCode]
+			,[RentAccountId]
+			,[SecurityRecivedId]
+			,[SecurityReceivedId]
+			,[AccountReceivableId]
+			,[ServicesIncomeId]
+			,[SalesTaxId]
+			,[Notes]
+			,[RejectReason]
+			,[CreatedOn]
+			,[UpdatedOn]
+			,[TransactionDate]
+			,[ChallanNumber]
+			,[ValidityDate]
+			,[UserId]
+			,[SpaceId]
+			,[PricingId]
+			,[StartOn]
+			,[EndOn]
+			,[BookingStatusId]
+			,[CancelReason]
+			,[IsDeleted]
+			,[CreatedById]
+			,[UpdatedById]
+			,[DiscountPercentage]
+			,[DiscountAmount]
+			,[DiscountType]
+			,[SubtotalAmount]
+			,[TotalAmount]
+			,[MonthlyRent]
+			,[BillingPeriodMonths]
+			,[AdvanceRentMonths]
+			,[SecurityDepositMonths]
+			,[SecurityDepositRequired]
+			,[SecurityDepositPaid]
+			,[ShiftType]
+			,[Capacity]
+		)
+		VALUES
+		(
+			 NEWID()
+			,SYSUTCDATETIME()
+			,@CustomerCode
+			,@RentAccountId
+			,@SecurityReceivedId
+			,@SecurityReceivedId
+			,@AccountReceivableId
+			,@ServicesIncomeId
+			,@SalesTaxId
+			,@Notes
+			,NULL
+			,SYSUTCDATETIME()
+			,NULL
+			,SYSUTCDATETIME()
+			,@ChallanNum
+			,@ChallanValidUntil
+			,@UserId
+			,@SpaceId
+			,@ResolvedPricingId
+			,@StartOn
+			,@EndOn
+			,5
+			,NULL
+			,0
+			,@CreatedById
+			,NULL
+			,@DiscountPercentage
+			,@TotalDiscountAmount
+			,ISNULL(@DiscountType, ''Percentage'')
+			,@RentAmount
+			,@TotalAmount
+			,@MonthlyRent
+			,@BillPeriodMonths
+			,@AdvMonths
+			,@SecMonths
+			,@SecurityDeposit
+			,0.00
+			,@NormalizedShift
+			,CASE WHEN @Capacity > 0 THEN @Capacity END
+		);
+		DECLARE @BookingId int = SCOPE_IDENTITY();
+		DECLARE @BookingGuid uniqueidentifier;
+		SELECT @BookingGuid = IdGUID FROM dbo.WN_Bookings WHERE Id=@BookingId;
+		DECLARE
+			 @SpaceName nvarchar(255)
+			,@SpaceCode nvarchar(50)
+			,@SpaceCategory nvarchar(50);
+		SELECT TOP 1
+			 @SpaceName = s.Name
+			,@SpaceCode = s.Code
+			,@SpaceCategory = sc.Label
+		FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+		WHERE s.Id=@SpaceId;
+		DECLARE @CustomerFullName nvarchar(255) = RTRIM(LTRIM(ISNULL(@CustomerFirstName, '''') + '' '' + ISNULL(@CustomerLastName, '''')));
+		IF @CustomerFullName=''''
+			SET @CustomerFullName = ISNULL(@CustomerEmail, ''Customer'');
+		EXEC dbo.WN_BookingDetails_Insert
+			 @BookingGuid = @BookingGuid
+			,@CustomerCode = @CustomerCode
+			,@CustomerName = @CustomerFullName
+			,@CustomerEmail = @CustomerEmail
+			,@SpaceName = @SpaceName
+			,@SpaceCode = @SpaceCode
+			,@SpaceCategory = @SpaceCategory
+			,@StartDateTime = @StartOn
+			,@EndDateTime = @EndOn
+			,@RentAmount = @RentAmount
+			,@SecurityDeposit = @SecurityDeposit
+			,@RentAccountId = @RentAccountId
+			,@DepositAccountId = @SecurityReceivedId
+			,@Notes = @Notes
+			,@SupportChargesId = @SupportChargesId
+			,@AppliedChargePercentage = @AppliedChargePercentage
+			,@AppliedTaxPercentage = @AppliedTaxPercentage
+			,@SupportChargeAmount = @SupportChargeAmount
+			,@TaxAmount = @TaxAmount
+			,@AccountReceivableId = @AccountReceivableId
+			,@ServicesIncomeId = @ServicesIncomeId
+			,@SalesTaxId = @SalesTaxId
+			,@SecurityReceivedId = @SecurityReceivedId;
+		INSERT INTO [dbo].[WN_Challans]
+		(
+			 [BookingId]
+			,[ChallanNumber]
+			,[ValidUntil]
+			,[StatusId]
+			,[CreatedById]
+		)
+		VALUES
+		(
+			 @BookingId
+			,@ChallanNum
+			,@ChallanValidUntil
+			,1
+			,@CreatedById
+		);
+		DECLARE @UnitPrice decimal(18, 2);
+		IF @OverrideUnitPrice IS NOT NULL AND @OverrideUnitPrice > 0
+			SET @UnitPrice = @OverrideUnitPrice;
+		ELSE IF @CategoryCode IN (''PrivateOffice'', ''Private'')
+			SET @UnitPrice = @SeatPrice * ISNULL(@Capacity, 1);
+		ELSE
+			SET @UnitPrice = @SeatPrice;
+		DECLARE @EffectiveRentQuantity decimal(18, 2) = CASE
+			WHEN @BillingPeriodCode=''Monthly'' AND ISNULL(@AdvMonths, 0) > 0 THEN CAST(@AdvMonths AS decimal(18, 2))
+			WHEN ISNULL(@Duration, 0) > 0 THEN @Duration
+			ELSE 1.0
+		END;
+		IF @EffectiveRentQuantity <= 0
+			SET @EffectiveRentQuantity = 1.0;
+		DECLARE @EffectiveSecMonths decimal(18, 2) = CASE WHEN ISNULL(@SecMonths, 0) > 0 THEN CAST(@SecMonths AS decimal(18, 2)) ELSE 1.0 END;
+		DECLARE @EffectiveDepositUnitPrice decimal(18, 4) = CASE
+			WHEN ISNULL(@SecMonths, 0) > 0 THEN ROUND(@SecurityDeposit / @SecMonths, 4)
+			ELSE @SecurityDeposit
+		END;
+		INSERT INTO [dbo].[WN_BookingLines]
+		(
+			 [BookingId]
+			,[ChargeTypeId]
+			,[Description]
+			,[Quantity]
+			,[UnitPrice]
+			,[DiscountAmount]
+			,[TaxRate]
+			,[AccountId]
+			,[IsDeleted]
+			,[CreatedOn]
+			,[CreatedById]
+			,[AccountReceivableId]
+			,[RentAccountId]
+			,[ServicesIncomeId]
+			,[SalesTaxId]
+			,[SecurityReceivedId]
+		)
+		VALUES
+		(
+			 @BookingId
+			,1
+			,''Room Rent''
+			,@EffectiveRentQuantity
+			,@UnitPrice
+			,@DiscountOnRent
+			,0.0000
+			,@RentAccountId
+			,0
+			,SYSUTCDATETIME()
+			,@CreatedById
+			,@AccountReceivableId
+			,@RentAccountId
+			,@ServicesIncomeId
+			,@SalesTaxId
+			,@SecurityReceivedId
+		);
+		IF @SecurityDeposit > 0
+		BEGIN
+			INSERT INTO [dbo].[WN_BookingLines]
+			(
+				 [BookingId]
+				,[ChargeTypeId]
+				,[Description]
+				,[Quantity]
+				,[UnitPrice]
+				,[DiscountAmount]
+				,[TaxRate]
+				,[AccountId]
+				,[IsDeleted]
+				,[CreatedOn]
+				,[CreatedById]
+				,[AccountReceivableId]
+				,[RentAccountId]
+				,[ServicesIncomeId]
+				,[SalesTaxId]
+				,[SecurityReceivedId]
+			)
+			VALUES
+			(
+				 @BookingId
+				,2
+				,''Security Deposit (Refundable)''
+				,@EffectiveSecMonths
+				,@EffectiveDepositUnitPrice
+				,@DiscountOnDeposit
+				,0.0000
+				,@SecurityReceivedId
+				,0
+				,SYSUTCDATETIME()
+				,@CreatedById
+				,@AccountReceivableId
+				,@RentAccountId
+				,@ServicesIncomeId
+				,@SalesTaxId
+				,@SecurityReceivedId
+			);
+			INSERT INTO [dbo].[WN_SecurityDeposits]
+			(
+				 [BookingId]
+				,[UserId]
+				,[Amount]
+				,[AccountId]
+				,[StatusId]
+				,[Notes]
+				,[UpdatedById]
+				,[SecurityReceivedId]
+				,[AccountReceivableId]
+				,[RentAccountId]
+				,[ServicesIncomeId]
+				,[SalesTaxId]
+				,[CustomerId]
+				,[RefId]
+				,[RefNo]
+			)
+			VALUES
+			(
+				 @BookingId
+				,@UserId
+				,@SecurityDeposit
+				,@SecurityReceivedId
+				,1
+				,''Initial security deposit for booking '' + ISNULL(@ChallanNum, CAST(@BookingId AS nvarchar(20)))
+				,@CreatedById
+				,@SecurityReceivedId
+				,@AccountReceivableId
+				,@RentAccountId
+				,@ServicesIncomeId
+				,@SalesTaxId
+				,@CustomerCode
+				,NULL
+				,NULL
+			);
+		END
+		IF @SupportChargesId IS NOT NULL AND @SupportChargeAmount > 0
+		BEGIN
+			INSERT INTO [dbo].[WN_BookingLines]
+			(
+				 [BookingId]
+				,[ChargeTypeId]
+				,[Description]
+				,[Quantity]
+				,[UnitPrice]
+				,[DiscountAmount]
+				,[TaxRate]
+				,[AccountId]
+				,[IsDeleted]
+				,[CreatedOn]
+				,[CreatedById]
+				,[AccountReceivableId]
+				,[RentAccountId]
+				,[ServicesIncomeId]
+				,[SalesTaxId]
+				,[SecurityReceivedId]
+			)
+			VALUES
+			(
+				 @BookingId
+				,@SupportChargesId
+				,''Support Services Portion''
+				,1
+				,@SupportChargeAmount
+				,0.00
+				,@AppliedTaxPercentage / 100.0
+				,@ServicesIncomeId
+				,0
+				,SYSUTCDATETIME()
+				,@CreatedById
+				,@AccountReceivableId
+				,@RentAccountId
+				,@ServicesIncomeId
+				,@SalesTaxId
+				,@SecurityReceivedId
+			);
+		END
+		COMMIT TRANSACTION;
+		SELECT
+			 @BookingId AS BookingId
+			,@BookingGuid AS BookingPublicId
+			,@ChallanNum AS ChallanNumber
+			,@ChallanValidUntil AS ChallanValidUntil
+			,NULL AS ErrorMessage
+			,@RentAmount AS SubtotalAmount
+			,@TotalDiscountAmount AS DiscountAmount
+			,@TaxAmount AS TaxAmount
+			,@SecurityDeposit AS SecurityDeposit
+			,@TotalAmount AS TotalAmount
+			,@MonthlyRent AS MonthlyRent
+			,@BillPeriodMonths AS BillingPeriodMonths
+			,@NormalizedShift AS ShiftType;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		SELECT
+			 NULL AS BookingId
+			,NULL AS BookingPublicId
+			,NULL AS ChallanNumber
+			,NULL AS ChallanValidUntil
+			,ERROR_MESSAGE() AS ErrorMessage;
+	END CATCH
+END;');
+
+    -- WN_Bookings_InsertSmart
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_InsertSmart]
+(
+	 @UserEmail nvarchar(256)
+	,@CategoryCode nvarchar(30)
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Capacity int = NULL
+	,@Notes nvarchar(MAX) = NULL
+	,@CreatedById int = NULL
+	,@CustomerEmail nvarchar(255) = NULL
+	,@CustomerFirstName nvarchar(100) = NULL
+	,@CustomerLastName nvarchar(100) = NULL
+	,@CustomerPhone nvarchar(50) = NULL
+	,@CustomerCnic nvarchar(50) = NULL
+	,@CustomerAddress nvarchar(500) = NULL
+	,@CustomerCityId int = NULL
+	,@CustomerNotes nvarchar(1000) = NULL
+	,@ShiftType nvarchar(20) = ''24_7''
+	,@LocationId int = NULL -- QA_03: book a space of this location only (NULL = any location, as before)
+)
+AS
+BEGIN
+	-- Books the first free space of a category (smallest first) and issues its challan (WN_Bookings_Insert).
+	-- QA_03 changes:
+	--   * @LocationId: only spaces of that location (the location the customer chose).
+	--   * The same booking sent again within 2 minutes (same user, category, location, start and end; e.g. the app
+	--     timed out and the customer tried again) is not booked twice: the existing booking is returned with
+	--     IsDuplicate = 1.
+	--   * Spaces with an active price for the booking period are picked first (a free space without a price used to
+	--     be picked and the booking failed with "No active ... pricing").
+	--   * A private office is charged for the whole office (seat price x the office''s seats), as staff bookings and
+	--     quotations charge it; it used to be charged for one seat.
+	-- PRC_02: the price is WN_SpaceConfig''s (location + space type; WN_Bookings_Insert charges it), so no WN_SpacePricing row
+	-- is needed: spaces with a config price for the booking period are picked first; without one the booking is refused.
+	SET NOCOUNT ON;
+	BEGIN TRANSACTION;
+	BEGIN TRY
+		DECLARE @NormalizedShift nvarchar(20) = CASE
+			WHEN @ShiftType IS NULL OR @ShiftType='''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+			WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+			WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+			ELSE LOWER(@ShiftType)
+		END;
+		DECLARE @UserId int;
+		DECLARE @SpaceId int;
+		DECLARE @PricingId int;
+		DECLARE @DuplicateId int;
+		DECLARE @ChargedSeats int = NULL;
+		DECLARE @TodayPk date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date);
+		DECLARE @BillingPeriodCode nvarchar(20) = CASE WHEN @CategoryCode IN (''PrivateOffice'', ''SharedSpace'') THEN ''Monthly'' ELSE ''Hourly'' END;
+		SELECT @UserId = Id
+		FROM dbo.WN_Users WITH (NOLOCK)
+		WHERE Email=@UserEmail AND IsActive=1;
+		IF @UserId IS NULL
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,''User not found or inactive.'' AS ErrorMessage;
+			RETURN;
+		END
+		-- The same booking a moment ago (created within the last 2 minutes; CreatedOn is UTC): return it. WN_Bookings is
+		-- read without NOLOCK on purpose: a first request still being saved is waited for, never half-read.
+		SELECT TOP 1 @DuplicateId = b.Id
+		FROM dbo.WN_Bookings b JOIN
+			dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=b.SpaceId JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+		WHERE b.UserId=@UserId
+			AND b.IsDeleted=0
+			AND b.BookingStatusId IN (1, 2, 5, 33)
+			AND b.StartOn=@StartOn
+			AND b.EndOn=@EndOn
+			AND sc.Code=@CategoryCode
+			AND (@LocationId IS NULL OR s.LocationId=@LocationId)
+			AND b.CreatedOn >= DATEADD(SECOND, -120, SYSUTCDATETIME())
+		ORDER BY b.Id DESC;
+		IF @DuplicateId IS NOT NULL
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 b.Id AS BookingId
+				,b.IdGUID AS BookingPublicId
+				,b.ChallanNumber
+				,b.ValidityDate AS ChallanValidUntil
+				,NULL AS ErrorMessage
+				,b.SubtotalAmount
+				,b.DiscountAmount
+				,b.SecurityDepositRequired AS SecurityDeposit
+				,b.TotalAmount
+				,b.MonthlyRent
+				,b.BillingPeriodMonths
+				,b.ShiftType
+				,CAST(1 AS bit) AS IsDuplicate
+			FROM dbo.WN_Bookings b
+			WHERE b.Id=@DuplicateId;
+			RETURN;
+		END
+		SELECT TOP 1 @SpaceId = s.Id
+		FROM dbo.WN_Spaces s WITH (UPDLOCK) JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+		WHERE s.IsActive=1
+			AND sc.Code=@CategoryCode
+			AND (@LocationId IS NULL OR s.LocationId=@LocationId)
+			AND (@Capacity IS NULL OR s.Capacity >= @Capacity)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM dbo.WN_Bookings bk
+				WHERE bk.SpaceId=s.Id
+					AND bk.IsDeleted=0
+					AND bk.BookingStatusId IN (1, 2, 5, 33)
+					AND @StartOn < bk.EndOn
+					AND @EndOn > bk.StartOn
+					AND (@NormalizedShift=''24_7''
+						OR ISNULL(bk.ShiftType, ''24_7'')=''24_7''
+						OR @NormalizedShift=ISNULL(bk.ShiftType, ''24_7''))
+			)
+		ORDER BY CASE
+			WHEN ISNULL((
+				SELECT TOP 1 CASE WHEN @BillingPeriodCode=''Monthly'' THEN pc.PricePerMonth ELSE pc.PricePerHour END
+				FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+					dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+				WHERE pc.LocationId=s.LocationId AND pc.Status=1
+					AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+				ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+			), 0) > 0 THEN 0
+			ELSE 1
+		END, s.Capacity ASC, TRY_CAST(s.Code AS int), s.Code;
+		IF @SpaceId IS NULL
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,''No available space for the requested period.'' AS ErrorMessage;
+			RETURN;
+		END
+		SELECT TOP 1 @PricingId = sp.Id
+		FROM dbo.WN_SpacePricing sp JOIN
+			dbo.WN_BillingPeriods bp ON bp.Id=sp.BillingPeriodId
+		WHERE sp.SpaceId=@SpaceId
+			AND sp.IsActive=1
+			AND bp.Code=@BillingPeriodCode
+			AND sp.EffectiveFrom <= @TodayPk
+			AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > @TodayPk)
+		ORDER BY sp.EffectiveFrom DESC;
+		SET @PricingId = ISNULL(@PricingId, 0);
+		IF ISNULL((
+			SELECT TOP 1 CASE WHEN @BillingPeriodCode=''Monthly'' THEN pc.PricePerMonth ELSE pc.PricePerHour END
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) JOIN
+				dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=@SpaceId JOIN
+				dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		), 0) <= 0
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,''No '' + LOWER(@BillingPeriodCode) + '' price is set for the selected space in the space configuration.'' AS ErrorMessage;
+			RETURN;
+		END
+		-- A private office is rented whole: WN_Bookings_Insert charges seat price x @Capacity (the office''s seats).
+		IF @CategoryCode IN (''PrivateOffice'', ''Private'')
+			SELECT @ChargedSeats = s.Capacity
+			FROM dbo.WN_Spaces s WITH (NOLOCK)
+			WHERE s.Id=@SpaceId;
+		COMMIT TRANSACTION;
+		EXEC dbo.WN_Bookings_Insert
+			 @UserId = @UserId
+			,@SpaceId = @SpaceId
+			,@PricingId = @PricingId
+			,@StartOn = @StartOn
+			,@EndOn = @EndOn
+			,@Notes = @Notes
+			,@CreatedById = @CreatedById
+			,@UserEmail = @UserEmail
+			,@CustomerEmail = @CustomerEmail
+			,@CustomerFirstName = @CustomerFirstName
+			,@CustomerLastName = @CustomerLastName
+			,@CustomerPhone = @CustomerPhone
+			,@CustomerCnic = @CustomerCnic
+			,@CustomerAddress = @CustomerAddress
+			,@CustomerCityId = @CustomerCityId
+			,@CustomerNotes = @CustomerNotes
+			,@ShiftType = @NormalizedShift
+			,@Capacity = @ChargedSeats;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		SELECT
+			 NULL AS BookingId
+			,NULL AS BookingPublicId
+			,NULL AS ChallanNumber
+			,NULL AS ChallanValidUntil
+			,ERROR_MESSAGE() AS ErrorMessage;
+	END CATCH
+END');
+
+    -- WN_Bookings_GetSmartAvailable
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_GetSmartAvailable]
+(
+	 @CategoryCode nvarchar(30)
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Capacity int = NULL
+	,@ShiftType nvarchar(20) = N''24_7''
+	,@LocationId int = NULL -- QA_03: only this location''s spaces (NULL = every location, as before)
+)
+AS
+BEGIN
+	-- Spaces of a category free for the whole period. QA_03: @LocationId; Bookable = 1 when the space has a price for the
+	-- period WN_Bookings_InsertSmart books it by (Monthly for PrivateOffice / SharedSpace, Hourly otherwise); bookable
+	-- spaces come first, in the order WN_Bookings_InsertSmart picks them (smallest first), so the first Bookable row is
+	-- the space a booking for this period would get.
+	-- PRC_02: the price is WN_SpaceConfig''s (the space''s location + space type, else a space type of the same category
+	-- there), as WN_Bookings_Insert charges it: SeatPrice = PricePerMonth per seat (Monthly) or PricePerHour (Hourly);
+	-- RoomPrice = SeatPrice x Capacity for a private office, else SeatPrice; 0 / NULL = no price (Bookable = 0).
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+		WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+		WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+		ELSE LOWER(@ShiftType)
+	END;
+	DECLARE @TodayPk date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date);
+	DECLARE @BookingPeriodCode nvarchar(20) = CASE WHEN @CategoryCode IN (''PrivateOffice'', ''SharedSpace'') THEN ''Monthly'' ELSE ''Hourly'' END;
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.SpaceTypeId AS SpaceTypeId
+		,st.Name AS SpaceTypeName
+		,sc.Code AS CategoryCode
+		,sc.Label AS CategoryLabel
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+		,vp.BillingPeriodCode
+		,CAST(CASE WHEN vp.SeatPrice > 0 THEN 1 ELSE 0 END AS bit) AS Bookable
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN @BookingPeriodCode=''Monthly'' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN @BookingPeriodCode=''Hourly'' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code=''PrivateOffice'' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,pc.SecurityDeposit
+				,@BookingPeriodCode AS BillingPeriodCode
+		) vp
+	WHERE s.IsActive=1
+		AND sc.Code=@CategoryCode
+		AND (@LocationId IS NULL OR s.LocationId=@LocationId)
+		AND (@Capacity IS NULL OR s.Capacity >= @Capacity)
+		AND NOT EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk WITH (NOLOCK)
+			WHERE bk.SpaceId=s.Id
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift=''24_7'' OR ISNULL(bk.ShiftType, ''24_7'')=''24_7'' OR @NormalizedShift=ISNULL(bk.ShiftType, ''24_7''))
+		)
+	ORDER BY CASE WHEN vp.SeatPrice > 0 THEN 0 ELSE 1 END, s.Capacity ASC, TRY_CAST(s.Code AS int), s.Code;
+END');
+
+    -- WN_Bookings_GetAvailableSpaces
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_GetAvailableSpaces]
+(
+	 @SpaceTypeId int
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Capacity int = NULL
+	,@ShiftType nvarchar(20) = ''24_7''
+)
+AS
+BEGIN
+	-- PRC_02: prices are WN_SpaceConfig''s (the space''s location + space type, else a space type of the same category
+	-- there), as WN_Bookings_Insert charges them: PricePerMonth per seat (private office, shared space; a private office''s
+	-- RoomPrice = seat price x Capacity) or PricePerHour (meeting room); 0 / NULL = no price (SeatPrice / RoomPrice NULL).
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+		WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+		WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+		ELSE LOWER(@ShiftType)
+	END;
+
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+		,vp.BillingPeriodCode
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+		(SELECT CASE WHEN sc.Code IN (''PrivateOffice'', ''SharedSpace'') THEN ''Monthly'' ELSE ''Hourly'' END AS Code) bpc OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN bpc.Code=''Monthly'' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN bpc.Code=''Hourly'' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code=''PrivateOffice'' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,pc.SecurityDeposit
+				,bpc.Code AS BillingPeriodCode
+		) vp
+	WHERE s.IsActive=1
+		AND s.SpaceTypeId=@SpaceTypeId
+		AND (@Capacity IS NULL OR s.Capacity >= @Capacity)
+		AND NOT EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk
+			WHERE bk.SpaceId=s.Id
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift=''24_7'' OR ISNULL(bk.ShiftType, ''24_7'')=''24_7'' OR @NormalizedShift=ISNULL(bk.ShiftType, ''24_7''))
+		)
+	ORDER BY TRY_CAST(s.Code AS int), s.Code;
+END');
+
+    -- WN_Bookings_GetAvailableSpacesForReassignment
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]
+(
+	 @SpaceTypeId int
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@ExcludeBookingId int
+	,@ShiftType nvarchar(20) = N''24_7''
+)
+AS
+BEGIN
+	-- PRC_02: prices are WN_SpaceConfig''s (the space''s location + space type, else a space type of the same category
+	-- there), as WN_Bookings_Insert charges them: PricePerMonth per seat (private office, shared space; a private office''s
+	-- RoomPrice = seat price x Capacity) or PricePerHour (meeting room); 0 / NULL = no price (SeatPrice / RoomPrice NULL).
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+		WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+		WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+		ELSE LOWER(@ShiftType)
+	END;
+
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+		(SELECT CASE WHEN sc.Code IN (''PrivateOffice'', ''SharedSpace'') THEN ''Monthly'' ELSE ''Hourly'' END AS Code) bpc OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN bpc.Code=''Monthly'' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN bpc.Code=''Hourly'' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code=''PrivateOffice'' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,pc.SecurityDeposit
+		) vp
+	WHERE s.IsActive=1
+		AND s.SpaceTypeId=@SpaceTypeId
+		AND NOT EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk
+			WHERE bk.SpaceId=s.Id
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND bk.Id <> @ExcludeBookingId
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift=''24_7'' OR ISNULL(bk.ShiftType, ''24_7'')=''24_7'' OR @NormalizedShift=ISNULL(bk.ShiftType, ''24_7''))
+		)
+	ORDER BY TRY_CAST(s.Code AS int), s.Code;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT N'OK: space charges now come from WN_SpaceConfig (PRC_02).' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

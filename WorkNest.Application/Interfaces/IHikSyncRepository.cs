@@ -15,7 +15,20 @@ namespace WorkNest.Application.Interfaces
         // Devices, log, settings
         Task<List<HikSyncDevice>> GetAllDevicesAsync();
         Task<HikSyncDevice?> GetDeviceAsync(int id);
-        Task SetDeviceOnlineAsync(int deviceId, bool online);
+        /// <summary>Saves online / offline; model and serial (from the machine's deviceInfo) only when given.</summary>
+        Task SetDeviceOnlineAsync(int deviceId, bool online, string? model = null, string? serial = null);
+
+        // Machine management from the CMS (HIK_DEV_01 procedures). They throw HikDeviceManagementNotInstalledException
+        // before HIK_DEV_01 has run (SQL error 2812 / 208).
+        Task<HikDeviceDetailDto?> GetDeviceDetailAsync(int id);
+        Task<List<HikDeviceGroupDto>> GetDeviceGroupsAsync();
+        /// <summary>Result: Added | Duplicate | BadLocation, with the machine's Id (the existing one on Duplicate).</summary>
+        Task<(string Result, int? Id)> AddDeviceAsync(HikDeviceSaveRequest request, int port);
+        /// <summary>Result: Updated | NotFound | Duplicate | BadLocation.</summary>
+        Task<(string Result, int? Id)> UpdateDeviceAsync(int id, HikDeviceSaveRequest request);
+        /// <summary>Result: Deleted | NotFound, with the machine's name.</summary>
+        Task<(string Result, string? Name)> DeleteDeviceAsync(int id);
+
         Task LogAsync(int? employeeId, int? deviceId, string action, bool ok, string? detail);
         Task<string?> GetSettingAsync(string key);
         Task SetSettingAsync(string key, string value);

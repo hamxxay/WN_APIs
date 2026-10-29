@@ -1,0 +1,213 @@
+-- ============================================================================================
+-- PRC_01: space prices from dbo.WN_SpaceConfig (per location + space type) instead of per-space WN_SpacePricing,
+-- for the prices customers SEE (GET api/space/available, available-grouped, vacant: dbo.WN_Spaces_GetAvailable).
+-- Owner's rules (the space's category, WN_SpaceCategories.Code):
+--   MeetingRoom (and any other)  SeatPrice = RoomPrice = PricePerHour, BillingPeriodCode Hourly.
+--   PrivateOffice                SeatPrice = PricePerMonth per seat, RoomPrice = PricePerMonth x the office's
+--                                Capacity, Monthly (the app card shows "From" the cheapest office).
+--   SharedSpace                  SeatPrice = RoomPrice = PricePerMonth per seat, Monthly.
+--   0 / NULL                     no price: SeatPrice / RoomPrice NULL ("Price on request", not bookable); the space is
+--                                still listed (the customer app list used to drop spaces without a WN_SpacePricing row).
+--   SecurityDeposit              WN_SpaceConfig.SecurityDeposit.
+-- The config row is the space's LocationId + SpaceTypeId (WN_SpaceConfig.SpaceCategory text is not used), else a row of
+-- the same location for a space type of the same category. Same output columns as before: no API / app change needed.
+--
+-- NOT changed (what a booking is CHARGED): WN_Bookings_Insert still prices from WN_Spaces.Price + WN_Spaces.BillingPeriodId,
+-- and WN_Bookings_InsertSmart / WN_Bookings_GetSmartAvailable still need an active WN_SpacePricing row to book a space.
+--
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+    IF COL_LENGTH(N'dbo.WN_SpaceConfig', N'PricePerHour') IS NULL
+       OR COL_LENGTH(N'dbo.WN_SpaceConfig', N'PricePerMonth') IS NULL
+       OR COL_LENGTH(N'dbo.WN_SpaceConfig', N'LocationId') IS NULL
+       OR COL_LENGTH(N'dbo.WN_SpaceConfig', N'SpaceTypeId') IS NULL
+        THROW 50001, N'dbo.WN_SpaceConfig has not got PricePerHour / PricePerMonth / LocationId / SpaceTypeId on this database. Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- WN_Spaces_GetAvailable
+    EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Spaces_GetAvailable]
+(
+	 @ShiftType nvarchar(20) = ''24_7''
+	,@IncludeOccupied bit = 0 -- QA_03: 1 = every active space with OccupiedNow (customer app space cards)
+)
+AS
+BEGIN
+	-- @IncludeOccupied = 0 (default, website / CMS): spaces not booked right now, as before. "Now" is Pakistan time
+	-- (bookings are stored in Pakistan time; this used to compare them with UTC, 5 hours off).
+	-- @IncludeOccupied = 1 (QA_03, customer app): every active space of an active location, occupied now or not:
+	-- OccupiedNow = 1 when a booking covers this moment; Amenities = the names of the space''s amenities (its own list,
+	-- WN_SpaceAmenities, else its location + space type''s WN_SpaceConfig list).
+	-- PRC_01: prices come from WN_SpaceConfig of the space''s location + space type (else a space type of the same
+	-- category there), no longer from WN_SpacePricing. Meeting room (and any category but the two below): SeatPrice =
+	-- PricePerHour, Hourly. PrivateOffice / SharedSpace: SeatPrice = PricePerMonth (per seat), Monthly; a private office
+	-- is rented whole, RoomPrice = SeatPrice x Capacity (other categories: RoomPrice = SeatPrice). 0 / NULL = no price:
+	-- SeatPrice and RoomPrice NULL ("Price on request"), the space is still listed. SecurityDeposit = WN_SpaceConfig''s.
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='''' OR @ShiftType IN (''24_7'', ''24/7'', ''24-by-7'', ''1'') THEN ''24_7''
+		WHEN LOWER(@ShiftType) IN (''morning'', ''morning_shift'', ''shift_morning'', ''2'') THEN ''morning''
+		WHEN LOWER(@ShiftType) IN (''evening'', ''evening_shift'', ''shift_evening'', ''night'', ''3'') THEN ''evening''
+		ELSE LOWER(@ShiftType)
+	END;
+	DECLARE @NowPk datetime2 = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS datetime2);
+	DECLARE @TodayPk date = CAST(@NowPk AS date);
+	IF ISNULL(@IncludeOccupied, 0)=0
+	BEGIN
+		SELECT
+			 s.Id
+			,s.IdGUID AS PublicId
+			,s.Code
+			,s.Name
+			,s.LocationId AS LocationId
+			,l.Name AS LocationName
+			,s.SpaceTypeId AS SpaceTypeId
+			,st.Description AS SpaceTypeName
+			,sc.Code AS CategoryCode
+			,sc.Label AS CategoryLabel
+			,s.Capacity
+			,s.ImageUrl
+			,vp.SeatPrice
+			,vp.RoomPrice
+			,vp.SecurityDeposit
+			,vp.BillingPeriodCode
+		FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+			dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+			(SELECT CASE WHEN sc.Code IN (''PrivateOffice'', ''SharedSpace'') THEN ''Monthly'' ELSE ''Hourly'' END AS Code) bpc OUTER APPLY
+			(
+				SELECT TOP 1
+					 pc.PricePerHour
+					,pc.PricePerMonth
+					,pc.SecurityDeposit
+				FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+					dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+				WHERE pc.LocationId=s.LocationId AND pc.Status=1
+					AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+				ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+			) pc CROSS APPLY
+			(
+				SELECT CASE
+					WHEN bpc.Code=''Monthly'' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+					WHEN bpc.Code=''Hourly'' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+				END AS SeatPrice
+			) pp CROSS APPLY
+			(
+				SELECT
+					 pp.SeatPrice
+					,CASE WHEN sc.Code=''PrivateOffice'' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+					,pc.SecurityDeposit
+					,bpc.Code AS BillingPeriodCode
+			) vp
+		WHERE s.IsActive=1
+			AND NOT EXISTS (
+				SELECT 1
+				FROM dbo.WN_Bookings bk WITH (NOLOCK)
+				WHERE bk.SpaceId=s.Id AND bk.IsDeleted=0
+					AND bk.BookingStatusId IN (1, 2, 5, 33)
+					AND @NowPk < bk.EndOn
+					AND @NowPk >= bk.StartOn
+					AND (@NormalizedShift=''24_7''
+						OR ISNULL(bk.ShiftType, ''24_7'')=''24_7''
+						OR @NormalizedShift=ISNULL(bk.ShiftType, ''24_7''))
+			)
+		ORDER BY s.LocationId, TRY_CAST(s.Code AS int), s.Code;
+		RETURN;
+	END
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.SpaceTypeId AS SpaceTypeId
+		,st.Description AS SpaceTypeName
+		,sc.Code AS CategoryCode
+		,sc.Label AS CategoryLabel
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+		,vp.BillingPeriodCode
+		,CAST(CASE
+			WHEN EXISTS (
+				SELECT 1
+				FROM dbo.WN_Bookings bk WITH (NOLOCK)
+				WHERE bk.SpaceId=s.Id AND bk.IsDeleted=0
+					AND bk.BookingStatusId IN (1, 2, 5, 33)
+					AND @NowPk < bk.EndOn
+					AND @NowPk >= bk.StartOn
+					AND (@NormalizedShift=''24_7''
+						OR ISNULL(bk.ShiftType, ''24_7'')=''24_7''
+						OR @NormalizedShift=ISNULL(bk.ShiftType, ''24_7''))
+			) THEN 1
+			ELSE 0
+		END AS bit) AS OccupiedNow
+		,am.Amenities
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+		(SELECT CASE WHEN sc.Code IN (''PrivateOffice'', ''SharedSpace'') THEN ''Monthly'' ELSE ''Hourly'' END AS Code) bpc OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN bpc.Code=''Monthly'' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN bpc.Code=''Hourly'' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code=''PrivateOffice'' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,pc.SecurityDeposit
+				,bpc.Code AS BillingPeriodCode
+		) vp OUTER APPLY
+		(
+			SELECT TOP 1 cfg.Amenities
+			FROM dbo.WN_SpaceConfig cfg WITH (NOLOCK)
+			WHERE cfg.LocationId=s.LocationId AND cfg.SpaceTypeId=s.SpaceTypeId AND cfg.Status=1
+			ORDER BY cfg.Id DESC
+		) cfg OUTER APPLY
+		(
+			SELECT STUFF((
+				SELECT N'', '' + a.Name
+				FROM dbo.WN_Amenities a WITH (NOLOCK)
+				WHERE ISNULL(a.IsActive, 1)=1
+					AND (N'','' + REPLACE(COALESCE(NULLIF(LTRIM(RTRIM(s.Amenities)), N''''), cfg.Amenities, N''''), N'' '', N'''') + N'','' LIKE N''%,'' + CAST(a.Id AS nvarchar(12)) + N'',%''
+						OR EXISTS (SELECT 1 FROM dbo.WN_SpaceAmenities sa WITH (NOLOCK) WHERE sa.SpaceId=s.Id AND sa.AmenityId=a.Id))
+				ORDER BY a.Name
+				FOR XML PATH(''''), TYPE
+			).value(''.'', ''NVARCHAR(MAX)''), 1, 2, N'''') AS Amenities
+		) am
+	WHERE s.IsActive=1
+		AND ISNULL(l.IsActive, 1)=1
+	ORDER BY s.LocationId, TRY_CAST(s.Code AS int), s.Code;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT N'OK: space prices now come from WN_SpaceConfig (PRC_01).' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

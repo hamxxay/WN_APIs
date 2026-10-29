@@ -1,0 +1,265 @@
+-- ============================================================================================
+-- HIK_DEV_01: access machine (Hikvision) management in the CMS: add, edit and delete machines (admin / super admin).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again. No table is changed.
+-- Needs dbo.WN_HIK_Devices.LocationId (WN_HIK_Devices_LocationId) and dbo.WN_HIK_Device_UpsertByHost (HIK schema).
+--
+--   dbo.WN_HIK_Device_GetById    one machine with its group and WorkNest location, never the password.
+--   dbo.WN_HIK_Device_GetGroups  the machine groups (dbo.WN_HIK_Groups); a group starting with "Entrance" = entrance doors.
+--   dbo.WN_HIK_Device_Add        adds a machine through dbo.WN_HIK_Device_UpsertByHost, then sets Host2, Code, LocationId.
+--                                Result Added | Duplicate (a machine already uses that host + port) | BadLocation.
+--   dbo.WN_HIK_Device_Update     changes a machine. NULL = keep; '' clears Host2 / Location / Group / Code; an empty
+--                                password keeps the saved one. Result Updated | NotFound | Duplicate | BadLocation.
+--   dbo.WN_HIK_Device_Delete     deletes a machine with its roster snapshot (WN_HIK_DevCache) and its queued operations
+--                                (WN_HIK_PendingOps); its access grants go with it (cascade). Events and the sync log are
+--                                kept. Result Deleted | NotFound.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+	IF COL_LENGTH(N'dbo.WN_HIK_Devices', N'LocationId') IS NULL
+		THROW 50001, N'dbo.WN_HIK_Devices.LocationId is missing: run WN_HIK_Devices_LocationId first. Nothing changed.', 1;
+	IF OBJECT_ID(N'dbo.WN_HIK_Device_UpsertByHost', N'P') IS NULL
+		THROW 50002, N'dbo.WN_HIK_Device_UpsertByHost is missing on this database. Nothing changed.', 1;
+
+	BEGIN TRANSACTION;
+
+	-- 1. One machine (edit form).
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_HIK_Device_GetById]
+(
+	 @Id int
+)
+AS
+BEGIN
+	-- HIK_DEV_01: one machine for the CMS edit form. The password is never returned.
+	SET NOCOUNT ON;
+	SELECT
+		 d.Id
+		,d.Device_Name
+		,d.Host
+		,d.Host2
+		,d.Port
+		,d.Use_https
+		,d.Username
+		,d.Location
+		,d.Code
+		,d.Group_id
+		,g.Name AS GroupName
+		,d.LocationId
+		,wl.Name AS LocationName
+		,d.Model
+		,d.Serial
+		,d.Online
+		,d.Last_seen
+	FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
+	LEFT JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id
+	LEFT JOIN dbo.WN_Locations wl WITH (NOLOCK) ON wl.Id = d.LocationId
+	WHERE d.Id = @Id;
+END;');
+
+	-- 2. Machine groups.
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_HIK_Device_GetGroups]
+AS
+BEGIN
+	-- HIK_DEV_01: the machine groups with how many machines each has. A group starting with "Entrance" marks entrance doors.
+	SET NOCOUNT ON;
+	SELECT
+		 g.Id
+		,LTRIM(RTRIM(g.Name)) AS Name
+		,CAST(CASE WHEN LTRIM(g.Name) LIKE N''Entrance%'' THEN 1 ELSE 0 END AS bit) AS IsEntrance
+		,(SELECT COUNT(1) FROM dbo.WN_HIK_Devices d WITH (NOLOCK) WHERE d.Group_id = g.Id) AS Machines
+	FROM dbo.WN_HIK_Groups g WITH (NOLOCK)
+	ORDER BY CASE WHEN LTRIM(g.Name) LIKE N''Entrance%'' THEN 0 ELSE 1 END, g.Name;
+END;');
+
+	-- 3. Add.
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_HIK_Device_Add]
+(
+	 @Name nvarchar(100)
+	,@Host nvarchar(64)
+	,@Host2 nvarchar(128) = NULL
+	,@Port int = 80
+	,@UseHttps bit = 0
+	,@Username nvarchar(64)
+	,@Password nvarchar(128)
+	,@Location nvarchar(128) = NULL
+	,@Grp nvarchar(64) = NULL
+	,@Code nvarchar(64) = NULL
+	,@LocationId int
+)
+AS
+BEGIN
+	-- HIK_DEV_01: adds a machine (dbo.WN_HIK_Device_UpsertByHost, as the HIK dashboard does), then its failover host,
+	-- room code and WorkNest location. A host + port that is already used is refused (Duplicate), never overwritten.
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Id int = NULL;
+	DECLARE @Ids TABLE (Id int);
+
+	SET @Host = LTRIM(RTRIM(@Host));
+	SET @Host2 = NULLIF(LTRIM(RTRIM(@Host2)), N'''');
+	SET @Location = NULLIF(LTRIM(RTRIM(@Location)), N'''');
+	SET @Grp = NULLIF(LTRIM(RTRIM(@Grp)), N'''');
+	SET @Code = NULLIF(LTRIM(RTRIM(@Code)), N'''');
+
+	BEGIN TRANSACTION;
+	SELECT @Id = Id FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK) WHERE Host = @Host AND Port = @Port;
+	IF @Id IS NOT NULL
+	BEGIN
+		COMMIT;
+		SELECT N''Duplicate'' AS Result, @Id AS Id;
+		RETURN;
+	END
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id = @LocationId)
+	BEGIN
+		COMMIT;
+		SELECT N''BadLocation'' AS Result, CAST(NULL AS int) AS Id;
+		RETURN;
+	END
+
+	INSERT INTO @Ids (Id)
+	EXEC dbo.WN_HIK_Device_UpsertByHost
+		 @name = @Name
+		,@host = @Host
+		,@port = @Port
+		,@use_https = @UseHttps
+		,@username = @Username
+		,@password = @Password
+		,@location = @Location
+		,@grp = @Grp;
+	SELECT TOP (1) @Id = Id FROM @Ids;
+
+	UPDATE dbo.WN_HIK_Devices
+	SET
+		 Host2 = @Host2
+		,Code = @Code
+		,LocationId = @LocationId
+	WHERE Id = @Id;
+	COMMIT;
+
+	SELECT N''Added'' AS Result, @Id AS Id;
+END;');
+
+	-- 4. Edit.
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_HIK_Device_Update]
+(
+	 @Id int
+	,@Name nvarchar(100) = NULL
+	,@Host nvarchar(64) = NULL
+	,@Host2 nvarchar(128) = NULL
+	,@Port int = NULL
+	,@UseHttps bit = NULL
+	,@Username nvarchar(64) = NULL
+	,@Password nvarchar(128) = NULL
+	,@Location nvarchar(128) = NULL
+	,@Grp nvarchar(64) = NULL
+	,@Code nvarchar(64) = NULL
+	,@LocationId int = NULL
+)
+AS
+BEGIN
+	-- HIK_DEV_01: changes a machine. NULL keeps a value; '''' clears Host2 / Location / Group / Code; an empty password keeps
+	-- the saved one. A group name that does not exist yet is created (as dbo.WN_HIK_Device_UpsertByHost does).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Gid int = NULL;
+	DECLARE @Other int = NULL;
+	DECLARE @NewHost nvarchar(128);
+	DECLARE @NewPort int;
+
+	BEGIN TRANSACTION;
+	SELECT
+		 @NewHost = COALESCE(NULLIF(LTRIM(RTRIM(@Host)), N''''), Host)
+		,@NewPort = COALESCE(@Port, Port)
+	FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK)
+	WHERE Id = @Id;
+	IF @NewHost IS NULL
+	BEGIN
+		COMMIT;
+		SELECT N''NotFound'' AS Result, @Id AS Id;
+		RETURN;
+	END
+
+	SELECT @Other = Id FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK) WHERE Host = @NewHost AND Port = @NewPort AND Id <> @Id;
+	IF @Other IS NOT NULL
+	BEGIN
+		COMMIT;
+		SELECT N''Duplicate'' AS Result, @Other AS Id;
+		RETURN;
+	END
+	IF @LocationId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id = @LocationId)
+	BEGIN
+		COMMIT;
+		SELECT N''BadLocation'' AS Result, @Id AS Id;
+		RETURN;
+	END
+
+	IF @Grp IS NOT NULL AND LTRIM(RTRIM(@Grp)) <> N''''
+	BEGIN
+		SET @Grp = LTRIM(RTRIM(@Grp));
+		SELECT @Gid = Id FROM dbo.WN_HIK_Groups WITH (UPDLOCK, HOLDLOCK) WHERE Name = @Grp;
+		IF @Gid IS NULL
+		BEGIN
+			INSERT INTO dbo.WN_HIK_Groups (Name) VALUES (@Grp);
+			SET @Gid = SCOPE_IDENTITY();
+		END
+	END
+
+	UPDATE dbo.WN_HIK_Devices
+	SET
+		 Device_Name = COALESCE(NULLIF(LTRIM(RTRIM(@Name)), N''''), Device_Name)
+		,Host = @NewHost
+		,Host2 = CASE WHEN @Host2 IS NULL THEN Host2 ELSE NULLIF(LTRIM(RTRIM(@Host2)), N'''') END
+		,Port = @NewPort
+		,Use_https = COALESCE(@UseHttps, Use_https)
+		,Username = COALESCE(NULLIF(LTRIM(RTRIM(@Username)), N''''), Username)
+		,Password = COALESCE(NULLIF(@Password, N''''), Password)
+		,Location = CASE WHEN @Location IS NULL THEN Location ELSE NULLIF(LTRIM(RTRIM(@Location)), N'''') END
+		,Group_id = CASE WHEN @Grp IS NULL THEN Group_id ELSE @Gid END
+		,Code = CASE WHEN @Code IS NULL THEN Code ELSE NULLIF(LTRIM(RTRIM(@Code)), N'''') END
+		,LocationId = COALESCE(@LocationId, LocationId)
+	WHERE Id = @Id;
+	COMMIT;
+
+	SELECT N''Updated'' AS Result, @Id AS Id;
+END;');
+
+	-- 5. Delete.
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_HIK_Device_Delete]
+(
+	 @Id int
+)
+AS
+BEGIN
+	-- HIK_DEV_01: deletes a machine, its roster snapshot and its queued operations; its access grants are deleted by the
+	-- cascade on FK_WN_HIK_grants_device. Door events and the sync log keep their rows (history).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Name nvarchar(200) = NULL;
+
+	BEGIN TRANSACTION;
+	SELECT @Name = Device_Name FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id;
+	IF @Name IS NULL
+	BEGIN
+		COMMIT;
+		SELECT N''NotFound'' AS Result, @Id AS Id, CAST(NULL AS nvarchar(200)) AS Device_Name;
+		RETURN;
+	END
+
+	DELETE FROM dbo.WN_HIK_PendingOps WHERE device_id = @Id;
+	DELETE FROM dbo.WN_HIK_DevCache WHERE Device_id = @Id;
+	DELETE FROM dbo.WN_HIK_Devices WHERE Id = @Id;
+	COMMIT;
+
+	SELECT N''Deleted'' AS Result, @Id AS Id, @Name AS Device_Name;
+END;');
+
+	COMMIT TRANSACTION;
+	SELECT N'OK: access machine management installed (HIK_DEV_01).' AS Result, DB_NAME() AS DatabaseName;
+END TRY
+BEGIN CATCH
+	IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+	THROW;
+END CATCH;

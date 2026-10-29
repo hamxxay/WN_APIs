@@ -1209,7 +1209,7 @@ namespace WorkNest.Application.Services
             sw.Stop();
             try
             {
-                await _repo.SetDeviceOnlineAsync(dev.Id, info.Ok);
+                await _repo.SetDeviceOnlineAsync(dev.Id, info.Ok, info.Model, info.SerialNumber);
                 if (info.Ok != dev.Online) await InvalidateRosterAsync(dev.Id);
                 await Log(null, dev.Id, "test", info.Ok, info.Ok ? $"online ({sw.ElapsedMilliseconds} ms)" : info.Error);
             }

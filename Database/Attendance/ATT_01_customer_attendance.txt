@@ -1,0 +1,542 @@
+-- ============================================================================================
+-- ATT_01: Customer Attendance (CMS customer detail > Attendance, /admin/reports/attendance, web /my-attendance, app).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live database.
+-- One transaction: if anything fails, nothing is changed. Safe to run again. Until it has run the API answers
+-- 503 "Attendance is not installed yet (run ATT_01)".
+--
+-- Attendance is computed by the API on request from dbo.WN_HIK_Events (successful scans of the customer's employees
+-- on the room machines of the customer's booked rooms); nothing is stored per day. This script adds:
+--   dbo.WN_Customers                     + AttendanceEnabled (off for every customer), AttendanceEnabledOn / By.
+--   dbo.WN_AttendanceShifts (new)        a customer's shifts (start / end, grace, work days, half day, one default).
+--   dbo.WN_AttendanceShiftAssignments    the shift of one employee (PK CustomerId + PersonId).
+--   dbo.WN_AttendanceHolidays (new)      a customer's holidays (one per date).
+--   dbo.WN_Attendance_GetCustomerByUser  the customer whose main account (WN_Customers.UserId) is @UserId.
+--   dbo.WN_Attendance_GetCustomer        one customer with its attendance switch.
+--   dbo.WN_Attendance_SetEnabled         turns attendance on / off for a customer (staff).
+--   dbo.WN_Attendance_GetCustomers       staff list: customers with attendance on or with employees, of @LocationIds.
+--   dbo.WN_Attendance_GetPeople          [0] the customer's employees with machine id; [1] their room assignments.
+--   dbo.WN_Attendance_GetRooms           the customer's booked rooms (all bookings, not only current) with dates.
+--   dbo.WN_Attendance_GetScans           successful scans (38, 1, 75, 104) of @EmployeeNos on @DeviceIds in a range.
+--   dbo.WN_Attendance_Shifts_GetList / _Save / _Delete, dbo.WN_Attendance_ShiftAssignments_Set,
+--   dbo.WN_Attendance_Holidays_GetList / _Add / _Delete.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+	BEGIN TRANSACTION;
+
+	-- 1. The switch on the customer (off for everyone).
+	IF COL_LENGTH(N'dbo.WN_Customers', N'AttendanceEnabled') IS NULL
+		EXEC(N'ALTER TABLE dbo.WN_Customers ADD AttendanceEnabled BIT NOT NULL CONSTRAINT DF_WN_Customers_AttendanceEnabled DEFAULT (0);');
+	IF COL_LENGTH(N'dbo.WN_Customers', N'AttendanceEnabledOn') IS NULL
+		EXEC(N'ALTER TABLE dbo.WN_Customers ADD AttendanceEnabledOn DATETIME2(0) NULL;');
+	IF COL_LENGTH(N'dbo.WN_Customers', N'AttendanceEnabledBy') IS NULL
+		EXEC(N'ALTER TABLE dbo.WN_Customers ADD AttendanceEnabledBy NVARCHAR(256) NULL;');
+
+	-- 2. Shifts, shift of each employee, holidays.
+	IF OBJECT_ID(N'dbo.WN_AttendanceShifts', N'U') IS NULL
+		EXEC(N'CREATE TABLE dbo.WN_AttendanceShifts (
+			Id             INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_AttendanceShifts PRIMARY KEY,
+			CustomerId     INT           NOT NULL,
+			Name           NVARCHAR(100) NOT NULL,
+			StartTime      TIME(0)       NOT NULL,
+			EndTime        TIME(0)       NOT NULL,
+			GraceMinutes   INT           NOT NULL CONSTRAINT DF_WN_AttendanceShifts_GraceMinutes DEFAULT (0),
+			HalfDayMinutes INT           NULL,
+			WorkDays       NVARCHAR(40)  NOT NULL CONSTRAINT DF_WN_AttendanceShifts_WorkDays DEFAULT (N''Mon,Tue,Wed,Thu,Fri''),
+			IsDefault      BIT           NOT NULL CONSTRAINT DF_WN_AttendanceShifts_IsDefault DEFAULT (0),
+			IsActive       BIT           NOT NULL CONSTRAINT DF_WN_AttendanceShifts_IsActive DEFAULT (1),
+			CreatedOn      DATETIME2(0)  NOT NULL CONSTRAINT DF_WN_AttendanceShifts_CreatedOn DEFAULT (SYSUTCDATETIME()),
+			CreatedBy      NVARCHAR(256) NULL,
+			UpdatedOn      DATETIME2(0)  NULL,
+			UpdatedBy      NVARCHAR(256) NULL
+		);');
+	IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_AttendanceShifts') AND name = N'IX_WN_AttendanceShifts_Customer')
+		EXEC(N'CREATE INDEX IX_WN_AttendanceShifts_Customer ON dbo.WN_AttendanceShifts (CustomerId, IsActive);');
+
+	IF OBJECT_ID(N'dbo.WN_AttendanceShiftAssignments', N'U') IS NULL
+		EXEC(N'CREATE TABLE dbo.WN_AttendanceShiftAssignments (
+			CustomerId INT           NOT NULL,
+			PersonId   INT           NOT NULL,
+			ShiftId    INT           NOT NULL,
+			UpdatedOn  DATETIME2(0)  NOT NULL CONSTRAINT DF_WN_AttendanceShiftAssignments_UpdatedOn DEFAULT (SYSUTCDATETIME()),
+			UpdatedBy  NVARCHAR(256) NULL,
+			CONSTRAINT PK_WN_AttendanceShiftAssignments PRIMARY KEY (CustomerId, PersonId)
+		);');
+
+	IF OBJECT_ID(N'dbo.WN_AttendanceHolidays', N'U') IS NULL
+		EXEC(N'CREATE TABLE dbo.WN_AttendanceHolidays (
+			Id          INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_AttendanceHolidays PRIMARY KEY,
+			CustomerId  INT           NOT NULL,
+			HolidayDate DATE          NOT NULL,
+			Name        NVARCHAR(100) NOT NULL,
+			CreatedOn   DATETIME2(0)  NOT NULL CONSTRAINT DF_WN_AttendanceHolidays_CreatedOn DEFAULT (SYSUTCDATETIME()),
+			CreatedBy   NVARCHAR(256) NULL,
+			CONSTRAINT UQ_WN_AttendanceHolidays_Customer_Date UNIQUE (CustomerId, HolidayDate)
+		);');
+
+	-- 3. Customer and switch.
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetCustomerByUser]
+(
+	 @UserId int
+)
+AS
+BEGIN
+	-- ATT_01: the customer whose main account is @UserId (WN_Customers.UserId). Employees with their own login are
+	-- not a customer''s main account and get no row.
+	SET NOCOUNT ON;
+	SELECT TOP 1
+		 c.Id AS CustomerId
+		,COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'''') + N'' '' + ISNULL(c.LastName, N''''))), N''''), c.Email) AS CustomerName
+		,c.AttendanceEnabled
+		,c.AttendanceEnabledOn
+		,c.AttendanceEnabledBy
+	FROM dbo.WN_Customers c WITH (NOLOCK)
+	WHERE c.UserId=@UserId
+		AND @UserId > 0
+	ORDER BY c.IsActive DESC, c.Id;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetCustomer]
+(
+	 @CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: one customer with its attendance switch (no row = no such customer).
+	SET NOCOUNT ON;
+	SELECT
+		 c.Id AS CustomerId
+		,COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'''') + N'' '' + ISNULL(c.LastName, N''''))), N''''), c.Email) AS CustomerName
+		,c.AttendanceEnabled
+		,c.AttendanceEnabledOn
+		,c.AttendanceEnabledBy
+	FROM dbo.WN_Customers c WITH (NOLOCK)
+	WHERE c.Id=@CustomerId;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_SetEnabled]
+(
+	 @CustomerId int
+	,@Enabled bit
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: attendance on / off for a customer (CMS, admin / super admin). Returns the customer as
+	-- WN_Attendance_GetCustomer (no row = no such customer).
+	SET NOCOUNT ON;
+	UPDATE [dbo].[WN_Customers]
+	SET [AttendanceEnabled]=ISNULL(@Enabled, 0)
+		,[AttendanceEnabledOn]=SYSUTCDATETIME()
+		,[AttendanceEnabledBy]=LEFT(@By, 256)
+	WHERE Id=@CustomerId;
+	EXEC dbo.WN_Attendance_GetCustomer @CustomerId = @CustomerId;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetCustomers]
+(
+	 @LocationIds nvarchar(MAX) = NULL -- CSV of location ids (NULL = every location)
+)
+AS
+BEGIN
+	-- ATT_01: staff list (CMS Reports > Attendance): customers with attendance on or with employees on a room, with
+	-- the number of employees on a room today; attendance on first. @LocationIds (location-bound staff): customers
+	-- whose account or a booking is at one of those locations.
+	SET NOCOUNT ON;
+	DECLARE @Today date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date);
+	SELECT
+		 c.Id AS CustomerId
+		,COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'''') + N'' '' + ISNULL(c.LastName, N''''))), N''''), c.Email) AS CustomerName
+		,c.AttendanceEnabled
+		,ISNULL(e.EmployeeCount, 0) AS EmployeeCount
+	FROM dbo.WN_Customers c WITH (NOLOCK) OUTER APPLY
+		(SELECT COUNT(DISTINCT ba.PersonId) AS EmployeeCount
+		FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+		WHERE ba.CustomerId=c.Id
+			AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= @Today)) e
+	WHERE (c.AttendanceEnabled=1 OR EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants xa WITH (NOLOCK) WHERE xa.CustomerId=c.Id))
+		AND (@LocationIds IS NULL
+			OR EXISTS (SELECT 1 FROM dbo.WN_Users lu WITH (NOLOCK)
+				WHERE lu.Id=c.UserId AND lu.LocationId IN (SELECT TRY_CAST(x.value AS int) FROM STRING_SPLIT(@LocationIds, N'','') x))
+			OR EXISTS (SELECT 1 FROM dbo.WN_Bookings lb WITH (NOLOCK) JOIN
+					dbo.WN_Spaces ls WITH (NOLOCK) ON ls.Id=lb.SpaceId
+				WHERE (lb.CustomerCode=c.Code OR (c.UserId IS NOT NULL AND lb.UserId=c.UserId))
+					AND ls.LocationId IN (SELECT TRY_CAST(x.value AS int) FROM STRING_SPLIT(@LocationIds, N'','') x)))
+	ORDER BY c.AttendanceEnabled DESC, CustomerName;
+END;');
+
+	-- 4. People, rooms and scans (the API computes the days).
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetPeople]
+(
+	 @CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: [0] the customer''s employees: everyone ever put on one of its rooms (WN_BookingAttendants), with
+	-- their machine id (WN_HIK_PersonMap.MachineID = WN_HIK_Events.employee_no; NULL = not enrolled).
+	-- [1] their room assignments: AssignedFrom .. AssignedTo (NULL = still on the room). A removed employee keeps
+	-- the past assignments, so past days still appear.
+	SET NOCOUNT ON;
+	SELECT
+		 p.PersonId
+		,p.Name
+		,p.IdType
+		,p.IdNumber
+		,hpm.MachineID
+	FROM dbo.WN_Persons p WITH (NOLOCK) LEFT JOIN
+		dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId=p.PersonId
+	WHERE p.PersonId IN (SELECT ba.PersonId FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId)
+	ORDER BY p.Name, p.PersonId;
+	SELECT
+		 ba.PersonId
+		,ba.BookingDetailId
+		,bd.SpaceName
+		,ba.AssignedFrom
+		,ba.AssignedTo
+	FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) LEFT JOIN
+		dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id=ba.BookingDetailId
+	WHERE ba.CustomerId=@CustomerId
+	ORDER BY ba.PersonId, ba.AssignedFrom;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetRooms]
+(
+	 @CustomerId int
+	,@From date = NULL
+	,@To date = NULL
+)
+AS
+BEGIN
+	-- ATT_01: the customer''s booked rooms (every booking, also ended / cancelled ones, not rejected or no show) whose
+	-- dates overlap @From .. @To (NULL = no limit), with the space category and the location of the booked space.
+	-- SpaceCode / SpaceName come from the booking detail, as the fingerprint enrolment matches room machines with them.
+	SET NOCOUNT ON;
+	SELECT
+		 bd.Id AS BookingDetailId
+		,b.Id AS BookingId
+		,bd.SpaceName
+		,bd.SpaceCode
+		,COALESCE(sc.Code, bd.SpaceCategory) AS CategoryCode
+		,s.LocationId
+		,CAST(bd.StartDateTime AS date) AS StartDate
+		,CAST(bd.EndDateTime AS date) AS EndDate
+	FROM dbo.WN_Customers c WITH (NOLOCK) JOIN
+		dbo.WN_Bookings b WITH (NOLOCK) ON (NULLIF(b.CustomerCode, N'''') IS NOT NULL AND b.CustomerCode=c.Code)
+			OR (NULLIF(b.CustomerCode, N'''') IS NULL AND b.UserId=c.UserId) JOIN
+		dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid=b.IdGUID AND bd.IsDeleted=0 LEFT JOIN
+		dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=b.SpaceId LEFT JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+	WHERE c.Id=@CustomerId
+		AND ISNULL(b.IsDeleted, 0)=0
+		AND b.BookingStatusId NOT IN (3, 6) -- rejected / no show: never occupied
+		AND (bd.FeeType IS NULL OR bd.FeeType LIKE N''%Rent%'')
+		AND (@From IS NULL OR bd.EndDateTime IS NULL OR bd.EndDateTime >= @From)
+		AND (@To IS NULL OR bd.StartDateTime IS NULL OR bd.StartDateTime < DATEADD(DAY, 1, @To))
+	ORDER BY bd.StartDateTime, bd.Id;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetScans]
+(
+	 @DeviceIds nvarchar(MAX) -- CSV of WN_HIK_Devices.Id
+	,@EmployeeNos nvarchar(MAX) -- CSV of machine ids (WN_HIK_PersonMap.MachineID)
+	,@From datetime2(0)
+	,@To datetime2(0)
+)
+AS
+BEGIN
+	-- ATT_01: successful scans (38 fingerprint OK, 1 card OK, 75 / 104 face OK) of @EmployeeNos on @DeviceIds,
+	-- machine time (Pakistan) @From <= event_time < @To, oldest first.
+	SET NOCOUNT ON;
+	SELECT
+		 e.device_id AS DeviceId
+		,e.employee_no AS EmployeeNo
+		,e.event_time AS EventTime
+	FROM dbo.WN_HIK_Events e WITH (NOLOCK)
+	WHERE e.employee_no IN (SELECT LTRIM(RTRIM(x.value)) FROM STRING_SPLIT(@EmployeeNos, N'','') x)
+		AND e.device_id IN (SELECT TRY_CAST(d.value AS int) FROM STRING_SPLIT(@DeviceIds, N'','') d)
+		AND e.access_event IN (38, 1, 75, 104)
+		AND e.event_time >= @From
+		AND e.event_time < @To
+	ORDER BY e.event_time, e.id;
+END;');
+
+	-- 5. Shifts.
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_Shifts_GetList]
+(
+	 @CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: [0] the customer''s shifts (not deleted); [1] the shift of each employee who has one.
+	SET NOCOUNT ON;
+	SELECT
+		 s.Id
+		,s.Name
+		,s.StartTime
+		,s.EndTime
+		,s.GraceMinutes
+		,s.HalfDayMinutes
+		,s.WorkDays
+		,s.IsDefault
+	FROM dbo.WN_AttendanceShifts s WITH (NOLOCK)
+	WHERE s.CustomerId=@CustomerId
+		AND s.IsActive=1
+	ORDER BY s.IsDefault DESC, s.StartTime, s.Name;
+	SELECT
+		 a.PersonId
+		,a.ShiftId
+	FROM dbo.WN_AttendanceShiftAssignments a WITH (NOLOCK) JOIN
+		dbo.WN_AttendanceShifts s WITH (NOLOCK) ON s.Id=a.ShiftId AND s.IsActive=1
+	WHERE a.CustomerId=@CustomerId;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_Shifts_Save]
+(
+	 @Id int = NULL -- NULL = new shift
+	,@CustomerId int
+	,@Name nvarchar(100)
+	,@StartTime time(0)
+	,@EndTime time(0)
+	,@GraceMinutes int = 0
+	,@HalfDayMinutes int = NULL
+	,@WorkDays nvarchar(40)
+	,@IsDefault bit = 0
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: adds (@Id NULL) or changes a shift of the customer. A default shift makes the customer''s other shifts
+	-- not default. Returns its Id (NULL = @Id is not a shift of this customer).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	BEGIN TRY
+		BEGIN TRANSACTION;
+		IF @Id IS NULL
+		BEGIN
+			INSERT INTO [dbo].[WN_AttendanceShifts]
+			(
+				 [CustomerId]
+				,[Name]
+				,[StartTime]
+				,[EndTime]
+				,[GraceMinutes]
+				,[HalfDayMinutes]
+				,[WorkDays]
+				,[IsDefault]
+				,[CreatedBy]
+			)
+			VALUES
+			(
+				 @CustomerId
+				,@Name
+				,@StartTime
+				,@EndTime
+				,ISNULL(@GraceMinutes, 0)
+				,@HalfDayMinutes
+				,@WorkDays
+				,ISNULL(@IsDefault, 0)
+				,LEFT(@By, 256)
+			);
+			SET @Id = CAST(SCOPE_IDENTITY() AS int);
+		END
+		ELSE
+		BEGIN
+			UPDATE [dbo].[WN_AttendanceShifts]
+			SET [Name]=@Name
+				,[StartTime]=@StartTime
+				,[EndTime]=@EndTime
+				,[GraceMinutes]=ISNULL(@GraceMinutes, 0)
+				,[HalfDayMinutes]=@HalfDayMinutes
+				,[WorkDays]=@WorkDays
+				,[IsDefault]=ISNULL(@IsDefault, 0)
+				,[UpdatedOn]=SYSUTCDATETIME()
+				,[UpdatedBy]=LEFT(@By, 256)
+			WHERE Id=@Id AND CustomerId=@CustomerId AND IsActive=1;
+			IF @@ROWCOUNT = 0
+				SET @Id = NULL;
+		END
+		IF @Id IS NOT NULL AND ISNULL(@IsDefault, 0)=1
+			UPDATE [dbo].[WN_AttendanceShifts]
+			SET [IsDefault]=0
+				,[UpdatedOn]=SYSUTCDATETIME()
+				,[UpdatedBy]=LEFT(@By, 256)
+			WHERE CustomerId=@CustomerId AND Id <> @Id AND IsDefault=1;
+		COMMIT TRANSACTION;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		THROW;
+	END CATCH
+	SELECT @Id AS Id;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_Shifts_Delete]
+(
+	 @Id int
+	,@CustomerId int
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: deletes a shift of the customer (kept, IsActive = 0); its employees go back to the default shift / no
+	-- shift. Returns how many shifts were deleted (0 = not a shift of this customer).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Deleted int = 0;
+	BEGIN TRY
+		BEGIN TRANSACTION;
+		UPDATE [dbo].[WN_AttendanceShifts]
+		SET [IsActive]=0
+			,[IsDefault]=0
+			,[UpdatedOn]=SYSUTCDATETIME()
+			,[UpdatedBy]=LEFT(@By, 256)
+		WHERE Id=@Id AND CustomerId=@CustomerId AND IsActive=1;
+		SET @Deleted = @@ROWCOUNT;
+		DELETE FROM [dbo].[WN_AttendanceShiftAssignments]
+		WHERE CustomerId=@CustomerId AND ShiftId=@Id AND @Deleted > 0;
+		COMMIT TRANSACTION;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		THROW;
+	END CATCH
+	SELECT @Deleted AS Deleted;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_ShiftAssignments_Set]
+(
+	 @CustomerId int
+	,@PersonId int
+	,@ShiftId int = NULL -- NULL = no own shift (the default shift, if any)
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: the shift of one employee of the customer. Result: ok / person_not_found / shift_not_found.
+	SET NOCOUNT ON;
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId AND ba.PersonId=@PersonId)
+	BEGIN
+		SELECT N''person_not_found'' AS Result;
+		RETURN;
+	END
+	IF @ShiftId IS NULL
+	BEGIN
+		DELETE FROM [dbo].[WN_AttendanceShiftAssignments]
+		WHERE CustomerId=@CustomerId AND PersonId=@PersonId;
+		SELECT N''ok'' AS Result;
+		RETURN;
+	END
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_AttendanceShifts s WITH (NOLOCK) WHERE s.Id=@ShiftId AND s.CustomerId=@CustomerId AND s.IsActive=1)
+	BEGIN
+		SELECT N''shift_not_found'' AS Result;
+		RETURN;
+	END
+	UPDATE [dbo].[WN_AttendanceShiftAssignments]
+	SET [ShiftId]=@ShiftId
+		,[UpdatedOn]=SYSUTCDATETIME()
+		,[UpdatedBy]=LEFT(@By, 256)
+	WHERE CustomerId=@CustomerId AND PersonId=@PersonId;
+	IF @@ROWCOUNT = 0
+		INSERT INTO [dbo].[WN_AttendanceShiftAssignments]
+		(
+			 [CustomerId]
+			,[PersonId]
+			,[ShiftId]
+			,[UpdatedBy]
+		)
+		VALUES
+		(
+			 @CustomerId
+			,@PersonId
+			,@ShiftId
+			,LEFT(@By, 256)
+		);
+	SELECT N''ok'' AS Result;
+END;');
+
+	-- 6. Holidays.
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_Holidays_GetList]
+(
+	 @CustomerId int
+	,@From date = NULL
+	,@To date = NULL
+)
+AS
+BEGIN
+	-- ATT_01: the customer''s holidays @From .. @To (NULL = no limit), by date.
+	SET NOCOUNT ON;
+	SELECT
+		 h.Id
+		,h.HolidayDate
+		,h.Name
+	FROM dbo.WN_AttendanceHolidays h WITH (NOLOCK)
+	WHERE h.CustomerId=@CustomerId
+		AND (@From IS NULL OR h.HolidayDate >= @From)
+		AND (@To IS NULL OR h.HolidayDate <= @To)
+	ORDER BY h.HolidayDate;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_Holidays_Add]
+(
+	 @CustomerId int
+	,@HolidayDate date
+	,@Name nvarchar(100)
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: declares a holiday of the customer. Result: ok (with its Id) / exists (that date is already a holiday).
+	SET NOCOUNT ON;
+	IF EXISTS (SELECT 1 FROM dbo.WN_AttendanceHolidays h WITH (UPDLOCK, HOLDLOCK) WHERE h.CustomerId=@CustomerId AND h.HolidayDate=@HolidayDate)
+	BEGIN
+		SELECT
+			 N''exists'' AS Result
+			,CAST(NULL AS int) AS Id;
+		RETURN;
+	END
+	INSERT INTO [dbo].[WN_AttendanceHolidays]
+	(
+		 [CustomerId]
+		,[HolidayDate]
+		,[Name]
+		,[CreatedBy]
+	)
+	VALUES
+	(
+		 @CustomerId
+		,@HolidayDate
+		,@Name
+		,LEFT(@By, 256)
+	);
+	SELECT
+		 N''ok'' AS Result
+		,CAST(SCOPE_IDENTITY() AS int) AS Id;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_Holidays_Delete]
+(
+	 @Id int
+	,@CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: removes a holiday of the customer. Returns how many were removed (0 = not a holiday of this customer).
+	SET NOCOUNT ON;
+	DELETE FROM [dbo].[WN_AttendanceHolidays]
+	WHERE Id=@Id AND CustomerId=@CustomerId;
+	SELECT @@ROWCOUNT AS Deleted;
+END;');
+
+	COMMIT TRANSACTION;
+	SELECT N'OK: Customer Attendance installed (ATT_01). Attendance is off for every customer until staff turn it on.' AS Result;
+END TRY
+BEGIN CATCH
+	IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+	THROW;
+END CATCH
