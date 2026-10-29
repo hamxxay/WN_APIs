@@ -34,6 +34,7 @@ namespace WorkNest.Application.Helpers
         public static CustomInvoiceBooking Booking(IDictionary<string, object?> r) => new()
         {
             BookingId = Int(r, "BookingId"),
+            SpaceId = IntOrNull(r, "SpaceId"),
             Label = Str(r, "Label"),
             SpaceName = Str(r, "SpaceName"),
             LocationId = IntOrNull(r, "LocationId"),
@@ -41,6 +42,15 @@ namespace WorkNest.Application.Helpers
             StartOn = DateText(r, "StartOn"),
             EndOn = DateText(r, "EndOn"),
             Status = Str(r, "Status")
+        };
+
+        public static CustomInvoiceSpace Space(IDictionary<string, object?> r) => new()
+        {
+            SpaceId = Int(r, "SpaceId"),
+            Code = Str(r, "Code"),
+            Name = Str(r, "Name"),
+            Label = Str(r, "Label"),
+            LocationId = IntOrNull(r, "LocationId")
         };
 
         public static CustomInvoiceReplaceable Replaceable(IDictionary<string, object?> r) => new()

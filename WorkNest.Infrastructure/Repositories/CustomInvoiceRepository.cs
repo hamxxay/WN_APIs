@@ -86,6 +86,13 @@ namespace WorkNest.Infrastructure.Repositories
             return rows.Select(CustomInvoiceRows.Replaceable).ToList();
         }
 
+        public async Task<IReadOnlyList<CustomInvoiceSpace>> GetSpacesAsync(int locationId)
+        {
+            var rows = await QueryAsync("dbo.WN_CustomInvoice_GetSpaces", false, cmd =>
+                cmd.Parameters.Add("@LocationId", SqlDbType.Int).Value = locationId);
+            return rows.Select(CustomInvoiceRows.Space).ToList();
+        }
+
         public async Task<CustomInvoiceLedgerDefaults> GetLedgerDefaultsAsync(int locationId, DateTime date)
         {
             var rows = await QueryAsync("dbo.WN_CustomInvoice_GetLedgerDefaults", false, cmd =>
@@ -149,6 +156,7 @@ namespace WorkNest.Infrastructure.Repositories
                 AddDecimal(cmd, "@CustomerLedgerDebit", x.CustomerLedgerDebit);
                 p.Add("@CustomerLedgerNarration", SqlDbType.NVarChar, 500).Value = (object?)x.CustomerLedgerNarration ?? DBNull.Value;
                 p.Add("@ReplaceInvoiceId", SqlDbType.Int).Value = (object?)x.ReplaceInvoiceId ?? DBNull.Value;
+                p.Add("@SpaceId", SqlDbType.Int).Value = (object?)x.SpaceId ?? DBNull.Value;
                 var lines = p.Add("@Lines", SqlDbType.Structured);
                 lines.TypeName = LinesTypeName;
                 lines.Value = LinesTable(x.Lines);

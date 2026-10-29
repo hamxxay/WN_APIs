@@ -16,6 +16,8 @@ namespace WorkNest.Application.DTOs.CustomInvoice
         /// <summary>The booking the invoice is for; null = none (then <see cref="LocationId"/> is required).</summary>
         public int? BookingId { get; set; }
         public int? LocationId { get; set; }
+        /// <summary>The space the invoice is assigned to (WN_Spaces.Id); null = none. Must belong to the location (and to the booking's space when a booking is chosen).</summary>
+        public int? SpaceId { get; set; }
         /// <summary>An invoice of the booking this one replaces (it is cancelled and its voucher reversed); null = none.</summary>
         public int? ReplaceInvoiceId { get; set; }
         public DateTime? IssuedOn { get; set; }
@@ -79,6 +81,7 @@ namespace WorkNest.Application.DTOs.CustomInvoice
         public int UserId { get; init; }
         public int? BookingId { get; init; }
         public int? LocationId { get; init; }
+        public int? SpaceId { get; init; }
         public DateTime IssuedOn { get; init; }
         public DateTime DueOn { get; init; }
         /// <summary>Billing period: both dates or neither.</summary>
@@ -132,6 +135,7 @@ namespace WorkNest.Application.DTOs.CustomInvoice
     public sealed class CustomInvoiceBooking
     {
         public int BookingId { get; set; }
+        public int? SpaceId { get; set; }
         public string? Label { get; set; }
         public string? SpaceName { get; set; }
         public int? LocationId { get; set; }
@@ -139,6 +143,16 @@ namespace WorkNest.Application.DTOs.CustomInvoice
         public string? StartOn { get; set; }
         public string? EndOn { get; set; }
         public string? Status { get; set; }
+    }
+
+    /// <summary>A space of a location that a custom invoice can be assigned to.</summary>
+    public sealed class CustomInvoiceSpace
+    {
+        public int SpaceId { get; set; }
+        public string? Code { get; set; }
+        public string? Name { get; set; }
+        public string? Label { get; set; }
+        public int? LocationId { get; set; }
     }
 
     public sealed class CustomInvoiceReplaceable

@@ -88,6 +88,13 @@ namespace WorkNest.Application.Services
                     return CustomInvoiceResult.Ok(await _repository.GetReplaceableAsync(bookingId.Value));
                 });
 
+        public Task<CustomInvoiceResult> GetSpacesAsync(int? locationId, CustomInvoiceScope scope)
+        {
+            if (locationId is not > 0) return Task.FromResult(CustomInvoiceResult.BadRequest("Choose the location first."));
+            if (!scope.Allows(locationId)) return Task.FromResult(CustomInvoiceResult.Forbidden(NotYourLocationMessage));
+            return Run(async () => CustomInvoiceResult.Ok(await _repository.GetSpacesAsync(locationId.Value)));
+        }
+
         public async Task<CustomInvoiceResult> GetLocationsAsync(CustomInvoiceScope scope)
         {
             var locations = BranchScope.Options(await _db.GetAllLocationsAsync())
@@ -190,9 +197,10 @@ namespace WorkNest.Application.Services
 
             int? bookingId = r.BookingId is > 0 ? r.BookingId : null;
             int? locationId = r.LocationId is > 0 ? r.LocationId : null;
+            int? spaceId = r.SpaceId is > 0 ? r.SpaceId : null;
             int? replaceInvoiceId = r.ReplaceInvoiceId is > 0 ? r.ReplaceInvoiceId : null;
             if (bookingId == null && locationId == null)
-                return Fail("Choose the location (needed when the invoice is not for a booking).");
+                return Fail("Choose the location (needed when the invoice is not for a booking), then optionally a space.");
             if (replaceInvoiceId != null && bookingId == null)
                 return Fail("Choose the booking of the invoice to replace.");
 
@@ -268,6 +276,7 @@ namespace WorkNest.Application.Services
                 UserId = r.UserId.Value,
                 BookingId = bookingId,
                 LocationId = locationId,
+                SpaceId = spaceId,
                 IssuedOn = issuedOn.Date,
                 DueOn = dueOn.Date,
                 PeriodFrom = r.PeriodFrom?.Date,

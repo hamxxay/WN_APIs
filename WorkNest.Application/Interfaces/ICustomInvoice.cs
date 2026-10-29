@@ -17,6 +17,7 @@ namespace WorkNest.Application.Interfaces
         Task<CustomInvoiceResult> SearchCustomersAsync(string? search, CustomInvoiceScope scope);
         Task<CustomInvoiceResult> GetBookingsAsync(int? userId, CustomInvoiceScope scope);
         Task<CustomInvoiceResult> GetReplaceableAsync(int? bookingId, CustomInvoiceScope scope);
+        Task<CustomInvoiceResult> GetSpacesAsync(int? locationId, CustomInvoiceScope scope);
         Task<CustomInvoiceResult> GetLocationsAsync(CustomInvoiceScope scope);
         /// <summary>The location's accounts on <paramref name="date"/> (today when null).</summary>
         Task<CustomInvoiceResult> GetLedgerDefaultsAsync(int? locationId, DateTime? date, CustomInvoiceScope scope);
@@ -65,6 +66,7 @@ namespace WorkNest.Application.Interfaces
         Task<IReadOnlyList<CustomInvoiceCustomer>> SearchCustomersAsync(string? search, int top);
         Task<IReadOnlyList<CustomInvoiceBooking>> GetBookingsAsync(int userId);
         Task<IReadOnlyList<CustomInvoiceReplaceable>> GetReplaceableAsync(int bookingId);
+        Task<IReadOnlyList<CustomInvoiceSpace>> GetSpacesAsync(int locationId);
         Task<CustomInvoiceLedgerDefaults> GetLedgerDefaultsAsync(int locationId, DateTime date);
         Task<IReadOnlyList<CustomInvoiceAccount>> SearchAccountsAsync(string? search, int top);
         /// <summary>Writes the invoice, its voucher and ledger lines in one transaction (null when no row came back).</summary>

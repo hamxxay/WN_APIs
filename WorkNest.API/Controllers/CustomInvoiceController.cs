@@ -71,11 +71,17 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> Customers([FromQuery] string? search = null) =>
             Send(await _service.SearchCustomersAsync(search, Scope()));
 
-        /// <summary>The customer's bookings: [{ bookingId, label, spaceName, locationId, locationName, startOn, endOn, status }].</summary>
+        /// <summary>The customer's bookings: [{ bookingId, spaceId, label, spaceName, locationId, locationName, startOn, endOn, status }].</summary>
         [HttpGet("bookings")]
         [Authorize(Policy = CustomInvoiceAccessPolicy.Name)]
         public async Task<IActionResult> Bookings([FromQuery] int? userId = null) =>
             Send(await _service.GetBookingsAsync(userId, Scope()));
+
+        /// <summary>The spaces of a location a custom invoice can be assigned to: [{ spaceId, code, name, label, locationId }].</summary>
+        [HttpGet("spaces")]
+        [Authorize(Policy = CustomInvoiceAccessPolicy.Name)]
+        public async Task<IActionResult> Spaces([FromQuery] int? locationId = null) =>
+            Send(await _service.GetSpacesAsync(locationId, Scope()));
 
         /// <summary>The booking's invoices a custom invoice may replace: [{ invoiceId, invoiceNumber, issuedOn, periodStart, periodEnd, grandTotal, invoiceTypeId }].</summary>
         [HttpGet("replaceable")]
