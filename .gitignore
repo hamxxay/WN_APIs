@@ -39,10 +39,7 @@ scratch/*
 .dotnet_temp/*
 **/App_Data/
 **/PersistentData/
-Sp.sql
 .dotnet /*
 Table.sql
-Sp.sql
-Sp.sql
-Sp.sql
 Database/WN_AuditLog_All_Triggers.sql
+Sp.sql
