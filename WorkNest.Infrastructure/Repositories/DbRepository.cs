@@ -7673,6 +7673,29 @@ END";
             }
         }
 
+        public async Task<WorkNest.Application.DTOs.Invoice.UpdateInvoiceIssueDateResult?> UpdateInvoiceIssueDateDbAsync(int invoiceId, DateTime newIssueDate, string reason, int updatedBy, string? updatedByEmail)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Invoices_UpdateIssueDate", c);
+            cmd.Parameters.Add("@InvoiceId", SqlDbType.Int).Value = invoiceId;
+            cmd.Parameters.Add("@NewIssueDate", SqlDbType.Date).Value = newIssueDate.Date;
+            cmd.Parameters.Add("@Reason", SqlDbType.NVarChar, 500).Value = reason;
+            cmd.Parameters.Add("@UpdatedBy", SqlDbType.Int).Value = updatedBy;
+            cmd.Parameters.Add("@UpdatedByEmail", SqlDbType.NVarChar, 256).Value = (object?)updatedByEmail ?? DBNull.Value;
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (!await r.ReadAsync()) return null;
+            var row = ToDict(r);
+            return new WorkNest.Application.DTOs.Invoice.UpdateInvoiceIssueDateResult
+            {
+                InvoiceId = Convert.ToInt32(row["InvoiceId"]),
+                InvoiceNumber = row["InvoiceNumber"]?.ToString(),
+                IssuedOn = Convert.ToDateTime(row["IssuedOn"]),
+                DueOn = Convert.ToDateTime(row["DueOn"]),
+                StatusId = Convert.ToByte(row["StatusId"]),
+                UpdatedOn = row["UpdatedOn"] is null or DBNull ? null : Convert.ToDateTime(row["UpdatedOn"])
+            };
+        }
+
         public async Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds)
         {
             await using var c = await Open();

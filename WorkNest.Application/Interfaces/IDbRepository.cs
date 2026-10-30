@@ -593,6 +593,10 @@ namespace WorkNest.Application.Interfaces
         /// invoice's pending e-mail retries and writes the audit row. A broken rule throws InvoiceApprovalRevertException.
         /// </summary>
         Task<WorkNest.Application.DTOs.InvoiceApproval.InvoiceApprovalRevertResult?> RevertInvoiceApprovalDbAsync(int invoiceId, int userId, string? userEmail, string reason);
+        /// <summary>
+        /// Super admin updates the issue date of an invoice and syncs Voucher and CustomerLedger dates.
+        /// </summary>
+        Task<WorkNest.Application.DTOs.Invoice.UpdateInvoiceIssueDateResult?> UpdateInvoiceIssueDateDbAsync(int invoiceId, DateTime newIssueDate, string reason, int updatedBy, string? updatedByEmail);
         Task<(IEnumerable<IDictionary<string, object?>> Items, int Total)> GetFeeReceiptsListDbAsync(int page, int limit, string? search, int? locationId, byte? status, string? allowedLocationIds);
         Task<IDictionary<string, object?>?> GetFeeReceiptByIdDbAsync(int? id, Guid? guid, string? allowedLocationIds);
         /// <summary>

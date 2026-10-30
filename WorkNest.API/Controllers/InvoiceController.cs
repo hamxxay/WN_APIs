@@ -8,6 +8,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.DTOs.InvoiceApproval;
+using WorkNest.Application.DTOs.Invoice;
 using WorkNest.Application.DTOs.Lists;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Helpers;
@@ -1594,6 +1595,51 @@ namespace WorkNest.API.Controllers
             catch (InvoiceApprovalRevertDatabaseMissingException ex)
             {
                 return StatusCode(503, ApiResponse.Fail(ex.Message));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ApiResponse.Fail(ex.Message));
+            }
+        }
+
+        /// <summary>
+        /// Super admin only: updates the issue date of an invoice and syncs related Voucher and CustomerLedger dates.
+        /// </summary>
+        [HttpPut("api/invoices/{id:int}/issue-date")]
+        [HttpPut("api/invoice/{id:int}/issue-date")]
+        [Authorize(Roles = SuperAdminRoles)]
+        public async Task<IActionResult> UpdateIssueDate(int id, [FromBody] UpdateInvoiceIssueDateRequest? req)
+        {
+            if (!(User.IsSuperAdmin() || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin")))
+                return StatusCode(403, ApiResponse.Fail("Only super_admin can update invoice issue date."));
+
+            if (id <= 0)
+                return BadRequest(ApiResponse.Fail("Invalid invoice ID."));
+
+            if (req?.NewIssueDate == null)
+                return BadRequest(ApiResponse.Fail("New issue date is required."));
+
+            var reason = req.Reason?.Trim();
+            if (string.IsNullOrWhiteSpace(reason))
+                return BadRequest(ApiResponse.Fail("Reason is required."));
+
+            if (reason.Length < 5)
+                return BadRequest(ApiResponse.Fail("Reason must be at least 5 characters long."));
+
+            try
+            {
+                var email = ResolveUserEmail();
+                var userId = await ResolveRevertUserIdAsync(email) ?? 0;
+
+                var result = await _db.UpdateInvoiceIssueDateDbAsync(id, req.NewIssueDate.Value, reason, userId, email);
+                if (result == null)
+                    return NotFound(ApiResponse.Fail("Invoice not found."));
+
+                return Ok(ApiResponse.Ok(result, "Invoice issue date updated successfully."));
+            }
+            catch (SqlException ex)
+            {
+                return BadRequest(ApiResponse.Fail(ex.Message));
             }
             catch (Exception ex)
             {
