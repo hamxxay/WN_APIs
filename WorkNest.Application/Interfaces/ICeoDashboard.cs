@@ -1,4 +1,4 @@
-using WorkNest.Application.DTOs.Dashboard;
+﻿using WorkNest.Application.DTOs.Dashboard;
 using WorkNest.Common.Responses;
 
 namespace WorkNest.Application.Interfaces
@@ -22,7 +22,7 @@ namespace WorkNest.Application.Interfaces
         /// naming CS_01).
         /// </remarks>
         Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
-            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null);
+            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null, string? locationIds = null);
 
         /// <summary>Metric inquiries-type: narrowed to <paramref name="locationId"/> when the procedure knows how (QA_07).</summary>
         /// <remarks>CS_01, metric revenue: <paramref name="from"/> / <paramref name="to"/> (days included) instead of a month.</remarks>
@@ -95,7 +95,7 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         /// <remarks>CS_01: <paramref name="from"/> / <paramref name="to"/> (days included) = a custom range instead of the period.</remarks>
         Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow,
-            DateTime? from = null, DateTime? to = null);
+            DateTime? from = null, DateTime? to = null, string? locationIds = null);
 
         /// <summary>
         /// CP_02: money received in the period (dbo.WN_Ceo_Received, same period parameters as the dashboard): [0] Received,
@@ -103,7 +103,7 @@ namespace WorkNest.Application.Interfaces
         /// Null when the procedure is not on the database yet (before CP_02).
         /// </summary>
         Task<List<List<IDictionary<string, object?>>>?> GetReceivedAsync(int? locationId, int periodMonths, DateTime businessNow,
-            DateTime? from = null, DateTime? to = null) => Task.FromResult<List<List<IDictionary<string, object?>>>?>(null);
+            DateTime? from = null, DateTime? to = null, string? locationIds = null) => Task.FromResult<List<List<IDictionary<string, object?>>>?>(null);
 
         /// <summary>
         /// CP_02: money received from <paramref name="from"/> to <paramref name="to"/> (days, both included), newest first
@@ -120,7 +120,7 @@ namespace WorkNest.Application.Interfaces
     public interface ICeoDashboardService
     {
         /// <summary>period = month | quarter | year | custom (custom: <paramref name="from"/> / <paramref name="to"/>, yyyy-MM-dd).</summary>
-        Task<ApiResponse> GetDashboardAsync(string? period, int? locationId, string? from = null, string? to = null);
+        Task<ApiResponse> GetDashboardAsync(string? period, int? locationId, string? from = null, string? to = null, string? locationIds = null);
         Task<ApiResponse> GetBreakdownAsync(CeoBreakdownQuery query);
         Task<ApiResponse> GetRecordsAsync(string kind, CeoRecordsQuery query);
 
@@ -128,7 +128,7 @@ namespace WorkNest.Application.Interfaces
         /// Rooms: occupancy per room and the price each was sold at against its list (or shift) price. Before CEO_02 a
         /// successful response with available = false and a message.
         /// </summary>
-        Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId, string? from = null, string? to = null);
+        Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId, string? from = null, string? to = null, string? locationIds = null);
     }
 
     /// <summary>

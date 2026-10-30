@@ -448,4 +448,14 @@ namespace WorkNest.Application.DTOs.Dashboard
             }
         }
     }
+
+    /// <summary>Money summary (invoiced, receivable, overdue) for the sales manager's locations.</summary>
+    public sealed class SalesManagerMoneyResponseDto
+    {
+        public string Period { get; set; } = "month";
+        public string PeriodLabel { get; set; } = "";
+        public string? From { get; set; }
+        public string? To { get; set; }
+        public CeoMoneyDto Money { get; set; } = new();
+    }
 }

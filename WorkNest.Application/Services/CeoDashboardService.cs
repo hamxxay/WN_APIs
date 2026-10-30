@@ -70,13 +70,13 @@ namespace WorkNest.Application.Services
 
         // ------------------------------------------------------------------ level 1: dashboard
 
-        public async Task<ApiResponse> GetDashboardAsync(string? period, int? locationId, string? from = null, string? to = null)
+        public async Task<ApiResponse> GetDashboardAsync(string? period, int? locationId, string? from = null, string? to = null, string? locationIds = null)
         {
             if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
             // CP_02: money received (dbo.WN_Ceo_Received) runs beside the dashboard; null before CP_02.
-            var receivedTask = _repo.GetReceivedAsync(Location(locationId), p.Months, now, p.From, p.To);
-            var s = await _repo.GetDashboardAsync(Location(locationId), p.Months, now, await StatusesAsync(), ExpiringDays, p.From, p.To);
+            var receivedTask = _repo.GetReceivedAsync(Location(locationId), p.Months, now, p.From, p.To, locationIds);
+            var s = await _repo.GetDashboardAsync(Location(locationId), p.Months, now, await StatusesAsync(), ExpiringDays, p.From, p.To, locationIds);
             var received = await receivedTask;
 
             var money = Set(s, 1).FirstOrDefault();
@@ -809,7 +809,7 @@ namespace WorkNest.Application.Services
         /// booking running in the period priced against its expected price (<see cref="PriceSale"/>), with totals
         /// (<see cref="SummarizeRooms"/>). Before CEO_02: available = false and the message, no summary, no rooms.
         /// </summary>
-        public async Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId, string? from = null, string? to = null)
+        public async Task<ApiResponse> GetRoomReportAsync(string? period, int? locationId, string? from = null, string? to = null, string? locationIds = null)
         {
             if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
@@ -824,7 +824,7 @@ namespace WorkNest.Application.Services
             List<List<IDictionary<string, object?>>> s;
             try
             {
-                s = await _repo.GetRoomReportAsync(Location(locationId), p.Months, now, p.From, p.To);
+                s = await _repo.GetRoomReportAsync(Location(locationId), p.Months, now, p.From, p.To, locationIds);
             }
             catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_02")
             {

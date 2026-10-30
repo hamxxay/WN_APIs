@@ -112,6 +112,37 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>
+        /// Room map and pricing against list for the sales manager's locations.
+        /// </summary>
+        [HttpGet("api/sales-manager/rooms")]
+        public Task<IActionResult> Rooms([FromQuery] string? period, [FromQuery] int? locationId,
+            [FromQuery] string? from = null, [FromQuery] string? to = null,
+            [FromServices] ICeoDashboardService ceo = null!) =>
+            Run(locationId, false, scope =>
+                ceo.GetRoomReportAsync(period, scope.LocationId, from, to, scope.LocationIdsCsv));
+
+        /// <summary>
+        /// Invoiced, receivable and overdue figures for the sales manager's locations.
+        /// </summary>
+        [HttpGet("api/sales-manager/money")]
+        public Task<IActionResult> Money([FromQuery] string? period, [FromQuery] int? locationId,
+            [FromQuery] string? from = null, [FromQuery] string? to = null,
+            [FromServices] ICeoDashboardService ceo = null!) =>
+            Run(locationId, false, async scope =>
+            {
+                var res = await ceo.GetDashboardAsync(period, scope.LocationId, from, to, scope.LocationIdsCsv);
+                if (!res.IsSuccessful || res.Data is not CeoDashboardDto dto) return res;
+                return ApiResponse.Ok(new SalesManagerMoneyResponseDto
+                {
+                    Period = dto.Period,
+                    PeriodLabel = dto.PeriodLabel,
+                    From = dto.From,
+                    To = dto.To,
+                    Money = dto.Money
+                });
+            });
+
+        /// <summary>
         /// The caller's scope: a Sales Manager covers their own locations (403 for any other, or when they have none);
         /// a super admin all locations, or the one asked for. Null (with <paramref name="refusal"/>) when refused.
         /// </summary>

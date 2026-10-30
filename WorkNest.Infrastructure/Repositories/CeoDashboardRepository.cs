@@ -116,7 +116,7 @@ namespace WorkNest.Infrastructure.Repositories
         // and the dashboard's result set [13] (all leases expiring).
 
         public Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
-            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null) =>
+            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null, string? locationIds = null) =>
             RunWithInquiryLocationAsync("dbo.WN_Ceo_Dashboard", p =>
             {
                 p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
@@ -124,6 +124,8 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 AddStatuses(p, statuses);
                 p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
+                if (!string.IsNullOrWhiteSpace(locationIds))
+                    p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = locationIds;
             }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true, from, to);
 
         public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, DateTime? monthStart, string? bucket,
@@ -309,7 +311,7 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         public async Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow,
-            DateTime? from = null, DateTime? to = null)
+            DateTime? from = null, DateTime? to = null, string? locationIds = null)
         {
             try
             {
@@ -318,6 +320,8 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
                     p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                    if (!string.IsNullOrWhiteSpace(locationIds))
+                        p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = locationIds;
                 }, from, to);
             }
             catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_01") // this procedure comes with CEO_02, not CEO_01
@@ -330,7 +334,7 @@ namespace WorkNest.Infrastructure.Repositories
         // (SQL error 2812 -> CeoDatabaseUpdateMissingException) the answer is null, so the dashboard still loads.
 
         public async Task<List<List<IDictionary<string, object?>>>?> GetReceivedAsync(int? locationId, int periodMonths, DateTime businessNow,
-            DateTime? from = null, DateTime? to = null)
+            DateTime? from = null, DateTime? to = null, string? locationIds = null)
         {
             try
             {
@@ -341,6 +345,8 @@ namespace WorkNest.Infrastructure.Repositories
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                     p.Add("@From", SqlDbType.Date).Value = Db(from?.Date);
                     p.Add("@To", SqlDbType.Date).Value = Db(to?.Date);
+                    if (!string.IsNullOrWhiteSpace(locationIds))
+                        p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = locationIds;
                 });
             }
             catch (CeoDatabaseUpdateMissingException)
