@@ -10,7 +10,7 @@ namespace WorkNest.API.Controllers
 {
     /// <summary>
     /// "Access Machines" tab of the CMS Network section: the Hikvision access-control machines with their connection
-    /// state, and the "Test" / "Test all" buttons. Super admins see every machine; a network engineer only the machines
+    /// state, the "Test" / "Test all" buttons, and add / edit. Super admins see every machine; a network engineer only the machines
     /// of the locations they are assigned to (machines without a location are not theirs). Admins and sales executives
     /// are refused. Never returns a username or password. Answers { isSuccessful, message, data }.
     /// </summary>
@@ -63,6 +63,50 @@ namespace WorkNest.API.Controllers
             return Ok(ApiResponse.Ok(results.Select(r => new { id = r.DeviceId, name = r.Name, online = r.Online, error = r.Error }).ToList(),
                 $"{online} of {results.Count} machines online."));
         });
+
+        /// <summary>One machine for the edit form (connection details, no password). 403 for another location's machine.</summary>
+        [HttpGet("api/network/access-machines/{id:int}")]
+        public Task<IActionResult> Get(int id) => Run(async () =>
+        {
+            var machine = await _devices.GetDeviceAsync(id);
+            if (machine == null) return NotFound(ApiResponse.Fail("Machine not found."));
+            if (!Allowed(machine)) return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(OtherLocationMessage));
+            return Ok(ApiResponse.Ok(machine));
+        });
+
+        /// <summary>Machine groups for the Group select of the add / edit form.</summary>
+        [HttpGet("api/network/access-machines/groups")]
+        public Task<IActionResult> Groups() => Run(async () => Ok(ApiResponse.Ok(await _devices.GetDeviceGroupsAsync())));
+
+        /// <summary>Adds a machine (a network engineer: only at one of their locations), then tests it. 409 when host + port is used.</summary>
+        [HttpPost("api/network/access-machines")]
+        public Task<IActionResult> Add([FromBody] HikDeviceSaveRequest? request) => Run(async () =>
+        {
+            if (!MayUseLocation(request?.LocationId)) return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(OtherLocationAddMessage));
+            return Outcome(await _devices.AddDeviceAsync(request, User.GetEmail()));
+        });
+
+        /// <summary>Changes a machine (fields left out are kept, an empty password keeps the saved one), then tests it.
+        /// A network engineer may only change their locations' machines and may not move one to another location.</summary>
+        [HttpPut("api/network/access-machines/{id:int}")]
+        public Task<IActionResult> Update(int id, [FromBody] HikDeviceSaveRequest? request) => Run(async () =>
+        {
+            var machine = await _devices.GetDeviceAsync(id);
+            if (machine == null) return NotFound(ApiResponse.Fail("Machine not found."));
+            if (!Allowed(machine)) return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(OtherLocationMessage));
+            if (request?.LocationId != null && !MayUseLocation(request.LocationId))
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(OtherLocationAddMessage));
+            return Outcome(await _devices.UpdateDeviceAsync(id, request, User.GetEmail()));
+        });
+
+        public const string OtherLocationAddMessage = "Pick one of your own locations for this machine.";
+
+        /// <summary>Super admin: any location. Network engineer: one of the locations they are assigned to.</summary>
+        private bool MayUseLocation(int? locationId) =>
+            !User.IsNetworkEngineer() || (locationId is > 0 && User.GetLocationIds().Contains(locationId.Value));
+
+        private IActionResult Outcome(HikDeviceSaveOutcome o) =>
+            StatusCode(o.StatusCode, new ApiResponse { IsSuccessful = o.IsSuccessful, Message = o.Message, Data = o.Device == null ? null : new { device = o.Device, test = o.Test } });
 
         /// <summary>Super admin: every machine. Network engineer: machines of their locations only (no unassigned ones).</summary>
         private bool Allowed(HikDeviceDetailDto d) =>
