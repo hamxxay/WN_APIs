@@ -32,7 +32,7 @@ namespace WorkNest.API.Controllers
             _attendance = attendance;
         }
 
-        /// <summary>Customers with attendance on or with employees on a room (attendance on first), [{ customerId, customerName, enabled, employeeCount }].</summary>
+        /// <summary>Customers with attendance on, with employees, or with a booking active in the last 2 months (attendance on first), [{ customerId, customerName, enabled, employeeCount }].</summary>
         [HttpGet("api/admin/attendance/customers")]
         public Task<IActionResult> Customers() =>
             AttendanceController.Guarded(async () =>

@@ -6,7 +6,8 @@ namespace WorkNest.Application.Services
 {
     /// <summary>
     /// Customer attendance. People = the customer's employees (WN_BookingAttendants of the customer, machine id from
-    /// WN_HIK_PersonMap); machines = the room machines of the customer's booked rooms, matched exactly as the fingerprint
+    /// WN_HIK_PersonMap) plus (ATT_02, WN_Attendance_GetPeople) the people enrolled directly on the machines of the
+    /// customer's own rooms and the account holder (negative PersonId = machine-only person); never anyone else; machines = the room machines of the customer's booked rooms, matched exactly as the fingerprint
     /// enrolment does (<see cref="HikEnrollmentService.RoomMachines"/>: at the booking's location, not Entrance, Code
     /// matching the room), each counting only for the dates its booking covers. Shared space / meeting rooms have no
     /// room machine and are skipped. Days come from <see cref="AttendanceCalculator"/>.
@@ -68,7 +69,8 @@ namespace WorkNest.Application.Services
             };
 
             var (people, assignments) = await _repo.GetPeopleAsync(customer.CustomerId);
-            if (personId is > 0) people = people.Where(p => p.PersonId == personId).ToList();
+            people = DedupeByMachine(people);
+            if (personId != null && personId != 0) people = people.Where(p => p.PersonId == personId).ToList();
             var periods = assignments.ToLookup(a => a.PersonId);
             // Only people who were an employee of the customer on some day of the range.
             people = people.Where(p => periods[p.PersonId].Any(a => a.AssignedFrom.Date <= to && (a.AssignedTo == null || a.AssignedTo.Value.Date >= from))).ToList();
@@ -120,6 +122,21 @@ namespace WorkNest.Application.Services
                 .ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ThenBy(d => d.PersonId).ToList();
             report.Summary = report.Summary.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ThenBy(s => s.PersonId).ToList();
             return AttendanceOutcome.Ok(report);
+        }
+
+        /// <summary>One row per machine id (the same machine id must not count twice): the person with a WN_Persons row (PersonId &gt; 0) wins.</summary>
+        public static List<AttendancePersonRow> DedupeByMachine(IEnumerable<AttendancePersonRow> people)
+        {
+            var result = new List<AttendancePersonRow>();
+            var byMachine = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in people)
+            {
+                var m = (p.MachineId ?? "").Trim();
+                if (m.Length == 0) { result.Add(p); continue; }
+                if (!byMachine.TryGetValue(m, out var at)) { byMachine[m] = result.Count; result.Add(p); }
+                else if (result[at].PersonId < 0 && p.PersonId > 0) result[at] = p;
+            }
+            return result;
         }
 
         /// <summary>Room machine id -> the customer's rooms on it (with their booked dates).</summary>

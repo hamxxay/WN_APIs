@@ -1,0 +1,278 @@
+-- ============================================================================================
+-- ATT_02: Attendance people (run AFTER ATT_01). Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the
+-- test database and on the live database. One transaction. Safe to run again. Nothing is deleted or changed in data;
+-- only procedures / one function are created or replaced.
+--
+-- 1. dbo.WN_Attendance_MachinePeople(@CustomerId) (new function): people who are NOT in WN_BookingAttendants but belong
+--    to the customer anyway:
+--    a) ROOM RULE: machine-enrolled people (dbo.WN_HIK_Users, role <> admin) whose room list on the machine contains
+--       ONLY rooms the customer booked (a person enrolled on rooms of two customers, or on many rooms such as WorkNest
+--       staff / cleaners / admins, is never added), who scanned (38, 1, 75, 104) on one of those rooms' machines while
+--       that booking was active, and when no OTHER customer had the same room booked at the same time (then nobody can
+--       tell whose person it is, so nobody is added for those dates). Bookings counted: not deleted, not rejected /
+--       no show / cancelled, rent lines. People already attendants of this customer, or attendants of another
+--       customer, are skipped. Their room period = the booking dates.
+--    b) ACCOUNT HOLDER: the customer itself, matched only by CNIC / passport (WN_Customers.CnicOrPassport equal to
+--       WN_Persons.IdNumber that has a machine id in WN_HIK_PersonMap, or to WN_HIK_Users.cnic). Room period = all the
+--       customer's bookings. (Email / name are NOT used: they are shared between customers.)
+--    People without a WN_Persons row get PersonId = -WN_HIK_Users.id (negative = machine-only person).
+-- 2. dbo.WN_Attendance_GetPeople   attendants (as before) + MachinePeople.
+-- 3. dbo.WN_Attendance_ShiftAssignments_Set   also accepts those people.
+-- 4. dbo.WN_Attendance_GetCustomers   staff dropdown: also every customer with a booking active in the last 2 months.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+	BEGIN TRANSACTION;
+
+	IF OBJECT_ID(N'dbo.WN_Attendance_MachinePeople', N'IF') IS NOT NULL
+		EXEC(N'DROP FUNCTION dbo.WN_Attendance_MachinePeople;');
+	EXEC(N'CREATE FUNCTION dbo.WN_Attendance_MachinePeople (@CustomerId int)
+RETURNS TABLE
+AS
+RETURN
+(
+	WITH MyRooms AS
+	(
+		SELECT bd.Id AS BookingDetailId, bd.SpaceName, bd.SpaceCode, c.Code AS CustomerCode, c.UserId AS CustomerUserId
+			,CAST(bd.StartDateTime AS date) AS S, CAST(bd.EndDateTime AS date) AS E
+		FROM dbo.WN_Customers c WITH (NOLOCK) JOIN
+			dbo.WN_Bookings b WITH (NOLOCK) ON (NULLIF(b.CustomerCode, N'''') IS NOT NULL AND b.CustomerCode=c.Code)
+				OR (NULLIF(b.CustomerCode, N'''') IS NULL AND b.UserId=c.UserId) JOIN
+			dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid=b.IdGUID AND bd.IsDeleted=0
+		WHERE c.Id=@CustomerId
+			AND ISNULL(b.IsDeleted, 0)=0
+			AND b.BookingStatusId NOT IN (3, 6, 86)
+			AND (bd.FeeType IS NULL OR bd.FeeType LIKE N''%Rent%'')
+	),
+	Cust AS
+	(
+		SELECT REPLACE(REPLACE(ISNULL(c.CnicOrPassport, N''''), N''-'', N''''), N'' '', N'''') AS Cnic
+		FROM dbo.WN_Customers c WITH (NOLOCK) WHERE c.Id=@CustomerId
+	),
+	Candidates AS
+	(
+		SELECT u.id AS UserRowId, u.employee_no, u.name, u.cnic, u.room
+		FROM dbo.WN_HIK_Users u WITH (NOLOCK)
+		WHERE ISNULL(u.role, N'''') <> N''admin''
+			AND NULLIF(LTRIM(RTRIM(ISNULL(u.room, N''''))), N'''') IS NOT NULL
+			AND NULLIF(LTRIM(RTRIM(ISNULL(u.employee_no, N''''))), N'''') IS NOT NULL
+	),
+	Tokens AS
+	(
+		SELECT cu.UserRowId, LTRIM(RTRIM(t.value)) AS Token
+			,CASE WHEN EXISTS (SELECT 1 FROM MyRooms r WHERE r.SpaceCode=LTRIM(RTRIM(t.value)) OR r.SpaceName=LTRIM(RTRIM(t.value))
+				OR r.SpaceName LIKE N''% '' + LTRIM(RTRIM(t.value))) THEN 1 ELSE 0 END AS IsMine
+		FROM Candidates cu CROSS APPLY STRING_SPLIT(cu.room, N'','') t
+		WHERE LTRIM(RTRIM(t.value)) <> N''''
+	),
+	-- only people whose EVERY room is a room of this customer
+	RoomUsers AS
+	(
+		SELECT tk.UserRowId
+		FROM Tokens tk
+		GROUP BY tk.UserRowId
+		HAVING COUNT(*) = SUM(tk.IsMine)
+	),
+	RoomAssign AS
+	(
+		SELECT DISTINCT cu.UserRowId, cu.employee_no, cu.name, cu.cnic, r.BookingDetailId, r.SpaceName, r.S, r.E
+		FROM RoomUsers ru JOIN Candidates cu ON cu.UserRowId=ru.UserRowId JOIN
+			Tokens tk ON tk.UserRowId=cu.UserRowId JOIN
+			MyRooms r ON (r.SpaceCode=tk.Token OR r.SpaceName=tk.Token OR r.SpaceName LIKE N''% '' + tk.Token)
+		WHERE EXISTS (SELECT 1 FROM dbo.WN_HIK_Events e WITH (NOLOCK) JOIN
+				dbo.WN_HIK_Devices d WITH (NOLOCK) ON d.Id=e.device_id
+			WHERE e.employee_no=cu.employee_no
+				AND (d.Code=tk.Token OR d.Device_Name=N''Room '' + tk.Token)
+				AND e.access_event IN (38, 1, 75, 104)
+				AND e.event_time >= r.S
+				AND (r.E IS NULL OR e.event_time < DATEADD(DAY, 1, r.E)))
+			-- the same room booked by ANOTHER customer on overlapping dates: whose person it is cannot be told
+			AND NOT EXISTS (SELECT 1 FROM dbo.WN_BookingDetails bd2 WITH (NOLOCK) JOIN
+					dbo.WN_Bookings b2 WITH (NOLOCK) ON b2.IdGUID=bd2.BookingGuid
+				WHERE bd2.IsDeleted=0 AND bd2.Id <> r.BookingDetailId
+					AND ISNULL(b2.IsDeleted, 0)=0
+					AND b2.BookingStatusId NOT IN (3, 6, 86)
+					AND (bd2.FeeType IS NULL OR bd2.FeeType LIKE N''%Rent%'')
+					AND (bd2.SpaceCode=r.SpaceCode OR bd2.SpaceName=r.SpaceName)
+					AND NOT ((NULLIF(b2.CustomerCode, N'''') IS NOT NULL AND b2.CustomerCode=r.CustomerCode)
+						OR (NULLIF(b2.CustomerCode, N'''') IS NULL AND b2.UserId=r.CustomerUserId))
+					AND bd2.StartDateTime < DATEADD(DAY, 1, ISNULL(r.E, CAST(N''9999-12-31'' AS date)))
+					AND (bd2.EndDateTime IS NULL OR bd2.EndDateTime >= r.S))
+			-- already an attendant of this customer (comes from WN_BookingAttendants), or of another customer
+			AND NOT EXISTS (SELECT 1 FROM dbo.WN_HIK_PersonMap pm WITH (NOLOCK) JOIN
+					dbo.WN_BookingAttendants ba WITH (NOLOCK) ON ba.PersonId=pm.PersonId
+				WHERE pm.MachineID=cu.employee_no)
+	),
+	HolderPerson AS
+	(
+		SELECT p.PersonId, pm.MachineID AS EmployeeNo, p.Name, p.IdType, p.IdNumber
+		FROM Cust ct JOIN dbo.WN_Persons p WITH (NOLOCK) ON REPLACE(REPLACE(ISNULL(p.IdNumber, N''''), N''-'', N''''), N'' '', N'''')=ct.Cnic JOIN
+			dbo.WN_HIK_PersonMap pm WITH (NOLOCK) ON pm.PersonId=p.PersonId
+		WHERE LEN(ct.Cnic) >= 5 AND ct.Cnic LIKE N''%[1-9]%''
+			AND NOT EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId AND ba.PersonId=p.PersonId)
+		UNION ALL
+		SELECT -u.id, u.employee_no, COALESCE(NULLIF(LTRIM(RTRIM(u.name)), N''''), N''Machine user '' + u.employee_no), N''CNIC'', u.cnic
+		FROM Cust ct JOIN dbo.WN_HIK_Users u WITH (NOLOCK) ON REPLACE(REPLACE(ISNULL(u.cnic, N''''), N''-'', N''''), N'' '', N'''')=ct.Cnic
+		WHERE LEN(ct.Cnic) >= 5 AND ct.Cnic LIKE N''%[1-9]%''
+			AND NULLIF(LTRIM(RTRIM(ISNULL(u.employee_no, N''''))), N'''') IS NOT NULL
+			AND NOT EXISTS (SELECT 1 FROM dbo.WN_HIK_PersonMap pm WITH (NOLOCK) WHERE pm.MachineID=u.employee_no)
+	)
+	SELECT -ra.UserRowId AS PersonId, ra.employee_no AS EmployeeNo
+		,COALESCE(NULLIF(LTRIM(RTRIM(ra.name)), N''''), N''Machine user '' + ra.employee_no) AS Name
+		,CASE WHEN NULLIF(ra.cnic, N'''') IS NULL THEN N'''' ELSE N''CNIC'' END AS IdType
+		,ISNULL(ra.cnic, N'''') AS IdNumber
+		,ra.BookingDetailId, ra.SpaceName, ra.S AS AssignedFrom, ra.E AS AssignedTo, N''room'' AS Source
+	FROM RoomAssign ra
+	UNION ALL
+	SELECT h.PersonId, h.EmployeeNo, h.Name, ISNULL(h.IdType, N''''), ISNULL(h.IdNumber, N'''')
+		,r.BookingDetailId, r.SpaceName, r.S, r.E, N''owner''
+	FROM HolderPerson h CROSS JOIN MyRooms r
+);');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetPeople]
+(
+	 @CustomerId int
+)
+AS
+BEGIN
+	-- ATT_02: [0] the customer''s people: attendants (WN_BookingAttendants) + machine-enrolled people of its own rooms +
+	-- the account holder (WN_Attendance_MachinePeople), with machine id (WN_HIK_Events.employee_no; NULL = not
+	-- enrolled). PersonId < 0 = machine-only person (no WN_Persons row).
+	-- [1] their room assignments: AssignedFrom .. AssignedTo (NULL = still on the room).
+	SET NOCOUNT ON;
+	SELECT
+		 p.PersonId
+		,p.Name
+		,p.IdType
+		,p.IdNumber
+		,hpm.MachineID
+	FROM dbo.WN_Persons p WITH (NOLOCK) LEFT JOIN
+		dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId=p.PersonId
+	WHERE p.PersonId IN (SELECT ba.PersonId FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId)
+	UNION
+	SELECT m.PersonId, m.Name, m.IdType, m.IdNumber, m.EmployeeNo
+	FROM (SELECT DISTINCT PersonId, EmployeeNo, Name, IdType, IdNumber FROM dbo.WN_Attendance_MachinePeople(@CustomerId)) m
+	WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants xa WITH (NOLOCK) WHERE xa.CustomerId=@CustomerId AND xa.PersonId=m.PersonId)
+	ORDER BY Name, PersonId;
+	SELECT
+		 ba.PersonId
+		,ba.BookingDetailId
+		,bd.SpaceName
+		,ba.AssignedFrom
+		,ba.AssignedTo
+	FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) LEFT JOIN
+		dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id=ba.BookingDetailId
+	WHERE ba.CustomerId=@CustomerId
+	UNION
+	SELECT m.PersonId, m.BookingDetailId, m.SpaceName, m.AssignedFrom, m.AssignedTo
+	FROM dbo.WN_Attendance_MachinePeople(@CustomerId) m
+	ORDER BY PersonId, AssignedFrom;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_ShiftAssignments_Set]
+(
+	 @CustomerId int
+	,@PersonId int
+	,@ShiftId int = NULL -- NULL = no own shift (the default shift, if any)
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_02: the shift of one person of the customer (attendant, machine-enrolled person of its rooms, account
+	-- holder). Result: ok / person_not_found / shift_not_found.
+	SET NOCOUNT ON;
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId AND ba.PersonId=@PersonId)
+		AND NOT EXISTS (SELECT 1 FROM dbo.WN_Attendance_MachinePeople(@CustomerId) m WHERE m.PersonId=@PersonId)
+	BEGIN
+		SELECT N''person_not_found'' AS Result;
+		RETURN;
+	END
+	IF @ShiftId IS NULL
+	BEGIN
+		DELETE FROM [dbo].[WN_AttendanceShiftAssignments]
+		WHERE CustomerId=@CustomerId AND PersonId=@PersonId;
+		SELECT N''ok'' AS Result;
+		RETURN;
+	END
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_AttendanceShifts s WITH (NOLOCK) WHERE s.Id=@ShiftId AND s.CustomerId=@CustomerId AND s.IsActive=1)
+	BEGIN
+		SELECT N''shift_not_found'' AS Result;
+		RETURN;
+	END
+	UPDATE [dbo].[WN_AttendanceShiftAssignments]
+	SET [ShiftId]=@ShiftId
+		,[UpdatedOn]=SYSUTCDATETIME()
+		,[UpdatedBy]=LEFT(@By, 256)
+	WHERE CustomerId=@CustomerId AND PersonId=@PersonId;
+	IF @@ROWCOUNT = 0
+		INSERT INTO [dbo].[WN_AttendanceShiftAssignments]
+		(
+			 [CustomerId]
+			,[PersonId]
+			,[ShiftId]
+			,[UpdatedBy]
+		)
+		VALUES
+		(
+			 @CustomerId
+			,@PersonId
+			,@ShiftId
+			,LEFT(@By, 256)
+		);
+	SELECT N''ok'' AS Result;
+END;');
+
+	EXEC(N'CREATE OR ALTER PROCEDURE [dbo].[WN_Attendance_GetCustomers]
+(
+	 @LocationIds nvarchar(MAX) = NULL -- CSV of location ids (NULL = every location)
+)
+AS
+BEGIN
+	-- ATT_02: staff list (CMS Reports > Attendance): customers with attendance on, with attendants, or with a booking
+	-- active in the last 2 months (so staff can pick any customer); attendance on first. EmployeeCount = attendants on
+	-- a room today (machine-enrolled people are found when the report is opened). @LocationIds (location-bound
+	-- staff): customers whose account or a booking is at one of those locations.
+	SET NOCOUNT ON;
+	DECLARE @Today date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS date);
+	DECLARE @Since date = DATEADD(MONTH, -2, @Today);
+	SELECT
+		 c.Id AS CustomerId
+		,COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'''') + N'' '' + ISNULL(c.LastName, N''''))), N''''), c.Email) AS CustomerName
+		,c.AttendanceEnabled
+		,ISNULL(e.EmployeeCount, 0) AS EmployeeCount
+	FROM dbo.WN_Customers c WITH (NOLOCK) OUTER APPLY
+		(SELECT COUNT(DISTINCT ba.PersonId) AS EmployeeCount
+		FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+		WHERE ba.CustomerId=c.Id
+			AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= @Today)) e
+	WHERE (c.AttendanceEnabled=1
+			OR EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants xa WITH (NOLOCK) WHERE xa.CustomerId=c.Id)
+			OR EXISTS (SELECT 1 FROM dbo.WN_Bookings rb WITH (NOLOCK) JOIN
+					dbo.WN_BookingDetails rd WITH (NOLOCK) ON rd.BookingGuid=rb.IdGUID AND rd.IsDeleted=0
+				WHERE ((NULLIF(rb.CustomerCode, N'''') IS NOT NULL AND rb.CustomerCode=c.Code)
+						OR (NULLIF(rb.CustomerCode, N'''') IS NULL AND c.UserId IS NOT NULL AND rb.UserId=c.UserId))
+					AND ISNULL(rb.IsDeleted, 0)=0
+					AND rb.BookingStatusId NOT IN (3, 6)
+					AND (rd.StartDateTime IS NULL OR rd.StartDateTime < DATEADD(DAY, 1, @Today))
+					AND (rd.EndDateTime IS NULL OR rd.EndDateTime >= @Since)))
+		AND (@LocationIds IS NULL
+			OR EXISTS (SELECT 1 FROM dbo.WN_Users lu WITH (NOLOCK)
+				WHERE lu.Id=c.UserId AND lu.LocationId IN (SELECT TRY_CAST(x.value AS int) FROM STRING_SPLIT(@LocationIds, N'','') x))
+			OR EXISTS (SELECT 1 FROM dbo.WN_Bookings lb WITH (NOLOCK) JOIN
+					dbo.WN_Spaces ls WITH (NOLOCK) ON ls.Id=lb.SpaceId
+				WHERE (lb.CustomerCode=c.Code OR (c.UserId IS NOT NULL AND lb.UserId=c.UserId))
+					AND ls.LocationId IN (SELECT TRY_CAST(x.value AS int) FROM STRING_SPLIT(@LocationIds, N'','') x)))
+	ORDER BY c.AttendanceEnabled DESC, CustomerName;
+END;');
+
+	COMMIT TRANSACTION;
+	SELECT N'OK: Attendance people installed (ATT_02).' AS Result;
+END TRY
+BEGIN CATCH
+	IF @@TRANCOUNT > 0
+		ROLLBACK TRANSACTION;
+	THROW;
+END CATCH

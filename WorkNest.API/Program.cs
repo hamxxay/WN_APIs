@@ -300,6 +300,7 @@ try
     builder.Services.AddScoped<IChallanService, ChallanService>();
     builder.Services.AddScoped<IOrderStatusService, OrderStatusService>();
     builder.Services.AddScoped<IHikAccessService, HikAccessService>();
+    builder.Services.AddScoped<IRoomReportService, RoomReportService>();
     builder.Services.AddScoped<IKycService, KycService>();
     builder.Services.AddScoped<ISecurityDepositReportService, SecurityDepositReportService>();
     builder.Services.AddSingleton<IUnifiService, UnifiService>();

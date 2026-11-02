@@ -13,7 +13,7 @@ namespace WorkNest.Application.Interfaces
         Task<AttendanceCustomerRow?> GetCustomerAsync(int customerId);
         /// <summary>Attendance on / off; returns the customer (null = no such customer).</summary>
         Task<AttendanceCustomerRow?> SetEnabledAsync(int customerId, bool enabled, string? by);
-        /// <summary>Customers with attendance on or with employees; locationIds null = every location.</summary>
+        /// <summary>Customers with attendance on, with employees or a booking active in the last 2 months (ATT_02); locationIds null = every location.</summary>
         Task<List<AttendanceCustomerRow>> GetCustomersAsync(IReadOnlyCollection<int>? locationIds);
 
         /// <summary>Everyone ever on one of the customer's rooms, and their room assignments.</summary>
