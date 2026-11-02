@@ -54,6 +54,8 @@ namespace WorkNest.Application.Interfaces
         /// <summary>false when the event is already archived (duplicate serial).</summary>
         Task<bool> TryInsertEventAsync(int deviceId, string deviceName, string? employeeNo, string? name, string? cardNo,
             int? accessEvent, string accessEventDetails, long? machineEventNo, DateTime eventTime);
+        /// <summary>Deletes events older than <paramref name="before"/> (at most 50,000 per call); returns how many. HIK_EVT_01.</summary>
+        Task<int> PurgeEventsAsync(DateTime before);
 
         // Queued operations
         Task<List<IDictionary<string, object?>>> GetPendingOpsAsync(int top);

@@ -1,0 +1,36 @@
+-- =====================================================================================================================
+-- HIK_EVT_01: door-event retention (WN_HIK_Events keeps the previous month and the current month only).
+--
+-- WN_HIK_Sync_Events_Purge deletes events older than @Before, at most @MaxRows per call in batches of 5000 rows,
+-- and returns { Deleted }. The API calls it once a day (HikSync "events" step) until it returns 0.
+-- The audit trigger on WN_HIK_Events is paused during the delete, so purged scans are not copied into WN_AuditLog;
+-- it is switched back on even when the delete fails.
+--
+-- Safe to run more than once. Run on SAC400 first, then on live. Nothing is deleted by this script itself.
+-- =====================================================================================================================
+
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_HIK_Sync_Events_Purge
+    @Before DATETIME, @MaxRows INT = 50000
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Deleted INT = 0, @Batch INT = 1;
+    DECLARE @HasTrigger BIT = CASE WHEN OBJECT_ID(N''dbo.TR_WN_HIK_Events_Audit'', N''TR'') IS NOT NULL THEN 1 ELSE 0 END;
+
+    IF @HasTrigger = 1 DISABLE TRIGGER dbo.TR_WN_HIK_Events_Audit ON dbo.WN_HIK_Events;
+    BEGIN TRY
+        WHILE @Batch > 0 AND @Deleted < @MaxRows
+        BEGIN
+            DELETE TOP (5000) FROM dbo.WN_HIK_Events WHERE event_time < @Before;
+            SET @Batch = @@ROWCOUNT;
+            SET @Deleted = @Deleted + @Batch;
+        END
+        IF @HasTrigger = 1 ENABLE TRIGGER dbo.TR_WN_HIK_Events_Audit ON dbo.WN_HIK_Events;
+    END TRY
+    BEGIN CATCH
+        IF @HasTrigger = 1 ENABLE TRIGGER dbo.TR_WN_HIK_Events_Audit ON dbo.WN_HIK_Events;
+        THROW;
+    END CATCH
+
+    SELECT @Deleted AS Deleted;
+END');

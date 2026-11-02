@@ -34,6 +34,8 @@ namespace WorkNest.Application.Interfaces
         Task<HikIsapiResult> SetDeviceTimeAsync(HikDeviceConnection device, int tzOffsetMinutes = 300);
         Task<HikSearchPage> SearchPersonsAsync(HikDeviceConnection device, int position, int maxResults, TimeSpan timeout);
         Task<HikSearchPage> SearchEventsAsync(HikDeviceConnection device, int position, int maxResults, TimeSpan timeout);
+        /// <summary>Access events (major 5) between two machine-local times ("yyyy-MM-ddTHH:mm:ss+05:00"), oldest first.</summary>
+        Task<HikSearchPage> SearchEventsInRangeAsync(HikDeviceConnection device, string startTime, string endTime, int position, int maxResults, TimeSpan timeout);
         Task<HikSearchPage> ReadAllCardsAsync(HikDeviceConnection device, int position, int maxResults, TimeSpan timeout);
         /// <summary>Card numbers of one person; null when the machine could not be read.</summary>
         Task<List<string>?> ReadCardsAsync(HikDeviceConnection device, string employeeNo);

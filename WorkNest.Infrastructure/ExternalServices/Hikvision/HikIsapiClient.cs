@@ -415,6 +415,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Hikvision
                 new JsonObject { ["AcsEventCond"] = new JsonObject { ["searchID"] = "hik-dash-ev", ["searchResultPosition"] = position, ["maxResults"] = maxResults, ["major"] = 5, ["minor"] = 0 } },
                 "AcsEvent", "InfoList", timeout);
 
+        public Task<HikSearchPage> SearchEventsInRangeAsync(HikDeviceConnection device, string startTime, string endTime, int position, int maxResults, TimeSpan timeout) =>
+            SearchAsync(device, "/ISAPI/AccessControl/AcsEvent?format=json",
+                new JsonObject { ["AcsEventCond"] = new JsonObject { ["searchID"] = "hik-dash-range", ["searchResultPosition"] = position, ["maxResults"] = maxResults,
+                    ["major"] = 5, ["minor"] = 0, ["startTime"] = startTime, ["endTime"] = endTime } },
+                "AcsEvent", "InfoList", timeout);
+
         public Task<HikSearchPage> ReadAllCardsAsync(HikDeviceConnection device, int position, int maxResults, TimeSpan timeout) =>
             SearchAsync(device, "/ISAPI/AccessControl/CardInfo/Search?format=json",
                 new JsonObject { ["CardInfoSearchCond"] = new JsonObject { ["searchID"] = "hik-dash-cards", ["searchResultPosition"] = position, ["maxResults"] = maxResults } },

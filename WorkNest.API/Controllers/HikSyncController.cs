@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.DTOs.HikDevice;
 using WorkNest.API.Extensions;
 using WorkNest.Application.Services;
 using WorkNest.Common.Responses;
@@ -64,5 +65,40 @@ namespace WorkNest.API.Controllers
             var status = await _sync.RunJobAsync(job!);
             return Ok(ApiResponse.Ok(status, status.LastOk == false ? "Job finished with an error." : "Job finished."));
         }
+
+        /// <summary>
+        /// "Load missing door events" (CMS Services, super admin): reads every access event of [from, to] (days,
+        /// inclusive) from the machines (all, or deviceId) in the background and saves the missing ones. 202 + status;
+        /// 409 while one is running; 400 for bad dates.
+        /// </summary>
+        [HttpPost("api/hik/sync/backfill-events")]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
+        public async Task<IActionResult> StartBackfill([FromBody] HikEventBackfillRequest? request)
+        {
+            if (request == null || !DateTime.TryParse(request.From, out var from) || !DateTime.TryParse(request.To, out var to))
+                return BadRequest(ApiResponse.Fail("Choose the start and end dates."));
+            var (status, error) = await _sync.StartEventBackfillAsync(from, to, request.DeviceId is > 0 ? request.DeviceId : null);
+            if (status == null)
+                return error != null && error.StartsWith("Missing events are already") ? Conflict(ApiResponse.Fail(error)) : BadRequest(ApiResponse.Fail(error ?? "Could not start."));
+            return StatusCode(StatusCodes.Status202Accepted, ApiResponse.Ok(status, "Loading missing door events…"));
+        }
+
+        /// <summary>The current / last backfill; { keepFrom } only when none has run since the API started.</summary>
+        [HttpGet("api/hik/sync/backfill-events")]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
+        public IActionResult GetBackfill() =>
+            Ok(ApiResponse.Ok(_sync.GetEventBackfill() ?? (object)new { keepFrom = $"{_sync.EventsKeepFrom():yyyy-MM-dd}" }));
+
+        [HttpPost("api/hik/sync/backfill-events/cancel")]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
+        public IActionResult CancelBackfill() =>
+            Ok(ApiResponse.Ok(_sync.CancelEventBackfill() ?? (object)new { keepFrom = $"{_sync.EventsKeepFrom():yyyy-MM-dd}" }, "Cancelling…"));
+    }
+
+    public class HikEventBackfillRequest
+    {
+        public string? From { get; set; }
+        public string? To { get; set; }
+        public int? DeviceId { get; set; }
     }
 }

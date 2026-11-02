@@ -33,6 +33,8 @@ namespace WorkNest.Application.Services
         public int PingTimeoutSeconds { get; set; } = 6;
         /// <summary>Machine time zone, minutes east of UTC (Pakistan = 300).</summary>
         public int DeviceTzOffsetMinutes { get; set; } = 300;
+        /// <summary>Door events kept besides the current month: 1 = previous month too (older ones are deleted daily).</summary>
+        public int KeepEventMonths { get; set; } = 1;
     }
 
     /// <summary>
@@ -835,48 +837,35 @@ namespace WorkNest.Application.Services
 
         // ---- events (archiveEvents) ------------------------------------------------------------
 
+        /// <summary>Events read per machine per 5-minute pass; a machine further behind catches up over the next passes.</summary>
+        private const int EventsPerPass = 3000;
+        /// <summary>Each pass re-reads this much before the newest saved event (duplicates are skipped by the database).</summary>
+        private static readonly TimeSpan EventOverlap = TimeSpan.FromMinutes(10);
+        private DateTime? _lastPurgeDay;
+
+        /// <summary>
+        /// Every 5 minutes: each online machine is read from its newest saved event onward (time-range search, oldest
+        /// first), so events from an API outage or a busy spell are caught up instead of skipped. A machine with no
+        /// saved event starts one day back. Once a day, events older than <see cref="EventsKeepFrom"/> are deleted.
+        /// </summary>
         private async Task<string> ArchiveEventsAsync()
         {
             var devices = (await _repo.GetAllDevicesAsync()).Where(d => d.Online).ToList();
+            var now = _clock.Now;
+            var keepFrom = EventsKeepFrom();
             var saved = 0;
-            var failed = new System.Collections.Concurrent.ConcurrentBag<string>();
+            var failed = new ConcurrentBag<string>();
             await Task.WhenAll(devices.Select(async dev =>
             {
                 try
                 {
-                    var head = await _isapi.SearchEventsAsync(dev, 0, 1, TimeSpan.FromSeconds(2));
-                    if (!head.Ok) { failed.Add(dev.Name); _logger.LogWarning("HIK events: {Device} could not be read", dev.Name); return; }
-                    if (head.Total == 0) return;
-                    // Firmware caps event pages at 30 — walk only the tail so background jobs don't stall.
-                    var pos = Math.Max(0, head.Total - 60);
-                    var recent = new List<JsonObject>();
-                    while (pos < head.Total && recent.Count < 90)
-                    {
-                        var page = await _isapi.SearchEventsAsync(dev, pos, 30, TimeSpan.FromSeconds(2));
-                        if (!page.Ok || page.List.Count == 0) break;
-                        recent.AddRange(page.List);
-                        pos += page.List.Count;
-                    }
-
-                    var (lastSerial, lastTime) = await _repo.GetLastEventAsync(dev.Id);
-                    foreach (var e in recent)
-                    {
-                        long? serial = long.TryParse(e["serialNo"]?.ToString(), out var sn) && sn > 0 ? sn : null;
-                        var t = e["time"]?.ToString() ?? string.Empty;
-                        if (t.Length < 19) continue;
-                        t = t[..19];
-                        // Skip re-read tail events, but not when the time is newer: a factory-reset machine restarts serials at 1.
-                        if (serial != null && serial <= lastSerial && lastTime != null && string.CompareOrdinal(t, lastTime) <= 0) continue;
-                        if (!DateTime.TryParse(t, out var eventTime)) continue;
-
-                        int? minor = int.TryParse(e["minor"]?.ToString(), out var mn) && mn != 0 ? mn : null;
-                        var label = minor.HasValue && EventLabels.TryGetValue(minor.Value, out var l) ? l : $"Event {e["minor"]}";
-                        var emp = e["employeeNoString"]?.ToString();
-                        var card = e["cardNo"]?.ToString();
-                        if (await _repo.TryInsertEventAsync(dev.Id, dev.Name, string.IsNullOrEmpty(emp) ? null : emp, e["name"]?.ToString(),
-                                string.IsNullOrEmpty(card) ? null : card, minor, label, serial, eventTime))
-                            Interlocked.Increment(ref saved);
-                    }
+                    var (_, lastTime) = await _repo.GetLastEventAsync(dev.Id);
+                    // No saved event, or a machine clock that ran ahead: start one day back.
+                    var from = DateTime.TryParse(lastTime, out var last) && last <= now.AddHours(1) ? last - EventOverlap : now.AddDays(-1);
+                    if (from < keepFrom) from = keepFrom;
+                    var r = await ReadEventRangeAsync(dev, from, now.AddDays(1), EventsPerPass, CancellationToken.None);
+                    Interlocked.Add(ref saved, r.Saved);
+                    if (r.Error != null) { failed.Add(dev.Name); _logger.LogWarning("HIK events: {Device} could not be read: {Error}", dev.Name, r.Error); }
                 }
                 catch (Exception ex)
                 {
@@ -887,8 +876,183 @@ namespace WorkNest.Application.Services
             var result = $"stored {saved} new event(s) from {devices.Count - failed.Count}/{devices.Count} online machine(s)";
             if (!failed.IsEmpty) result += $"; could not read: {string.Join(", ", failed.OrderBy(n => n).Take(10))}{(failed.Count > 10 ? "…" : "")}";
             if (devices.Count == 0) result = "no machines are marked online (run the online check / Test all first)";
-            return result;
+            return result + await PurgeOldEventsOncePerDayAsync();
         }
+
+        /// <summary>First day the database keeps: the first of the month, HikSync:KeepEventMonths months back (1 = previous month).</summary>
+        public DateTime EventsKeepFrom()
+        {
+            var today = _clock.Today;
+            return new DateTime(today.Year, today.Month, 1).AddMonths(-Math.Max(1, _options.KeepEventMonths));
+        }
+
+        private async Task<string> PurgeOldEventsOncePerDayAsync()
+        {
+            var today = _clock.Today;
+            if (_lastPurgeDay == today) return string.Empty;
+            var before = EventsKeepFrom();
+            try
+            {
+                var total = 0;
+                for (int n; (n = await _repo.PurgeEventsAsync(before)) > 0;) total += n;
+                _lastPurgeDay = today;
+                return $"; removed {total} event(s) before {before:yyyy-MM-dd}";
+            }
+            catch (Exception ex)
+            {
+                // HIK_EVT_01 not run yet: keep everything, try again on the next pass.
+                _logger.LogWarning("HIK event purge failed: {Error}", ex.Message);
+                return "; old events not removed (run HIK_EVT_01)";
+            }
+        }
+
+        private sealed record EventRangeResult(int Read, int Saved, string? Error);
+
+        /// <summary>
+        /// Reads a machine's access events between two local times, 30 per page (firmware cap), and saves the ones the
+        /// database doesn't have. Stops after <paramref name="maxEvents"/> (the next call continues from the newest saved).
+        /// </summary>
+        private async Task<EventRangeResult> ReadEventRangeAsync(HikSyncDevice dev, DateTime from, DateTime to, int maxEvents, CancellationToken ct,
+            Action<int, int>? progress = null)
+        {
+            var off = TimeSpan.FromMinutes(_options.DeviceTzOffsetMinutes);
+            var zone = $"{(off < TimeSpan.Zero ? "-" : "+")}{off.Duration():hh\\:mm}";
+            string Stamp(DateTime t) => $"{t:yyyy-MM-ddTHH:mm:ss}{zone}";
+            int pos = 0, read = 0, saved = 0;
+            while (read < maxEvents && !ct.IsCancellationRequested)
+            {
+                HikSearchPage page = new() { Ok = false };
+                for (var attempt = 0; attempt < 3 && !page.Ok; attempt++)
+                {
+                    if (attempt > 0) await Task.Delay(1500, ct);
+                    page = await _isapi.SearchEventsInRangeAsync(dev, Stamp(from), Stamp(to), pos, 30, TimeSpan.FromSeconds(6));
+                }
+                if (!page.Ok) return new EventRangeResult(read, saved, page.Error ?? "search failed");
+                if (page.List.Count == 0) break;
+                foreach (var e in page.List)
+                    if (await SaveEventAsync(dev, e)) saved++;
+                read += page.List.Count;
+                pos += page.List.Count;
+                progress?.Invoke(page.List.Count, saved);
+                if (pos >= page.Total) break;
+            }
+            return new EventRangeResult(read, saved, null);
+        }
+
+        /// <summary>Saves one machine event; false when it is already archived (device + serial + time) or unreadable.</summary>
+        private async Task<bool> SaveEventAsync(HikSyncDevice dev, JsonObject e)
+        {
+            long? serial = long.TryParse(e["serialNo"]?.ToString(), out var sn) && sn > 0 ? sn : null;
+            var t = e["time"]?.ToString() ?? string.Empty;
+            if (t.Length < 19 || !DateTime.TryParse(t[..19], out var eventTime)) return false;
+            int? minor = int.TryParse(e["minor"]?.ToString(), out var mn) && mn != 0 ? mn : null;
+            var label = minor.HasValue && EventLabels.TryGetValue(minor.Value, out var l) ? l : $"Event {e["minor"]}";
+            var emp = e["employeeNoString"]?.ToString();
+            var card = e["cardNo"]?.ToString();
+            return await _repo.TryInsertEventAsync(dev.Id, dev.Name, string.IsNullOrEmpty(emp) ? null : emp, e["name"]?.ToString(),
+                string.IsNullOrEmpty(card) ? null : card, minor, label, serial, eventTime);
+        }
+
+        // ---- "Load missing door events" (one-off backfill) --------------------------------------
+
+        private HikEventBackfillStatus? _backfill;
+        private CancellationTokenSource? _backfillCts;
+        private readonly object _backfillLock = new();
+
+        public HikEventBackfillStatus? GetEventBackfill()
+        {
+            lock (_backfillLock) return _backfill == null ? null : Copy(_backfill);
+        }
+
+        public HikEventBackfillStatus? CancelEventBackfill()
+        {
+            lock (_backfillLock)
+            {
+                _backfillCts?.Cancel();
+                return _backfill == null ? null : Copy(_backfill);
+            }
+        }
+
+        /// <summary>
+        /// Starts reading every access event of [from, to] (days, inclusive) from the machines (all, or one) in the
+        /// background, 3 machines at a time. Returns the new status, or an error message (bad dates, already running).
+        /// </summary>
+        public async Task<(HikEventBackfillStatus? Status, string? Error)> StartEventBackfillAsync(DateTime from, DateTime to, int? deviceId)
+        {
+            from = from.Date; to = to.Date;
+            var keepFrom = EventsKeepFrom();
+            if (to < from) return (null, "The end date is before the start date.");
+            if ((to - from).TotalDays > 92) return (null, "Choose at most 92 days at a time.");
+            if (from > _clock.Today) return (null, "The start date is in the future.");
+            if (from < keepFrom) return (null, $"Events are kept from {keepFrom:dd MMM yyyy} onward; choose that date or later.");
+
+            var devices = (await _repo.GetAllDevicesAsync()).Where(d => deviceId == null || d.Id == deviceId).ToList();
+            if (devices.Count == 0) return (null, "Machine not found.");
+
+            CancellationTokenSource cts;
+            HikEventBackfillStatus status;
+            lock (_backfillLock)
+            {
+                if (_backfill?.Running == true) return (null, "Missing events are already being loaded; wait for it to finish or cancel it.");
+                _backfillCts?.Dispose();
+                _backfillCts = cts = new CancellationTokenSource();
+                _backfill = status = new HikEventBackfillStatus
+                {
+                    Running = true, From = $"{from:yyyy-MM-dd}", To = $"{to:yyyy-MM-dd}", DeviceId = deviceId, StartedAt = _clock.Now,
+                    MachinesTotal = devices.Count, KeepFrom = $"{keepFrom:yyyy-MM-dd}", Message = "Loading…"
+                };
+            }
+            _ = Task.Run(() => RunEventBackfillAsync(devices, from, to.AddDays(1), status, cts.Token));
+            return (Copy(status), null);
+        }
+
+        private async Task RunEventBackfillAsync(List<HikSyncDevice> devices, DateTime from, DateTime toExclusive, HikEventBackfillStatus status, CancellationToken ct)
+        {
+            using var gate = new SemaphoreSlim(3);
+            await Task.WhenAll(devices.Select(async dev =>
+            {
+                await gate.WaitAsync();
+                try
+                {
+                    if (ct.IsCancellationRequested) return;
+                    lock (_backfillLock) status.Current.Add(dev.Name);
+                    var r = await ReadEventRangeAsync(dev, from, toExclusive.AddSeconds(-1), int.MaxValue, ct,
+                        (read, _) => { lock (_backfillLock) status.EventsRead += read; });
+                    lock (_backfillLock)
+                    {
+                        status.EventsSaved += r.Saved;
+                        if (r.Error != null) status.Failed.Add(new HikEventBackfillFailure { Name = dev.Name, Error = r.Error });
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("HIK event backfill failed for {Device}: {Error}", dev.Name, ex.Message);
+                    lock (_backfillLock) status.Failed.Add(new HikEventBackfillFailure { Name = dev.Name, Error = ex.Message });
+                }
+                finally
+                {
+                    lock (_backfillLock) { status.Current.Remove(dev.Name); status.MachinesDone++; }
+                    gate.Release();
+                }
+            }));
+            lock (_backfillLock)
+            {
+                status.Running = false;
+                status.Cancelled = ct.IsCancellationRequested;
+                status.FinishedAt = _clock.Now;
+                status.Message = $"{(status.Cancelled ? "Cancelled" : "Finished")}: {status.EventsRead} event(s) read, {status.EventsSaved} new saved"
+                    + (status.Failed.Count > 0 ? $", {status.Failed.Count} machine(s) could not be read." : ".");
+            }
+            _logger.LogInformation("HIK event backfill {From}..{To}: {Message}", status.From, status.To, status.Message);
+        }
+
+        private static HikEventBackfillStatus Copy(HikEventBackfillStatus s) => new()
+        {
+            Running = s.Running, From = s.From, To = s.To, DeviceId = s.DeviceId, StartedAt = s.StartedAt, FinishedAt = s.FinishedAt,
+            Cancelled = s.Cancelled, MachinesTotal = s.MachinesTotal, MachinesDone = s.MachinesDone, EventsRead = s.EventsRead,
+            EventsSaved = s.EventsSaved, Current = s.Current.ToList(), Failed = s.Failed.ToList(), Message = s.Message, KeepFrom = s.KeepFrom
+        };
 
         // ---- queued operations (replayPendingOps) ----------------------------------------------
 

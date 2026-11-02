@@ -49,6 +49,35 @@ namespace WorkNest.Application.DTOs.HikDevice
         public bool Running { get; set; }
     }
 
+    /// <summary>"Load missing door events" (CMS Services): one backfill run that re-reads a date range from the machines.</summary>
+    public class HikEventBackfillStatus
+    {
+        public bool Running { get; set; }
+        /// <summary>First and last day read (inclusive), yyyy-MM-dd.</summary>
+        public string From { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+        public int? DeviceId { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime? FinishedAt { get; set; }
+        public bool Cancelled { get; set; }
+        public int MachinesTotal { get; set; }
+        public int MachinesDone { get; set; }
+        public int EventsRead { get; set; }
+        public int EventsSaved { get; set; }
+        /// <summary>Machines being read right now.</summary>
+        public List<string> Current { get; set; } = new();
+        public List<HikEventBackfillFailure> Failed { get; set; } = new();
+        public string Message { get; set; } = string.Empty;
+        /// <summary>Earliest day the database keeps (events before it are deleted daily), yyyy-MM-dd.</summary>
+        public string KeepFrom { get; set; } = string.Empty;
+    }
+
+    public class HikEventBackfillFailure
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Error { get; set; } = string.Empty;
+    }
+
     /// <summary>Result of testing one machine (the "Test" button): reachable or not, with its details.</summary>
     public class HikDeviceTestResult
     {

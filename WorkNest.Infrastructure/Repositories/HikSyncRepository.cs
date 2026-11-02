@@ -227,6 +227,12 @@ namespace WorkNest.Infrastructure.Repositories
             return r != null && Int(r, "Inserted") == 1; // 0 = duplicate serial, already archived
         }
 
+        public async Task<int> PurgeEventsAsync(DateTime before)
+        {
+            var r = (await SpAsync("WN_HIK_Sync_Events_Purge", ("@Before", before))).FirstOrDefault();
+            return r != null ? Int(r, "Deleted") : 0;
+        }
+
         // ---- queued operations -----------------------------------------------------------------
 
         public Task<List<IDictionary<string, object?>>> GetPendingOpsAsync(int top) =>

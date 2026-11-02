@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.HikDevice;
@@ -25,5 +26,16 @@ namespace WorkNest.Application.Interfaces
         /// <summary>"Test all": tests every machine in parallel and saves online / offline.</summary>
         /// <summary><paramref name="onlyDeviceIds"/>: test only these machines (null = every machine).</summary>
         Task<List<HikDeviceTestResult>> TestAllDevicesAsync(IReadOnlyCollection<int>? onlyDeviceIds = null);
+
+        /// <summary>First day the database keeps door events (older ones are deleted daily).</summary>
+        DateTime EventsKeepFrom();
+
+        /// <summary>"Load missing door events": reads [from, to] (days) from the machines in the background.</summary>
+        Task<(HikEventBackfillStatus? Status, string? Error)> StartEventBackfillAsync(DateTime from, DateTime to, int? deviceId);
+
+        /// <summary>The current / last backfill (null when none has run since the API started).</summary>
+        HikEventBackfillStatus? GetEventBackfill();
+
+        HikEventBackfillStatus? CancelEventBackfill();
     }
 }
