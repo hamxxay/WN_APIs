@@ -323,6 +323,9 @@ try
     builder.Services.AddScoped<ICustomInvoiceRepository, WorkNest.Infrastructure.Repositories.CustomInvoiceRepository>();
     builder.Services.AddScoped<ICustomInvoiceAccessService, CustomInvoiceAccessService>();
     builder.Services.AddScoped<ICustomInvoiceService, CustomInvoiceService>();
+    builder.Services.AddScoped<ITransferRepository, TransferRepository>();
+    builder.Services.AddScoped<ITransferService, TransferService>();
+    builder.Services.AddScoped<ITransferAddendumPdfService, TransferAddendumPdfService>();
 
 
     // ── Background Hosted Services ────────────────────────────────────────────
