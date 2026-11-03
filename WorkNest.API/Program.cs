@@ -47,6 +47,7 @@ try
     builder.Services.AddControllers(o =>
         {
             o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
+            o.Filters.Add<WorkNest.API.Filters.PasswordChangeRequiredFilter>();
             o.Filters.Add<WorkNest.API.Filters.CeoAccessFilter>();
             o.Filters.Add<WorkNest.API.Filters.SalesManagerAccessFilter>();
             o.Filters.Add<WorkNest.API.Filters.AccessOfficerAccessFilter>();
@@ -204,6 +205,9 @@ try
 
     // ── Application Services ──────────────────────────────────────────────────
     builder.Services.AddScoped<IAuthService, AuthService>();
+    // Customer temporary passwords (script AUTH_TEMP_01_customer_temp_passwords); 503 on the staff endpoints before it.
+    builder.Services.AddScoped<ICustomerLoginRepository, WorkNest.Infrastructure.Repositories.CustomerLoginRepository>();
+    builder.Services.AddScoped<ICustomerLoginService, CustomerLoginService>();
     // Roles from dbo.WN_Roles (api/roles, roleDisplayName on sign-in / api/auth/me): dbo.WN_Roles_GetList (script SM_01).
     builder.Services.AddScoped<IRoleService, RoleService>();
     builder.Services.AddScoped<IUserService, UserService>();

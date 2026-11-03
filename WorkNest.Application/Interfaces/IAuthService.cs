@@ -21,6 +21,8 @@ namespace WorkNest.Application.Interfaces
         /// (EMAIL_NOT_VERIFIED / ACCOUNT_DISABLED). Called for every endpoint that takes a Firebase token.
         /// </summary>
         Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified);
+        /// <summary>Own password change (also while MustChangePassword is set): same data as a login on success, Fail otherwise.</summary>
+        Task<ApiResponse> ChangePasswordAsync(string email, string? currentPassword, string? newPassword);
         Task<ApiResponse> GetMeAsync(string email);
         Task<ApiResponse> UpdateMeAsync(string email, UpdateMyProfileRequest request);
         ApiResponse Logout();

@@ -16,9 +16,11 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IOrderStatusService _orderStatus;
         private readonly IBusinessClock _clock;
+        private readonly ICustomerLoginService? _logins;
 
-        public CustomerService(IDbRepository db, IOrderStatusService orderStatus, IBusinessClock clock)
+        public CustomerService(IDbRepository db, IOrderStatusService orderStatus, IBusinessClock clock, ICustomerLoginService? logins = null)
         {
+            _logins = logins;
             _db = db;
             _orderStatus = orderStatus;
             _clock = clock;
@@ -162,7 +164,20 @@ namespace WorkNest.Application.Services
             if (!result.TryGetValue("Id", out var custIdObj) || custIdObj is null)
                 return ApiResponse.Fail("Customer could not be created. The stored procedure returned no result.");
 
-            return ApiResponse.Ok(result, "Customer created successfully.");
+            // Every new customer gets a temporary password (shown once to staff, e-mailed to the customer). The customer
+            // exists either way: if this step fails, data.login is null and the message says so.
+            object? login = null;
+            var message = "Customer created successfully.";
+            if (_logins is not null && int.TryParse(custIdObj.ToString(), out var newCustomerId))
+            {
+                var (issued, error) = await _logins.TryIssueAsync(newCustomerId);
+                if (issued is not null)
+                    login = new { email = issued.Email, tempPassword = issued.TempPassword, emailed = issued.Emailed };
+                else
+                    message = $"Customer created successfully, but the login could not be created: {error}";
+            }
+            result["login"] = login;
+            return ApiResponse.Ok(result, message);
         }
 
         public async Task<ApiResponse> UpdateCustomerAsync(string id, CustomerRequest request)

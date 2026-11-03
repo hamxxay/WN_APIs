@@ -18,6 +18,7 @@ namespace WorkNest.Application.Services
         private readonly IRoleService _roles;
         private readonly DateTime _grandfatherBeforeUtc;
         private readonly bool _requireVerifiedEmail;
+        private readonly ICustomerLoginRepository? _customerLogin;
 
         /// <summary>Config key: only sign-ins recorded before this UTC instant let an unverified Firebase email through.</summary>
         public const string GrandfatherCutoffKey = "Security:UnverifiedSignInGrandfatherBeforeUtc";
@@ -33,8 +34,9 @@ namespace WorkNest.Application.Services
         public static readonly DateTime DefaultGrandfatherCutoffUtc = new(2026, 10, 16, 0, 0, 0, DateTimeKind.Utc);
 
         public AuthService(IDbRepository db, IJwtService jwt, ILogger<AuthService> logger, ILoginHistoryService loginHistory,
-            IRoleService roles, IConfiguration? configuration = null)
+            IRoleService roles, IConfiguration? configuration = null, ICustomerLoginRepository? customerLogin = null)
         {
+            _customerLogin = customerLogin;
             _db = db;
             _jwt = jwt;
             _logger = logger;
@@ -66,7 +68,9 @@ namespace WorkNest.Application.Services
 
             var (id, publicId) = await _db.SyncUserAsync(request.Email, name, request.Phone, request.PasswordHash, roleId, companyId);
             await EnsureCustomerAsync(request.Email, name, request.Phone, id);
-            return ApiResponse.Ok(new { id, publicId, email = request.Email }, "User synchronized successfully.");
+            // sync only runs with a verified Firebase sign-in: it proves the email, so a temporary password is retired.
+            var mustChange = await ActivateIfFlaggedAsync(request.Email, id);
+            return ApiResponse.Ok(new { id, publicId, email = request.Email, mustChangePassword = mustChange }, "User synchronized successfully.");
         }
 
         public async Task<ApiResponse> RegisterAsync(UserRegisterRequest request)
@@ -96,6 +100,7 @@ namespace WorkNest.Application.Services
             bool isFirebaseVerified = firebaseVerified;
 
             int? newUserId = null;
+            var mustChange = false;
             if (row is null)
             {
                 // WN_Users_GetByEmail only returns active rows: a turned-off account is told so (403 ACCOUNT_DISABLED), but
@@ -173,6 +178,10 @@ namespace WorkNest.Application.Services
                     : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
                 role = Roles.FromRow(row);
                 locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : (int?)null;
+                mustChange = RowMustChange(row);
+                // A verified Firebase / Google sign-in proves the email: a temporary password is retired.
+                if (isFirebaseVerified && mustChange && userId.HasValue && role == Roles.General)
+                    mustChange = !await TryActivateAsync(userId.Value);
 
                 var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
                 var nameToUse = !string.IsNullOrWhiteSpace(existingName) ? existingName : name;
@@ -184,7 +193,7 @@ namespace WorkNest.Application.Services
                 });
             }
 
-            var session = await SessionDataAsync(row, publicId, request.Email, role, locationId);
+            var session = await SessionDataAsync(row, publicId, request.Email, role, locationId, mustChange);
 
             var resolvedUserId = (row != null && row.TryGetValue("Id", out var rUid) && rUid is not null)
                 ? Convert.ToInt32(rUid) 
@@ -220,7 +229,7 @@ namespace WorkNest.Application.Services
                 : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
             var role = Roles.FromRow(row);
             int? locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : null;
-            var session = await SessionDataAsync(row, publicId, email, role, locationId);
+            var session = await SessionDataAsync(row, publicId, email, role, locationId, RowMustChange(row));
 
             await RecordQuietly("LOGIN", userId, email, null);
             return ApiResponse.Ok(session, "Login successful.");
@@ -230,13 +239,13 @@ namespace WorkNest.Application.Services
         /// data of a successful sign-in (login, google-login, handoff): the API token for the user and what the sites
         /// store with it. Location-bound roles get every allowed location (row = their WN_Users row; null for a new user).
         /// </summary>
-        private async Task<object> SessionDataAsync(IDictionary<string, object?>? row, string? publicId, string email, string role, int? locationId)
+        private async Task<object> SessionDataAsync(IDictionary<string, object?>? row, string? publicId, string email, string role, int? locationId, bool mustChangePassword = false)
         {
             var locationIds = row is not null && Roles.IsLocationBoundRole(role) ? await AllowedLocationsAsync(row) : new List<int>();
             var token = _jwt.GenerateToken(publicId ?? "", email, role, locationId,
-                locationIds.Count > 0 ? locationIds : null);
+                locationIds.Count > 0 ? locationIds : null, mustChangePassword);
             return new { id = publicId, email, role, roles = new[] { role },
-                roleDisplayName = await RoleDisplayNameAsync(role), locationId, locationIds, token };
+                roleDisplayName = await RoleDisplayNameAsync(role), locationId, locationIds, mustChangePassword, token };
         }
 
         /// <summary>
@@ -308,9 +317,85 @@ namespace WorkNest.Application.Services
             Data = new SignInRefusalData { Code = refusal.Code }
         };
 
-        private static bool PasswordMatches(string? given, string? stored) =>
-            !string.IsNullOrWhiteSpace(given) && !string.IsNullOrWhiteSpace(stored) &&
-            string.Equals(stored, given, StringComparison.Ordinal);
+        /// <summary>The stored password may be a PBKDF2 hash or (existing staff, not migrated) plain text.</summary>
+        internal static bool PasswordMatches(string? given, string? stored) => PasswordHasher.Verify(given, stored);
+
+        /// <summary>WN_Users.MustChangePassword of a row (false while AUTH_TEMP_01 has not run: the column is missing).</summary>
+        private static bool RowMustChange(IDictionary<string, object?> row) =>
+            row.TryGetValue("MustChangePassword", out var v) && v is not null && v is not DBNull && Convert.ToBoolean(v);
+
+        /// <summary>Clears the first-login flag and the readable temporary password. False when it could not be done (flag stays).</summary>
+        private async Task<bool> TryActivateAsync(int userId)
+        {
+            if (_customerLogin is null) return false;
+            try
+            {
+                await _customerLogin.ActivateAsync(userId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not clear the temporary password of user {UserId}", userId);
+                return false;
+            }
+        }
+
+        /// <summary>After a verified sign-in for <paramref name="email"/>: clears a customer's temporary password. Returns the flag as it is now.</summary>
+        private async Task<bool> ActivateIfFlaggedAsync(string email, int? userId)
+        {
+            try
+            {
+                var row = await _db.GetUserByEmailAsync(email);
+                if (row is null || !RowMustChange(row)) return false;
+                var id = userId ?? (row.TryGetValue("Id", out var i) && i is not null ? Convert.ToInt32(i) : (int?)null);
+                if (id is null || Roles.FromRow(row) != Roles.General) return true;
+                return !await TryActivateAsync(id.Value);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not check the temporary password flag for {Email}", email);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// api/auth/change-password: checks the current password (hashed or plain), validates the new one, stores its hash,
+        /// clears MustChangePassword and the readable temporary password, and answers like a login (new token without pwd_change).
+        /// Failures are a plain ApiResponse.Fail (400) except AUTH_TEMP_01 missing (the message says so, 503 by the controller).
+        /// </summary>
+        public async Task<ApiResponse> ChangePasswordAsync(string email, string? currentPassword, string? newPassword)
+        {
+            var row = await _db.GetUserByEmailAsync(email);
+            if (row is null || !row.TryGetValue("Id", out var idObj) || idObj is null) return ApiResponse.Fail("User not found.");
+            var userId = Convert.ToInt32(idObj);
+
+            var stored = row.TryGetValue("PasswordHash", out var pw) ? pw?.ToString() : null;
+            if (!PasswordMatches(currentPassword, stored))
+            {
+                await RecordQuietly("FAILED", userId, email, "WrongPassword");
+                return ApiResponse.Fail("The current password is incorrect.");
+            }
+            var error = PasswordRules.ValidateNew(currentPassword, newPassword);
+            if (error != null) return ApiResponse.Fail(error);
+            if (_customerLogin is null) return ApiResponse.Fail(CustomerLoginMissingException.Text);
+
+            try
+            {
+                await _customerLogin.ChangePasswordAsync(userId, PasswordHasher.Hash(newPassword!));
+            }
+            catch (CustomerLoginMissingException)
+            {
+                return ApiResponse.Fail(CustomerLoginMissingException.Text);
+            }
+
+            var publicId = (row.TryGetValue("IdGUID", out var idg) && idg is not null && !string.IsNullOrWhiteSpace(idg.ToString()))
+                ? idg.ToString()
+                : (row.TryGetValue("PublicId", out var g) ? g?.ToString() : null);
+            var role = Roles.FromRow(row);
+            int? locationId = row.TryGetValue("LocationId", out var loc) && loc is not null ? Convert.ToInt32(loc) : null;
+            var session = await SessionDataAsync(row, publicId, email, role, locationId, mustChangePassword: false);
+            return ApiResponse.Ok(session, "Password changed successfully.");
+        }
 
         private async Task RecordQuietly(string eventType, int? userId, string email, string? reason)
         {
@@ -355,6 +440,7 @@ namespace WorkNest.Application.Services
                 // but don't add a login-history row or rewrite the user / customer rows every time.
                 var interactive = request.IsInteractive;
                 int? resolvedUserId;
+                var mustChange = false;
 
                 if (row is not null)
                 {
@@ -366,6 +452,10 @@ namespace WorkNest.Application.Services
 
                     var userId = row.TryGetValue("Id", out var uid) && uid is not null ? Convert.ToInt32(uid) : (int?)null;
                     resolvedUserId = userId;
+                    // Google proves the email: a customer's temporary password is retired and the flag cleared.
+                    mustChange = RowMustChange(row);
+                    if (mustChange && userId.HasValue && role == Roles.General)
+                        mustChange = !await TryActivateAsync(userId.Value);
                     if (interactive)
                     {
                         var existingName = row.TryGetValue("Name", out var n) ? n?.ToString() : null;
@@ -395,7 +485,7 @@ namespace WorkNest.Application.Services
                     await EnsureCustomerAsync(request.Email, name, null, newId);
                 }
 
-                var session = await SessionDataAsync(row, publicId, request.Email, role, locationId);
+                var session = await SessionDataAsync(row, publicId, request.Email, role, locationId, mustChange);
 
                 if (interactive)
                     await RecordQuietly("LOGIN", resolvedUserId, request.Email, null);
@@ -449,6 +539,7 @@ namespace WorkNest.Application.Services
                 locationId = locationId,
                 locationIds = locationIds,
                 customerId = row.TryGetValue("CustomerId",  out var c) ? c?.ToString() : null,
+                mustChangePassword = RowMustChange(row),
             });
         }
 

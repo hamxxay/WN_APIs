@@ -5,6 +5,7 @@ using System.Text;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using WorkNest.Application.Interfaces;
+using WorkNest.Common.Constants;
 
 namespace WorkNest.Infrastructure.Security.JWT
 {
@@ -22,7 +23,7 @@ namespace WorkNest.Infrastructure.Security.JWT
         }
 
         /// <summary>Generates a signed JWT for the given user identity.</summary>
-        public string GenerateToken(string userId, string email, string role, int? locationId = null, IEnumerable<int>? locationIds = null)
+        public string GenerateToken(string userId, string email, string role, int? locationId = null, IEnumerable<int>? locationIds = null, bool mustChangePassword = false)
         {
             if (string.IsNullOrWhiteSpace(_settings.SecretKey))
                 throw new InvalidOperationException("JwtSettings:SecretKey is not configured.");
@@ -55,6 +56,9 @@ namespace WorkNest.Infrastructure.Security.JWT
             {
                 claimsList.Add(new Claim("location_ids", string.Join(",", allLocations)));
             }
+
+            // While set, only auth/me, auth/change-password and auth/logout work (PasswordChangeRequiredFilter).
+            if (mustChangePassword) claimsList.Add(new Claim(PasswordChange.ClaimType, "1"));
 
             var expiryMinutes = _settings.ExpiryMinutes > 0 ? _settings.ExpiryMinutes : 1440;
 

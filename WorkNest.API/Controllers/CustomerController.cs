@@ -15,7 +15,31 @@ namespace WorkNest.API.Controllers
     public class CustomerController : ControllerBase
     {
         private readonly ICustomerService _customers;
-        public CustomerController(ICustomerService customers) => _customers = customers;
+        private readonly ICustomerLoginService? _logins;
+        public CustomerController(ICustomerService customers, ICustomerLoginService? logins = null)
+        {
+            _customers = customers;
+            _logins = logins;
+        }
+
+        /// <summary>Only admin / super admin see the temporary password of a pending login.</summary>
+        private bool SeesTempPasswords() =>
+            User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin")
+            || User.GetRole() is WorkNest.Common.Constants.Roles.Admin or WorkNest.Common.Constants.Roles.SuperAdmin;
+
+        /// <summary>Adds loginStatus / canUseGoogle / tempPassword to the customer rows of a response.</summary>
+        private async Task<WorkNest.Common.Responses.ApiResponse> WithLoginAsync(WorkNest.Common.Responses.ApiResponse response)
+        {
+            if (_logins is null || !response.IsSuccessful) return response;
+            var rows = response.Data switch
+            {
+                IDictionary<string, object?> one => new[] { one },
+                IEnumerable<IDictionary<string, object?>> many => many.ToArray(),
+                _ => Array.Empty<IDictionary<string, object?>>()
+            };
+            await _logins.EnrichAsync(rows.OfType<IDictionary<string, object?>>(), SeesTempPasswords(), HttpContext.RequestAborted);
+            return response;
+        }
 
         private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
 
@@ -37,7 +61,7 @@ namespace WorkNest.API.Controllers
         {
             var filter = new ListFilter { Status = status, From = from, To = to };
             if (!filter.HasStatusOrDates && locationId is not > 0 && !User.IsLocationBoundRole())
-                return Ok(await _customers.GetAllCustomersAsync(page, limit, search));
+                return Ok(await WithLoginAsync(await _customers.GetAllCustomersAsync(page, limit, search)));
 
             return await ListFilterResults.RunAsync(async () =>
             {
@@ -45,6 +69,7 @@ namespace WorkNest.API.Controllers
                 // without one everyone else sees every customer, as the unfiltered list does.
                 var locations = User.ScopedLocationIds(locationId);
                 var (rows, total) = await lists.GetCustomersAsync(page, limit, search, locations, filter);
+                if (_logins is not null) await _logins.EnrichAsync(rows.OfType<IDictionary<string, object?>>(), SeesTempPasswords(), HttpContext.RequestAborted);
                 return Ok(new { isSuccessful = true, message = "Success", data = rows, total = total });
             });
         }
@@ -75,7 +100,7 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("api/customer/{id}")]
         public async Task<IActionResult> GetById(string id) =>
-            Ok(await _customers.GetCustomerByIdAsync(id));
+            Ok(await WithLoginAsync(await _customers.GetCustomerByIdAsync(id)));
 
         /// <summary>
         /// Customer detail page (CMS /admin/customers/:id): summary figures, bookings, fee receipts, payments, agreements,

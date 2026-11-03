@@ -205,6 +205,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/auth/me")]
+        [AllowWhilePasswordChangeRequired]
         [CeoAllowed] // the CEO's own profile
         [SalesManagerAllowed] // and the Sales Manager's
         [AccessOfficerAllowed] // and the Access Officer's
@@ -244,12 +245,44 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        public sealed class ChangePasswordRequest
+        {
+            public string? CurrentPassword { get; set; }
+            public string? NewPassword { get; set; }
+        }
+
+        /// <summary>
+        /// The signed-in user sets their own password (also the forced change after a temporary password). 200 with the same
+        /// body as api/auth/login (a new token without pwd_change, mustChangePassword false); 400 { isSuccessful: false, message }
+        /// for a wrong current password or a new one that is too weak / unchanged; 503 before AUTH_TEMP_01 has run.
+        /// </summary>
+        [EnableRateLimiting("auth")]
+        [HttpPost("api/auth/change-password")]
+        [AllowWhilePasswordChangeRequired]
+        public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest? request)
+        {
+            var email = User.FindFirst(ClaimTypes.Email)?.Value
+                        ?? User.FindFirst("email")?.Value
+                        ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Email)?.Value;
+            if (string.IsNullOrWhiteSpace(email))
+                return Unauthorized(new { isSuccessful = false, message = "Sign in required." });
+
+            var result = await _auth.ChangePasswordAsync(email, request?.CurrentPassword, request?.NewPassword);
+            if (!result.IsSuccessful)
+                return result.Message == WorkNest.Application.Interfaces.CustomerLoginMissingException.Text
+                    ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
+                    : BadRequest(result);
+            _sessions.RevokeCurrent(HttpContext); // the old token (with pwd_change) stops working
+            return Ok(result);
+        }
+
         /// <summary>
         /// Signs out the bearer token sent with this request: it gets a 401 from now until it expires (kept in this
         /// server's memory, see TokenSessionValidator). Still anonymous: without a valid token it just answers OK.
         /// </summary>
         [HttpPost("api/auth/logout")]
         [AllowAnonymous]
+        [AllowWhilePasswordChangeRequired]
         public async Task<IActionResult> Logout()
         {
             try
