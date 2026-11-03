@@ -245,7 +245,7 @@ namespace WorkNest.API.Controllers
                     return NotFound(new { isSuccessful = false, message = "Invoice not found." });
 
                 using var chkConn = await OpenConnectionAsync();
-                using var chkCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", chkConn);
+                using var chkCmd = new SqlCommand("dbo.WN_Invoices_GetApprovalStatus", chkConn) { CommandType = CommandType.StoredProcedure };
                 chkCmd.Parameters.AddWithValue("@Id", id);
                 var appStatus = (await chkCmd.ExecuteScalarAsync())?.ToString();
                 if (string.Equals(appStatus, "PendingApproval", StringComparison.OrdinalIgnoreCase))
@@ -372,12 +372,7 @@ namespace WorkNest.API.Controllers
         private async Task<int?> ResolveInvoiceIdForSalesTaxAsync(Guid publicId)
         {
             using var conn = await OpenConnectionAsync();
-            using var cmd = new SqlCommand(@"
-                SELECT TOP 1 Id FROM (
-                    SELECT st.CustomerInvoiceId AS Id, 0 AS Pref FROM dbo.WN_CustomerSTInvoice st WITH (NOLOCK) WHERE st.PublicId = @Guid
-                    UNION ALL
-                    SELECT i.Id, 1 FROM dbo.WN_Invoices i WITH (NOLOCK) WHERE i.PublicId = @Guid) x
-                ORDER BY Pref;", conn);
+            using var cmd = new SqlCommand("dbo.WN_Invoices_ResolveByGuid", conn) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.Add("@Guid", SqlDbType.UniqueIdentifier).Value = publicId;
             return await cmd.ExecuteScalarAsync() is int id ? id : null;
         }
@@ -699,7 +694,7 @@ namespace WorkNest.API.Controllers
                 using var conn = await OpenConnectionAsync();
 
                 // Check invoice approval status first
-                using var checkCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", conn);
+                using var checkCmd = new SqlCommand("dbo.WN_Invoices_GetApprovalStatus", conn) { CommandType = CommandType.StoredProcedure };
                 checkCmd.Parameters.AddWithValue("@Id", id);
                 var appStatusObj = await checkCmd.ExecuteScalarAsync();
                 if (appStatusObj == null)
@@ -724,11 +719,7 @@ namespace WorkNest.API.Controllers
                 }
 
                 await SetAuditContextAsync(conn);
-                using var cmd = new SqlCommand(@"
-                    UPDATE dbo.WN_Invoices 
-                    SET StatusId = 40, UpdatedOn = SYSUTCDATETIME() 
-                    WHERE Id = @Id;
-                    SELECT @@ROWCOUNT;", conn);
+                using var cmd = new SqlCommand("dbo.WN_Invoices_CancelById", conn) { CommandType = CommandType.StoredProcedure };
                 cmd.Parameters.AddWithValue("@Id", id);
 
                 var affected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
@@ -759,11 +750,7 @@ namespace WorkNest.API.Controllers
             try
             {
                 using var conn = await OpenConnectionAsync();
-                using var cmd = new SqlCommand(@"
-                    UPDATE dbo.WN_Invoices 
-                    SET StatusId = 40, UpdatedOn = SYSUTCDATETIME() 
-                    WHERE PublicId = @PublicId;
-                    SELECT @@ROWCOUNT;", conn);
+                using var cmd = new SqlCommand("dbo.WN_Invoices_CancelByPublicId", conn) { CommandType = CommandType.StoredProcedure };
                 cmd.Parameters.AddWithValue("@PublicId", publicId);
 
                 var affected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
@@ -1017,7 +1004,7 @@ namespace WorkNest.API.Controllers
                 var oneBillNumber = await _oneBill.EnsureAsync(newInvoiceId);
 
                 string approvalStatus = "PendingApproval";
-                using (var statusCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WHERE Id = @Id", conn))
+                using (var statusCmd = new SqlCommand("dbo.WN_Invoices_GetApprovalStatus", conn) { CommandType = CommandType.StoredProcedure })
                 {
                     statusCmd.Parameters.AddWithValue("@Id", newInvoiceId);
                     var statusVal = await statusCmd.ExecuteScalarAsync();
@@ -1125,15 +1112,7 @@ namespace WorkNest.API.Controllers
 
             try
             {
-                using var setCtx = new SqlCommand(@"
-                    DECLARE @ResolvedId INT = @UserId;
-                    IF @ResolvedId IS NULL AND @UserEmail IS NOT NULL
-                        SELECT TOP 1 @ResolvedId = Id FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @UserEmail;
-                    IF @ResolvedId IS NOT NULL
-                        EXEC sp_set_session_context @key = N'AppUserId', @value = @ResolvedId;
-                    IF @UserEmail IS NOT NULL
-                        EXEC sp_set_session_context @key = N'AppUserEmail', @value = @UserEmail;
-                    EXEC sp_set_session_context @key = N'SourceApp', @value = N'WebAPI';", conn);
+                using var setCtx = new SqlCommand("dbo.WN_Audit_SetSessionContext", conn) { CommandType = CommandType.StoredProcedure };
                 setCtx.Parameters.Add("@UserId", SqlDbType.Int).Value = (object?)userId ?? DBNull.Value;
                 setCtx.Parameters.Add("@UserEmail", SqlDbType.NVarChar, 256).Value = (object?)email ?? DBNull.Value;
                 await setCtx.ExecuteNonQueryAsync();
@@ -1149,7 +1128,7 @@ namespace WorkNest.API.Controllers
             var email = ResolveUserEmail();
             if (!string.IsNullOrWhiteSpace(email))
             {
-                using var cmd = new SqlCommand("SELECT TOP 1 Id FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @Email", conn);
+                using var cmd = new SqlCommand("dbo.WN_Users_GetIdByEmail", conn) { CommandType = CommandType.StoredProcedure };
                 cmd.Parameters.AddWithValue("@Email", email);
                 var r = await cmd.ExecuteScalarAsync();
                 if (r is int id) return id;
@@ -1274,7 +1253,7 @@ namespace WorkNest.API.Controllers
                 using var conn = await OpenConnectionAsync();
 
                 // Guard: check if invoice is PendingApproval
-                using (var chkCmd = new SqlCommand("SELECT ApprovalStatus FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", conn))
+                using (var chkCmd = new SqlCommand("dbo.WN_Invoices_GetApprovalStatus", conn) { CommandType = CommandType.StoredProcedure })
                 {
                     chkCmd.Parameters.AddWithValue("@Id", id);
                     var statusVal = (await chkCmd.ExecuteScalarAsync())?.ToString();
@@ -1283,13 +1262,7 @@ namespace WorkNest.API.Controllers
                         if (force)
                         {
                             var currentUserId = await ResolveUserIdAsync(conn);
-                            using var appCmd = new SqlCommand(@"
-                                UPDATE dbo.WN_Invoices 
-                                SET ApprovalStatus = 'Approved', 
-                                    ApprovedAt = SYSUTCDATETIME(), 
-                                    ApprovedBy = @UserId,
-                                    UpdatedOn = SYSUTCDATETIME()
-                                WHERE Id = @Id", conn);
+                            using var appCmd = new SqlCommand("dbo.WN_Invoices_DirectApprove", conn) { CommandType = CommandType.StoredProcedure };
                             appCmd.Parameters.AddWithValue("@Id", id);
                             appCmd.Parameters.AddWithValue("@UserId", (object?)currentUserId ?? DBNull.Value);
                             await appCmd.ExecuteNonQueryAsync();
@@ -1444,7 +1417,7 @@ namespace WorkNest.API.Controllers
                 if (rowsAffected == 0)
                 {
                     // Query specific failure reason
-                    using var checkCmd = new SqlCommand("SELECT ApprovalStatus, ViewedAt, ViewedBy FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id", conn);
+                    using var checkCmd = new SqlCommand("dbo.WN_Invoices_GetApprovalFailureDetails", conn) { CommandType = CommandType.StoredProcedure };
                     checkCmd.Parameters.AddWithValue("@Id", id);
                     using var r = await checkCmd.ExecuteReaderAsync();
                     if (!await r.ReadAsync())
@@ -2101,7 +2074,7 @@ namespace WorkNest.API.Controllers
                 // 1. Fetch booking info
                 DateTime contractStart, contractEnd;
                 int bookingStatusId;
-                using (var bCmd = new SqlCommand("SELECT StartOn, EndOn, BookingStatusId FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @BookingId", conn))
+                using (var bCmd = new SqlCommand("dbo.WN_Bookings_GetDatesAndStatus", conn) { CommandType = CommandType.StoredProcedure })
                 {
                     bCmd.Parameters.AddWithValue("@BookingId", bookingId);
                     using var r = await bCmd.ExecuteReaderAsync();
@@ -2166,14 +2139,7 @@ namespace WorkNest.API.Controllers
                     var res = await checkCmd.ExecuteScalarAsync();
                     if (Convert.ToInt32(res) == 1)
                     {
-                        using var exCmd = new SqlCommand(@"
-                            SELECT TOP 1 Id, InvoiceNumber, GrandTotal, ApprovalStatus
-                            FROM dbo.WN_Invoices WITH (NOLOCK)
-                            WHERE BookingId = @BookingId 
-                              AND BillingPeriodStart = @BillingPeriodStart 
-                              AND BillingPeriodEnd = @BillingPeriodEnd
-                              AND StatusId NOT IN (5, 40)
-                            ORDER BY Id DESC", conn);
+                        using var exCmd = new SqlCommand("dbo.WN_Invoices_FindExistingPeriodInvoice", conn) { CommandType = CommandType.StoredProcedure };
                         exCmd.Parameters.AddWithValue("@BookingId", bookingId);
                         exCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart);
                         exCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd);
@@ -2273,13 +2239,7 @@ namespace WorkNest.API.Controllers
                 if (request?.AutoApproveAndSend == true)
                 {
                     var currentUserId = await ResolveUserIdAsync(conn);
-                    using (var appCmd = new SqlCommand(@"
-                        UPDATE dbo.WN_Invoices 
-                        SET ApprovalStatus = 'Approved', 
-                            ApprovedAt = SYSUTCDATETIME(), 
-                            ApprovedBy = @UserId,
-                            UpdatedOn = SYSUTCDATETIME()
-                        WHERE Id = @Id", conn))
+                    using (var appCmd = new SqlCommand("dbo.WN_Invoices_DirectApprove", conn) { CommandType = CommandType.StoredProcedure })
                     {
                         appCmd.Parameters.AddWithValue("@Id", createdInvoiceId);
                         appCmd.Parameters.AddWithValue("@UserId", (object?)currentUserId ?? DBNull.Value);

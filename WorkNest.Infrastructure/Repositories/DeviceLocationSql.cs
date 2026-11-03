@@ -14,7 +14,9 @@ namespace WorkNest.Infrastructure.Repositories
         public static async Task<bool> HasColumnAsync(SqlConnection open)
         {
             if (_hasColumn == true) return true;  // once present it never goes away; a missing column is re-checked
-            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH('dbo.WN_HIK_Devices', 'LocationId') IS NULL THEN 0 ELSE 1 END;", open);
+            await using var cmd = new SqlCommand("dbo.WN_Schema_CheckColumn", open) { CommandType = System.Data.CommandType.StoredProcedure };
+            cmd.Parameters.AddWithValue("@TableName", "dbo.WN_HIK_Devices");
+            cmd.Parameters.AddWithValue("@ColumnName", "LocationId");
             _hasColumn = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
             return _hasColumn.Value;
         }

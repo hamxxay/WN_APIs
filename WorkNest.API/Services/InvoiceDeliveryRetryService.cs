@@ -75,19 +75,7 @@ namespace WorkNest.API.Services
             // Claim the due rows in the same statement that reads them: their NextRetryAt moves 10 minutes ahead, so a
             // second instance (IIS overlapped recycle, another server) skips them instead of sending the same invoice
             // again. The success / failure update below sets the real NextRetryAt; a crash just retries after 10 minutes.
-            string query = @"
-                DECLARE @Claimed TABLE (Id INT, InvoiceId INT, BookingId INT NULL, TargetEmail NVARCHAR(320) NULL, Attempts INT);
-                UPDATE TOP (20) q
-                   SET NextRetryAt = DATEADD(minute, 10, SYSUTCDATETIME())
-                OUTPUT inserted.Id, inserted.InvoiceId, inserted.BookingId, inserted.TargetEmail, inserted.Attempts INTO @Claimed
-                  FROM dbo.WN_InvoiceDeliveryQueue q WITH (ROWLOCK, READPAST, UPDLOCK)
-                  INNER JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = q.InvoiceId
-                 WHERE q.Status = 'Pending'
-                   AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')
-                   AND (q.NextRetryAt IS NULL OR q.NextRetryAt <= SYSUTCDATETIME());
-                SELECT Id, InvoiceId, BookingId, TargetEmail, Attempts FROM @Claimed;";
-
-            using (var cmd = new SqlCommand(query, conn))
+            using (var cmd = new SqlCommand("dbo.WN_InvoiceDeliveryQueue_ClaimPending", conn) { CommandType = CommandType.StoredProcedure })
             using (var reader = await cmd.ExecuteReaderAsync(stoppingToken))
             {
                 while (await reader.ReadAsync(stoppingToken))
@@ -202,11 +190,7 @@ namespace WorkNest.API.Services
                     );
 
                     // Success update
-                    string successSql = @"
-                        UPDATE dbo.WN_InvoiceDeliveryQueue 
-                        SET Status = 'Sent', Attempts = @Attempts, LastAttemptAt = SYSUTCDATETIME(), NextRetryAt = NULL, LastError = NULL 
-                        WHERE Id = @Id;";
-                    using var okCmd = new SqlCommand(successSql, conn);
+                    using var okCmd = new SqlCommand("dbo.WN_InvoiceDeliveryQueue_MarkSent", conn) { CommandType = CommandType.StoredProcedure };
                     okCmd.Parameters.AddWithValue("@Attempts", attemptNum);
                     okCmd.Parameters.AddWithValue("@Id", item.Id);
                     await okCmd.ExecuteNonQueryAsync(stoppingToken);
@@ -217,10 +201,7 @@ namespace WorkNest.API.Services
                 {
                     // Email Sending was turned off meanwhile: the e-mail is held in Pending emails (it goes out from there),
                     // so this row stops here instead of retrying (it would go out twice). No attempt is used.
-                    using var heldCmd = new SqlCommand(@"
-                        UPDATE dbo.WN_InvoiceDeliveryQueue
-                           SET Status = 'HeldInPendingEmails', NextRetryAt = NULL, LastAttemptAt = SYSUTCDATETIME(), LastError = @LastError
-                         WHERE Id = @Id;", conn);
+                    using var heldCmd = new SqlCommand("dbo.WN_InvoiceDeliveryQueue_MarkHeld", conn) { CommandType = CommandType.StoredProcedure };
                     heldCmd.Parameters.AddWithValue("@LastError", $"Held as pending e-mail #{held.OutboxId}.");
                     heldCmd.Parameters.AddWithValue("@Id", item.Id);
                     await heldCmd.ExecuteNonQueryAsync(stoppingToken);
@@ -237,16 +218,7 @@ namespace WorkNest.API.Services
                         _logger.LogError("[HUMAN ALERT] Invoice delivery for Invoice ID {InvoiceId} to {Email} failed 3 consecutive times. Status set to FailedNeedsAttention.", item.InvoiceId, item.TargetEmail);
                     }
 
-                    string failSql = @"
-                        UPDATE dbo.WN_InvoiceDeliveryQueue 
-                        SET Attempts = @Attempts, 
-                            LastAttemptAt = SYSUTCDATETIME(), 
-                            NextRetryAt = CASE WHEN @NextStatus = 'Pending' THEN DATEADD(minute, @NextMinutes, SYSUTCDATETIME()) ELSE NULL END, 
-                            Status = @NextStatus, 
-                            LastError = @LastError 
-                        WHERE Id = @Id;";
-
-                    using var failCmd = new SqlCommand(failSql, conn);
+                    using var failCmd = new SqlCommand("dbo.WN_InvoiceDeliveryQueue_RecordFailure", conn) { CommandType = CommandType.StoredProcedure };
                     failCmd.Parameters.AddWithValue("@Attempts", attemptNum);
                     failCmd.Parameters.AddWithValue("@NextMinutes", nextMinutes);
                     failCmd.Parameters.AddWithValue("@NextStatus", nextStatus);

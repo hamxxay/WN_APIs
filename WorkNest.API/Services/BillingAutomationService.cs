@@ -72,7 +72,7 @@ namespace WorkNest.API.Services
                 int deadlineDay = 18;
                 int reminderDaysBefore = 3;
 
-                using (var setCmd = new SqlCommand("SELECT SettingKey, SettingValue FROM dbo.WN_BillingSettings WITH (NOLOCK) WHERE SettingKey IN ('SendDeadlineDay', 'ReminderDaysBeforeDeadline')", conn))
+                using (var setCmd = new SqlCommand("dbo.WN_BillingSettings_GetBatch", conn) { CommandType = CommandType.StoredProcedure })
                 using (var r = await setCmd.ExecuteReaderAsync(stoppingToken))
                 {
                     while (await r.ReadAsync(stoppingToken))
@@ -91,25 +91,8 @@ namespace WorkNest.API.Services
                 }
 
                 // Find PendingApproval invoices grouped by location
-                const string query = @"
-                    SELECT 
-                        ISNULL(s.LocationId, u.LocationId) AS LocationId,
-                        ISNULL(loc.Name, 'Location') AS LocationName,
-                        COUNT(i.Id) AS PendingCount,
-                        SUM(ISNULL(i.GrandTotal, 0)) AS PendingTotal
-                    FROM dbo.WN_Invoices i WITH (NOLOCK)
-                    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
-                    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-                    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
-                    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = ISNULL(s.LocationId, u.LocationId)
-                    WHERE i.ApprovalStatus = 'PendingApproval'
-                      AND i.StatusId <> 40
-                      AND ISNULL(s.LocationId, u.LocationId) IS NOT NULL
-                    GROUP BY ISNULL(s.LocationId, u.LocationId), loc.Name;";
-
                 var locationSummaries = new List<(int LocationId, string LocationName, int Count, decimal Total)>();
-
-                using (var cmd = new SqlCommand(query, conn))
+                using (var cmd = new SqlCommand("dbo.WN_Invoices_GetPendingApprovalLocationSummary", conn) { CommandType = CommandType.StoredProcedure })
                 using (var r = await cmd.ExecuteReaderAsync(stoppingToken))
                 {
                     while (await r.ReadAsync(stoppingToken))
@@ -132,13 +115,7 @@ namespace WorkNest.API.Services
 
                     // Query sales executives (RoleId 16) for this location
                     var recipients = new List<(string Email, string Name)>();
-                    using (var userCmd = new SqlCommand(@"
-                        SELECT Email, Name 
-                        FROM dbo.WN_Users WITH (NOLOCK) 
-                        WHERE (RoleId = 16 OR RoleId = 1) 
-                          AND IsActive = 1 
-                          AND LocationId = @LocationId 
-                          AND Email IS NOT NULL AND LTRIM(RTRIM(Email)) <> '';", conn))
+                    using (var userCmd = new SqlCommand("dbo.WN_Users_GetSalesExecutivesForLocation", conn) { CommandType = CommandType.StoredProcedure })
                     {
                         userCmd.Parameters.AddWithValue("@LocationId", loc.LocationId);
                         using var ur = await userCmd.ExecuteReaderAsync(stoppingToken);
@@ -318,11 +295,8 @@ namespace WorkNest.API.Services
 
         private static async Task<bool> TryLockBookingAsync(SqlConnection conn, int bookingId, CancellationToken ct)
         {
-            using var cmd = new SqlCommand(@"
-                DECLARE @r INT;
-                EXEC @r = sp_getapplock @Resource = @Res, @LockMode = 'Exclusive', @LockOwner = 'Session', @LockTimeout = 0;
-                SELECT @r;", conn);
-            cmd.Parameters.AddWithValue("@Res", $"wn-billing-{bookingId}");
+            using var cmd = new SqlCommand("dbo.WN_Lock_AcquireAppLock", conn) { CommandType = CommandType.StoredProcedure };
+            cmd.Parameters.AddWithValue("@Resource", $"wn-billing-{bookingId}");
             return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) >= 0; // 0 / 1 = granted, negative = held elsewhere
         }
 
@@ -330,8 +304,8 @@ namespace WorkNest.API.Services
         {
             try
             {
-                using var cmd = new SqlCommand("EXEC sp_releaseapplock @Resource = @Res, @LockOwner = 'Session';", conn);
-                cmd.Parameters.AddWithValue("@Res", $"wn-billing-{bookingId}");
+                using var cmd = new SqlCommand("dbo.WN_Lock_ReleaseAppLock", conn) { CommandType = CommandType.StoredProcedure };
+                cmd.Parameters.AddWithValue("@Resource", $"wn-billing-{bookingId}");
                 await cmd.ExecuteNonQueryAsync();
             }
             catch { /* the lock also ends when the connection closes */ }

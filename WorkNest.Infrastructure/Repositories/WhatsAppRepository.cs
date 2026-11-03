@@ -6,16 +6,10 @@ using WorkNest.Application.Interfaces;
 
 namespace WorkNest.Infrastructure.Repositories
 {
-    /// <summary>Data access for dbo.WN_WhatsApp_Contacts / _Conversations / _Messages / _BotState. Reads use NOLOCK.</summary>
+    /// <summary>Data access for dbo.WN_WhatsApp_Contacts / _Conversations / _Messages / _BotState via stored procedures.</summary>
     public class WhatsAppRepository : IWhatsAppRepository
     {
         private readonly string _connectionString;
-
-        // The 24-hour window is computed in SQL so the API and database clocks can't disagree.
-        private const string ConversationSelect = @"
-            cv.Id, cv.ContactId, ct.PhoneNumber, ct.Name, ct.Tags, ct.AdminNotes, cv.Status, cv.LastMessageAt, cv.LastMessageText,
-            cv.LastIncomingAt, cv.UnreadCount,
-            CAST(CASE WHEN cv.LastIncomingAt IS NOT NULL AND DATEDIFF(SECOND, cv.LastIncomingAt, SYSDATETIME()) <= 86400 THEN 1 ELSE 0 END AS BIT) AS InReplyWindow";
 
         public WhatsAppRepository(IConfiguration configuration)
         {
@@ -33,27 +27,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<(int ContactId, int ConversationId)> EnsureConversationAsync(string phone, string? name)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand(@"
-                SET XACT_ABORT ON;
-                BEGIN TRAN;
-                DECLARE @ContactId INT = (SELECT Id FROM dbo.WN_WhatsApp_Contacts WITH (UPDLOCK, HOLDLOCK) WHERE PhoneNumber = @Phone);
-                IF @ContactId IS NULL
-                BEGIN
-                    INSERT INTO dbo.WN_WhatsApp_Contacts (PhoneNumber, Name) VALUES (@Phone, @Name);
-                    SET @ContactId = SCOPE_IDENTITY();
-                END
-                ELSE IF @Name IS NOT NULL
-                    UPDATE dbo.WN_WhatsApp_Contacts SET Name = @Name, UpdatedOn = SYSDATETIME()
-                    WHERE Id = @ContactId AND ISNULL(Name, N'') <> @Name;
-
-                DECLARE @ConversationId INT = (SELECT Id FROM dbo.WN_WhatsApp_Conversations WITH (UPDLOCK, HOLDLOCK) WHERE ContactId = @ContactId);
-                IF @ConversationId IS NULL
-                BEGIN
-                    INSERT INTO dbo.WN_WhatsApp_Conversations (ContactId) VALUES (@ContactId);
-                    SET @ConversationId = SCOPE_IDENTITY();
-                END
-                COMMIT;
-                SELECT @ContactId, @ConversationId;", c);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_EnsureConversation", c) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.AddWithValue("@Phone", phone);
             cmd.Parameters.AddWithValue("@Name", string.IsNullOrWhiteSpace(name) ? DBNull.Value : name.Trim());
             await using var r = await cmd.ExecuteReaderAsync();
@@ -66,20 +40,7 @@ namespace WorkNest.Infrastructure.Repositories
             try
             {
                 await using var c = await OpenAsync();
-                await using var cmd = new SqlCommand(@"
-                    SET XACT_ABORT ON;
-                    BEGIN TRAN;
-                    INSERT INTO dbo.WN_WhatsApp_Messages (ConversationId, WhatsAppMessageId, Direction, MessageType, MessageText, SentByUserId)
-                    VALUES (@ConversationId, @WaId, @Direction, @Type, @Text, @UserId);
-                    UPDATE dbo.WN_WhatsApp_Conversations
-                    SET LastMessageAt = SYSDATETIME(),
-                        LastMessageText = LEFT(@Text, 500),
-                        LastIncomingAt = CASE WHEN @Direction = N'incoming' THEN SYSDATETIME() ELSE LastIncomingAt END,
-                        UnreadCount = CASE WHEN @Direction = N'incoming' THEN UnreadCount + 1 ELSE UnreadCount END,
-                        Status = CASE WHEN @Direction = N'incoming' THEN N'open' ELSE Status END,
-                        UpdatedOn = SYSDATETIME()
-                    WHERE Id = @ConversationId;
-                    COMMIT;", c);
+                await using var cmd = new SqlCommand("dbo.WN_WhatsApp_AddMessage", c) { CommandType = CommandType.StoredProcedure };
                 cmd.Parameters.AddWithValue("@ConversationId", conversationId);
                 cmd.Parameters.AddWithValue("@WaId", string.IsNullOrWhiteSpace(whatsAppMessageId) ? DBNull.Value : whatsAppMessageId);
                 cmd.Parameters.AddWithValue("@Direction", direction);
@@ -95,8 +56,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<(string State, string? Data, int MinutesSinceUpdate)?> GetBotStateAsync(string phone)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand(
-                "SELECT State, Data, DATEDIFF(MINUTE, UpdatedOn, SYSDATETIME()) FROM dbo.WN_WhatsApp_BotState WITH (NOLOCK) WHERE PhoneNumber = @Phone;", c);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_GetBotState", c) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.AddWithValue("@Phone", phone);
             await using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return null;
@@ -106,10 +66,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task SaveBotStateAsync(string phone, string state, string? data)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand(@"
-                UPDATE dbo.WN_WhatsApp_BotState SET State = @State, Data = @Data, UpdatedOn = SYSDATETIME() WHERE PhoneNumber = @Phone;
-                IF @@ROWCOUNT = 0
-                    INSERT INTO dbo.WN_WhatsApp_BotState (PhoneNumber, State, Data) VALUES (@Phone, @State, @Data);", c);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_SaveBotState", c) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.AddWithValue("@Phone", phone);
             cmd.Parameters.AddWithValue("@State", state);
             cmd.Parameters.AddWithValue("@Data", (object?)data ?? DBNull.Value);
@@ -119,14 +76,8 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<(List<WhatsAppConversationDto> Items, int Total)> GetConversationsAsync(int page, int limit, string? search)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand($@"
-                SELECT {ConversationSelect}, COUNT(*) OVER () AS TotalCount
-                FROM dbo.WN_WhatsApp_Conversations cv WITH (NOLOCK)
-                JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
-                WHERE (@Like IS NULL OR ct.PhoneNumber LIKE @Like OR ct.Name LIKE @Like OR ct.Tags LIKE @Like OR cv.LastMessageText LIKE @Like)
-                ORDER BY CASE WHEN cv.UnreadCount > 0 THEN 0 ELSE 1 END, cv.LastMessageAt DESC, cv.Id DESC
-                OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;", c);
-            cmd.Parameters.AddWithValue("@Like", search == null ? DBNull.Value : "%" + search + "%");
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_GetConversations", c) { CommandType = CommandType.StoredProcedure };
+            cmd.Parameters.AddWithValue("@Search", string.IsNullOrWhiteSpace(search) ? DBNull.Value : search.Trim());
             cmd.Parameters.AddWithValue("@Offset", (page - 1) * limit);
             cmd.Parameters.AddWithValue("@Limit", limit);
             var items = new List<WhatsAppConversationDto>();
@@ -137,20 +88,17 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         public Task<WhatsAppConversationDto?> GetConversationAsync(int id) =>
-            GetOneConversationAsync("cv.Id = @Key", id);
+            GetOneConversationAsync(byId: id, byPhone: null);
 
         public Task<WhatsAppConversationDto?> GetConversationByPhoneAsync(string phone) =>
-            GetOneConversationAsync("ct.PhoneNumber = @Key", phone);
+            GetOneConversationAsync(byId: null, byPhone: phone);
 
-        private async Task<WhatsAppConversationDto?> GetOneConversationAsync(string where, object key)
+        private async Task<WhatsAppConversationDto?> GetOneConversationAsync(int? byId, string? byPhone)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand($@"
-                SELECT {ConversationSelect}
-                FROM dbo.WN_WhatsApp_Conversations cv WITH (NOLOCK)
-                JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
-                WHERE {where};", c);
-            cmd.Parameters.AddWithValue("@Key", key);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_GetOneConversation", c) { CommandType = CommandType.StoredProcedure };
+            cmd.Parameters.AddWithValue("@ById", (object?)byId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ByPhone", (object?)byPhone ?? DBNull.Value);
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? MapConversation(r) : null;
         }
@@ -158,11 +106,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<List<WhatsAppMessageDto>> GetMessagesAsync(int conversationId, long? beforeId, int limit)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand(@"
-                SELECT TOP (@Limit) Id, ConversationId, Direction, MessageType, MessageText, SentByUserId, CreatedOn
-                FROM dbo.WN_WhatsApp_Messages WITH (NOLOCK)
-                WHERE ConversationId = @ConversationId AND (@BeforeId IS NULL OR Id < @BeforeId)
-                ORDER BY Id DESC;", c);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_GetMessages", c) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.AddWithValue("@Limit", limit);
             cmd.Parameters.AddWithValue("@ConversationId", conversationId);
             cmd.Parameters.AddWithValue("@BeforeId", (object?)beforeId ?? DBNull.Value);
@@ -188,7 +132,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task MarkReadAsync(int conversationId)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand("UPDATE dbo.WN_WhatsApp_Conversations SET UnreadCount = 0 WHERE Id = @Id AND UnreadCount <> 0;", c);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_MarkRead", c) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.AddWithValue("@Id", conversationId);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -196,10 +140,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task UpdateContactMetaAsync(int contactId, string? name, string? tags, string? adminNotes)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand(@"
-                UPDATE dbo.WN_WhatsApp_Contacts
-                SET Name = COALESCE(NULLIF(@Name, N''), Name), Tags = @Tags, AdminNotes = @Notes, UpdatedOn = SYSDATETIME()
-                WHERE Id = @Id;", c);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_UpdateContactMeta", c) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.AddWithValue("@Id", contactId);
             cmd.Parameters.AddWithValue("@Name", (object?)name ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Tags", string.IsNullOrWhiteSpace(tags) ? DBNull.Value : tags);
@@ -210,12 +151,7 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<List<WhatsAppConversationDto>> GetBroadcastTargetsAsync(string? tag)
         {
             await using var c = await OpenAsync();
-            await using var cmd = new SqlCommand($@"
-                SELECT {ConversationSelect}
-                FROM dbo.WN_WhatsApp_Conversations cv WITH (NOLOCK)
-                JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
-                WHERE @Tag IS NULL OR (N',' + REPLACE(LOWER(ISNULL(ct.Tags, N'')), N' ', N'') + N',') LIKE N'%,' + REPLACE(LOWER(@Tag), N' ', N'') + N',%'
-                ORDER BY cv.Id;", c);
+            await using var cmd = new SqlCommand("dbo.WN_WhatsApp_GetBroadcastTargets", c) { CommandType = CommandType.StoredProcedure };
             cmd.Parameters.AddWithValue("@Tag", (object?)tag ?? DBNull.Value);
             var list = new List<WhatsAppConversationDto>();
             await using var r = await cmd.ExecuteReaderAsync();
@@ -229,8 +165,7 @@ namespace WorkNest.Infrastructure.Repositories
             try
             {
                 await using var c = await OpenAsync();
-                await using var cmd = new SqlCommand(
-                    "SELECT Id, ISNULL(LastMessageAt, CreatedOn) FROM dbo.WN_WhatsApp_Conversations WITH (NOLOCK) WHERE UnreadCount > 0;", c);
+                await using var cmd = new SqlCommand("dbo.WN_WhatsApp_GetUnreadConversations", c) { CommandType = CommandType.StoredProcedure };
                 await using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.GetDateTime(1)));
             }

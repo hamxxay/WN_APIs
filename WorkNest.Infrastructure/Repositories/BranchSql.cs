@@ -18,7 +18,9 @@ namespace WorkNest.Infrastructure.Repositories
         public static async Task<bool> ContactsHaveCategoryAsync(SqlConnection open)
         {
             if (_contactsHaveCategory == true) return true;  // once present it never goes away; a missing column is re-checked
-            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH('dbo.WN_Contacts', 'InquiryCategory') IS NULL THEN 0 ELSE 1 END;", open);
+            await using var cmd = new SqlCommand("dbo.WN_Schema_CheckColumn", open) { CommandType = System.Data.CommandType.StoredProcedure };
+            cmd.Parameters.AddWithValue("@TableName", "dbo.WN_Contacts");
+            cmd.Parameters.AddWithValue("@ColumnName", "InquiryCategory");
             _contactsHaveCategory = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
             return _contactsHaveCategory.Value;
         }
@@ -39,7 +41,9 @@ namespace WorkNest.Infrastructure.Repositories
         public static async Task<bool> ContactsHaveLocationAsync(SqlConnection open)
         {
             if (_contactsHaveLocation == true) return true;  // once present it never goes away; a missing column is re-checked
-            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH('dbo.WN_Contacts', 'LocationId') IS NULL THEN 0 ELSE 1 END;", open);
+            await using var cmd = new SqlCommand("dbo.WN_Schema_CheckColumn", open) { CommandType = System.Data.CommandType.StoredProcedure };
+            cmd.Parameters.AddWithValue("@TableName", "dbo.WN_Contacts");
+            cmd.Parameters.AddWithValue("@ColumnName", "LocationId");
             _contactsHaveLocation = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
             return _contactsHaveLocation.Value;
         }

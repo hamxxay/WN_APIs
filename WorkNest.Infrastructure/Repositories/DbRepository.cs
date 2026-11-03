@@ -1940,7 +1940,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         public async Task<IReadOnlyList<(int Id, string Code)>> GetBookingStatusesDbAsync()
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT CAST(Id AS INT) AS Id, LTRIM(RTRIM(Code)) AS Code FROM dbo.WN_BookingStatuses WITH (NOLOCK) ORDER BY Id;", c);
+            await using var cmd = SP("dbo.WN_BookingStatuses_GetList", c);
             await using var r = await cmd.ExecuteReaderAsync();
             var list = new List<(int Id, string Code)>();
             while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.IsDBNull(1) ? "" : r.GetString(1)));
@@ -2445,7 +2445,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         public async Task<IEnumerable<IDictionary<string, object?>>> GetSpaceCategoriesAsync()
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT Id, Code, Label FROM dbo.WN_SpaceCategories WITH (NOLOCK) ORDER BY Label", c);
+            await using var cmd = SP("dbo.WN_SpaceCategories_GetList", c);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -6245,7 +6245,7 @@ END";
         public async Task<IReadOnlyDictionary<int, string>> GetOrderStatusesDbAsync()
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT Id, Description FROM dbo.OrderStatus WITH (NOLOCK) WHERE ISNULL(Status, 1) = 1;", c);
+            await using var cmd = SP("dbo.WN_OrderStatus_GetList", c);
             var map = new Dictionary<int, string>();
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync()) map[Convert.ToInt32(r.GetValue(0))] = r.IsDBNull(1) ? "" : Convert.ToString(r.GetValue(1)) ?? "";
@@ -6479,7 +6479,7 @@ END";
         public async Task<IEnumerable<IDictionary<string, object?>>> GetHikTagsDbAsync()
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT Id, Name FROM dbo.WN_HIK_Tags WITH (NOLOCK) WHERE Status = 1 ORDER BY Name;", c);
+            await using var cmd = SP("dbo.WN_HIK_Tags_GetActive", c);
             await using var r = await cmd.ExecuteReaderAsync();
             return await ReadAll(r);
         }
@@ -6488,17 +6488,7 @@ END";
         public async Task<int> AddHikTagDbAsync(string name)
         {
             await using var c = await Open();
-            const string sql = @"
-                DECLARE @Id INT = (SELECT Id FROM dbo.WN_HIK_Tags WHERE Name = @Name);
-                IF @Id IS NULL
-                BEGIN
-                    INSERT INTO dbo.WN_HIK_Tags (Name, Status) VALUES (@Name, 1);
-                    SET @Id = SCOPE_IDENTITY();
-                END
-                ELSE
-                    UPDATE dbo.WN_HIK_Tags SET Status = 1 WHERE Id = @Id;
-                SELECT @Id;";
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_HIK_Tags_Upsert", c);
             cmd.Parameters.AddWithValue("@Name", name.Trim());
             return Convert.ToInt32(await cmd.ExecuteScalarAsync());
         }
@@ -6554,7 +6544,7 @@ END";
         public async Task<IEnumerable<(int DeviceId, string? UsersJson)>> GetHikDevCacheSnapshotsDbAsync()
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT Device_id, Users_snapshot FROM dbo.WN_HIK_DevCache WITH (NOLOCK) WHERE Users_snapshot IS NOT NULL;", c);
+            await using var cmd = SP("dbo.WN_HIK_DevCache_GetSnapshots", c);
             var list = new List<(int, string?)>();
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync()) list.Add((r.GetInt32(0), r.IsDBNull(1) ? null : r.GetString(1)));
@@ -6564,7 +6554,7 @@ END";
         public async Task<IEnumerable<int>> GetHikPendingOpDeviceIdsDbAsync(string employeeNo)
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT DISTINCT device_id FROM dbo.WN_HIK_PendingOps WITH (NOLOCK) WHERE employee_no = @Emp AND op = 'grant';", c);
+            await using var cmd = SP("dbo.WN_HIK_PendingOps_GetGrantDeviceIds", c);
             cmd.Parameters.AddWithValue("@Emp", employeeNo);
             var ids = new List<int>();
             await using var r = await cmd.ExecuteReaderAsync();
@@ -6914,7 +6904,7 @@ END";
         public async Task<Dictionary<string, string>> GetUnifiClientAliasesDbAsync()
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("SELECT Mac, Alias FROM dbo.WN_UNIFI_ClientAliases WITH (NOLOCK);", c);
+            await using var cmd = SP("dbo.WN_UNIFI_ClientAliases_GetList", c);
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             await using var r = await cmd.ExecuteReaderAsync();
             while (await r.ReadAsync())
@@ -6927,12 +6917,7 @@ END";
         public async Task UpsertUnifiClientAliasDbAsync(string mac, string alias, string? updatedByEmail)
         {
             await using var c = await Open();
-            const string sql = @"
-                MERGE dbo.WN_UNIFI_ClientAliases WITH (HOLDLOCK) AS t
-                USING (SELECT @Mac AS Mac) s ON t.Mac = s.Mac
-                WHEN MATCHED THEN UPDATE SET Alias = @Alias, UpdatedAt = SYSUTCDATETIME(), UpdatedByEmail = @Email
-                WHEN NOT MATCHED THEN INSERT (Mac, Alias, UpdatedAt, UpdatedByEmail) VALUES (s.Mac, @Alias, SYSUTCDATETIME(), @Email);";
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_UNIFI_ClientAliases_Upsert", c);
             cmd.Parameters.AddWithValue("@Mac", mac);
             cmd.Parameters.AddWithValue("@Alias", alias);
             cmd.Parameters.AddWithValue("@Email", (object?)updatedByEmail ?? DBNull.Value);
@@ -6942,7 +6927,7 @@ END";
         public async Task DeleteUnifiClientAliasDbAsync(string mac)
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("DELETE FROM dbo.WN_UNIFI_ClientAliases WHERE Mac = @Mac;", c);
+            await using var cmd = SP("dbo.WN_UNIFI_ClientAliases_Delete", c);
             cmd.Parameters.AddWithValue("@Mac", mac);
             await cmd.ExecuteNonQueryAsync();
         }
@@ -6950,9 +6935,7 @@ END";
         public async Task InsertUnifiMacFilterLogDbAsync(string wlanId, string ssid, string? mac, string action, string? policy, string? reason, string? byEmail, int? byUserId, string? previousList)
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand(@"
-                INSERT INTO dbo.WN_UNIFI_MacFilterLog (WlanId, Ssid, Mac, Action, Policy, Reason, ByEmail, ByUserId, PreviousList)
-                VALUES (@WlanId, @Ssid, @Mac, @Action, @Policy, @Reason, @ByEmail, @ByUserId, @PreviousList);", c);
+            await using var cmd = SP("dbo.WN_UNIFI_MacFilterLog_Insert", c);
             cmd.Parameters.Add("@WlanId", SqlDbType.NVarChar, 50).Value = wlanId;
             cmd.Parameters.Add("@Ssid", SqlDbType.NVarChar, 100).Value = ssid;
             cmd.Parameters.Add("@Mac", SqlDbType.NVarChar, 17).Value = (object?)mac ?? DBNull.Value;
@@ -6971,7 +6954,7 @@ END";
             try
             {
                 await using var c = await Open();
-                await using var cmd = new SqlCommand("SELECT WlanId, Mac, Name, RoomNo FROM dbo.WN_UNIFI_SsidDevices WITH (NOLOCK);", c);
+                await using var cmd = SP("dbo.WN_UNIFI_SsidDevices_GetList", c);
                 await using var r = await cmd.ExecuteReaderAsync();
                 while (await r.ReadAsync())
                     list.Add((r.GetString(0), r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.IsDBNull(3) ? null : r.GetString(3)));
@@ -7066,7 +7049,7 @@ END";
         public async Task DeleteUnifiSsidDeviceDbAsync(string wlanId, string mac)
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("DELETE FROM dbo.WN_UNIFI_SsidDevices WHERE WlanId = @WlanId AND Mac = @Mac;", c);
+            await using var cmd = SP("dbo.WN_UNIFI_SsidDevices_Delete", c);
             cmd.Parameters.Add("@WlanId", SqlDbType.NVarChar, 50).Value = wlanId;
             cmd.Parameters.Add("@Mac", SqlDbType.NVarChar, 17).Value = mac;
             await cmd.ExecuteNonQueryAsync();
@@ -7078,13 +7061,7 @@ END";
             try
             {
                 await using var c = await Open();
-                await using var cmd = new SqlCommand(@"
-                    SELECT TOP (@Top) l.Id, l.LoggedAt, l.WlanId, l.Ssid, l.Mac, l.Action, l.Policy, l.Reason, l.ByEmail,
-                           COALESCE(NULLIF(u.Name, ''), l.ByEmail) AS ByName
-                      FROM dbo.WN_UNIFI_MacFilterLog l WITH (NOLOCK)
-                      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = l.ByUserId
-                     WHERE (@WlanId IS NULL OR l.WlanId = @WlanId) AND (@Mac IS NULL OR l.Mac = @Mac)
-                     ORDER BY l.Id DESC;", c);
+                await using var cmd = SP("dbo.WN_UNIFI_MacFilterLog_GetPaged", c);
                 cmd.Parameters.Add("@Top", SqlDbType.Int).Value = top;
                 cmd.Parameters.Add("@WlanId", SqlDbType.NVarChar, 50).Value = (object?)wlanId ?? DBNull.Value;
                 cmd.Parameters.Add("@Mac", SqlDbType.NVarChar, 17).Value = (object?)mac ?? DBNull.Value;
@@ -7337,39 +7314,8 @@ END";
         public async Task<IDictionary<string, object?>?> GetCustomerByIdOrGuidDbAsync(string idOrGuid)
         {
             await using var conn = await Open();
-            await using var cmd = new SqlCommand(@"
-                SELECT 
-                    c.Id, 
-                    c.IdGUID, 
-                    c.Code, 
-                    c.FirstName, 
-                    c.LastName, 
-                    LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))) AS FullName,
-                    c.Company, 
-                    c.Email, 
-                    c.PhoneNumber, 
-                    c.CnicOrPassport, 
-                    c.Address, 
-                    c.CityId, 
-                    ci.Description AS CityName,
-                    c.IsActive, 
-                    c.Notes, 
-                    c.CreatedAt,
-                    c.UserId
-                FROM dbo.WN_Customers c WITH (NOLOCK)
-                LEFT JOIN dbo.City ci WITH (NOLOCK) ON ci.Id = c.CityId
-                WHERE (@IsGuid = 1 AND c.IdGUID = @GuidVal)
-                   OR (@IsInt = 1 AND c.Id = @IntVal)
-                   OR (c.Code = @CodeVal)", conn);
-
-            bool isGuid = Guid.TryParse(idOrGuid, out var g);
-            bool isInt = int.TryParse(idOrGuid, out var id);
-
-            cmd.Parameters.AddWithValue("@IsGuid", isGuid ? 1 : 0);
-            cmd.Parameters.AddWithValue("@GuidVal", isGuid ? g : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@IsInt", isInt ? 1 : 0);
-            cmd.Parameters.AddWithValue("@IntVal", isInt ? id : (object)DBNull.Value);
-            cmd.Parameters.AddWithValue("@CodeVal", idOrGuid);
+            await using var cmd = SP("dbo.WN_Customers_GetBasicInfo", conn);
+            cmd.Parameters.Add("@IdOrGuid", SqlDbType.NVarChar, 64).Value = idOrGuid;
 
             await using var r = await cmd.ExecuteReaderAsync();
             return await r.ReadAsync() ? ToDict(r) : null;
@@ -7378,15 +7324,7 @@ END";
         public async Task<bool> CustomerBelongsToLocationDbAsync(int customerId, int locationId)
         {
             await using var conn = await Open();
-            await using var cmd = new SqlCommand(@"
-                SELECT TOP 1 1
-                FROM dbo.WN_Customers c WITH (NOLOCK)
-                LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = c.UserId
-                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.CustomerCode = c.Code OR (c.UserId IS NOT NULL AND b.UserId = c.UserId)
-                LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId
-                WHERE c.Id = @CustomerId
-                  AND (sb.LocationId = @LocationId OR u.LocationId = @LocationId)", conn);
-
+            await using var cmd = SP("dbo.WN_Customers_CheckLocationAccess", conn);
             cmd.Parameters.AddWithValue("@CustomerId", customerId);
             cmd.Parameters.AddWithValue("@LocationId", locationId);
 
@@ -7502,15 +7440,7 @@ END";
             await using var c = await Open();
             // Same balance as the FR_01 column WN_Invoices.BalanceAmount: GrandTotal less WHT (WHTAmount, or the WHT rate of a
             // type 6 invoice) less PaidTotal, 2 decimals, never below 0.
-            await using var cmd = new SqlCommand(@"
-                SELECT TOP 1 ISNULL(i.InvoiceTypeId, 1) AS InvoiceTypeId,
-                       CAST(CASE WHEN x.Payable - ROUND(ISNULL(i.PaidTotal, 0), 2) > 0 THEN x.Payable - ROUND(ISNULL(i.PaidTotal, 0), 2) ELSE 0 END
-                            AS DECIMAL(18,2)) AS Balance
-                  FROM dbo.WN_Invoices i WITH (NOLOCK)
-                 CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.WHTAmount, 0) > 0 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(i.WHTAmount, 2)
-                                               WHEN i.InvoiceTypeId = 6 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(ROUND(ISNULL(i.GrandTotal, 0), 2) * ISNULL(i.WHTRate, 0) / 100.0, 2)
-                                               ELSE ROUND(ISNULL(i.GrandTotal, 0), 2) END AS DECIMAL(18,2)) AS Payable) x
-                 WHERE i.PublicId = @PublicId AND ISNULL(i.StatusId, 0) <> 40;", c);
+            await using var cmd = SP("dbo.WN_Invoices_GetBalanceAndType", c);
             cmd.Parameters.Add("@PublicId", SqlDbType.UniqueIdentifier).Value = invoiceIdGuid;
             await using var r = await cmd.ExecuteReaderAsync();
             if (!await r.ReadAsync()) return null;
@@ -8064,11 +7994,7 @@ SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) 
         public async Task<List<string>> GetQuotationCustomerEmailsAsync(int quotationId)
         {
             await using var c = await Open();
-            const string sql = @"
-                SELECT cu.Email FROM dbo.WN_Quotations q WITH (NOLOCK)
-                  JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
-                 WHERE q.Id = @QuotationId AND NULLIF(LTRIM(RTRIM(cu.Email)), '') IS NOT NULL;";
-            await using var cmd = new SqlCommand(sql, c);
+            await using var cmd = SP("dbo.WN_Quotations_GetCustomerEmail", c);
             cmd.Parameters.Add("@QuotationId", SqlDbType.Int).Value = quotationId;
             var emails = new List<string>();
             await using var r = await cmd.ExecuteReaderAsync();

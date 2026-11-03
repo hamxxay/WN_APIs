@@ -58,7 +58,7 @@ namespace WorkNest.API.Services
 
             using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync(stoppingToken);
-            using var cmd = new SqlCommand("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; EXEC dbo.WN_ReRestrictLapsedPartialPayments;", conn);
+            using var cmd = new SqlCommand("dbo.WN_ReRestrictLapsedPartialPayments", conn) { CommandType = CommandType.StoredProcedure };
             cmd.CommandType = CommandType.Text;
             int affected = await cmd.ExecuteNonQueryAsync(stoppingToken);
 
