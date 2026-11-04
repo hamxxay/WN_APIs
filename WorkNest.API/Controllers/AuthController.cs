@@ -93,7 +93,7 @@ namespace WorkNest.API.Controllers
         /// </summary>
         private async Task<IActionResult?> CheckAccountAsync(FirebaseIdentity identity, string endpoint)
         {
-            var refusal = await _auth.CheckFirebaseSignInAsync(identity.Email, identity.EmailVerified);
+            var refusal = await _auth.CheckFirebaseSignInAsync(identity.Email, identity.EmailVerified, identity.SignInProvider);
             if (refusal is null) return null;
             _logger.LogWarning("Refused {Endpoint} for {Email} (provider {Provider}, email verified {Verified}): {Code}",
                 endpoint, identity.Email, identity.SignInProvider, identity.EmailVerified, refusal.Code);

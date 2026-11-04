@@ -77,6 +77,7 @@ namespace WorkNest.Application.DTOs.Auth
     {
         public const string EmailNotVerifiedCode = "EMAIL_NOT_VERIFIED";
         public const string AccountDisabledCode = "ACCOUNT_DISABLED";
+        public const string PasswordResetCode = "PASSWORD_RESET";
 
         /// <summary>A Firebase account whose email nobody has proven to own (and no earlier sign-in to vouch for it).</summary>
         public static SignInRefusal EmailNotVerified(string email) => new(EmailNotVerifiedCode,
@@ -85,6 +86,13 @@ namespace WorkNest.Application.DTOs.Auth
         /// <summary>The WN_Users row exists but IsActive = 0.</summary>
         public static SignInRefusal AccountDisabled() => new(AccountDisabledCode,
             "Your account is turned off. Please contact WorkNest.");
+
+        /// <summary>
+        /// An old Firebase password of a customer whose password WorkNest now holds (reset in the CMS, then changed by the
+        /// customer): Firebase can't be updated from the server, so it would otherwise keep working and skip the forced change.
+        /// </summary>
+        public static SignInRefusal PasswordReset() => new(PasswordResetCode,
+            "That password is no longer valid. Use your latest password, or the temporary password WorkNest emailed you.");
 
         /// <summary>The 403 body: { isSuccessful: false, message, data: { code } }.</summary>
         public object ToBody() => new { isSuccessful = false, message = Message, data = new { code = Code } };

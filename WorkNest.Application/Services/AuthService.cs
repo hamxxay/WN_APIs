@@ -262,7 +262,7 @@ namespace WorkNest.Application.Services
         ///   first. Everything else, brand-new emails included, gets EMAIL_NOT_VERIFIED and nothing is created until the
         ///   email is verified (the CMS keeps working through its password fallback).
         /// </summary>
-        public async Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified)
+        public async Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified, string? signInProvider = null)
         {
             if (!_requireVerifiedEmail) emailVerified = true;
             UserSignInStatus? status;
@@ -290,9 +290,16 @@ namespace WorkNest.Application.Services
                 refusal = status.IsActive ? null : SignInRefusal.AccountDisabled();
             }
 
+            // A hashed WN_Users password means WorkNest holds this customer's password since a reset: a Firebase email /
+            // password sign-in is the old password. Google still works (it proves the email and activates the login).
+            if (refusal is null && string.Equals(signInProvider, "password", StringComparison.OrdinalIgnoreCase)
+                && PasswordHasher.IsHashed(status?.PasswordHash))
+                refusal = SignInRefusal.PasswordReset();
+
             if (refusal != null)
                 await RecordQuietly("FAILED", status?.Id, email,
-                    refusal.Code == SignInRefusal.AccountDisabledCode ? "Inactive" : "EmailNotVerified");
+                    refusal.Code == SignInRefusal.AccountDisabledCode ? "Inactive"
+                    : refusal.Code == SignInRefusal.PasswordResetCode ? "OldPassword" : "EmailNotVerified");
             return refusal;
         }
 

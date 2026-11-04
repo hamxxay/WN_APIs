@@ -20,7 +20,7 @@ namespace WorkNest.Application.Interfaces
         /// Whether a verified Firebase token may sign in as its email: null = yes, else the refusal to send as a 403
         /// (EMAIL_NOT_VERIFIED / ACCOUNT_DISABLED). Called for every endpoint that takes a Firebase token.
         /// </summary>
-        Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified);
+        Task<SignInRefusal?> CheckFirebaseSignInAsync(string email, bool emailVerified, string? signInProvider = null);
         /// <summary>Own password change (also while MustChangePassword is set): same data as a login on success, Fail otherwise.</summary>
         Task<ApiResponse> ChangePasswordAsync(string email, string? currentPassword, string? newPassword);
         Task<ApiResponse> GetMeAsync(string email);
