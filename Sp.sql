@@ -1,1263 +1,455 @@
 USE [SAC400]
 GO
-/****** Object:  StoredProcedure [dbo].[WN_WHTaxRate_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_WHTaxRate_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_SetStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_SetStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_SetRole]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_SetRole]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_SetPassword]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_SetPassword]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetHistory]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_GetHistory]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetByPublicId]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_GetByPublicId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetById]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetByGuid]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_GetByGuid]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetByEmail]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_GetByEmail]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Users_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_Set]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_UserPermissions_Set]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_ListAdmins]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_UserPermissions_ListAdmins]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_GetByUser]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_UserPermissions_GetByUser]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_UpdateInvoiceBreakdown]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_UpdateInvoiceBreakdown]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SiteLocations_Set]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_UNIFI_SiteLocations_Set]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SiteLocations_GetAll]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_UNIFI_SiteLocations_GetAll]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_ToggleAccessStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_ToggleAccessStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceTypes_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceTypes_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceTypes_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceTypes_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_UpdateConfig]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_UpdateConfig]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_SetAmenities]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_SetAmenities]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetVacant]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetVacant]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetConfig]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetConfig]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetByPublicId]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetByPublicId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetByGuid]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetByGuid]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailableByType]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetAvailableByType]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailable]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetAvailable]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailabilityCounts]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GetAvailabilityCounts]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GenerateInventory]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_GenerateInventory]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Spaces_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpacePricing_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpacePricing_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpacePricing_GetActive]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpacePricing_GetActive]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_Upsert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceInventoryConfig_Upsert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceInventoryConfig_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceInventoryConfig_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetSpaceStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_GetSpaceStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetListV2]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_GetListV2]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetDepositByCategory]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_GetDepositByCategory]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GenerateSpaces]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_GenerateSpaces]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_DeleteSpaces]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_DeleteSpaces]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SpaceConfig_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_ServiceSwitches_Set]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_ServiceSwitches_Set]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_ServiceSwitches_GetAll]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_ServiceSwitches_GetAll]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_UpdateStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SecurityDeposits_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SecurityDeposits_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_GetByBooking]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SecurityDeposits_GetByBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposit_CustomerReport]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SecurityDeposit_CustomerReport]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposit_CustomerDetail]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SecurityDeposit_CustomerDetail]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Quotations]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Records_Quotations]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Leases]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Records_Leases]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Inquiries]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Records_Inquiries]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Complaints]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Records_Complaints]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Bookings]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Records_Bookings]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_InquiryRows]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_InquiryRows]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Dashboard]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Dashboard]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Complaints]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Complaints]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Breakdown]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_SalesMgr_Breakdown]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Roles_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Roles_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Roles_GetAll]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Roles_GetAll]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_ReRestrictLapsedPartialPayments]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_ReRestrictLapsedPartialPayments]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Refunds_UpdateStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Refunds_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Refunds_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Refunds_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_RevokeAllForUser]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_RefreshTokens_RevokeAllForUser]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_Revoke]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_RefreshTokens_Revoke]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_RefreshTokens_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_GetByHash]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_RefreshTokens_GetByHash]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_RecurringInvoice_GenerateMonthlyInvoices]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_RecurringInvoice_GenerateMonthlyInvoices]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_RecordInvoicePayment]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_RecordInvoicePayment]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_UpdateStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetLocationAndCompanyDetails]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_GetLocationAndCompanyDetails]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetListFiltered]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_GetListFiltered]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetHistory]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_GetHistory]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetById]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_ConvertToBooking]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_QuotationDetails_GetByQuotation]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_QuotationDetails_GetByQuotation]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_QuotationActivities_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_QuotationActivities_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_QueueInvoiceDeliveryFailure]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_QueueInvoiceDeliveryFailure]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_PricingPlans_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_PricingPlans_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_PlanFeatures_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_PlanFeatures_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_GetByPlan]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_PlanFeatures_GetByPlan]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_PlanFeatures_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByRef]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_UpdateStatusByRef]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByPublicId]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_UpdateStatusByPublicId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByGuid]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_UpdateStatusByGuid]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_InsertCard]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_InsertCard]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_InitiatePayFast]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_InitiatePayFast]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetSummary]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_GetSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetMyList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_GetMyList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetListFiltered]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_GetListFiltered]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetByMembershipId]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_GetByMembershipId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GenerateVoucher]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_GenerateVoucher]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Payments_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_SetResult]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_OneBill_SetResult]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_RecordPayment]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_OneBill_RecordPayment]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_GetPending]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_OneBill_GetPending]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_GetByInvoice]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_OneBill_GetByInvoice]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_ClaimInvoice]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_OneBill_ClaimInvoice]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MessageTemplates_Save]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MessageTemplates_Save]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MessageTemplates_Get]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MessageTemplates_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_UpdateStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Memberships_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Memberships_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetSummary]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Memberships_GetSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Memberships_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetByPlanId]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Memberships_GetByPlanId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Memberships_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlans_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlans_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetSummary]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlans_GetSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlans_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetAll]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlans_GetAll]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlans_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlanFeatures_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlanFeatures_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_GetByPlan]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlanFeatures_GetByPlan]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MembershipPlanFeatures_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetRooms]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MeetingRooms_GetRooms]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetMyFree]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MeetingRooms_GetMyFree]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetEntitlement]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MeetingRooms_GetEntitlement]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_CancelFree]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MeetingRooms_CancelFree]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_BookFree]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_MeetingRooms_BookFree]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_LoginHistory_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_GetStats]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_LoginHistory_GetStats]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_GetPaged]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_LoginHistory_GetPaged]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_Update]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Locations_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Locations_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Locations_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_GetAll]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Locations_GetAll]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_GetActive]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Locations_GetActive]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Locations_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_ListStatusOptions_Get]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_ListStatusOptions_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_LeaseTemplates_Publish]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_LeaseTemplates_Publish]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_LeaseTemplates_GetActiveByName]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_LeaseTemplates_GetActiveByName]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_KYCDocumentTypes_GetActive]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_KYCDocumentTypes_GetActive]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_RecordViewed]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoices_RecordViewed]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoices_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetSummary]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoices_GetSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetList]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoices_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetApprovalQueue]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoices_GetApprovalQueue]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_DeleteUnapproved]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoices_DeleteUnapproved]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_ApproveSingle]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoices_ApproveSingle]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_CreateRecurring_Test]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoice_CreateRecurring_Test]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_CreateRecurring]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoice_CreateRecurring]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_CheckExistingBillingPeriod]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoice_CheckExistingBillingPeriod]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_ApplyWhtToLines]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_Invoice_ApplyWhtToLines]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_UpdateStatus]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_IntegrationLog_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_Insert]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_IntegrationLog_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_GetPending]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_IntegrationLog_GetPending]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_InsertInvoiceLine]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_InsertInvoiceLine]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Visitor_Create]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Visitor_Create]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Visitors_Retarget]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Visitors_Retarget]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Users_Rebuild]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Users_Rebuild]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_UserMeta_Get]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_UserMeta_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Ref_HasAttendees]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Ref_HasAttendees]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOps_Get]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_PendingOps_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOp_Fail]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_PendingOp_Fail]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOp_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_PendingOp_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_ResetToPending]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Grants_ResetToPending]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_GetByEmployee]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Grants_GetByEmployee]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_DeleteByEmployee]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Grants_DeleteByEmployee]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_CountPending]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Grants_CountPending]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grant_InsertSynced]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Grant_InsertSynced]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grant_Delete]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Grant_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FpVault_Save]    Script Date: 28/10/2026 11:43:09 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_FpVault_Save]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FpVault_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_FpVault_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Save]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_FaceVault_Save]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Keys]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_FaceVault_Keys]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_FaceVault_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Events_GetLast]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Events_GetLast]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Event_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Event_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Employee_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Employee_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Devices_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Devices_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Save]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_DevCache_Save]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Invalidate]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_DevCache_Invalidate]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_DevCache_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_CardEmployees_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_CardEmployees_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Card_SetHolder]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Card_SetHolder]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_BookingRefs_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_BookingRefs_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Booking_GetNext]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Booking_GetNext]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Booking_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Booking_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Attendees_GetByRef]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Sync_Attendees_GetByRef]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Stats_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Stats_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Settings_Set]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Settings_Set]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Settings_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Settings_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Log_Write]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Log_Write]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_SetState]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Grant_SetState]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_PendingEmployees]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Grant_PendingEmployees]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_MarkRemoving]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Grant_MarkRemoving]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_Ensure]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Grant_Ensure]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Expiry_Run]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Expiry_Run]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Employee_NextNumber]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Employee_NextNumber]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_UpsertByHost]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Device_UpsertByHost]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_SetOnline]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Device_SetOnline]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Upsert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_DashUser_Upsert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_SetStatus]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_DashUser_SetStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Rename]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_DashUser_Rename]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_List]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_DashUser_List]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_DashUser_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_DashUser_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Count]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_DashUser_Count]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Card_Register]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Card_Register]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Booking_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Booking_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Booking_Attendees]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Booking_Attendees]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Activity_Recent]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Activity_Recent]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_SetApplied]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_AccessSuspension_SetApplied]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Run]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_AccessSuspension_Run]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_GetByBookingDetail]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_AccessSuspension_GetByBookingDetail]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Extend]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_AccessSuspension_Extend]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Access_Extend]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_HIK_Access_Extend]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetStatementInvoicePdfData]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetStatementInvoicePdfData]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetRemainingBillingPeriods]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetRemainingBillingPeriods]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoicesListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetInvoicesListFiltered]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoicesList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetInvoicesList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceForSTGeneration]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetInvoiceForSTGeneration]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceEmailData]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetInvoiceEmailData]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceDetailsById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetInvoiceDetailsById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceByBookingId]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetInvoiceByBookingId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetCustomerSTInvoiceByPublicId]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetCustomerSTInvoiceByPublicId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetCustomerArrears]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetCustomerArrears]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetBookingLastInvoicePeriodEnd]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetBookingLastInvoicePeriodEnd]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetBookingInvoiceDetails]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetBookingInvoiceDetails]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetBookingBillingSummary]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetBookingBillingSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GetAvailableSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GetAvailableSpaces]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Update]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GalleryImages_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GalleryImages_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GalleryImages_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_GetAll]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GalleryImages_GetAll]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_GalleryImages_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Floors_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Floors_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Floors_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Floors_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_Void]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_Void]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_PostVoucher]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_PostVoucher]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetUnpaidInvoices]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_GetUnpaidInvoices]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetAccounts]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_GetAccounts]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_CreateDueMonthly]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_FeeReceipts_CreateDueMonthly]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_EnsureCustomerSTInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_EnsureCustomerSTInvoice]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_MarkUsed]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_EmailOtps_MarkUsed]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_EmailOtps_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_GetActive]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_EmailOtps_GetActive]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_DeviceTokens_Upsert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_DeviceTokens_Upsert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_DeleteInvoiceLines]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_DeleteInvoiceLines]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Dashboard_GetSummary]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Dashboard_GetSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceTypeSummary]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Dash_SpaceTypeSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceTypeDetails]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Dash_SpaceTypeDetails]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceInventory]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Dash_SpaceInventory]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Dash_OverviewSpaces]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewInvoices]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Dash_OverviewInvoices]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewBookings]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Dash_OverviewBookings]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_SearchCustomers]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomInvoice_SearchCustomers]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_SearchAccounts]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomInvoice_SearchAccounts]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomInvoice_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetReplaceable]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomInvoice_GetReplaceable]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomInvoice_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetLedgerDefaults]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomInvoice_GetLedgerDefaults]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetBookings]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomInvoice_GetBookings]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomersVendors_SyncOnInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomersVendors_SyncOnInvoice]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomersTemp_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomersTemp_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_UpdateAgreementDetails]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_UpdateAgreementDetails]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Update]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Search]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_Search]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetOverview]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetOverview]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetListFiltered]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetKycList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetKycList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByUserId]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetByUserId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByGuid]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetByGuid]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByEmail]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_GetByEmail]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Customers_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_SetStatus]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomerKYCDocuments_SetStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_InsertOrReplace]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomerKYCDocuments_InsertOrReplace]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomerKYCDocuments_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_GetByCustomerId]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CustomerKYCDocuments_GetByCustomerId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateSurchargeInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CreateSurchargeInvoice]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateCustomInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CreateCustomInvoice]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateBookingWithAutoAssignment]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CreateBookingWithAutoAssignment]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateAdvanceInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CreateAdvanceInvoice]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Contacts_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateLocation]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Contacts_UpdateLocation]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateInquiryType]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Contacts_UpdateInquiryType]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Contacts_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_GetRecent]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Contacts_GetRecent]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Contacts_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Contacts_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Complaints_UpdateBranch]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Complaints_UpdateBranch]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Companies_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Companies_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Cities_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Cities_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_Search]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Challans_Search]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_GetFullByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Challans_GetFullByBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_GetByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Challans_GetByBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_ExtendValidity]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Challans_ExtendValidity]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Challan_Search]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Challan_Search]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Challan_ExtendValidity]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Challan_ExtendValidity]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Seats]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Seats]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_RoomReport]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_RoomReport]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Spaces]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Spaces]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Sales]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Sales]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Receipts]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Receipts]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Quotations]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Quotations]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Leases]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Leases]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Invoices]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Invoices]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Inquiries]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Inquiries]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Bookings]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Records_Bookings]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Received]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Received]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_InquiryRows]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_InquiryRows]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Discounts]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Discounts]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Dashboard]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Dashboard]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Breakdown]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Ceo_Breakdown]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_CalculateInvoiceAmounts]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_CalculateInvoiceAmounts]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Branches_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Branches_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookTour_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookTour_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_UpdateStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_UpdateSecurityDeposit]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_UpdateSecurityDeposit]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Update]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Reassign]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_Reassign]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_InsertSmart]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_InsertSmart]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_InsertFreeMeetingRoom]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_InsertFreeMeetingRoom]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetSmartAvailable]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetSmartAvailable]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetRecent]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetRecent]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetMyList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetMyList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetListFiltered]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetListByUserId]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetListByUserId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetCalendar]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetCalendar]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetBySpaceGuid]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetBySpaceGuid]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByPublicId]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetByPublicId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByGuid]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetByGuid]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByChallan]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetByChallan]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetAvailableSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_GetAvailableSpaces]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_CheckOverlap]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_CheckOverlap]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_CancelFreeMeetingRoom]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_CancelFreeMeetingRoom]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Cancel]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Bookings_Cancel]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingMeetingRoomEntitlements_GetActive]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingMeetingRoomEntitlements_GetActive]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingMeetingRoomEntitlements_Generate]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingMeetingRoomEntitlements_Generate]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingLines_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingLines_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingLines_GetTotal]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingLines_GetTotal]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingLines_GetByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingLines_GetByBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Verify]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_Verify]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Reopen]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_Reopen]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_RemoveRequests]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_RemoveRequests]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_PendingPersons]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_PendingPersons]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Get]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_Get]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_FindPerson]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_FindPerson]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_FindPendingByIdNumber]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_FindPendingByIdNumber]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_AddRequest]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingEmployees_AddRequest]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_InsertLine]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingDetails_InsertLine]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingDetails_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetTotalByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingDetails_GetTotalByBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingDetails_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BookingDetails_GetByBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_GetBillingSummary]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Booking_GetBillingSummary]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_GetAvailableSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Booking_GetAvailableSpaces]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_Create]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Booking_Create]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_CheckOverlap]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Booking_CheckOverlap]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_AssignClosestSpace]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Booking_AssignClosestSpace]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_BillingPeriods_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_BillingPeriods_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Billing_GetDueBookings]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Billing_GetDueBookings]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetPaged]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AuditLog_GetPaged]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetFilterOptions]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AuditLog_GetFilterOptions]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AuditLog_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Reopen]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AttendantCapacityRequest_Reopen]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_List]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AttendantCapacityRequest_List]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Decide]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AttendantCapacityRequest_Decide]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Create]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AttendantCapacityRequest_Create]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AssignAttendantToBooking]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AssignAttendantToBooking]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_UpdateDeliveryStatus]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_UpdateDeliveryStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_MarkRead]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_MarkRead]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetPendingDeliveries]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_GetPendingDeliveries]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetForUser]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_GetForUser]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_Create]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_Create]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_CheckTerminalStatus]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Announcements_CheckTerminalStatus]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AmountFields_UpdateAccount]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AmountFields_UpdateAccount]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AmountFields_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AmountFields_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AmountFields_GetByEntityField]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AmountFields_GetByEntityField]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Amenities_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Amenities_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Amenities_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Amenities_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_UpdateSignedPdf]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_UpdateSignedPdf]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_SetBookingId]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_SetBookingId]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_MarkSigned]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_MarkSigned]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_ClearSignedPdf]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Agreements_ClearSignedPdf]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AddAttendant]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AddAttendant]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccountsCOA_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccountsCOA_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccountsCOA_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccountsCOA_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_Account_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_Account_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessOfficer_Lookup]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccessOfficer_Lookup]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Update]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccessCards_Update]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_PopulateAllBookings]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccessCards_PopulateAllBookings]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccessCards_Insert]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccessCards_GetList]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccessCards_GetById]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
-DROP PROCEDURE [dbo].[WN_AccessCards_Delete]
-GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  View [dbo].[WN_HIK_Employees]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   VIEW [dbo].[WN_HIK_Employees] AS
+  SELECT Id AS id, Employee_no AS employee_no, Name AS name, Card_no AS card_no,
+         CAST(NULL AS NVARCHAR(260)) AS face_path, Valid_begin AS valid_begin, Valid_end AS valid_end,
+         Auto_delete AS auto_delete,
+         CAST(CASE WHEN Status = 1 THEN 'active' ELSE 'expired' END AS NVARCHAR(16)) AS status,
+         Notes AS notes, CAST('card' AS NVARCHAR(16)) AS kind, Booking_ref AS booking_ref, Created_at AS created_at,
+         Created_by AS created_by, Updated_by AS updated_by, Updated_on AS updated_on
+  FROM dbo.WN_HIK_Cards
+  UNION ALL
+  SELECT id, employee_no, name, card_no, face_path, valid_begin, valid_end, auto_delete, status, notes,
+         CAST('visitor' AS NVARCHAR(16)) AS kind, booking_ref, created_at,
+         CAST(NULL AS INT), CAST(NULL AS INT), CAST(NULL AS DATETIME2(0))
+  FROM dbo.WN_HIK_Visitors
+GO
+/****** Object:  View [dbo].[WN_vw_AccessStatusExport]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER OFF
+GO
+
+CREATE VIEW [dbo].[WN_vw_AccessStatusExport] AS
+SELECT 
+    p.PersonGuid,
+    p.Name,
+    p.Phone,
+    p.Email,
+    a.IsEnabled,
+    a.BookingDetailId,
+    a.CustomerId
+FROM [dbo].[WN_AccessStatus] a
+JOIN [dbo].[WN_Persons] p ON p.PersonId = a.PersonId;
+GO
+/****** Object:  View [dbo].[WN_vw_BookingSummary]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- ==============================================================================
+-- 15. dbo.WN_vw_BookingSummary (ALTERED VIEW)
+-- Ensures CustomerEmail and UserEmail are sourced ONLY from dbo.WN_Customers (cust.Email).
+-- ==============================================================================
+CREATE   VIEW [dbo].[WN_vw_BookingSummary] AS
+    SELECT
+        b.Id                      AS BookingId,
+        b.IdGUID                  AS BookingPublicId,
+        b.IdGUID                  AS BookingIdGuid,
+        b.StartOn                 AS StartOn,
+        b.StartOn                 AS ContractStartDate,
+        b.EndOn                   AS EndOn,
+        b.EndOn                   AS ContractEndDate,
+        b.BookingStatusId,
+        bs.Code                   AS BookingStatusCode,
+        bs.Label                  AS BookingStatusLabel,
+        b.Notes,
+        b.CancelReason,
+        b.CreatedOn               AS BookedOn,
+        u.Id                      AS UserId,
+        u.IdGUID                  AS UserPublicId,
+        u.IdGUID                  AS UserIdGuid,
+        COALESCE(
+            NULLIF(RTRIM(LTRIM(cust.Company)), ''),
+            NULLIF(RTRIM(LTRIM(ISNULL(cust.FirstName, '') + ' ' + ISNULL(cust.LastName, ''))), ''),
+            NULLIF(u.Name, ''),
+            'Customer'
+        )                         AS UserName,
+        cust.Email                AS UserEmail,
+        COALESCE(
+            NULLIF(RTRIM(LTRIM(cust.Company)), ''),
+            NULLIF(RTRIM(LTRIM(ISNULL(cust.FirstName, '') + ' ' + ISNULL(cust.LastName, ''))), ''),
+            NULLIF(u.Name, ''),
+            'Customer'
+        )                         AS CustomerName,
+        cust.Company              AS CustomerCompany,
+        cust.Email                AS CustomerEmail,
+        b.CustomerCode            AS CustomerCode,
+        cust.PhoneNumber          AS CustomerPhone,
+        s.Id                      AS SpaceId,
+        s.IdGUID                  AS SpacePublicId,
+        s.IdGUID                  AS SpaceIdGuid,
+        s.Code                    AS SpaceCode,
+        ISNULL(NULLIF(s.Code, ''), s.Name) AS SpaceNumber,
+        s.Name                    AS SpaceName,
+        s.Capacity                AS SpaceCapacity,
+        st.Id                     AS SpaceTypeId,
+        st.Name                   AS SpaceTypeName,
+        l.Id                      AS LocationId,
+        l.Name                    AS LocationName,
+        br.Id                     AS BranchId,
+        br.[Description]          AS BranchName,
+        co.Id                     AS CompanyId,
+        co.CompanyName            AS CompanyName,
+        ISNULL(sp.SeatPrice, 0.0) AS SeatPrice,
+        CASE
+          WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+          THEN DATEDIFF(month, b.StartOn, b.EndOn)
+          ELSE 1
+        END AS NumberOfMonths,
+        CASE
+          WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+          THEN DATEDIFF(month, b.StartOn, b.EndOn)
+          ELSE 1
+        END AS ContractDuration,
+        CAST(
+          COALESCE(
+            NULLIF(b.MonthlyRent, 0.0),
+            NULLIF(
+              CASE
+                WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+                THEN sp.SeatPrice * s.Capacity
+                ELSE sp.SeatPrice
+              END, 0.0),
+            CASE
+              WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+              THEN NULLIF(b.SubtotalAmount, 0.0) / DATEDIFF(month, b.StartOn, b.EndOn)
+              ELSE NULLIF(b.SubtotalAmount, 0.0)
+            END,
+            NULLIF(b.TotalAmount, 0.0),
+            35000.00
+          ) AS DECIMAL(18,2)
+        ) AS MonthlyRent,
+        CASE
+          WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+          THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0)
+          ELSE ISNULL(sp.SeatPrice, 0.0)
+        END AS RoomPrice,
+        COALESCE(
+          NULLIF(b.BillingPeriodMonths, 0),
+          NULLIF(b.AdvanceRentMonths, 0),
+          NULLIF(inv_meta.BillingPeriodMonths, 0),
+          CASE
+            WHEN bp.Code = 'Quarterly' OR bp.Code = '3 Months' OR bp.Label LIKE '%3 Month%' THEN 3
+            WHEN bp.Code = 'SemiAnnual' OR bp.Code = '6 Months' OR bp.Label LIKE '%6 Month%' THEN 6
+            WHEN bp.Code = 'BiMonthly' OR bp.Code = '2 Months' OR bp.Label LIKE '%2 Month%' THEN 2
+            WHEN bp.Code = 'Annual' OR bp.Code = '12 Months' OR bp.Label LIKE '%12 Month%' THEN 12
+            WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private', 'SharedSpace', 'Shared') THEN 3
+            ELSE 1
+          END
+        ) AS BillingPeriodMonths,
+        COALESCE(
+          bp.Code,
+          CASE
+            WHEN COALESCE(NULLIF(b.BillingPeriodMonths, 0), NULLIF(b.AdvanceRentMonths, 0), 3) = 3 THEN 'Quarterly'
+            WHEN COALESCE(NULLIF(b.BillingPeriodMonths, 0), NULLIF(b.AdvanceRentMonths, 0), 3) = 6 THEN 'SemiAnnual'
+            WHEN COALESCE(NULLIF(b.BillingPeriodMonths, 0), NULLIF(b.AdvanceRentMonths, 0), 3) = 12 THEN 'Annual'
+            ELSE 'Monthly'
+          END
+        ) AS BillingPeriodCode,
+        COALESCE(
+          bp.Label,
+          CAST(COALESCE(NULLIF(b.BillingPeriodMonths, 0), NULLIF(b.AdvanceRentMonths, 0), NULLIF(inv_meta.BillingPeriodMonths, 0), 3) AS NVARCHAR(10)) + ' Month(s)'
+        ) AS BillingPeriodLabel,
+        COALESCE(
+          bp.Label,
+          CAST(COALESCE(NULLIF(b.BillingPeriodMonths, 0), NULLIF(b.AdvanceRentMonths, 0), NULLIF(inv_meta.BillingPeriodMonths, 0), 3) AS NVARCHAR(10)) + ' Month(s)'
+        ) AS BillingPeriod,
+        CAST(sdv.SecurityDepositValue AS DECIMAL(18,2)) AS SecurityDeposit,
+        CAST(
+          (
+            COALESCE(
+              NULLIF(b.MonthlyRent, 0.0),
+              NULLIF(
+                CASE
+                  WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+                  THEN sp.SeatPrice * s.Capacity
+                  ELSE sp.SeatPrice
+                END, 0.0),
+              CASE
+                WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+                THEN NULLIF(b.SubtotalAmount, 0.0) / DATEDIFF(month, b.StartOn, b.EndOn)
+                ELSE NULLIF(b.SubtotalAmount, 0.0)
+              END,
+              NULLIF(b.TotalAmount, 0.0),
+              35000.00
+            ) * COALESCE(
+                  NULLIF(b.BillingPeriodMonths, 0),
+                  NULLIF(b.AdvanceRentMonths, 0),
+                  NULLIF(inv_meta.BillingPeriodMonths, 0),
+                  CASE
+                    WHEN bp.Code = 'Quarterly' OR bp.Code = '3 Months' OR bp.Label LIKE '%3 Month%' THEN 3
+                    WHEN bp.Code = 'SemiAnnual' OR bp.Code = '6 Months' OR bp.Label LIKE '%6 Month%' THEN 6
+                    WHEN bp.Code = 'BiMonthly' OR bp.Code = '2 Months' OR bp.Label LIKE '%2 Month%' THEN 2
+                    WHEN bp.Code = 'Annual' OR bp.Code = '12 Months' OR bp.Label LIKE '%12 Month%' THEN 12
+                    WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private', 'SharedSpace', 'Shared') THEN 3
+                    ELSE 1
+                  END
+                )
+          ) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))
+          AS DECIMAL(18,2)
+        ) AS CurrentCycleAmount,
+        CASE WHEN bx.IsMeeting = 1 THEN
+        CAST(
+              ISNULL(
+                NULLIF(b.TotalAmount, 0.0),
+                (
+                  (
+                    COALESCE(
+                      NULLIF(b.MonthlyRent, 0.0),
+                      NULLIF(
+                        CASE
+                          WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+                          THEN sp.SeatPrice * s.Capacity
+                          ELSE sp.SeatPrice
+                        END, 0.0),
+                      CASE
+                        WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+                        THEN NULLIF(b.SubtotalAmount, 0.0) / DATEDIFF(month, b.StartOn, b.EndOn)
+                        ELSE NULLIF(b.SubtotalAmount, 0.0)
+                      END,
+                      35000.00
+                    ) * CASE
+                          WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+                          THEN DATEDIFF(month, b.StartOn, b.EndOn)
+                          ELSE 1
+                        END
+                  ) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))
+                ) + sdv.SecurityDepositValue
+              ) AS DECIMAL(18,2)
+            )
+        ELSE CAST(bx.MonthlyRentValue * bx.ContractMonths * bx.RentFactor AS DECIMAL(18,2))
+        END AS TotalContractAmount,
+        ISNULL(b.TotalAmount, 0.0) AS TotalAmount,
+        CAST(ISNULL(inv_paid.PaidTotal, 0.0) AS DECIMAL(18,2)) AS TotalPaidAmount,
+        CASE WHEN bx.IsMeeting = 1 THEN
+        CAST(
+              CASE
+                WHEN ISNULL(
+                       NULLIF(b.TotalAmount, 0.0),
+                       ((ISNULL(NULLIF(CASE WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private') THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0) ELSE ISNULL(sp.SeatPrice, 0.0) END, 0.0), 35000.00) * CASE WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0 THEN DATEDIFF(month, b.StartOn, b.EndOn) ELSE 1 END) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))) + sdv.SecurityDepositValue
+                     ) - ISNULL(inv_paid.PaidTotal, 0.0) > 0
+                THEN ISNULL(
+                       NULLIF(b.TotalAmount, 0.0),
+                       ((ISNULL(NULLIF(CASE WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private') THEN ISNULL(sp.SeatPrice * s.Capacity, 0.0) ELSE ISNULL(sp.SeatPrice, 0.0) END, 0.0), 35000.00) * CASE WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0 THEN DATEDIFF(month, b.StartOn, b.EndOn) ELSE 1 END) * (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0))) + sdv.SecurityDepositValue
+                     ) - ISNULL(inv_paid.PaidTotal, 0.0)
+                ELSE 0.0
+              END AS DECIMAL(18,2)
+            )
+        WHEN bx.IsVoid = 1 THEN CAST(0 AS DECIMAL(18,2))
+        ELSE CAST(ISNULL(inv_bill.Outstanding, 0) + bu.UnbilledMonths * bx.MonthlyRentValue * bx.RentFactor AS DECIMAL(18,2))
+        END AS BalanceLeft,
+        CAST(CASE
+            WHEN bx.IsVoid = 1 OR bx.IsMeeting = 1 THEN NULL
+            WHEN inv_bill.FirstUnpaidDueOn IS NOT NULL THEN inv_bill.FirstUnpaidDueOn
+            WHEN ISNULL(inv_bill.InvoiceCount, 0) = 0 AND bx.IsPending = 1
+            THEN COALESCE(CASE WHEN b.ValidityDate > ch.ValidUntil OR ch.ValidUntil IS NULL THEN b.ValidityDate ELSE ch.ValidUntil END, bnd.NextBilling)
+            ELSE bnd.NextBilling
+        END AS DATETIME2) AS NextBillDueDate,
+        CAST(CASE WHEN bx.IsVoid = 1 OR bx.IsMeeting = 1 THEN NULL ELSE bnd.NextBilling END AS DATETIME2) AS NextBillingDate,
+        ISNULL(b.DiscountPercentage, 0.0) AS DiscountPercentage,
+        ISNULL(b.DiscountAmount, 0.0)     AS DiscountAmount,
+        ISNULL(b.SubtotalAmount, 0.0)     AS SubtotalAmount,
+        COALESCE(b.ChallanNumber, ch.ChallanNumber) AS ChallanNumber,
+        COALESCE(b.ValidityDate, ch.ValidUntil)     AS ChallanValidUntil,
+        ISNULL(ch.StatusId, 1)                      AS ChallanStatusId,
+        ISNULL(b.SecurityDepositMonths, 0)          AS SecurityDepositMonths,
+        ISNULL(b.SecurityDepositRequired, 0.00)     AS SecurityDepositRequired,
+        ISNULL(b.SecurityDepositPaid, 0.00)         AS SecurityDepositPaid,
+        ISNULL(b.AdvanceRentMonths, 1)              AS AdvanceRentMonths,
+        CAST(2 AS INT) AS BillingRulesVersion,
+        CAST(CASE WHEN bx.IsMeeting = 1 OR bx.IsVoid = 1 THEN 1
+                  WHEN b.StartOn IS NULL OR b.EndOn IS NULL THEN 0
+                  WHEN inv_bill.LastPeriodEnd IS NOT NULL THEN 1
+                  WHEN ISNULL(inv_bill.InvoiceCount, 0) = 0 AND bx.IsPending = 1 THEN 1
+                  ELSE 0 END AS BIT) AS BillingFiguresKnown
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
+    LEFT JOIN dbo.WN_Customers cust WITH (NOLOCK) ON (cust.Code = b.CustomerCode OR (b.CustomerCode IS NULL AND cust.UserId = b.UserId))
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+    LEFT JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
+    LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
+    LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = l.BranchId
+    LEFT JOIN dbo.Company co WITH (NOLOCK) ON co.Id = br.CompanyId
+    LEFT JOIN dbo.WN_SpacePricing sp WITH (NOLOCK) ON sp.Id = b.PricingId
+    LEFT JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = sp.BillingPeriodId
+    OUTER APPLY (
+        SELECT TOP 1
+            i.BillingPeriodMonths,
+            i.SecurityDepositAmount
+        FROM dbo.WN_Invoices i WITH (NOLOCK)
+        WHERE i.BookingId = b.Id
+        ORDER BY i.Id ASC
+    ) inv_meta
+    OUTER APPLY (
+        SELECT
+            SUM(i.PaidTotal) AS PaidTotal,
+            COUNT(CASE WHEN i.StatusId = 2 THEN 1 END) AS PaidCyclesCount
+        FROM dbo.WN_Invoices i WITH (NOLOCK)
+        WHERE i.BookingId = b.Id AND ISNULL(i.StatusId, 0) NOT IN (5, 40)
+    ) inv_paid
+    OUTER APPLY (
+        SELECT TOP 1
+            bc.ChallanNumber,
+            bc.ValidUntil,
+            bc.StatusId
+        FROM dbo.WN_Challans bc WITH (NOLOCK)
+        WHERE bc.BookingId = b.Id
+        ORDER BY bc.Id DESC
+    ) ch
+    OUTER APPLY (
+        SELECT
+            MAX(i.BillingPeriodEnd) AS LastPeriodEnd,
+            COUNT(1) AS InvoiceCount,
+            SUM(CASE WHEN x.Bal >= 1 THEN x.Bal ELSE 0 END) AS Outstanding,
+            MIN(CASE WHEN x.Bal >= 1 THEN i.DueOn END) AS FirstUnpaidDueOn
+        FROM dbo.WN_Invoices i WITH (NOLOCK)
+        CROSS APPLY (
+            SELECT CAST(CASE
+                WHEN ISNULL(i.StatusId, 0) = 2 THEN 0
+                WHEN ISNULL(i.StatusId, 0) > 5 AND EXISTS (SELECT 1 FROM dbo.OrderStatus op WITH (NOLOCK) WHERE op.Id = i.StatusId AND LTRIM(RTRIM(op.Description)) = 'Paid') THEN 0
+                ELSE ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0)
+            END AS DECIMAL(18,2)) AS Bal
+        ) x
+        WHERE i.BookingId = b.Id
+          AND ISNULL(i.StatusId, 0) NOT IN (5, 40, ISNULL((SELECT TOP 1 os.Id FROM dbo.OrderStatus os WITH (NOLOCK) WHERE LTRIM(RTRIM(os.Description)) IN ('Cancelled', 'Delete', 'Deleted') ORDER BY os.Id), 5))
+    ) inv_bill
+    CROSS APPLY (
+        SELECT
+            CAST(CASE WHEN st.Name LIKE '%Meeting%' OR st.Name LIKE '%Conference%' OR sc.Code IN ('MeetingRoom', 'Conference') THEN 1 ELSE 0 END AS BIT) AS IsMeeting,
+            CAST(CASE WHEN b.BookingStatusId IN (3, 6, 86) OR bs.Code IN ('Rejected', 'NoShow', 'Cancelled') THEN 1 ELSE 0 END AS BIT) AS IsVoid,
+            CAST(CASE WHEN b.BookingStatusId IN (1, 5) OR bs.Code = 'Pending' THEN 1 ELSE 0 END AS BIT) AS IsPending,
+            COALESCE(
+              NULLIF(b.BillingPeriodMonths, 0),
+              NULLIF(b.AdvanceRentMonths, 0),
+              NULLIF(inv_meta.BillingPeriodMonths, 0),
+              CASE
+                WHEN bp.Code = 'Quarterly' OR bp.Code = '3 Months' OR bp.Label LIKE '%3 Month%' THEN 3
+                WHEN bp.Code = 'SemiAnnual' OR bp.Code = '6 Months' OR bp.Label LIKE '%6 Month%' THEN 6
+                WHEN bp.Code = 'BiMonthly' OR bp.Code = '2 Months' OR bp.Label LIKE '%2 Month%' THEN 2
+                WHEN bp.Code = 'Annual' OR bp.Code = '12 Months' OR bp.Label LIKE '%12 Month%' THEN 12
+                WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private', 'SharedSpace', 'Shared') THEN 3
+                ELSE 1
+              END
+            ) AS CycleMonths,
+            CASE
+              WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+              THEN DATEDIFF(month, b.StartOn, b.EndOn)
+              ELSE 1
+            END AS ContractMonths,
+            CAST(b.StartOn AS DATE) AS StartDay,
+            CASE WHEN b.StartOn IS NULL OR b.EndOn IS NULL THEN NULL
+                 ELSE DATEADD(day, CASE WHEN DAY(b.StartOn) > 1 THEN 1 ELSE 0 END, CAST(b.EndOn AS DATE)) END AS CoverEnd,
+            CAST(
+              COALESCE(
+                NULLIF(b.MonthlyRent, 0.0),
+                NULLIF(
+                  CASE
+                    WHEN st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private')
+                    THEN sp.SeatPrice * s.Capacity
+                    ELSE sp.SeatPrice
+                  END, 0.0),
+                CASE
+                  WHEN b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL AND DATEDIFF(month, b.StartOn, b.EndOn) > 0
+                  THEN NULLIF(b.SubtotalAmount, 0.0) / DATEDIFF(month, b.StartOn, b.EndOn)
+                  ELSE NULLIF(b.SubtotalAmount, 0.0)
+                END,
+                NULLIF(b.TotalAmount, 0.0),
+                35000.00
+              ) AS DECIMAL(18,2)
+            ) AS MonthlyRentValue,
+            (1.0 - (ISNULL(b.DiscountPercentage, 0.0) / 100.0)) AS RentFactor
+    ) bx
+    CROSS APPLY (
+        SELECT CASE
+            WHEN ISNULL(b.MonthlyRent, 0.0) <= 0 THEN 0.0
+            WHEN b.DiscountType IN ('Amount', 'Fixed') THEN b.MonthlyRent - CASE
+                WHEN COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) <= 0 THEN 0.0
+                WHEN COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) >= b.MonthlyRent THEN b.MonthlyRent
+                ELSE COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0)
+              END
+            WHEN ISNULL(b.DiscountPercentage, 0.0) <= 0 THEN b.MonthlyRent
+            WHEN b.DiscountPercentage >= 100 THEN 0.0
+            ELSE b.MonthlyRent * (1.0 - b.DiscountPercentage / 100.0)
+        END AS DiscountedMonthlyRent
+    ) sdr
+    CROSS APPLY (
+        SELECT CAST(CASE
+            WHEN ISNULL(b.SecurityDepositRequired, 0.0) > 0 THEN b.SecurityDepositRequired
+            WHEN ISNULL(inv_meta.SecurityDepositAmount, 0.0) > 0 THEN inv_meta.SecurityDepositAmount
+            WHEN ISNULL(b.SecurityDepositMonths, 0) > 0 AND (st.Name LIKE '%Private%' OR sc.Code IN ('PrivateOffice', 'Private'))
+            THEN ROUND(b.SecurityDepositMonths * sdr.DiscountedMonthlyRent, 2)
+            ELSE 0.0
+        END AS DECIMAL(18,2)) AS SecurityDepositValue
+    ) sdv
+    CROSS APPLY (
+        SELECT CASE
+            WHEN b.StartOn IS NULL OR b.EndOn IS NULL THEN NULL
+            WHEN inv_bill.LastPeriodEnd IS NOT NULL THEN DATEADD(day, 1, CAST(inv_bill.LastPeriodEnd AS DATE))
+            WHEN ISNULL(inv_bill.InvoiceCount, 0) = 0 AND bx.IsPending = 1 THEN DATEADD(day, CASE WHEN DAY(b.StartOn) > 1 THEN 1 ELSE 0 END, bx.StartDay)
+            WHEN DAY(b.StartOn) > 1 THEN DATEADD(month, bx.CycleMonths + CASE WHEN DAY(b.StartOn) >= 15 THEN 1 ELSE 0 END, DATEFROMPARTS(YEAR(b.StartOn), MONTH(b.StartOn), 1))
+            ELSE DATEADD(month, bx.CycleMonths, bx.StartDay)
+        END AS NextStart
+    ) bn
+    CROSS APPLY (
+        SELECT CASE WHEN bn.NextStart IS NULL OR bx.CoverEnd IS NULL OR bn.NextStart >= bx.CoverEnd THEN NULL ELSE bn.NextStart END AS NextBilling
+    ) bnd
+    CROSS APPLY (
+        SELECT CASE WHEN bnd.NextBilling IS NULL THEN 0
+                    ELSE DATEDIFF(month, bnd.NextBilling, bx.CoverEnd)
+                         - CASE WHEN DATEADD(month, DATEDIFF(month, bnd.NextBilling, bx.CoverEnd), bnd.NextBilling) > bx.CoverEnd THEN 1 ELSE 0 END
+               END AS WholeMonths
+    ) bw
+    CROSS APPLY (
+        SELECT CAST(CASE WHEN bnd.NextBilling IS NULL THEN 0.0
+                         ELSE bw.WholeMonths
+                              + CASE WHEN DATEDIFF(day, DATEADD(month, bw.WholeMonths, bnd.NextBilling), bx.CoverEnd) >= 30 THEN 1.0
+                                     ELSE DATEDIFF(day, DATEADD(month, bw.WholeMonths, bnd.NextBilling), bx.CoverEnd) / 30.0 END
+                    END AS DECIMAL(9,4)) AS UnbilledMonths
+    ) bu;
+GO
+/****** Object:  View [dbo].[WN_vw_SpacePricingActive]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   VIEW [dbo].[WN_vw_SpacePricingActive]
+AS
+    SELECT
+        sp.Id                        AS PricingId,
+        sp.SpaceId,
+        s.Code                       AS SpaceCode,
+        s.Name                       AS SpaceName,
+        s.Capacity,
+        sp.BillingPeriodId,
+        bp.Code                      AS BillingPeriodCode,
+        bp.Label                     AS BillingPeriodLabel,
+        sp.TierTypeId,
+        tt.Code                      AS TierCode,
+        sp.SeatPrice,
+        sp.SeatPrice * s.Capacity    AS RoomPrice,
+        sp.SecurityDeposit,
+        sp.RentAccountId,
+        sp.DepositAccountId,
+        sp.CurrencyCode,
+        sp.EffectiveFrom,
+        sp.EffectiveTo
+    FROM  [dbo].[WN_SpacePricing]     sp
+    JOIN  [dbo].[WN_Spaces]           s  ON s.Id  = sp.SpaceId
+    JOIN  [dbo].[WN_BillingPeriods]   bp ON bp.Id = sp.BillingPeriodId
+    JOIN  [dbo].[WN_PricingTierTypes] tt ON tt.Id = sp.TierTypeId
+    WHERE sp.IsActive = 1
+      AND sp.EffectiveFrom <= CAST(SYSUTCDATETIME() AS DATE)
+      AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSUTCDATETIME() AS DATE));
+GO
+/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1275,7 +467,7 @@ BEGIN
        OR (CardNumber = @Id);
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccessCards_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1322,7 +514,7 @@ BEGIN
        OR (@Id IS NULL AND @IdGUID IS NOT NULL AND ac.IdGUID = @IdGUID);
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccessCards_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1389,12 +581,11 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- 3. WN_AccessCards_Insert
 CREATE   PROCEDURE [dbo].[WN_AccessCards_Insert]
     @LocationId INT,
     @CustomerId INT,
@@ -1418,7 +609,7 @@ BEGIN
         IdGUID, LocationId, CustomerId, BookingId, SpaceId, CardNumber, StartDate, EndDate, Status, CreatedOn, CreatedById
     )
     VALUES (
-        NEWID(), @LocationId, @CustomerId, @BookingId, @SpaceId, @CardNumber, @StartDate, @EndDate, @Status, SYSUTCDATETIME(), @CreatedById
+        NEWID(), @LocationId, @CustomerId, @BookingId, @SpaceId, @CardNumber, @StartDate, @EndDate, @Status, SYSDATETIME(), @CreatedById
     );
 
     DECLARE @NewId INT = SCOPE_IDENTITY();
@@ -1426,7 +617,7 @@ BEGIN
     EXEC dbo.WN_AccessCards_GetById @Id = @NewId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_PopulateAllBookings]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccessCards_PopulateAllBookings]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1456,7 +647,7 @@ BEGIN
                         WHEN ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)) THEN 3 -- Inactive/Expired
                         ELSE 1 -- Active
                        END,
-        ac.UpdatedOn = SYSUTCDATETIME()
+        ac.UpdatedOn = SYSDATETIME()
     FROM dbo.WN_AccessCards ac
     JOIN dbo.WN_Bookings b ON b.Id = ac.BookingId
     OUTER APPLY (
@@ -1508,7 +699,7 @@ BEGIN
             WHEN ISNULL(inv.BillingPeriodEnd, DATEADD(MONTH, ISNULL(NULLIF(b.AdvanceRentMonths, 0), 1), b.StartOn)) < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)) THEN 3 -- Inactive/Expired
             ELSE 1 -- Active
         END AS Status,
-        SYSUTCDATETIME() AS CreatedOn,
+        SYSDATETIME() AS CreatedOn,
         NULL AS UpdatedOn,
         CASE 
             WHEN EXISTS (SELECT 1 FROM dbo.WN_Users u WHERE u.Id = b.CreatedById) THEN b.CreatedById
@@ -1540,12 +731,11 @@ BEGIN
     ORDER BY b.Id, n.Seq;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccessCards_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- 4. WN_AccessCards_Update
 CREATE   PROCEDURE [dbo].[WN_AccessCards_Update]
     @Id NVARCHAR(100),
     @LocationId INT = NULL,
@@ -1571,14 +761,14 @@ BEGIN
         StartDate   = ISNULL(@StartDate, StartDate),
         EndDate     = ISNULL(@EndDate, EndDate),
         Status      = ISNULL(@Status, Status),
-        UpdatedOn   = SYSUTCDATETIME(),
+        UpdatedOn   = SYSDATETIME(),
         UpdatedById = ISNULL(@UpdatedById, UpdatedById)
     WHERE (TRY_CAST(@Id AS INT) IS NOT NULL AND Id = TRY_CAST(@Id AS INT))
        OR (TRY_CAST(@Id AS UNIQUEIDENTIFIER) IS NOT NULL AND IdGUID = TRY_CAST(@Id AS UNIQUEIDENTIFIER))
        OR (CardNumber = @Id);
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccessOfficer_Lookup]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccessOfficer_Lookup]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1693,7 +883,7 @@ BEGIN
      ORDER BY CASE m.State WHEN N'pending' THEN 0 ELSE 1 END, COALESCE(bd.StartDateTime, b.StartOn) DESC, m.BookingDetailId DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Account_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Account_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1787,7 +977,7 @@ BEGIN
       FROM dbo.WN_Customers c
       JOIN @CustomerIds k ON k.Id = c.Id;
     UPDATE dbo.WN_DeviceToken SET IsActive = 0 WHERE UserId = @UserId AND IsActive = 1;
-    UPDATE dbo.WN_RefreshTokens_Temp SET RevokedAt = SYSUTCDATETIME() WHERE UserId = @UserId AND RevokedAt IS NULL;
+    UPDATE dbo.WN_RefreshTokens_Temp SET RevokedAt = SYSDATETIME() WHERE UserId = @UserId AND RevokedAt IS NULL;
     -- The audit log keeps every change, but not the personal details of a deleted account.
     UPDATE a
        SET OldValues = CASE WHEN ISJSON(a.OldValues) = 1 THEN
@@ -1821,13 +1011,13 @@ BEGIN
             (SELECT N'Account deleted by its owner' AS Action, @UserId AS UserId, @Customers AS CustomerProfiles,
                     N'Personal details removed; bookings, invoices, payments and agreements kept' AS Kept
                FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
-            NULL, NULL, NULL, @UserId, @Placeholder, SYSUTCDATETIME(), N'AccountDelete');
+            NULL, NULL, NULL, @UserId, @Placeholder, SYSDATETIME(), N'AccountDelete');
     COMMIT TRANSACTION;
     SELECT @UserId AS UserId, CAST(1 AS BIT) AS CanDelete, CAST(1 AS BIT) AS Deleted, CAST(NULL AS NVARCHAR(40)) AS ReasonCode,
            @Active AS ActiveBookings, @Pending AS PendingBookings, @Unpaid AS UnpaidInvoices, @Balance AS BalanceDue;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccountsCOA_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccountsCOA_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1846,7 +1036,7 @@ BEGIN
     WHERE Id = @AccountId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AccountsCOA_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AccountsCOA_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1865,7 +1055,7 @@ BEGIN
     ORDER BY Description ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AddAttendant]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AddAttendant]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1899,7 +1089,7 @@ BEGIN
     BEGIN
         SET @PersonGuid = NEWID();
         INSERT INTO [dbo].[WN_Persons] (PersonGuid, Name, Email, Phone, IdType, IdNumber, CreatedAt)
-        VALUES (@PersonGuid, @Name, @Email, @Phone, @IdType, @IdNumber, SYSUTCDATETIME());
+        VALUES (@PersonGuid, @Name, @Email, @Phone, @IdType, @IdNumber, SYSDATETIME());
         
         SET @PersonId = SCOPE_IDENTITY();
     END
@@ -1921,19 +1111,17 @@ BEGIN
     ELSE
     BEGIN
         INSERT INTO [dbo].[WN_CustomerAttendants] (PersonId, CustomerId, IsActive, CreatedAt)
-        VALUES (@PersonId, @CustomerId, 1, SYSUTCDATETIME());
+        VALUES (@PersonId, @CustomerId, 1, SYSDATETIME());
     END
 
     SELECT @PersonId AS PersonId, @PersonGuid AS PersonGuid;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_ClearSignedPdf]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_ClearSignedPdf]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 9. Clear Signed PDF Path
 CREATE   PROCEDURE [dbo].[WN_Agreements_ClearSignedPdf]
     @AgreementId INT
 AS
@@ -1942,11 +1130,11 @@ BEGIN
     UPDATE dbo.WN_Agreements
     SET SignedPdfPath = NULL,
         SignedPdfUploadedAt = NULL,
-        UpdatedOn = SYSUTCDATETIME()
+        UpdatedOn = SYSDATETIME()
     WHERE Id = @AgreementId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1962,7 +1150,7 @@ BEGIN
     WHERE Id = @AgreementId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -1993,7 +1181,7 @@ BEGIN
     WHERE a.Id = @AgreementId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2049,13 +1237,11 @@ BEGIN
     FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 3. Insert Agreement Record
 CREATE   PROCEDURE [dbo].[WN_Agreements_Insert]
     @QuotationId INT,
     @CustomerId INT,
@@ -2084,20 +1270,18 @@ BEGIN
     )
     OUTPUT INSERTED.Id
     VALUES (
-        @QuotationId, @CustomerId, @EntityType, 'AgreementSent', SYSUTCDATETIME(),
+        @QuotationId, @CustomerId, @EntityType, 'AgreementSent', SYSDATETIME(),
         ISNULL(NULLIF(@RefundDays, 0), 30), @FeeAmount, @SecurityDeposit, ISNULL(@OperatingHours, '24/7'),
         @CustomerName, @CustomerCnic, @CustomerPhone, @CustomerAddress,
-        @CompanyName, @Ntn, @SecpRegistrationNo, @CreatedById, @TemplateVersionId, SYSUTCDATETIME()
+        @CompanyName, @Ntn, @SecpRegistrationNo, @CreatedById, @TemplateVersionId, SYSDATETIME()
     );
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_MarkSigned]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_MarkSigned]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 6. Mark Agreement Signed
 CREATE   PROCEDURE [dbo].[WN_Agreements_MarkSigned]
     @AgreementId INT,
     @UserId INT = NULL
@@ -2106,18 +1290,16 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Agreements
     SET Status = 'Signed',
-        SignedDate = SYSUTCDATETIME(),
-        UpdatedOn = SYSUTCDATETIME()
+        SignedDate = SYSDATETIME(),
+        UpdatedOn = SYSDATETIME()
     WHERE Id = @AgreementId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_SetBookingId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_SetBookingId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 7. Set Agreement Booking ID
 CREATE   PROCEDURE [dbo].[WN_Agreements_SetBookingId]
     @AgreementId INT,
     @BookingId INT
@@ -2126,17 +1308,15 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Agreements
     SET BookingId = @BookingId,
-        UpdatedOn = SYSUTCDATETIME()
+        UpdatedOn = SYSDATETIME()
     WHERE Id = @AgreementId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Agreements_UpdateSignedPdf]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Agreements_UpdateSignedPdf]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 8. Update Uploaded Signed PDF Path
 CREATE   PROCEDURE [dbo].[WN_Agreements_UpdateSignedPdf]
     @AgreementId INT,
     @SignedPdfPath NVARCHAR(500),
@@ -2147,11 +1327,11 @@ BEGIN
     UPDATE dbo.WN_Agreements
     SET SignedPdfPath = @SignedPdfPath,
         SignedPdfUploadedAt = @SignedPdfUploadedAt,
-        UpdatedOn = SYSUTCDATETIME()
+        UpdatedOn = SYSDATETIME()
     WHERE Id = @AgreementId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Amenities_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Amenities_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2166,7 +1346,7 @@ BEGIN
     ORDER BY Name ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Amenities_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Amenities_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2186,7 +1366,7 @@ BEGIN
     SELECT SCOPE_IDENTITY() AS Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AmountFields_GetByEntityField]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AmountFields_GetByEntityField]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2202,7 +1382,7 @@ BEGIN
     WHERE Entity = @Entity AND Field = @Field;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AmountFields_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AmountFields_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2240,7 +1420,7 @@ BEGIN
     ORDER BY ct.Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AmountFields_UpdateAccount]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AmountFields_UpdateAccount]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2279,13 +1459,11 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_CheckTerminalStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_CheckTerminalStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 11. Stored Procedure: dbo.WN_Announcements_CheckTerminalStatus
 CREATE   PROCEDURE [dbo].[WN_Announcements_CheckTerminalStatus]
     @AnnouncementId UNIQUEIDENTIFIER
 AS
@@ -2301,19 +1479,17 @@ BEGIN
     BEGIN
         UPDATE dbo.WN_Announcement
         SET Status = 'Sent',
-            SentAt = ISNULL(SentAt, SYSUTCDATETIME())
+            SentAt = ISNULL(SentAt, SYSDATETIME())
         WHERE Id = @AnnouncementId
           AND Status IN ('Queued', 'Sending', 'Draft');
     END
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_Create]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_Create]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 4. Stored Procedure: dbo.WN_Announcements_Create
 CREATE   PROCEDURE [dbo].[WN_Announcements_Create]
     @Title           NVARCHAR(200),
     @Body            NVARCHAR(MAX),
@@ -2331,7 +1507,7 @@ BEGIN
     DECLARE @NewId UNIQUEIDENTIFIER = NEWID();
     DECLARE @InitialStatus NVARCHAR(20);
 
-    IF @ScheduledAt IS NOT NULL AND @ScheduledAt > SYSUTCDATETIME()
+    IF @ScheduledAt IS NOT NULL AND @ScheduledAt > SYSDATETIME()
         SET @InitialStatus = 'Draft';
     ELSE
         SET @InitialStatus = 'Queued';
@@ -2341,7 +1517,7 @@ BEGIN
         Id, Title, Body, Type, TargetScope, LocationId, SpaceId, ScheduledAt, Status, CreatedBy, CreatedAt
     )
     VALUES (
-        @NewId, @Title, @Body, @Type, @TargetScope, @LocationId, @SpaceId, @ScheduledAt, @InitialStatus, @CreatedBy, SYSUTCDATETIME()
+        @NewId, @Title, @Body, @Type, @TargetScope, @LocationId, @SpaceId, @ScheduledAt, @InitialStatus, @CreatedBy, SYSDATETIME()
     );
 
     -- Audience Resolution Table
@@ -2419,7 +1595,7 @@ BEGIN
     EXEC dbo.WN_Announcements_GetById @AnnouncementId = @NewId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2484,7 +1660,7 @@ BEGIN
     ORDER BY r.Id ASC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetForUser]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetForUser]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2529,7 +1705,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2583,13 +1759,11 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetPendingDeliveries]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_GetPendingDeliveries]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 9. Stored Procedure: dbo.WN_Announcements_GetPendingDeliveries (Job worker batch pickup)
 CREATE   PROCEDURE [dbo].[WN_Announcements_GetPendingDeliveries]
     @BatchSize INT = 200
 AS
@@ -2601,7 +1775,7 @@ BEGIN
     SET a.Status = 'Sending'
     FROM dbo.WN_Announcement a
     WHERE a.Status = 'Queued'
-      AND (a.ScheduledAt IS NULL OR a.ScheduledAt <= SYSUTCDATETIME());
+      AND (a.ScheduledAt IS NULL OR a.ScheduledAt <= SYSDATETIME());
 
     -- Select batch of pending recipients
     SELECT TOP (@BatchSize)
@@ -2620,17 +1794,15 @@ BEGIN
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = r.UserId
     WHERE r.Status = 'Pending'
       AND a.Status IN ('Queued', 'Sending')
-      AND (a.ScheduledAt IS NULL OR a.ScheduledAt <= SYSUTCDATETIME())
+      AND (a.ScheduledAt IS NULL OR a.ScheduledAt <= SYSDATETIME())
     ORDER BY r.Id ASC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_MarkRead]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_MarkRead]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 8. Stored Procedure: dbo.WN_Announcements_MarkRead
 CREATE   PROCEDURE [dbo].[WN_Announcements_MarkRead]
     @AnnouncementId UNIQUEIDENTIFIER,
     @UserId         INT
@@ -2640,20 +1812,18 @@ BEGIN
 
     UPDATE dbo.WN_AnnouncementRecipient
     SET Status = 'Read',
-        SentAt = ISNULL(SentAt, SYSUTCDATETIME())
+        SentAt = ISNULL(SentAt, SYSDATETIME())
     WHERE AnnouncementId = @AnnouncementId
       AND UserId = @UserId;
 
     SELECT @@ROWCOUNT AS AffectedRows;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Announcements_UpdateDeliveryStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Announcements_UpdateDeliveryStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 10. Stored Procedure: dbo.WN_Announcements_UpdateDeliveryStatus
 CREATE   PROCEDURE [dbo].[WN_Announcements_UpdateDeliveryStatus]
     @RecipientId BIGINT,
     @Status      NVARCHAR(20),
@@ -2665,13 +1835,13 @@ BEGIN
     UPDATE dbo.WN_AnnouncementRecipient
     SET Status = @Status,
         RetryCount = @RetryCount,
-        SentAt = CASE WHEN @Status IN ('Sent', 'Read') THEN SYSUTCDATETIME() ELSE SentAt END
+        SentAt = CASE WHEN @Status IN ('Sent', 'Read') THEN SYSDATETIME() ELSE SentAt END
     WHERE Id = @RecipientId;
 
     SELECT @@ROWCOUNT AS AffectedRows;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AssignAttendantToBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AssignAttendantToBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2772,13 +1942,13 @@ BEGIN
         IF EXISTS (SELECT 1 FROM [dbo].[WN_AccessStatus] WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId)
         BEGIN
             UPDATE [dbo].[WN_AccessStatus]
-            SET IsEnabled = 1, GrantedAt = SYSUTCDATETIME(), RevokedAt = NULL
+            SET IsEnabled = 1, GrantedAt = SYSDATETIME(), RevokedAt = NULL
             WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId;
         END
         ELSE
         BEGIN
             INSERT INTO [dbo].[WN_AccessStatus] (BookingDetailId, PersonId, CustomerId, IsEnabled, GrantedAt)
-            VALUES (@BookingDetailId, @PersonId, @CustomerId, 1, SYSUTCDATETIME());
+            VALUES (@BookingDetailId, @PersonId, @CustomerId, 1, SYSDATETIME());
         END
 
         COMMIT TRANSACTION;
@@ -2795,7 +1965,529 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Create]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_GetCustomer]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_GetCustomer]
+(
+	 @CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: one customer with its attendance switch (no row = no such customer).
+	SET NOCOUNT ON;
+	SELECT
+		 c.Id AS CustomerId
+		,COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'') + N' ' + ISNULL(c.LastName, N''))), N''), c.Email) AS CustomerName
+		,c.AttendanceEnabled
+		,c.AttendanceEnabledOn
+		,c.AttendanceEnabledBy
+	FROM dbo.WN_Customers c WITH (NOLOCK)
+	WHERE c.Id=@CustomerId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_GetCustomerByUser]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_GetCustomerByUser]
+(
+	 @UserId int
+)
+AS
+BEGIN
+	-- ATT_01: the customer whose main account is @UserId (WN_Customers.UserId). Employees with their own login are
+	-- not a customer's main account and get no row.
+	SET NOCOUNT ON;
+	SELECT TOP 1
+		 c.Id AS CustomerId
+		,COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'') + N' ' + ISNULL(c.LastName, N''))), N''), c.Email) AS CustomerName
+		,c.AttendanceEnabled
+		,c.AttendanceEnabledOn
+		,c.AttendanceEnabledBy
+	FROM dbo.WN_Customers c WITH (NOLOCK)
+	WHERE c.UserId=@UserId
+		AND @UserId > 0
+	ORDER BY c.IsActive DESC, c.Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_GetCustomers]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_GetCustomers]
+(
+	 @LocationIds nvarchar(MAX) = NULL -- CSV of location ids (NULL = every location)
+)
+AS
+BEGIN
+	-- ATT_01: staff list (CMS Reports > Attendance): customers with attendance on or with employees on a room, with
+	-- the number of employees on a room today; attendance on first. @LocationIds (location-bound staff): customers
+	-- whose account or a booking is at one of those locations.
+	SET NOCOUNT ON;
+	DECLARE @Today date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date);
+	SELECT
+		 c.Id AS CustomerId
+		,COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'') + N' ' + ISNULL(c.LastName, N''))), N''), c.Email) AS CustomerName
+		,c.AttendanceEnabled
+		,ISNULL(e.EmployeeCount, 0) AS EmployeeCount
+	FROM dbo.WN_Customers c WITH (NOLOCK) OUTER APPLY
+		(SELECT COUNT(DISTINCT ba.PersonId) AS EmployeeCount
+		FROM dbo.WN_BookingAttendants ba WITH (NOLOCK)
+		WHERE ba.CustomerId=c.Id
+			AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= @Today)) e
+	WHERE (c.AttendanceEnabled=1 OR EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants xa WITH (NOLOCK) WHERE xa.CustomerId=c.Id))
+		AND (@LocationIds IS NULL
+			OR EXISTS (SELECT 1 FROM dbo.WN_Users lu WITH (NOLOCK)
+				WHERE lu.Id=c.UserId AND lu.LocationId IN (SELECT TRY_CAST(x.value AS int) FROM STRING_SPLIT(@LocationIds, N',') x))
+			OR EXISTS (SELECT 1 FROM dbo.WN_Bookings lb WITH (NOLOCK) JOIN
+					dbo.WN_Spaces ls WITH (NOLOCK) ON ls.Id=lb.SpaceId
+				WHERE (lb.CustomerCode=c.Code OR (c.UserId IS NOT NULL AND lb.UserId=c.UserId))
+					AND ls.LocationId IN (SELECT TRY_CAST(x.value AS int) FROM STRING_SPLIT(@LocationIds, N',') x)))
+	ORDER BY c.AttendanceEnabled DESC, CustomerName;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_GetPeople]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_GetPeople]
+(
+	 @CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: [0] the customer's employees: everyone ever put on one of its rooms (WN_BookingAttendants), with
+	-- their machine id (WN_HIK_PersonMap.MachineID = WN_HIK_Events.employee_no; NULL = not enrolled).
+	-- [1] their room assignments: AssignedFrom .. AssignedTo (NULL = still on the room). A removed employee keeps
+	-- the past assignments, so past days still appear.
+	SET NOCOUNT ON;
+	SELECT
+		 p.PersonId
+		,p.Name
+		,p.IdType
+		,p.IdNumber
+		,hpm.MachineID
+	FROM dbo.WN_Persons p WITH (NOLOCK) LEFT JOIN
+		dbo.WN_HIK_PersonMap hpm WITH (NOLOCK) ON hpm.PersonId=p.PersonId
+	WHERE p.PersonId IN (SELECT ba.PersonId FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId)
+	ORDER BY p.Name, p.PersonId;
+	SELECT
+		 ba.PersonId
+		,ba.BookingDetailId
+		,bd.SpaceName
+		,ba.AssignedFrom
+		,ba.AssignedTo
+	FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) LEFT JOIN
+		dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.Id=ba.BookingDetailId
+	WHERE ba.CustomerId=@CustomerId
+	ORDER BY ba.PersonId, ba.AssignedFrom;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_GetRooms]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_GetRooms]
+(
+	 @CustomerId int
+	,@From date = NULL
+	,@To date = NULL
+)
+AS
+BEGIN
+	-- ATT_01: the customer's booked rooms (every booking, also ended / cancelled ones, not rejected or no show) whose
+	-- dates overlap @From .. @To (NULL = no limit), with the space category and the location of the booked space.
+	-- SpaceCode / SpaceName come from the booking detail, as the fingerprint enrolment matches room machines with them.
+	SET NOCOUNT ON;
+	SELECT
+		 bd.Id AS BookingDetailId
+		,b.Id AS BookingId
+		,bd.SpaceName
+		,bd.SpaceCode
+		,COALESCE(sc.Code, bd.SpaceCategory) AS CategoryCode
+		,s.LocationId
+		,CAST(bd.StartDateTime AS date) AS StartDate
+		,CAST(bd.EndDateTime AS date) AS EndDate
+	FROM dbo.WN_Customers c WITH (NOLOCK) JOIN
+		dbo.WN_Bookings b WITH (NOLOCK) ON (NULLIF(b.CustomerCode, N'') IS NOT NULL AND b.CustomerCode=c.Code)
+			OR (NULLIF(b.CustomerCode, N'') IS NULL AND b.UserId=c.UserId) JOIN
+		dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid=b.IdGUID AND bd.IsDeleted=0 LEFT JOIN
+		dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=b.SpaceId LEFT JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+	WHERE c.Id=@CustomerId
+		AND ISNULL(b.IsDeleted, 0)=0
+		AND b.BookingStatusId NOT IN (3, 6) -- rejected / no show: never occupied
+		AND (bd.FeeType IS NULL OR bd.FeeType LIKE N'%Rent%')
+		AND (@From IS NULL OR bd.EndDateTime IS NULL OR bd.EndDateTime >= @From)
+		AND (@To IS NULL OR bd.StartDateTime IS NULL OR bd.StartDateTime < DATEADD(DAY, 1, @To))
+	ORDER BY bd.StartDateTime, bd.Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_GetScans]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_GetScans]
+(
+	 @DeviceIds nvarchar(MAX) -- CSV of WN_HIK_Devices.Id
+	,@EmployeeNos nvarchar(MAX) -- CSV of machine ids (WN_HIK_PersonMap.MachineID)
+	,@From datetime2(0)
+	,@To datetime2(0)
+)
+AS
+BEGIN
+	-- ATT_01: successful scans (38 fingerprint OK, 1 card OK, 75 / 104 face OK) of @EmployeeNos on @DeviceIds,
+	-- machine time (Pakistan) @From <= event_time < @To, oldest first.
+	SET NOCOUNT ON;
+	SELECT
+		 e.device_id AS DeviceId
+		,e.employee_no AS EmployeeNo
+		,e.event_time AS EventTime
+	FROM dbo.WN_HIK_Events e WITH (NOLOCK)
+	WHERE e.employee_no IN (SELECT LTRIM(RTRIM(x.value)) FROM STRING_SPLIT(@EmployeeNos, N',') x)
+		AND e.device_id IN (SELECT TRY_CAST(d.value AS int) FROM STRING_SPLIT(@DeviceIds, N',') d)
+		AND e.access_event IN (38, 1, 75, 104)
+		AND e.event_time >= @From
+		AND e.event_time < @To
+	ORDER BY e.event_time, e.id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_Holidays_Add]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_Holidays_Add]
+(
+	 @CustomerId int
+	,@HolidayDate date
+	,@Name nvarchar(100)
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: declares a holiday of the customer. Result: ok (with its Id) / exists (that date is already a holiday).
+	SET NOCOUNT ON;
+	IF EXISTS (SELECT 1 FROM dbo.WN_AttendanceHolidays h WITH (UPDLOCK, HOLDLOCK) WHERE h.CustomerId=@CustomerId AND h.HolidayDate=@HolidayDate)
+	BEGIN
+		SELECT
+			 N'exists' AS Result
+			,CAST(NULL AS int) AS Id;
+		RETURN;
+	END
+	INSERT INTO [dbo].[WN_AttendanceHolidays]
+	(
+		 [CustomerId]
+		,[HolidayDate]
+		,[Name]
+		,[CreatedBy]
+	)
+	VALUES
+	(
+		 @CustomerId
+		,@HolidayDate
+		,@Name
+		,LEFT(@By, 256)
+	);
+	SELECT
+		 N'ok' AS Result
+		,CAST(SCOPE_IDENTITY() AS int) AS Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_Holidays_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_Holidays_Delete]
+(
+	 @Id int
+	,@CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: removes a holiday of the customer. Returns how many were removed (0 = not a holiday of this customer).
+	SET NOCOUNT ON;
+	DELETE FROM [dbo].[WN_AttendanceHolidays]
+	WHERE Id=@Id AND CustomerId=@CustomerId;
+	SELECT @@ROWCOUNT AS Deleted;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_Holidays_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_Holidays_GetList]
+(
+	 @CustomerId int
+	,@From date = NULL
+	,@To date = NULL
+)
+AS
+BEGIN
+	-- ATT_01: the customer's holidays @From .. @To (NULL = no limit), by date.
+	SET NOCOUNT ON;
+	SELECT
+		 h.Id
+		,h.HolidayDate
+		,h.Name
+	FROM dbo.WN_AttendanceHolidays h WITH (NOLOCK)
+	WHERE h.CustomerId=@CustomerId
+		AND (@From IS NULL OR h.HolidayDate >= @From)
+		AND (@To IS NULL OR h.HolidayDate <= @To)
+	ORDER BY h.HolidayDate;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_SetEnabled]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_SetEnabled]
+(
+	 @CustomerId int
+	,@Enabled bit
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: attendance on / off for a customer (CMS, admin / super admin). Returns the customer as
+	-- WN_Attendance_GetCustomer (no row = no such customer).
+	SET NOCOUNT ON;
+	UPDATE [dbo].[WN_Customers]
+	SET [AttendanceEnabled]=ISNULL(@Enabled, 0)
+		,[AttendanceEnabledOn]=SYSUTCDATETIME()
+		,[AttendanceEnabledBy]=LEFT(@By, 256)
+	WHERE Id=@CustomerId;
+	EXEC dbo.WN_Attendance_GetCustomer @CustomerId = @CustomerId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_ShiftAssignments_Set]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_ShiftAssignments_Set]
+(
+	 @CustomerId int
+	,@PersonId int
+	,@ShiftId int = NULL -- NULL = no own shift (the default shift, if any)
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: the shift of one employee of the customer. Result: ok / person_not_found / shift_not_found.
+	SET NOCOUNT ON;
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId AND ba.PersonId=@PersonId)
+	BEGIN
+		SELECT N'person_not_found' AS Result;
+		RETURN;
+	END
+	IF @ShiftId IS NULL
+	BEGIN
+		DELETE FROM [dbo].[WN_AttendanceShiftAssignments]
+		WHERE CustomerId=@CustomerId AND PersonId=@PersonId;
+		SELECT N'ok' AS Result;
+		RETURN;
+	END
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_AttendanceShifts s WITH (NOLOCK) WHERE s.Id=@ShiftId AND s.CustomerId=@CustomerId AND s.IsActive=1)
+	BEGIN
+		SELECT N'shift_not_found' AS Result;
+		RETURN;
+	END
+	UPDATE [dbo].[WN_AttendanceShiftAssignments]
+	SET [ShiftId]=@ShiftId
+		,[UpdatedOn]=SYSUTCDATETIME()
+		,[UpdatedBy]=LEFT(@By, 256)
+	WHERE CustomerId=@CustomerId AND PersonId=@PersonId;
+	IF @@ROWCOUNT = 0
+		INSERT INTO [dbo].[WN_AttendanceShiftAssignments]
+		(
+			 [CustomerId]
+			,[PersonId]
+			,[ShiftId]
+			,[UpdatedBy]
+		)
+		VALUES
+		(
+			 @CustomerId
+			,@PersonId
+			,@ShiftId
+			,LEFT(@By, 256)
+		);
+	SELECT N'ok' AS Result;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_Shifts_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_Shifts_Delete]
+(
+	 @Id int
+	,@CustomerId int
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: deletes a shift of the customer (kept, IsActive = 0); its employees go back to the default shift / no
+	-- shift. Returns how many shifts were deleted (0 = not a shift of this customer).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Deleted int = 0;
+	BEGIN TRY
+		BEGIN TRANSACTION;
+		UPDATE [dbo].[WN_AttendanceShifts]
+		SET [IsActive]=0
+			,[IsDefault]=0
+			,[UpdatedOn]=SYSUTCDATETIME()
+			,[UpdatedBy]=LEFT(@By, 256)
+		WHERE Id=@Id AND CustomerId=@CustomerId AND IsActive=1;
+		SET @Deleted = @@ROWCOUNT;
+		DELETE FROM [dbo].[WN_AttendanceShiftAssignments]
+		WHERE CustomerId=@CustomerId AND ShiftId=@Id AND @Deleted > 0;
+		COMMIT TRANSACTION;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		THROW;
+	END CATCH
+	SELECT @Deleted AS Deleted;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_Shifts_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_Shifts_GetList]
+(
+	 @CustomerId int
+)
+AS
+BEGIN
+	-- ATT_01: [0] the customer's shifts (not deleted); [1] the shift of each employee who has one.
+	SET NOCOUNT ON;
+	SELECT
+		 s.Id
+		,s.Name
+		,s.StartTime
+		,s.EndTime
+		,s.GraceMinutes
+		,s.HalfDayMinutes
+		,s.WorkDays
+		,s.IsDefault
+	FROM dbo.WN_AttendanceShifts s WITH (NOLOCK)
+	WHERE s.CustomerId=@CustomerId
+		AND s.IsActive=1
+	ORDER BY s.IsDefault DESC, s.StartTime, s.Name;
+	SELECT
+		 a.PersonId
+		,a.ShiftId
+	FROM dbo.WN_AttendanceShiftAssignments a WITH (NOLOCK) JOIN
+		dbo.WN_AttendanceShifts s WITH (NOLOCK) ON s.Id=a.ShiftId AND s.IsActive=1
+	WHERE a.CustomerId=@CustomerId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Attendance_Shifts_Save]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Attendance_Shifts_Save]
+(
+	 @Id int = NULL -- NULL = new shift
+	,@CustomerId int
+	,@Name nvarchar(100)
+	,@StartTime time(0)
+	,@EndTime time(0)
+	,@GraceMinutes int = 0
+	,@HalfDayMinutes int = NULL
+	,@WorkDays nvarchar(40)
+	,@IsDefault bit = 0
+	,@By nvarchar(256) = NULL
+)
+AS
+BEGIN
+	-- ATT_01: adds (@Id NULL) or changes a shift of the customer. A default shift makes the customer's other shifts
+	-- not default. Returns its Id (NULL = @Id is not a shift of this customer).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	BEGIN TRY
+		BEGIN TRANSACTION;
+		IF @Id IS NULL
+		BEGIN
+			INSERT INTO [dbo].[WN_AttendanceShifts]
+			(
+				 [CustomerId]
+				,[Name]
+				,[StartTime]
+				,[EndTime]
+				,[GraceMinutes]
+				,[HalfDayMinutes]
+				,[WorkDays]
+				,[IsDefault]
+				,[CreatedBy]
+			)
+			VALUES
+			(
+				 @CustomerId
+				,@Name
+				,@StartTime
+				,@EndTime
+				,ISNULL(@GraceMinutes, 0)
+				,@HalfDayMinutes
+				,@WorkDays
+				,ISNULL(@IsDefault, 0)
+				,LEFT(@By, 256)
+			);
+			SET @Id = CAST(SCOPE_IDENTITY() AS int);
+		END
+		ELSE
+		BEGIN
+			UPDATE [dbo].[WN_AttendanceShifts]
+			SET [Name]=@Name
+				,[StartTime]=@StartTime
+				,[EndTime]=@EndTime
+				,[GraceMinutes]=ISNULL(@GraceMinutes, 0)
+				,[HalfDayMinutes]=@HalfDayMinutes
+				,[WorkDays]=@WorkDays
+				,[IsDefault]=ISNULL(@IsDefault, 0)
+				,[UpdatedOn]=SYSUTCDATETIME()
+				,[UpdatedBy]=LEFT(@By, 256)
+			WHERE Id=@Id AND CustomerId=@CustomerId AND IsActive=1;
+			IF @@ROWCOUNT = 0
+				SET @Id = NULL;
+		END
+		IF @Id IS NOT NULL AND ISNULL(@IsDefault, 0)=1
+			UPDATE [dbo].[WN_AttendanceShifts]
+			SET [IsDefault]=0
+				,[UpdatedOn]=SYSUTCDATETIME()
+				,[UpdatedBy]=LEFT(@By, 256)
+			WHERE CustomerId=@CustomerId AND Id <> @Id AND IsDefault=1;
+		COMMIT TRANSACTION;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		THROW;
+	END CATCH
+	SELECT @Id AS Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Create]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2828,7 +2520,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Decide]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Decide]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2848,7 +2540,7 @@ BEGIN
     SELECT @@ROWCOUNT AS Affected;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_List]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_List]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2888,7 +2580,7 @@ BEGIN
      ORDER BY r.RequestedAt DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Reopen]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AttendantCapacityRequest_Reopen]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2903,7 +2595,30 @@ BEGIN
      WHERE Id = @Id AND Status = N'Approved';
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Audit_SetSessionContext]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 11. dbo.WN_Audit_SetSessionContext
+CREATE   PROCEDURE [dbo].[WN_Audit_SetSessionContext]
+    @UserId INT = NULL,
+    @UserEmail NVARCHAR(256) = NULL,
+    @SourceApp NVARCHAR(50) = N'WebAPI'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @ResolvedId INT = @UserId;
+    IF @ResolvedId IS NULL AND @UserEmail IS NOT NULL
+        SELECT TOP 1 @ResolvedId = Id FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = @UserEmail;
+    IF @ResolvedId IS NOT NULL
+        EXEC sp_set_session_context @key = N'AppUserId', @value = @ResolvedId;
+    IF @UserEmail IS NOT NULL
+        EXEC sp_set_session_context @key = N'AppUserEmail', @value = @UserEmail;
+    EXEC sp_set_session_context @key = N'SourceApp', @value = @SourceApp;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2934,7 +2649,7 @@ BEGIN
     WHERE a.AuditId = @AuditId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetFilterOptions]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetFilterOptions]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -2959,7 +2674,7 @@ BEGIN
     ORDER BY a.SourceApp;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetPaged]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AuditLog_GetPaged]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3035,7 +2750,51 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Billing_GetDueBookings]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_AuthHandoff_Create]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_AuthHandoff_Create]
+    @UserId     INT,
+    @CodeHash   BINARY(32),
+    @Target     VARCHAR(10),
+    @TtlSeconds INT = 60
+AS
+BEGIN
+    -- AUTH_HANDOFF_01: stores a new one-time code (its SHA-256 only) for @UserId to open @Target ('cms' | 'web').
+    SET NOCOUNT ON;
+    IF @TtlSeconds IS NULL OR @TtlSeconds < 1 OR @TtlSeconds > 300 SET @TtlSeconds = 60;
+    -- Housekeeping: codes are worthless a minute after they were made; keep a day for troubleshooting.
+    DELETE FROM dbo.WN_AuthHandoff WHERE ExpiresAt < DATEADD(DAY, -1, SYSUTCDATETIME());
+    INSERT INTO dbo.WN_AuthHandoff (CodeHash, UserId, Target, ExpiresAt)
+    VALUES (@CodeHash, @UserId, LOWER(@Target), DATEADD(SECOND, @TtlSeconds, SYSUTCDATETIME()));
+    SELECT CAST(SCOPE_IDENTITY() AS BIGINT) AS Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_AuthHandoff_Redeem]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_AuthHandoff_Redeem]
+    @CodeHash BINARY(32)
+AS
+BEGIN
+    -- AUTH_HANDOFF_01: marks the code used, only while it is unused (one atomic UPDATE: two requests with the same code
+    -- never both get it), and returns it with its user. Expired / wrong-site codes are spent too; the API refuses them.
+    SET NOCOUNT ON;
+    DECLARE @Used TABLE (UserId INT, Target VARCHAR(10), ExpiresAt DATETIME2(3), UsedAt DATETIME2(3));
+    UPDATE h SET UsedAt = SYSUTCDATETIME()
+    OUTPUT inserted.UserId, inserted.Target, inserted.ExpiresAt, inserted.UsedAt INTO @Used
+      FROM dbo.WN_AuthHandoff h WITH (ROWLOCK, UPDLOCK)
+     WHERE h.CodeHash = @CodeHash AND h.UsedAt IS NULL;
+    SELECT x.UserId, x.Target, x.ExpiresAt, x.UsedAt, u.Email, CAST(ISNULL(u.IsActive, 0) AS BIT) AS IsActive
+      FROM @Used x
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = x.UserId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Billing_GetDueBookings]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3108,7 +2867,7 @@ BEGIN
       );
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BillingPeriods_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BillingPeriods_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3123,7 +2882,24 @@ BEGIN
     ORDER BY SortOrder ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_AssignClosestSpace]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BillingSettings_GetBatch]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 1. dbo.WN_BillingSettings_GetBatch
+CREATE   PROCEDURE [dbo].[WN_BillingSettings_GetBatch]
+    @Keys NVARCHAR(MAX) = N'SendDeadlineDay,ReminderDaysBeforeDeadline'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT s.SettingKey, s.SettingValue 
+    FROM dbo.WN_BillingSettings s WITH (NOLOCK)
+    CROSS APPLY STRING_SPLIT(@Keys, ',') k
+    WHERE s.SettingKey = LTRIM(RTRIM(k.value));
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Booking_AssignClosestSpace]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3167,7 +2943,7 @@ BEGIN
     ORDER BY TRY_CAST(s.Code AS INT) ASC, s.Id ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_CheckOverlap]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Booking_CheckOverlap]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3199,7 +2975,7 @@ BEGIN
         SELECT 0 AS IsOverlapping;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_Create]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Booking_Create]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3346,7 +3122,7 @@ BEGIN
          @Notes, @TotalAmount, 5,
          @RentAccountId, @SecurityRecivedId,
          @ChallanNumber, @ValidityDate,
-         GETUTCDATE(), GETUTCDATE(), @UserId, @NormalizedShift);
+         GETDATE(), GETDATE(), @UserId, @NormalizedShift);
 
     SET @BookingId       = SCOPE_IDENTITY();
     SET @AssignedSpaceId = @SpaceId;
@@ -3358,7 +3134,7 @@ BEGIN
              PaymentMethodId, StatusId, TransactionRef, CreatedOn)
         VALUES
             (NEWID(), @UserId, @BookingId, @TotalAmount, N'PKR',
-             1, 1, @PaymentRef, GETUTCDATE());
+             1, 1, @PaymentRef, GETDATE());
     END
 
     EXEC dbo.WN_BookingDetails_InsertLine
@@ -3393,7 +3169,7 @@ BEGIN
         NULL                               AS errorMessage;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_GetAvailableSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Booking_GetAvailableSpaces]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3467,7 +3243,7 @@ BEGIN
     ORDER BY TRY_CAST(s.Code AS INT) ASC, s.Id ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Booking_GetBillingSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Booking_GetBillingSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3555,7 +3331,659 @@ BEGIN
         @PeriodEnd AS CurrentBillingPeriodEnd;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Booking_TransferPreview]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- =========================================================================================
+-- Stored Procedure: dbo.WN_Booking_TransferPreview
+-- Validates transfer pre-conditions and returns settlement details and blocking invoices.
+-- =========================================================================================
+CREATE   PROCEDURE [dbo].[WN_Booking_TransferPreview]
+    @BookingId      INT,
+    @NewSpaceId     INT,
+    @EffectiveDate  DATE,
+    @TransferFee    DECIMAL(18, 2) = 0.00
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @IsValid BIT = 1;
+    DECLARE @ErrorMessage NVARCHAR(500) = NULL;
+
+    -- 1. Fetch old booking
+    DECLARE @OldSpaceId INT, @OldLocationId INT, @OldStartOn DATETIME2, @OldEndOn DATETIME2;
+    DECLARE @OldMonthlyRent DECIMAL(18, 2), @OldDiscountPct DECIMAL(5, 2), @OldOfferingType NVARCHAR(50), @OldShiftType NVARCHAR(20);
+    DECLARE @OldStatusId TINYINT, @OldSecPaid DECIMAL(18, 2);
+    DECLARE @OldBPStart DATE, @OldBPEnd DATE;
+    DECLARE @CustomerName NVARCHAR(250), @CustomerEmail NVARCHAR(256), @CustomerCode NVARCHAR(50);
+    DECLARE @OldSpaceName NVARCHAR(200), @OldSpaceCode NVARCHAR(50), @LocationName NVARCHAR(200);
+
+    SELECT 
+        @OldSpaceId         = b.SpaceId,
+        @OldStartOn         = b.StartOn,
+        @OldEndOn           = b.EndOn,
+        @OldMonthlyRent     = COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), 0.00),
+        @OldDiscountPct     = ISNULL(b.DiscountPercentage, 0.00),
+        @OldOfferingType    = b.OfferingType,
+        @OldShiftType       = ISNULL(b.ShiftType, N'24_7'),
+        @OldStatusId        = b.BookingStatusId,
+        @OldSecPaid         = ISNULL(b.SecurityDepositPaid, 0.00),
+        @OldBPStart         = CAST(b.BillingPeriodStart AS DATE),
+        @OldBPEnd           = CAST(b.BillingPeriodEnd AS DATE),
+        @CustomerCode       = b.CustomerCode
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    WHERE b.Id = @BookingId AND ISNULL(b.IsDeleted, 0) = 0;
+
+    IF @OldSpaceId IS NULL
+    BEGIN
+        SELECT CAST(0 AS BIT) AS IsValid, N'Booking not found.' AS ErrorMessage;
+        RETURN;
+    END
+
+    -- Check active status: 1, 2, 5, 33 (Confirmed is 33)
+    IF @OldStatusId NOT IN (1, 2, 5, 33)
+    BEGIN
+        SET @IsValid = 0;
+        SET @ErrorMessage = N'Booking is not active (StatusId: ' + CAST(@OldStatusId AS NVARCHAR(10)) + N').';
+    END
+
+    -- Lookup old space & location
+    SELECT 
+        @OldLocationId  = s.LocationId,
+        @OldSpaceName   = s.Name,
+        @OldSpaceCode   = s.Code,
+        @LocationName   = l.Name
+    FROM dbo.WN_Spaces s WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
+    WHERE s.Id = @OldSpaceId;
+
+    -- Lookup customer details
+    SELECT TOP 1
+        @CustomerName  = COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(c.FirstName, N' ', c.LastName))), N''), u.Name, u.Email),
+        @CustomerEmail = COALESCE(c.Email, u.Email)
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = b.CustomerCode OR c.UserId = b.UserId
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+    WHERE b.Id = @BookingId;
+
+    -- 2. Fetch new space
+    DECLARE @NewLocationId INT, @NewSpaceName NVARCHAR(200), @NewSpaceCode NVARCHAR(50), @NewCapacity INT;
+    DECLARE @NewMonthlyRate DECIMAL(18, 2), @NewMaxDiscountPct DECIMAL(5, 2);
+
+    SELECT 
+        @NewLocationId      = s.LocationId,
+        @NewSpaceName       = s.Name,
+        @NewSpaceCode       = s.Code,
+        @NewCapacity        = ISNULL(s.Capacity, 1),
+        @NewMonthlyRate     = ISNULL(s.Price, 0.00),
+        @NewMaxDiscountPct  = ISNULL(s.MaxDiscountPercent, 10.00)
+    FROM dbo.WN_Spaces s WITH (NOLOCK)
+    WHERE s.Id = @NewSpaceId AND ISNULL(s.IsActive, 1) = 1;
+
+    IF @NewLocationId IS NULL
+    BEGIN
+        SET @IsValid = 0;
+        SET @ErrorMessage = ISNULL(@ErrorMessage + N' ', N'') + N'Target space not found or is inactive.';
+    END
+
+    -- Same location check
+    IF @NewLocationId IS NOT NULL AND @OldLocationId IS NOT NULL AND @NewLocationId <> @OldLocationId
+    BEGIN
+        SET @IsValid = 0;
+        SET @ErrorMessage = ISNULL(@ErrorMessage + N' ', N'') + N'New space must be in the same location (' + ISNULL(@LocationName, N'') + N').';
+    END
+
+    -- Effective date validation
+    IF @EffectiveDate IS NULL SET @EffectiveDate = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+    IF @EffectiveDate < CAST(@OldStartOn AS DATE) OR @EffectiveDate > CAST(@OldEndOn AS DATE)
+    BEGIN
+        SET @IsValid = 0;
+        SET @ErrorMessage = ISNULL(@ErrorMessage + N' ', N'') + N'Effective date must be between booking start (' + CONVERT(NVARCHAR(10), @OldStartOn, 23) + N') and end (' + CONVERT(NVARCHAR(10), @OldEndOn, 23) + N').';
+    END
+
+    -- Overlap logic on target space for remaining term
+    DECLARE @NormalizedShift NVARCHAR(20) = CASE 
+        WHEN @OldShiftType IN ('24_7', '24/7', '24-by-7', '1', '') OR @OldShiftType IS NULL THEN '24_7'
+        WHEN LOWER(@OldShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+        WHEN LOWER(@OldShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+        ELSE LOWER(@OldShiftType)
+    END;
+
+    IF EXISTS (
+        SELECT 1 FROM dbo.WN_Bookings bk WITH (NOLOCK)
+        WHERE bk.SpaceId = @NewSpaceId
+          AND ISNULL(bk.IsDeleted, 0) = 0
+          AND bk.BookingStatusId IN (1, 2, 5, 33)
+          AND bk.Id <> @BookingId
+          AND CAST(@EffectiveDate AS DATETIME2) < bk.EndOn
+          AND @OldEndOn > bk.StartOn
+          AND (
+              @NormalizedShift = '24_7'
+              OR ISNULL(bk.ShiftType, '24_7') = '24_7'
+              OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
+          )
+    )
+    BEGIN
+        SET @IsValid = 0;
+        SET @ErrorMessage = ISNULL(@ErrorMessage + N' ', N'') + N'New space is not available for the remaining booking term.';
+    END
+
+    -- 3. Check for blocking unpaid invoices
+    DECLARE @BlockingInvoiceCount INT = 0;
+    DECLARE @BlockingInvoices TABLE (
+        InvoiceId INT,
+        InvoiceNumber NVARCHAR(50),
+        Amount DECIMAL(18, 2),
+        DueOn DATE,
+        PublicId UNIQUEIDENTIFIER
+    );
+
+    INSERT INTO @BlockingInvoices (InvoiceId, InvoiceNumber, Amount, DueOn, PublicId)
+    SELECT 
+        i.Id,
+        i.InvoiceNumber,
+        (i.GrandTotal - i.PaidTotal) AS Amount,
+        i.DueOn,
+        i.PublicId
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    WHERE i.BookingId = @BookingId
+      AND ISNULL(i.StatusId, 0) NOT IN (5, 40)
+      AND (i.GrandTotal - i.PaidTotal) > 0
+      AND i.StatusId <> 2
+      AND ISNULL(i.ApprovalStatus, N'Approved') = N'Approved';
+
+    SELECT @BlockingInvoiceCount = COUNT(*) FROM @BlockingInvoices;
+    IF @BlockingInvoiceCount > 0
+    BEGIN
+        SET @IsValid = 0;
+        SET @ErrorMessage = ISNULL(@ErrorMessage + N' ', N'') + N'Booking has ' + CAST(@BlockingInvoiceCount AS NVARCHAR(10)) + N' issued, unpaid invoice(s). All unpaid invoices must be collected before transfer.';
+    END
+
+    -- 4. Re-validate discount against target space's Offering Type cap
+    DECLARE @OfferingCap DECIMAL(5, 2) = 10.00;
+    SELECT TOP 1 @OfferingCap = ISNULL(DiscountCap, 10.00)
+    FROM dbo.WN_OfferingType WITH (NOLOCK)
+    WHERE (Id = TRY_CAST(@OldOfferingType AS INT) OR Description = @OldOfferingType)
+      AND (LocationId IS NULL OR LocationId = @NewLocationId);
+
+    DECLARE @DiscountExceeded BIT = 0;
+    IF @OldDiscountPct > @OfferingCap
+    BEGIN
+        SET @DiscountExceeded = 1;
+        SET @IsValid = 0;
+        SET @ErrorMessage = ISNULL(@ErrorMessage + N' ', N'') + N'Current discount (' + CAST(@OldDiscountPct AS NVARCHAR(10)) + N'%) exceeds the new space offering type cap of ' + CAST(@OfferingCap AS NVARCHAR(10)) + N'%.';
+    END
+
+    -- 5. Resolve Current Billing Period
+    DECLARE @PeriodStart DATE = @OldBPStart;
+    DECLARE @PeriodEnd DATE = @OldBPEnd;
+
+    IF @PeriodStart IS NULL OR @PeriodEnd IS NULL OR @EffectiveDate < @PeriodStart OR @EffectiveDate > @PeriodEnd
+    BEGIN
+        SELECT TOP 1 @PeriodStart = CAST(i.BillingPeriodStart AS DATE), @PeriodEnd = CAST(i.BillingPeriodEnd AS DATE)
+        FROM dbo.WN_Invoices i WITH (NOLOCK)
+        WHERE i.BookingId = @BookingId
+          AND i.BillingPeriodStart IS NOT NULL
+          AND i.BillingPeriodEnd IS NOT NULL
+          AND CAST(i.BillingPeriodStart AS DATE) <= @EffectiveDate
+          AND CAST(i.BillingPeriodEnd AS DATE) >= @EffectiveDate
+        ORDER BY i.Id DESC;
+    END
+
+    IF @PeriodStart IS NULL OR @PeriodEnd IS NULL
+    BEGIN
+        SET @PeriodStart = DATEFROMPARTS(YEAR(@EffectiveDate), MONTH(@EffectiveDate), 1);
+        SET @PeriodEnd = EOMONTH(@EffectiveDate);
+    END
+
+    -- 6. Settlement Calculation
+    DECLARE @DailyRateA DECIMAL(18, 4) = @OldMonthlyRent / 30.0000;
+    DECLARE @DailyRateB DECIMAL(18, 4) = @NewMonthlyRate / 30.0000;
+    DECLARE @DaysUsed INT = DATEDIFF(DAY, @PeriodStart, @EffectiveDate);
+    IF @DaysUsed < 0 SET @DaysUsed = 0;
+    DECLARE @RemainingDays INT = DATEDIFF(DAY, @EffectiveDate, @PeriodEnd);
+    IF @RemainingDays < 0 SET @RemainingDays = 0;
+
+    DECLARE @CreditAtA DECIMAL(18, 2) = ROUND(@RemainingDays * @DailyRateA, 2);
+    DECLARE @RepricedAtB DECIMAL(18, 2) = ROUND(@RemainingDays * @DailyRateB, 2);
+    DECLARE @Adjustment DECIMAL(18, 2) = @RepricedAtB - @CreditAtA;
+    DECLARE @SettlementOutcome NVARCHAR(50) = CASE 
+        WHEN @Adjustment > 0 THEN N'Billed'
+        WHEN @Adjustment < 0 THEN N'CreditStored'
+        ELSE N'NoAdjustment'
+    END;
+    DECLARE @TotalDue DECIMAL(18, 2) = CASE WHEN @Adjustment > 0 THEN @Adjustment ELSE 0.00 END + ISNULL(@TransferFee, 0.00);
+
+    -- Result Set 1: Overall Status
+    SELECT 
+        @IsValid AS IsValid,
+        @ErrorMessage AS ErrorMessage;
+
+    -- Result Set 2: Current Booking & Target Space Summary
+    SELECT 
+        @BookingId AS BookingId,
+        @CustomerName AS CustomerName,
+        @CustomerEmail AS CustomerEmail,
+        @CustomerCode AS CustomerCode,
+        @OldSpaceId AS CurrentSpaceId,
+        @OldSpaceName AS CurrentSpaceName,
+        @OldSpaceCode AS CurrentSpaceCode,
+        @OldLocationId AS LocationId,
+        @LocationName AS LocationName,
+        @OldStartOn AS StartOn,
+        @OldEndOn AS EndOn,
+        @OldMonthlyRent AS MonthlyRent,
+        @OldDiscountPct AS DiscountPercentage,
+        @OldOfferingType AS OfferingType,
+        @OldSecPaid AS SecurityDepositPaid,
+        @NewSpaceId AS TargetSpaceId,
+        @NewSpaceName AS TargetSpaceName,
+        @NewSpaceCode AS TargetSpaceCode,
+        @NewCapacity AS TargetCapacity,
+        @NewMonthlyRate AS TargetMonthlyRate,
+        @NewMaxDiscountPct AS TargetMaxDiscountPct,
+        @OfferingCap AS OfferingTypeDiscountCap,
+        @DiscountExceeded AS DiscountExceeded;
+
+    -- Result Set 3: Blocking Invoices
+    SELECT InvoiceId, InvoiceNumber, Amount, DueOn, PublicId
+    FROM @BlockingInvoices
+    ORDER BY DueOn ASC;
+
+    -- Result Set 4: Settlement Result
+    SELECT 
+        @PeriodStart AS PeriodStart,
+        @PeriodEnd AS PeriodEnd,
+        @EffectiveDate AS EffectiveDate,
+        @OldMonthlyRent AS OldMonthlyRate,
+        @NewMonthlyRate AS NewMonthlyRate,
+        @DaysUsed AS DaysUsed,
+        @RemainingDays AS RemainingDays,
+        @CreditAtA AS CreditAtA,
+        @RepricedAtB AS RepricedAtB,
+        @Adjustment AS Adjustment,
+        ISNULL(@TransferFee, 0.00) AS TransferFee,
+        @TotalDue AS TotalDue,
+        @SettlementOutcome AS Outcome;
+END;
+
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Booking_TransferSpace]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- =========================================================================================
+-- Stored Procedure: dbo.WN_Booking_TransferSpace
+-- Transactional execution of space transfer: re-validates, ends old, creates new,
+-- shifts deposit, invoices adjustment/fee, logs audit.
+-- =========================================================================================
+CREATE   PROCEDURE [dbo].[WN_Booking_TransferSpace]
+    @OldBookingId       INT,
+    @NewSpaceId         INT,
+    @EffectiveDate      DATE,
+    @TransferFee        DECIMAL(18, 2)  = 0.00,
+    @Notes              NVARCHAR(MAX),
+    @UpdatedById        INT             = NULL,
+    @UserEmail          NVARCHAR(256)   = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRANSACTION;
+    BEGIN TRY
+        -- 1. Lock and read Old Booking
+        DECLARE @OldSpaceId INT, @OldLocationId INT, @OldStartOn DATETIME2, @OldEndOn DATETIME2;
+        DECLARE @OldMonthlyRent DECIMAL(18, 2), @OldDiscountPct DECIMAL(5, 2), @OldDiscountAmt DECIMAL(18, 2), @OldDiscountType NVARCHAR(20);
+        DECLARE @OldOfferingType NVARCHAR(50), @OldShiftType NVARCHAR(20), @OldStatusId TINYINT;
+        DECLARE @OldSecReq DECIMAL(18, 2), @OldSecPaid DECIMAL(18, 2), @OldSecMonths INT;
+        DECLARE @OldBPStart DATE, @OldBPEnd DATE, @BillingPeriodMonths INT;
+        DECLARE @UserId INT, @CustomerCode NVARCHAR(50), @CustomerEmail NVARCHAR(256);
+        DECLARE @SendWHTInvoice BIT, @WHTaxId INT;
+        DECLARE @RentAccountId INT, @AccountReceivableId INT, @ServicesIncomeId INT, @SalesTaxId INT, @SecurityReceivedId INT;
+
+        SELECT 
+            @OldSpaceId             = b.SpaceId,
+            @OldStartOn             = b.StartOn,
+            @OldEndOn               = b.EndOn,
+            @OldMonthlyRent         = COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), 0.00),
+            @OldDiscountPct         = ISNULL(b.DiscountPercentage, 0.00),
+            @OldDiscountAmt         = ISNULL(b.DiscountAmount, 0.00),
+            @OldDiscountType        = ISNULL(b.DiscountType, N'Percentage'),
+            @OldOfferingType        = b.OfferingType,
+            @OldShiftType           = ISNULL(b.ShiftType, N'24_7'),
+            @OldStatusId            = b.BookingStatusId,
+            @OldSecReq              = ISNULL(b.SecurityDepositRequired, 0.00),
+            @OldSecPaid             = ISNULL(b.SecurityDepositPaid, 0.00),
+            @OldSecMonths           = ISNULL(b.SecurityDepositMonths, 0),
+            @OldBPStart             = CAST(b.BillingPeriodStart AS DATE),
+            @OldBPEnd               = CAST(b.BillingPeriodEnd AS DATE),
+            @BillingPeriodMonths    = ISNULL(b.BillingPeriodMonths, 1),
+            @UserId                 = b.UserId,
+            @CustomerCode           = b.CustomerCode,
+            @SendWHTInvoice         = ISNULL(b.SendWHTInvoice, 0),
+            @WHTaxId                = b.WHTaxId,
+            @RentAccountId          = b.RentAccountId,
+            @AccountReceivableId    = b.AccountReceivableId,
+            @ServicesIncomeId       = b.ServicesIncomeId,
+            @SalesTaxId             = b.SalesTaxId,
+            @SecurityReceivedId     = b.SecurityReceivedId
+        FROM dbo.WN_Bookings b WITH (UPDLOCK, HOLDLOCK)
+        WHERE b.Id = @OldBookingId AND ISNULL(b.IsDeleted, 0) = 0;
+
+        IF @OldSpaceId IS NULL
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Old booking not found.', 16, 1);
+            RETURN;
+        END
+
+        IF @OldStatusId NOT IN (1, 2, 5, 33)
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Booking is not in an active status.', 16, 1);
+            RETURN;
+        END
+
+        -- Read old space location
+        SELECT @OldLocationId = s.LocationId FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = @OldSpaceId;
+
+        -- 2. Lock and read New Space
+        DECLARE @NewLocationId INT, @NewMonthlyRate DECIMAL(18, 2), @NewFloorId INT, @NewCapacity INT, @NewSpaceName NVARCHAR(200);
+        SELECT 
+            @NewLocationId  = s.LocationId,
+            @NewMonthlyRate = ISNULL(s.Price, 0.00),
+            @NewFloorId     = s.FloorId,
+            @NewCapacity    = ISNULL(s.Capacity, 1),
+            @NewSpaceName   = s.Name
+        FROM dbo.WN_Spaces s WITH (UPDLOCK, HOLDLOCK)
+        WHERE s.Id = @NewSpaceId AND ISNULL(s.IsActive, 1) = 1;
+
+        IF @NewLocationId IS NULL
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Target space not found or is inactive.', 16, 1);
+            RETURN;
+        END
+
+        IF @NewLocationId <> @OldLocationId
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('New space must be located in the same location as current booking.', 16, 1);
+            RETURN;
+        END
+
+        IF @EffectiveDate IS NULL SET @EffectiveDate = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+        IF @EffectiveDate < CAST(@OldStartOn AS DATE) OR @EffectiveDate > CAST(@OldEndOn AS DATE)
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Effective date must fall between booking start and end date.', 16, 1);
+            RETURN;
+        END
+
+        -- 3. Overlap check on target space
+        DECLARE @NormalizedShift NVARCHAR(20) = CASE 
+            WHEN @OldShiftType IN ('24_7', '24/7', '24-by-7', '1', '') OR @OldShiftType IS NULL THEN '24_7'
+            WHEN LOWER(@OldShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+            WHEN LOWER(@OldShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+            ELSE LOWER(@OldShiftType)
+        END;
+
+        IF EXISTS (
+            SELECT 1 FROM dbo.WN_Bookings bk WITH (UPDLOCK, HOLDLOCK)
+            WHERE bk.SpaceId = @NewSpaceId
+              AND ISNULL(bk.IsDeleted, 0) = 0
+              AND bk.BookingStatusId IN (1, 2, 5, 33)
+              AND bk.Id <> @OldBookingId
+              AND CAST(@EffectiveDate AS DATETIME2) < bk.EndOn
+              AND @OldEndOn > bk.StartOn
+              AND (
+                  @NormalizedShift = '24_7'
+                  OR ISNULL(bk.ShiftType, '24_7') = '24_7'
+                  OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
+              )
+        )
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Target space is not available for the remaining term.', 16, 1);
+            RETURN;
+        END
+
+        -- 4. Unpaid invoices check
+        IF EXISTS (
+            SELECT 1 FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+            WHERE i.BookingId = @OldBookingId
+              AND ISNULL(i.StatusId, 0) NOT IN (5, 40)
+              AND (i.GrandTotal - i.PaidTotal) > 0
+              AND i.StatusId <> 2
+              AND ISNULL(i.ApprovalStatus, N'Approved') = N'Approved'
+        )
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Booking has issued, unpaid invoices. All unpaid invoices must be collected before transfer.', 16, 1);
+            RETURN;
+        END
+
+        -- 5. Discount Cap re-validation
+        DECLARE @OfferingCap DECIMAL(5, 2) = 10.00;
+        SELECT TOP 1 @OfferingCap = ISNULL(DiscountCap, 10.00)
+        FROM dbo.WN_OfferingType WITH (NOLOCK)
+        WHERE (Id = TRY_CAST(@OldOfferingType AS INT) OR Description = @OldOfferingType)
+          AND (LocationId IS NULL OR LocationId = @NewLocationId);
+
+        IF @OldDiscountPct > @OfferingCap
+        BEGIN
+            ROLLBACK TRANSACTION;
+            RAISERROR('Current booking discount exceeds the target space offering type cap.', 16, 1);
+            RETURN;
+        END
+
+        -- 6. Settlement Calculation
+        DECLARE @PeriodStart DATE = @OldBPStart;
+        DECLARE @PeriodEnd DATE = @OldBPEnd;
+
+        IF @PeriodStart IS NULL OR @PeriodEnd IS NULL OR @EffectiveDate < @PeriodStart OR @EffectiveDate > @PeriodEnd
+        BEGIN
+            SELECT TOP 1 @PeriodStart = CAST(i.BillingPeriodStart AS DATE), @PeriodEnd = CAST(i.BillingPeriodEnd AS DATE)
+            FROM dbo.WN_Invoices i WITH (NOLOCK)
+            WHERE i.BookingId = @OldBookingId
+              AND i.BillingPeriodStart IS NOT NULL
+              AND i.BillingPeriodEnd IS NOT NULL
+              AND CAST(i.BillingPeriodStart AS DATE) <= @EffectiveDate
+              AND CAST(i.BillingPeriodEnd AS DATE) >= @EffectiveDate
+            ORDER BY i.Id DESC;
+        END
+
+        IF @PeriodStart IS NULL OR @PeriodEnd IS NULL
+        BEGIN
+            SET @PeriodStart = DATEFROMPARTS(YEAR(@EffectiveDate), MONTH(@EffectiveDate), 1);
+            SET @PeriodEnd = EOMONTH(@EffectiveDate);
+        END
+
+        DECLARE @DailyRateA DECIMAL(18, 4) = @OldMonthlyRent / 30.0000;
+        DECLARE @DailyRateB DECIMAL(18, 4) = @NewMonthlyRate / 30.0000;
+        DECLARE @DaysUsed INT = DATEDIFF(DAY, @PeriodStart, @EffectiveDate);
+        IF @DaysUsed < 0 SET @DaysUsed = 0;
+        DECLARE @RemainingDays INT = DATEDIFF(DAY, @EffectiveDate, @PeriodEnd);
+        IF @RemainingDays < 0 SET @RemainingDays = 0;
+
+        DECLARE @CreditAtA DECIMAL(18, 2) = ROUND(@RemainingDays * @DailyRateA, 2);
+        DECLARE @RepricedAtB DECIMAL(18, 2) = ROUND(@RemainingDays * @DailyRateB, 2);
+        DECLARE @Adjustment DECIMAL(18, 2) = @RepricedAtB - @CreditAtA;
+        DECLARE @SettlementOutcome NVARCHAR(50) = CASE 
+            WHEN @Adjustment > 0 THEN N'Billed'
+            WHEN @Adjustment < 0 THEN N'CreditStored'
+            ELSE N'NoAdjustment'
+        END;
+        DECLARE @TransferCreditBalance DECIMAL(18, 2) = CASE WHEN @Adjustment < 0 THEN ABS(@Adjustment) ELSE 0.00 END;
+
+        -- 7. Get Status 'Transferred' Id
+        DECLARE @TransferredStatusId TINYINT = (SELECT TOP 1 Id FROM dbo.WN_BookingStatuses WHERE Code = N'Transferred');
+        IF @TransferredStatusId IS NULL SET @TransferredStatusId = 86; -- fallback to Cancelled if missing
+
+        -- 8. Create New Booking
+        DECLARE @NewBookingId INT;
+        DECLARE @NewBookingGuid UNIQUEIDENTIFIER = NEWID();
+        DECLARE @NewSubtotal DECIMAL(18, 2) = @NewMonthlyRate * @BillingPeriodMonths;
+        DECLARE @NewTotalAmount DECIMAL(18, 2) = @NewSubtotal - (@OldDiscountAmt);
+        IF @NewTotalAmount < 0 SET @NewTotalAmount = 0;
+
+        INSERT INTO dbo.WN_Bookings (
+            IdGUID, BookingDate, CustomerCode, TotalAmount, Notes,
+            CreatedOn, UpdatedOn, ValidityDate, UserId, SpaceId, PricingId,
+            StartOn, EndOn, BookingStatusId, IsDeleted, CreatedById, UpdatedById,
+            DiscountPercentage, SubtotalAmount, IsFree, DiscountType, DiscountAmount,
+            FloorId, AdvanceRentMonths, SecurityDepositMonths, SecurityDepositRequired,
+            SecurityDepositPaid, BillingPeriodMonths, SecurityDepositCharged,
+            BillingPeriodStart, BillingPeriodEnd, NextBillingDate, MonthlyRent,
+            MonthlyBasePrice, Capacity, OfferingType, ShiftType, SendWHTInvoice, WHTaxId,
+            RentAccountId, AccountReceivableId, ServicesIncomeId, SalesTaxId, SecurityReceivedId,
+            TransferredFromBookingId, TransferCreditBalance
+        )
+        VALUES (
+            @NewBookingGuid, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)), @CustomerCode, @NewTotalAmount, @Notes,
+            SYSUTCDATETIME(), SYSUTCDATETIME(), @OldEndOn, @UserId, @NewSpaceId, 0,
+            CAST(@EffectiveDate AS DATETIME2), @OldEndOn, 33, 0, @UpdatedById, @UpdatedById,
+            @OldDiscountPct, @NewSubtotal, 0, @OldDiscountType, @OldDiscountAmt,
+            @NewFloorId, 0, @OldSecMonths, @OldSecReq,
+            @OldSecPaid, @BillingPeriodMonths, 1,
+            @EffectiveDate, @PeriodEnd, @PeriodEnd, @NewMonthlyRate,
+            @NewMonthlyRate, @NewCapacity, @OldOfferingType, @OldShiftType, @SendWHTInvoice, @WHTaxId,
+            @RentAccountId, @AccountReceivableId, @ServicesIncomeId, @SalesTaxId, @SecurityReceivedId,
+            @OldBookingId, @TransferCreditBalance
+        );
+        SET @NewBookingId = SCOPE_IDENTITY();
+
+        -- 9. End Old Booking
+        UPDATE dbo.WN_Bookings SET
+            EndOn                   = CAST(@EffectiveDate AS DATETIME2),
+            BookingStatusId         = @TransferredStatusId,
+            TransferredToBookingId  = @NewBookingId,
+            SecurityDepositRequired = 0.00,
+            SecurityDepositPaid     = 0.00,
+            UpdatedOn               = SYSUTCDATETIME(),
+            UpdatedById             = @UpdatedById
+        WHERE Id = @OldBookingId;
+
+        -- 10. Re-link existing WN_SecurityDeposits to New Booking
+        UPDATE dbo.WN_SecurityDeposits SET
+            BookingId   = @NewBookingId,
+            UpdatedById = @UpdatedById
+        WHERE BookingId = @OldBookingId;
+
+        -- 11. Bill Settlement Adjustment and Transfer Fee if due
+        DECLARE @SettlementInvoiceId INT = NULL;
+        DECLARE @SettlementInvoiceNumber NVARCHAR(50) = NULL;
+        DECLARE @InvoiceAmount DECIMAL(18, 2) = (CASE WHEN @Adjustment > 0 THEN @Adjustment ELSE 0.00 END) + ISNULL(@TransferFee, 0.00);
+
+        IF @InvoiceAmount > 0
+        BEGIN
+            DECLARE @TodayDate DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+            DECLARE @DueDate DATE = EOMONTH(@TodayDate);
+            DECLARE @InvNotes NVARCHAR(MAX) = N'Space Transfer Settlement: moved from space #' + CAST(@OldSpaceId AS NVARCHAR(10)) 
+                + N' to space #' + CAST(@NewSpaceId AS NVARCHAR(10)) 
+                + CASE WHEN @TransferFee > 0 THEN N' (includes PKR ' + CAST(@TransferFee AS NVARCHAR(20)) + N' transfer fee)' ELSE N'' END;
+
+            EXEC dbo.WN_Invoices_Insert
+                @UserId                 = @UserId,
+                @BookingId              = @NewBookingId,
+                @IssuedOn               = @TodayDate,
+                @DueOn                  = @DueDate,
+                @SubTotal               = @InvoiceAmount,
+                @DiscountTotal          = 0.00,
+                @TaxTotal               = 0.00,
+                @GrandTotal             = @InvoiceAmount,
+                @PaidTotal              = 0.00,
+                @CurrencyCode           = N'PKR',
+                @Notes                  = @InvNotes,
+                @InvoiceTypeId          = 4, -- Custom / Settlement
+                @SecurityDepositAmount  = 0.00,
+                @AccountsCoaId          = @RentAccountId,
+                @CreatedById            = @UpdatedById,
+                @SyncCustomerVendor     = 1,
+                @PostToLedger           = 1,
+                @InvoiceId              = @SettlementInvoiceId OUTPUT,
+                @GeneratedInvoiceNumber = @SettlementInvoiceNumber OUTPUT;
+
+            -- Add line item to WN_InvoiceLines
+            INSERT INTO dbo.WN_InvoiceLines (
+                InvoiceId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, SortOrder
+            )
+            VALUES (
+                @SettlementInvoiceId, 1, @InvNotes, 1, @InvoiceAmount, 0.00, 0.00, @RentAccountId, 1
+            );
+        END
+
+        -- 12. Insert Transfer Record in dbo.WN_BookingTransfers
+        DECLARE @TransferId INT;
+        INSERT INTO dbo.WN_BookingTransfers (
+            OldBookingId, NewBookingId, OldSpaceId, NewSpaceId, LocationId,
+            EffectiveDate, PeriodStartDate, PeriodEndDate, OldMonthlyRate, NewMonthlyRate,
+            DaysUsed, RemainingDays, CreditAtOldRate, RepricedAtNewRate, Adjustment,
+            SettlementOutcome, SettlementInvoiceId, TransferFee, Notes,
+            InitiatedById, InitiatedByEmail, CreatedOn
+        )
+        VALUES (
+            @OldBookingId, @NewBookingId, @OldSpaceId, @NewSpaceId, @NewLocationId,
+            @EffectiveDate, @PeriodStart, @PeriodEnd, @OldMonthlyRent, @NewMonthlyRate,
+            @DaysUsed, @RemainingDays, @CreditAtA, @RepricedAtB, @Adjustment,
+            @SettlementOutcome, @SettlementInvoiceId, ISNULL(@TransferFee, 0.00), @Notes,
+            @UpdatedById, @UserEmail, SYSUTCDATETIME()
+        );
+        SET @TransferId = SCOPE_IDENTITY();
+
+        -- 13. Write Audit Log
+        DECLARE @AuditJson NVARCHAR(MAX) = (
+            SELECT 
+                @TransferId AS TransferId,
+                @OldBookingId AS OldBookingId,
+                @NewBookingId AS NewBookingId,
+                @OldSpaceId AS OldSpaceId,
+                @NewSpaceId AS NewSpaceId,
+                @EffectiveDate AS EffectiveDate,
+                @Adjustment AS Adjustment,
+                @SettlementOutcome AS Outcome,
+                @SettlementInvoiceId AS SettlementInvoiceId
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        );
+
+        INSERT INTO dbo.WN_AuditLog (
+            EntityName, RecordId, Operation, OldValues, NewValues,
+            ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+        )
+        VALUES (
+            N'WN_BookingTransfers', CAST(@TransferId AS NVARCHAR(64)), N'I',
+            NULL, @AuditJson,
+            NULL, NULL, NULL, @UpdatedById, @UserEmail, SYSUTCDATETIME(), N'SpaceTransfer'
+        );
+
+        COMMIT TRANSACTION;
+
+        -- Return output
+        SELECT 
+            @TransferId AS TransferId,
+            @OldBookingId AS OldBookingId,
+            @NewBookingId AS NewBookingId,
+            @SettlementInvoiceId AS SettlementInvoiceId,
+            @SettlementInvoiceNumber AS SettlementInvoiceNumber,
+            @TransferCreditBalance AS CreditBalance,
+            @Adjustment AS Adjustment,
+            @SettlementOutcome AS Outcome;
+
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END;
+
+GO
+/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetByBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3684,7 +4112,7 @@ BEGIN
     END
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3735,7 +4163,7 @@ BEGIN
     FETCH NEXT @Limit ROWS ONLY;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetTotalByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_GetTotalByBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3753,13 +4181,11 @@ BEGIN
       AND IsDeleted = 0;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 2. Update dbo.WN_BookingDetails_Insert
 CREATE   PROCEDURE [dbo].[WN_BookingDetails_Insert]
     @BookingGuid             UNIQUEIDENTIFIER,
     @CustomerCode            NVARCHAR(50)   = NULL,
@@ -3849,7 +4275,7 @@ BEGIN
              @SpaceName, @SpaceCode, @SpaceCategory, @StartDateTime, @EndDateTime,
              @RentAmount, @SecurityDeposit, @SupportChargesId, @AppliedChargePercentage,
              @AppliedTaxPercentage, @SupportChargeAmt, @TaxAmt, @CalculatedTotal,
-             @RentAccountId, @EffectiveSecRecId, @PaymentMethod, @Notes, SYSUTCDATETIME(), 0,
+             @RentAccountId, @EffectiveSecRecId, @PaymentMethod, @Notes, SYSDATETIME(), 0,
              @AccountReceivableId, @ServicesIncomeId, @SalesTaxId, @EffectiveSecRecId);
     END
 
@@ -3865,7 +4291,7 @@ BEGIN
     WHERE IdGUID = @BookingGuid;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_InsertLine]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingDetails_InsertLine]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3908,7 +4334,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_AddRequest]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_AddRequest]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3954,7 +4380,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_AddRequest]
             ELSE
             BEGIN
                 INSERT INTO dbo.WN_BookingEmployeeRequests (BookingId, BookingDetailId, CustomerId, PersonId, Status, AddedAt, AddedByUserId)
-                VALUES (@BookingId, @BookingDetailId, @CustomerId, @PersonId, N'Pending', SYSUTCDATETIME(), @AddedByUserId);
+                VALUES (@BookingId, @BookingDetailId, @CustomerId, @PersonId, N'Pending', SYSDATETIME(), @AddedByUserId);
                 SET @RequestId = SCOPE_IDENTITY();
                 SET @Used = @Used + 1;
             END
@@ -3967,7 +4393,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_AddRequest]
         END CATCH
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_FindPendingByIdNumber]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_FindPendingByIdNumber]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -3996,7 +4422,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_FindPendingByIdNumber]
          ORDER BY r.Id DESC;
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_FindPerson]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_FindPerson]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4017,7 +4443,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_FindPerson]
          ORDER BY p.PersonId;
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4070,7 +4496,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_Get]
          ORDER BY r.Id;
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_PendingPersons]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_PendingPersons]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4093,7 +4519,7 @@ BEGIN
        AND (@BookingDetailId IS NULL OR r.BookingDetailId = @BookingDetailId);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_RemoveRequests]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_RemoveRequests]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4105,12 +4531,12 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_RemoveRequests]
     BEGIN
         SET NOCOUNT ON;
         UPDATE dbo.WN_BookingEmployeeRequests
-           SET Status = N'Removed', RemovedAt = SYSUTCDATETIME()
+           SET Status = N'Removed', RemovedAt = SYSDATETIME()
          WHERE BookingId = @BookingId AND PersonId = @PersonId AND Status IN (N'Pending', N'Verified');
         SELECT @@ROWCOUNT AS Removed;
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Reopen]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Reopen]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4125,7 +4551,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_Reopen]
          WHERE Id = @RequestId AND Status = N'Verified';
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Verify]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingEmployees_Verify]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4139,7 +4565,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_Verify]
     BEGIN
         SET NOCOUNT ON;
         UPDATE r
-           SET r.Status = N'Verified', r.VerifiedAt = SYSUTCDATETIME(), r.VerifiedById = @VerifiedById,
+           SET r.Status = N'Verified', r.VerifiedAt = SYSDATETIME(), r.VerifiedById = @VerifiedById,
                r.BookingDetailId = COALESCE(r.BookingDetailId, @BookingDetailId)
           FROM dbo.WN_BookingEmployeeRequests r
          WHERE r.Status = N'Pending'
@@ -4152,7 +4578,7 @@ CREATE   PROCEDURE [dbo].[WN_BookingEmployees_Verify]
         SELECT @@ROWCOUNT AS Verified;
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingLines_GetByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingLines_GetByBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4178,7 +4604,7 @@ BEGIN
     ORDER BY bl.Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingLines_GetTotal]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingLines_GetTotal]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4196,7 +4622,7 @@ BEGIN
     WHERE BookingId = @BookingId AND IsDeleted = 0;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingLines_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingLines_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4223,14 +4649,11 @@ BEGIN
     SELECT SCOPE_IDENTITY() AS Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingMeetingRoomEntitlements_Generate]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingMeetingRoomEntitlements_Generate]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- =========================================================================
--- 2. Stored Procedure: WN_BookingMeetingRoomEntitlements_Generate
--- =========================================================================
 CREATE   PROCEDURE [dbo].[WN_BookingMeetingRoomEntitlements_Generate]
     @BookingId INT,
     @UserId INT,
@@ -4267,7 +4690,7 @@ BEGIN
                     BookingId, UserId, MonthStartDate, MonthEndDate, AllocatedMinutes, Status, CreatedDate, CreatedById
                 )
                 VALUES (
-                    @BookingId, @UserId, @MonthStart, @MonthEnd, 360, 'Active', SYSUTCDATETIME(), @CreatedById
+                    @BookingId, @UserId, @MonthStart, @MonthEnd, 360, 'Active', SYSDATETIME(), @CreatedById
                 );
             END
 
@@ -4282,15 +4705,12 @@ BEGIN
     END CATCH
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookingMeetingRoomEntitlements_GetActive]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingMeetingRoomEntitlements_GetActive]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- =========================================================================
--- 3. Stored Procedure: WN_BookingMeetingRoomEntitlements_GetActive
--- =========================================================================
-CREATE     PROCEDURE [dbo].[WN_BookingMeetingRoomEntitlements_GetActive]
+CREATE   PROCEDURE [dbo].[WN_BookingMeetingRoomEntitlements_GetActive]
     @UserId INT,
     @Date DATE
 AS
@@ -4347,7 +4767,7 @@ BEGIN
             BookingId, UserId, MonthStartDate, MonthEndDate, AllocatedMinutes, Status, CreatedDate
         )
         VALUES (
-            @PrivateBookingId, @UserId, @MonthStart, @MonthEnd, 360, 'Active', SYSUTCDATETIME()
+            @PrivateBookingId, @UserId, @MonthStart, @MonthEnd, 360, 'Active', SYSDATETIME()
         );
     END
 
@@ -4376,12 +4796,12 @@ BEGIN
       AND e.Status = 'Active';
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Cancel]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_Cancel]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_Bookings_Cancel]
+CREATE   PROCEDURE [dbo].[WN_Bookings_Cancel]
     @Id           INT,
     @UserEmail    NVARCHAR(256) = NULL,
     @CancelReason NVARCHAR(500) = NULL,
@@ -4401,7 +4821,7 @@ BEGIN
     UPDATE dbo.WN_Bookings SET
         BookingStatusId = 86,
         CancelReason    = @CancelReason,
-        UpdatedOn       = SYSUTCDATETIME(),
+        UpdatedOn       = SYSDATETIME(),
         UpdatedById     = @UpdatedById
     WHERE Id = @Id AND IsDeleted = 0;
 
@@ -4409,12 +4829,12 @@ BEGIN
     WHERE BookingId = @Id AND StatusId = 1;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_CancelFreeMeetingRoom]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_CancelFreeMeetingRoom]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_Bookings_CancelFreeMeetingRoom]
+CREATE   PROCEDURE [dbo].[WN_Bookings_CancelFreeMeetingRoom]
     @BookingId      INT,
     @UserEmail      NVARCHAR(256) = NULL,
     @CancelReason   NVARCHAR(500) = NULL,
@@ -4428,7 +4848,7 @@ BEGIN
         UPDATE dbo.WN_Bookings
         SET BookingStatusId = 86, -- Cancelled
             CancelReason = @CancelReason,
-            UpdatedOn = SYSUTCDATETIME(),
+            UpdatedOn = SYSDATETIME(),
             UpdatedById = @UpdatedById
         WHERE Id = @BookingId AND IsFree = 1;
 
@@ -4441,7 +4861,7 @@ BEGIN
         -- Update Usage Log Status to Cancelled
         UPDATE dbo.WN_MeetingRoomUsageLogs
         SET Status = 'Cancelled',
-            CancelledDate = SYSUTCDATETIME(),
+            CancelledDate = SYSDATETIME(),
             CancelledById = @UpdatedById,
             Remarks = ISNULL(Remarks, '') + ' ' + ISNULL(@CancelReason, '')
         WHERE MeetingRoomBookingId = @BookingId;
@@ -4459,7 +4879,7 @@ BEGIN
     END CATCH
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_CheckOverlap]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_CheckOverlap]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4499,128 +4919,173 @@ BEGIN
         SELECT 0 AS IsOverlapping;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetAvailableSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetAvailableSpaces]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE   PROCEDURE [dbo].[WN_Bookings_GetAvailableSpaces]
-    @SpaceTypeId INT,
-    @StartOn     DATETIME2,
-    @EndOn       DATETIME2,
-    @Capacity    INT = NULL,
-    @ShiftType   NVARCHAR(20) = '24_7'
+(
+	 @SpaceTypeId int
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Capacity int = NULL
+	,@ShiftType nvarchar(20) = '24_7'
+)
 AS
 BEGIN
-    SET NOCOUNT ON;
-    DECLARE @NormalizedShift NVARCHAR(20) = CASE 
-        WHEN @ShiftType IS NULL OR @ShiftType = '' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
-        WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
-        WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
-        ELSE LOWER(@ShiftType)
-    END;
+	-- PRC_02: prices are WN_SpaceConfig's (the space's location + space type, else a space type of the same category
+	-- there), as WN_Bookings_Insert charges them: PricePerMonth per seat (private office, shared space; a private office's
+	-- RoomPrice = seat price x Capacity) or PricePerHour (meeting room); 0 / NULL = no price (SeatPrice / RoomPrice NULL).
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
+		WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+		WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+		ELSE LOWER(@ShiftType)
+	END;
 
-    SELECT
-        s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
-        s.LocationId AS LocationId, l.Name AS LocationName,
-        s.Capacity, s.ImageUrl,
-        vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit,
-        vp.BillingPeriodCode
-    FROM dbo.WN_Spaces    s  WITH (NOLOCK)
-    JOIN dbo.WN_Locations l  WITH (NOLOCK) ON l.Id = s.LocationId
-    OUTER APPLY (
-        SELECT TOP 1
-            sp.SeatPrice,
-            sp.SeatPrice * s.Capacity AS RoomPrice,
-            sp.SecurityDeposit,
-            bp.Code AS BillingPeriodCode
-        FROM dbo.WN_SpacePricing   sp
-        JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
-        WHERE sp.SpaceId      = s.Id
-          AND sp.IsActive     = 1
-          AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
-        ORDER BY sp.EffectiveFrom DESC
-    ) vp
-    WHERE s.IsActive        = 1
-      AND s.SpaceTypeId  = @SpaceTypeId
-      AND (@Capacity        IS NULL OR s.Capacity >= @Capacity)
-      AND NOT EXISTS (
-          SELECT 1 FROM dbo.WN_Bookings bk
-          WHERE bk.SpaceId         = s.Id
-            AND bk.IsDeleted       = 0
-            AND bk.BookingStatusId IN (1, 2, 5, 33)
-            AND @StartOn           < bk.EndOn
-            AND @EndOn             > bk.StartOn
-            AND (
-                @NormalizedShift = '24_7'
-                OR ISNULL(bk.ShiftType, '24_7') = '24_7'
-                OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
-            )
-      )
-    ORDER BY TRY_CAST(s.Code AS INT), s.Code;
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+		,vp.BillingPeriodCode
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+		(SELECT CASE WHEN sc.Code IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END AS Code) bpc OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN bpc.Code='Monthly' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN bpc.Code='Hourly' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code='PrivateOffice' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,pc.SecurityDeposit
+				,bpc.Code AS BillingPeriodCode
+		) vp
+	WHERE s.IsActive=1
+		AND s.SpaceTypeId=@SpaceTypeId
+		AND (@Capacity IS NULL OR s.Capacity >= @Capacity)
+		AND NOT EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk
+			WHERE bk.SpaceId=s.Id
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift='24_7' OR ISNULL(bk.ShiftType, '24_7')='24_7' OR @NormalizedShift=ISNULL(bk.ShiftType, '24_7'))
+		)
+	ORDER BY TRY_CAST(s.Code AS int), s.Code;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE   PROCEDURE [dbo].[WN_Bookings_GetAvailableSpacesForReassignment]
-        @SpaceTypeId      INT,
-        @StartOn          DATETIME2,
-        @EndOn            DATETIME2,
-        @ExcludeBookingId INT,
-        @ShiftType        NVARCHAR(20) = N'24_7'
-    AS
-    BEGIN
-        SET NOCOUNT ON;
-        DECLARE @NormalizedShift NVARCHAR(20) = CASE
-            WHEN @ShiftType IS NULL OR @ShiftType = '' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
-            WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
-            WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
-            ELSE LOWER(@ShiftType)
-        END;
+(
+	 @SpaceTypeId int
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@ExcludeBookingId int
+	,@ShiftType nvarchar(20) = N'24_7'
+)
+AS
+BEGIN
+	-- PRC_02: prices are WN_SpaceConfig's (the space's location + space type, else a space type of the same category
+	-- there), as WN_Bookings_Insert charges them: PricePerMonth per seat (private office, shared space; a private office's
+	-- RoomPrice = seat price x Capacity) or PricePerHour (meeting room); 0 / NULL = no price (SeatPrice / RoomPrice NULL).
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
+		WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+		WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+		ELSE LOWER(@ShiftType)
+	END;
 
-        SELECT
-            s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
-            s.LocationId AS LocationId, l.Name AS LocationName,
-            s.Capacity, s.ImageUrl,
-            vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit
-        FROM dbo.WN_Spaces    s  WITH (NOLOCK)
-        JOIN dbo.WN_Locations l  WITH (NOLOCK) ON l.Id = s.LocationId
-        OUTER APPLY (
-            SELECT TOP 1
-                sp.SeatPrice,
-                sp.SeatPrice * s.Capacity AS RoomPrice,
-                sp.SecurityDeposit
-            FROM dbo.WN_SpacePricing sp
-            WHERE sp.SpaceId      = s.Id
-              AND sp.IsActive     = 1
-              AND sp.EffectiveFrom <= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)
-              AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))
-            ORDER BY sp.EffectiveFrom DESC
-        ) vp
-        WHERE s.IsActive       = 1
-          AND s.SpaceTypeId = @SpaceTypeId
-          AND NOT EXISTS (
-              SELECT 1 FROM dbo.WN_Bookings bk
-              WHERE bk.SpaceId         = s.Id
-                AND bk.IsDeleted       = 0
-                AND bk.BookingStatusId IN (1, 2, 5, 33)
-                AND bk.Id             <> @ExcludeBookingId
-                AND @StartOn           < bk.EndOn
-                AND @EndOn             > bk.StartOn
-                AND (
-                    @NormalizedShift = '24_7'
-                    OR ISNULL(bk.ShiftType, '24_7') = '24_7'
-                    OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
-                )
-          )
-        ORDER BY TRY_CAST(s.Code AS INT), s.Code;
-    END
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+		(SELECT CASE WHEN sc.Code IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END AS Code) bpc OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN bpc.Code='Monthly' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN bpc.Code='Hourly' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code='PrivateOffice' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,pc.SecurityDeposit
+		) vp
+	WHERE s.IsActive=1
+		AND s.SpaceTypeId=@SpaceTypeId
+		AND NOT EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk
+			WHERE bk.SpaceId=s.Id
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND bk.Id <> @ExcludeBookingId
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift='24_7' OR ISNULL(bk.ShiftType, '24_7')='24_7' OR @NormalizedShift=ISNULL(bk.ShiftType, '24_7'))
+		)
+	ORDER BY TRY_CAST(s.Code AS int), s.Code;
+END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByChallan]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByChallan]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4672,7 +5137,7 @@ BEGIN
     WHERE b.ChallanNumber = @ChallanNumber;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByGuid]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByGuid]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4724,7 +5189,7 @@ BEGIN
     WHERE CAST(b.IdGUID AS NVARCHAR(36)) = @IdGUID;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByPublicId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetByPublicId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4746,7 +5211,7 @@ BEGIN
       AND (@UserEmail IS NULL OR v.UserEmail = @UserEmail OR v.CustomerEmail = @UserEmail);
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetBySpaceGuid]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetBySpaceGuid]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4781,7 +5246,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetCalendar]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetCalendar]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4812,7 +5277,23 @@ BEGIN
     ORDER BY b.StartOn;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetDatesAndStatus]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 7. dbo.WN_Bookings_GetDatesAndStatus
+CREATE   PROCEDURE [dbo].[WN_Bookings_GetDatesAndStatus]
+    @BookingId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT StartOn, EndOn, BookingStatusId 
+    FROM dbo.WN_Bookings WITH (NOLOCK) 
+    WHERE Id = @BookingId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4853,7 +5334,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetListByUserId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetListByUserId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4886,7 +5367,7 @@ BEGIN
     ORDER BY b.BookingDate DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetListFiltered]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4934,7 +5415,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetMyList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetMyList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4961,7 +5442,7 @@ BEGIN
     ORDER BY v.BookedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetRecent]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetRecent]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -4987,532 +5468,800 @@ BEGIN
     ORDER BY v.BookedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetSmartAvailable]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_GetSmartAvailable]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE   PROCEDURE [dbo].[WN_Bookings_GetSmartAvailable]
-    @CategoryCode NVARCHAR(30),
-    @StartOn      DATETIME2,
-    @EndOn        DATETIME2,
-    @Capacity     INT = NULL,
-    @ShiftType    NVARCHAR(20) = N'24_7',
-    @LocationId   INT = NULL   -- QA_03: only this location's spaces (NULL = every location, as before)
+(
+	 @CategoryCode nvarchar(30)
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Capacity int = NULL
+	,@ShiftType nvarchar(20) = N'24_7'
+	,@LocationId int = NULL
+)
 AS
 BEGIN
-    -- Spaces of a category free for the whole period. QA_03: @LocationId; Bookable = 1 when the space has an active
-    -- price for the period WN_Bookings_InsertSmart books it by (Monthly for PrivateOffice / SharedSpace, Hourly
-    -- otherwise); bookable spaces come first, in the order WN_Bookings_InsertSmart picks them (smallest first), so the
-    -- first Bookable row is the space a booking for this period would get. The listed price prefers that period.
-    SET NOCOUNT ON;
-    DECLARE @NormalizedShift NVARCHAR(20) = CASE
-        WHEN @ShiftType IS NULL OR @ShiftType = '' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
-        WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
-        WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
-        ELSE LOWER(@ShiftType)
-    END;
-    DECLARE @TodayPk DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
-    DECLARE @BookingPeriodCode NVARCHAR(20) = CASE WHEN @CategoryCode IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END;
-    SELECT
-        s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
-        s.LocationId AS LocationId, l.Name AS LocationName,
-        s.SpaceTypeId AS SpaceTypeId, st.Name AS SpaceTypeName,
-        sc.Code AS CategoryCode, sc.Label AS CategoryLabel,
-        s.Capacity, s.ImageUrl,
-        vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit,
-        vp.BillingPeriodCode,
-        CAST(CASE WHEN vp.BillingPeriodCode = @BookingPeriodCode THEN 1 ELSE 0 END AS BIT) AS Bookable
-    FROM dbo.WN_Spaces          s  WITH (NOLOCK)
-    JOIN dbo.WN_Locations       l  WITH (NOLOCK) ON l.Id  = s.LocationId
-    JOIN dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-    JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-    OUTER APPLY (
-        SELECT TOP 1
-            sp.SeatPrice,
-            sp.SeatPrice * s.Capacity AS RoomPrice,
-            sp.SecurityDeposit,
-            bp.Code AS BillingPeriodCode
-        FROM dbo.WN_SpacePricing   sp WITH (NOLOCK)
-        JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = sp.BillingPeriodId
-        WHERE sp.SpaceId       = s.Id
-          AND sp.IsActive      = 1
-          AND sp.EffectiveFrom <= @TodayPk
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > @TodayPk)
-        ORDER BY CASE WHEN bp.Code = @BookingPeriodCode THEN 0 ELSE 1 END, sp.EffectiveFrom DESC
-    ) vp
-    WHERE s.IsActive  = 1
-      AND sc.Code     = @CategoryCode
-      AND (@LocationId IS NULL OR s.LocationId = @LocationId)
-      AND (@Capacity  IS NULL OR s.Capacity >= @Capacity)
-      AND NOT EXISTS (
-          SELECT 1 FROM dbo.WN_Bookings bk WITH (NOLOCK)
-          WHERE bk.SpaceId         = s.Id
-            AND bk.IsDeleted       = 0
-            AND bk.BookingStatusId IN (1, 2, 5, 33)
-            AND @StartOn           < bk.EndOn
-            AND @EndOn             > bk.StartOn
-            AND (
-                @NormalizedShift = '24_7'
-                OR ISNULL(bk.ShiftType, '24_7') = '24_7'
-                OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
-            )
-      )
-    ORDER BY CASE WHEN vp.BillingPeriodCode = @BookingPeriodCode THEN 0 ELSE 1 END,
-             s.Capacity ASC, TRY_CAST(s.Code AS INT), s.Code;
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
+		WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+		WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+		ELSE LOWER(@ShiftType)
+	END;
+	DECLARE @TodayPk date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date);
+	DECLARE @BookingPeriodCode nvarchar(20) = CASE WHEN @CategoryCode IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END;
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.SpaceTypeId AS SpaceTypeId
+		,st.Name AS SpaceTypeName
+		,sc.Code AS CategoryCode
+		,sc.Label AS CategoryLabel
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+		,vp.BillingPeriodCode
+		,CAST(CASE WHEN vp.SeatPrice > 0 THEN 1 ELSE 0 END AS bit) AS Bookable
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN @BookingPeriodCode='Monthly' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN @BookingPeriodCode='Hourly' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code='PrivateOffice' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,CASE
+					WHEN pc.SecurityDeposit > 0 THEN pc.SecurityDeposit
+					WHEN sc.Code IN ('PrivateOffice', 'Private') AND pp.SeatPrice > 0 THEN pp.SeatPrice * s.Capacity * 2
+					ELSE 0
+				 END AS SecurityDeposit
+				,@BookingPeriodCode AS BillingPeriodCode
+		) vp
+	WHERE s.IsActive=1
+		AND sc.Code=@CategoryCode
+		AND (@LocationId IS NULL OR s.LocationId=@LocationId)
+		AND (@Capacity IS NULL OR s.Capacity >= @Capacity)
+		AND NOT EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk WITH (NOLOCK)
+			WHERE bk.SpaceId=s.Id
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift='24_7' OR ISNULL(bk.ShiftType, '24_7')='24_7' OR @NormalizedShift=ISNULL(bk.ShiftType, '24_7'))
+		)
+	ORDER BY CASE WHEN vp.SeatPrice > 0 THEN 0 ELSE 1 END, s.Capacity ASC, TRY_CAST(s.Code AS int), s.Code;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE   PROCEDURE [dbo].[WN_Bookings_Insert]
-    @UserId                INT           = NULL,
-    @SpaceId               INT,
-    @PricingId             INT           = 0,
-    @StartOn               DATETIME2,
-    @EndOn                 DATETIME2,
-    @Notes                 NVARCHAR(MAX) = NULL,
-    @CreatedById           INT           = NULL,
-    @UserEmail             NVARCHAR(255) = NULL,
-    @CustomerEmail         NVARCHAR(255) = NULL,
-    @CustomerFirstName     NVARCHAR(100) = NULL,
-    @CustomerLastName      NVARCHAR(100) = NULL,
-    @CustomerPhone         NVARCHAR(50)  = NULL,
-    @CustomerCnic          NVARCHAR(50)  = NULL,
-    @CustomerAddress       NVARCHAR(500) = NULL,
-    @CustomerCityId        INT           = NULL,
-    @CustomerNotes         NVARCHAR(MAX) = NULL,
-    @DiscountPercentage    DECIMAL(5,2)  = 0.0,
-    @DiscountAmount        DECIMAL(18,2) = 0.0,
-    @DiscountType          NVARCHAR(20)  = 'Percentage',
-    @BillingPeriodMonths   INT           = NULL,
-    @SecurityDepositMonths INT           = NULL,
-    @AdvanceRentMonths     INT           = NULL,
-    @SupportChargesId      TINYINT       = NULL,
-    @Capacity              INT           = NULL,
-    @OverrideDuration      DECIMAL(18,2) = NULL,
-    @OverrideSubtotal      DECIMAL(18,2) = NULL,
-    @OverrideUnitPrice     DECIMAL(18,2) = NULL,
-    @CustomerCode          NVARCHAR(50)  = NULL,
-    @ShiftType             NVARCHAR(20)  = '24_7',
-    @PerSeatBasePrice      DECIMAL(18,2) = NULL,
-    @SecurityDepositAmount DECIMAL(18,2) = NULL   -- SD_01: a saved deposit amount (quotation conversion); more than 0 wins
+(
+	 @UserId int = NULL
+	,@SpaceId int
+	,@PricingId int = 0
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Notes nvarchar(MAX) = NULL
+	,@CreatedById int = NULL
+	,@UserEmail nvarchar(255) = NULL
+	,@CustomerEmail nvarchar(255) = NULL
+	,@CustomerFirstName nvarchar(100) = NULL
+	,@CustomerLastName nvarchar(100) = NULL
+	,@CustomerPhone nvarchar(50) = NULL
+	,@CustomerCnic nvarchar(50) = NULL
+	,@CustomerAddress nvarchar(500) = NULL
+	,@CustomerCityId int = NULL
+	,@CustomerNotes nvarchar(MAX) = NULL
+	,@DiscountPercentage decimal(5, 2) = 0.0
+	,@DiscountAmount decimal(18, 2) = 0.0
+	,@DiscountType nvarchar(20) = 'Percentage'
+	,@BillingPeriodMonths int = NULL
+	,@SecurityDepositMonths int = NULL
+	,@AdvanceRentMonths int = NULL
+	,@SupportChargesId tinyint = NULL
+	,@Capacity int = NULL
+	,@OverrideDuration decimal(18, 2) = NULL
+	,@OverrideSubtotal decimal(18, 2) = NULL
+	,@OverrideUnitPrice decimal(18, 2) = NULL
+	,@CustomerCode nvarchar(50) = NULL
+	,@ShiftType nvarchar(20) = '24_7'
+	,@PerSeatBasePrice decimal(18, 2) = NULL
+	,@SecurityDepositAmount decimal(18, 2) = NULL
+)
 AS
 BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
-    BEGIN TRANSACTION;
-    BEGIN TRY
-        DECLARE @NormalizedShift NVARCHAR(20) = CASE
-            WHEN @ShiftType IS NULL OR @ShiftType = '' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
-            WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
-            WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
-            ELSE LOWER(@ShiftType)
-        END;
-        -- SD_01: security deposit months are 0, 1, 2 or 3
-        IF @SecurityDepositMonths IS NOT NULL AND (@SecurityDepositMonths < 0 OR @SecurityDepositMonths > 3)
-            RAISERROR('Security deposit must be 0, 1, 2 or 3 months.', 16, 1);
-        IF EXISTS (
-            SELECT 1 FROM dbo.WN_Bookings bk WITH (UPDLOCK, HOLDLOCK)
-            WHERE bk.SpaceId = @SpaceId
-              AND bk.IsDeleted = 0
-              AND bk.BookingStatusId IN (1, 2, 5, 33)
-              AND @StartOn < bk.EndOn
-              AND @EndOn > bk.StartOn
-              AND (
-                  @NormalizedShift = '24_7'
-                  OR ISNULL(bk.ShiftType, '24_7') = '24_7'
-                  OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
-              )
-        )
-        BEGIN
-            ROLLBACK TRANSACTION;
-            SELECT NULL AS BookingId, NULL AS BookingPublicId,
-                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
-                   'Space is already booked for the selected date range and shift.' AS ErrorMessage;
-            RETURN;
-        END
-        IF @UserId IS NULL
-        BEGIN
-            IF @UserEmail IS NOT NULL AND @UserEmail <> ''
-            BEGIN
-                SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email = @UserEmail;
-            END
-            IF @UserId IS NULL AND @CustomerEmail IS NOT NULL AND @CustomerEmail <> ''
-            BEGIN
-                SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email = @CustomerEmail;
-                IF @UserId IS NULL
-                BEGIN
-                    SELECT TOP 1 @UserId = UserId FROM dbo.WN_Customers WHERE Email = @CustomerEmail;
-                END
-            END
-        END
-        IF @CustomerCode IS NULL AND @UserId IS NOT NULL
-        BEGIN
-            SELECT TOP 1 @CustomerCode = Code FROM dbo.WN_Customers WHERE UserId = @UserId;
-        END
-        IF @CustomerCode IS NULL AND @UserId IS NOT NULL
-        BEGIN
-            SELECT TOP 1 @CustomerCode = c.Code
-            FROM dbo.WN_Customers c
-            JOIN dbo.WN_Users u ON LOWER(LTRIM(RTRIM(u.Email))) = LOWER(LTRIM(RTRIM(c.Email)))
-            WHERE u.Id = @UserId AND c.Email IS NOT NULL AND LTRIM(RTRIM(c.Email)) <> '';
-        END
-        IF @CustomerCode IS NULL AND COALESCE(NULLIF(LTRIM(RTRIM(@CustomerEmail)), ''), NULLIF(LTRIM(RTRIM(@UserEmail)), '')) IS NOT NULL
-        BEGIN
-            SELECT TOP 1 @CustomerCode = Code
-            FROM dbo.WN_Customers
-            WHERE LOWER(LTRIM(RTRIM(Email))) = LOWER(COALESCE(NULLIF(LTRIM(RTRIM(@CustomerEmail)), ''), NULLIF(LTRIM(RTRIM(@UserEmail)), '')));
-        END
-        DECLARE @CategoryCode NVARCHAR(50) = NULL;
-        DECLARE @LocationId INT = NULL;
-        DECLARE @BillingPeriodCode NVARCHAR(20) = 'Monthly';
-        DECLARE @SeatPrice DECIMAL(18,2) = 0.0;
-        DECLARE @SecurityDeposit DECIMAL(18,2) = 0.0;
-        DECLARE @AccountReceivableId INT = NULL;
-        DECLARE @RentAccountId INT = NULL;
-        DECLARE @ServicesIncomeId INT = NULL;
-        DECLARE @SalesTaxId INT = NULL;
-        DECLARE @SecurityReceivedId INT = NULL;
-        DECLARE @ResolvedPricingId INT = @PricingId;
-        SELECT TOP 1
-            @CategoryCode        = sc.Code,
-            @LocationId          = s.LocationId,
-            @BillingPeriodCode   = ISNULL(bp.Code, 'Monthly'),
-            @SeatPrice           = ISNULL(s.Price, 0.0),
-            @AccountReceivableId = COALESCE(s.AccountReceivableId, st.AccountReceivableId),
-            @RentAccountId       = COALESCE(s.RentAccountId, st.RentAccountId),
-            @ServicesIncomeId    = COALESCE(s.ServicesIncomeId, st.ServicesIncomeId),
-            @SalesTaxId          = COALESCE(s.SalesTaxId, st.SalesTaxId),
-            @SecurityReceivedId  = COALESCE(s.SecurityReceivedId, st.SecurityReceivedId, s.SecurityRecivedId)
-        FROM dbo.WN_Spaces s WITH (NOLOCK)
-        JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-        JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-        LEFT JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = s.BillingPeriodId
-        WHERE s.Id = @SpaceId;
-        IF @PerSeatBasePrice IS NOT NULL AND @PerSeatBasePrice > @SeatPrice
-            SET @SeatPrice = @PerSeatBasePrice;
-        IF (@RentAccountId IS NULL OR @SecurityReceivedId IS NULL OR @AccountReceivableId IS NULL OR @SalesTaxId IS NULL OR @ServicesIncomeId IS NULL)
-        BEGIN
-            SELECT TOP 1
-                @AccountReceivableId = COALESCE(@AccountReceivableId, cfg.AccountReceivableId),
-                @RentAccountId       = COALESCE(@RentAccountId, cfg.RentAccountId),
-                @ServicesIncomeId    = COALESCE(@ServicesIncomeId, cfg.ServicesIncomeId),
-                @SalesTaxId          = COALESCE(@SalesTaxId, cfg.SalesTaxId),
-                @SecurityReceivedId  = COALESCE(@SecurityReceivedId, cfg.SecurityReceivedId)
-            FROM dbo.WN_SpaceConfig cfg WITH (NOLOCK)
-            WHERE cfg.SpaceTypeId = (SELECT SpaceTypeId FROM dbo.WN_Spaces WHERE Id = @SpaceId)
-              AND (cfg.LocationId = @LocationId OR cfg.LocationId IS NULL)
-            ORDER BY CASE WHEN cfg.LocationId = @LocationId THEN 0 ELSE 1 END;
-        END
-        IF @RentAccountId IS NULL
-            SELECT TOP 1 @RentAccountId = RentAccountId
-            FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
-            WHERE ChargeTypeId = 1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
-        IF @SecurityReceivedId IS NULL
-            SELECT TOP 1 @SecurityReceivedId = SecurityReceivedId
-            FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
-            WHERE ChargeTypeId = 2 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
-        IF @SalesTaxId IS NULL
-            SELECT TOP 1 @SalesTaxId = SalesTaxId
-            FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
-            WHERE ChargeTypeId = 3 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
-        IF @ServicesIncomeId IS NULL
-            SELECT TOP 1 @ServicesIncomeId = ServicesIncomeId
-            FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
-            WHERE ChargeTypeId = 4 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
-        IF @AccountReceivableId IS NULL
-            SELECT TOP 1 @AccountReceivableId = AccountReceivableId
-            FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
-            WHERE ChargeTypeId = 1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));
-        DECLARE @Duration DECIMAL(18,2) = 1.0;
-        DECLARE @RentAmount DECIMAL(18,2) = 0.0;
-        DECLARE @AdvMonths INT = 1;
-        DECLARE @SecMonths INT = 0;
-        DECLARE @BillPeriodMonths INT = 1;
-        IF @BillingPeriodCode = 'Daily'
-        BEGIN
-            SET @Duration = CAST(DATEDIFF(day, @StartOn, @EndOn) AS DECIMAL(18,2));
-            IF @Duration <= 0 SET @Duration = 1.0;
-            SET @RentAmount = @SeatPrice * @Duration * ISNULL(@Capacity, 1);
-            SET @AdvMonths = 0;
-            SET @SecMonths = 0;
-            SET @BillPeriodMonths = 0;
-        END
-        ELSE IF @BillingPeriodCode = 'Hourly'
-        BEGIN
-            SET @Duration = CAST(DATEDIFF(hour, @StartOn, @EndOn) AS DECIMAL(18,2));
-            IF @Duration <= 0 SET @Duration = 1.0;
-            SET @RentAmount = @SeatPrice * @Duration * ISNULL(@Capacity, 1);
-            SET @AdvMonths = 0;
-            SET @SecMonths = 0;
-            SET @BillPeriodMonths = 0;
-        END
-        ELSE
-        BEGIN
-            IF @BillingPeriodMonths IS NOT NULL AND @BillingPeriodMonths > 0
-                SET @Duration = CAST(@BillingPeriodMonths AS DECIMAL(18,2));
-            ELSE
-                SET @Duration = CAST(DATEDIFF(month, @StartOn, @EndOn) AS DECIMAL(18,2));
-            IF @Duration <= 0 SET @Duration = 1.0;
-            IF @CategoryCode IN ('PrivateOffice', 'Private')
-            BEGIN
-                SET @RentAmount = @SeatPrice * ISNULL(@Capacity, 1) * ISNULL(@AdvanceRentMonths, 1);
-            END
-            ELSE
-            BEGIN
-                SET @RentAmount = @SeatPrice * ISNULL(@AdvanceRentMonths, 1);
-            END
-            SET @AdvMonths = ISNULL(@AdvanceRentMonths, 1);
-            -- SD_01: only a private office has deposit months (shared desks: 0), unless a saved amount comes with them
-            SET @SecMonths = CASE WHEN @CategoryCode IN ('PrivateOffice', 'Private') OR ISNULL(@SecurityDepositAmount, 0) > 0
-                                  THEN ISNULL(@SecurityDepositMonths, 0) ELSE 0 END;
-            SET @BillPeriodMonths = ISNULL(@BillingPeriodMonths, 1);
-        END
-        IF @OverrideDuration IS NOT NULL AND @OverrideDuration > 0
-            SET @Duration = @OverrideDuration;
-        IF @OverrideSubtotal IS NOT NULL AND @OverrideSubtotal > 0
-            SET @RentAmount = @OverrideSubtotal;
-        DECLARE @MonthlyRent DECIMAL(18,2) = 0.0;
-        IF @CategoryCode IN ('PrivateOffice', 'Private')
-            SET @MonthlyRent = @SeatPrice * ISNULL(@Capacity, 1);
-        ELSE
-            SET @MonthlyRent = @SeatPrice;
-        IF (@MonthlyRent <= 0 OR @MonthlyRent IS NULL) AND @OverrideSubtotal IS NOT NULL AND @OverrideSubtotal > 0 AND ISNULL(@AdvMonths, 1) > 0
-        BEGIN
-            SET @MonthlyRent = ROUND(@OverrideSubtotal / ISNULL(@AdvMonths, 1), 2);
-        END
-        -- SD_01: the security deposit is worked out after the rent discount (below), from the months only.
-        DECLARE @DiscountAmt DECIMAL(18,2) = ISNULL(@DiscountAmount, 0);
-        IF @DiscountAmt <= 0 AND ISNULL(@DiscountPercentage, 0) > 0
-            SET @DiscountAmt = ROUND(@RentAmount * (@DiscountPercentage / 100.0), 2);
-        ELSE IF @DiscountAmt > 0 AND ISNULL(@DiscountPercentage, 0) <= 0 AND @RentAmount > 0
-            SET @DiscountPercentage = ROUND((@DiscountAmt / @RentAmount) * 100.0, 2);
-        DECLARE @DiscountOnRent DECIMAL(18,2) = 0.00;
-        DECLARE @DiscountOnDeposit DECIMAL(18,2) = 0.00;   -- SD_01: stays 0 (the discount no longer spills onto the deposit)
-        IF @DiscountAmt > 0
-            SET @DiscountOnRent = CASE WHEN @DiscountAmt <= @RentAmount THEN @DiscountAmt ELSE @RentAmount END;   -- SD_01
-        -- SD_01: security deposit = months x monthly rent x (1 - the discount the rent gets), 2 decimals. A fixed discount
-        -- counts as its share of the rent it was taken off. A saved amount (@SecurityDepositAmount, from the quotation)
-        -- wins. No deposit for daily / hourly bookings, shared desks or 0 months.
-        DECLARE @DepositDiscountFraction DECIMAL(18,10) = CASE
-            WHEN ISNULL(@DiscountAmount, 0) <= 0 AND ISNULL(@DiscountPercentage, 0) > 0 THEN @DiscountPercentage / 100.0
-            WHEN @RentAmount > 0 THEN @DiscountOnRent / @RentAmount
-            ELSE 0 END;
-        IF @DepositDiscountFraction > 1 SET @DepositDiscountFraction = 1;
-        IF @DepositDiscountFraction < 0 SET @DepositDiscountFraction = 0;
-        SET @SecurityDeposit = CASE
-            WHEN @BillingPeriodCode IN ('Daily', 'Hourly') THEN 0.00
-            WHEN ISNULL(@SecurityDepositAmount, 0) > 0 THEN ROUND(@SecurityDepositAmount, 2)
-            WHEN @SecMonths > 0 THEN ROUND(@MonthlyRent * @SecMonths * (1.0 - @DepositDiscountFraction), 2)
-            ELSE 0.00 END;
-        DECLARE @DiscountedRent DECIMAL(18,2) = @RentAmount - @DiscountOnRent;
-        DECLARE @DiscountedDeposit DECIMAL(18,2) = @SecurityDeposit - @DiscountOnDeposit;
-        DECLARE @TotalDiscountAmount DECIMAL(18,2) = @DiscountOnRent + @DiscountOnDeposit;
-        -- Tax & Support Charges Calculation
-        DECLARE @SupportChargeAmount DECIMAL(18,2) = 0.00;
-        DECLARE @TaxAmount DECIMAL(18,2) = 0.00;
-        DECLARE @AppliedChargePercentage DECIMAL(5,2) = 0.00;
-        DECLARE @AppliedTaxPercentage DECIMAL(5,2) = 0.00;
-        IF @SupportChargesId IS NOT NULL AND @CategoryCode IN ('PrivateOffice', 'Private')
-        BEGIN
-            DECLARE @ChargePercentage DECIMAL(5,2);
-            DECLARE @TaxApplicable BIT = 0;
-            DECLARE @ProvinceId INT = NULL;
-            SELECT TOP 1 @ProvinceId = loc.ProvinceId
-            FROM dbo.WN_Locations loc WITH (NOLOCK)
-            WHERE loc.Id = @LocationId;
-            DECLARE @BookingDateAnchor DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
-            SELECT TOP 1 @ChargePercentage = ChargePercentage
-            FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
-            WHERE ChargeTypeId = @SupportChargesId
-              AND StartDate <= @BookingDateAnchor
-              AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
-            ORDER BY StartDate DESC;
-            IF @ChargePercentage IS NULL SET @ChargePercentage = 10.00;
-            SET @AppliedChargePercentage = @ChargePercentage;
-            SET @SupportChargeAmount = ROUND(@RentAmount * (@ChargePercentage / 100.0), 2);
-            IF @ProvinceId IS NOT NULL
-            BEGIN
-                SELECT TOP 1 @TaxApplicable = ISNULL(TaxApplicable, 0)
-                FROM dbo.WN_ProvinceChargeTypeTax WITH (NOLOCK)
-                WHERE ProvinceId = @ProvinceId AND ChargeTypeId = @SupportChargesId;
-                IF @TaxApplicable = 1
-                BEGIN
-                    SELECT TOP 1 @AppliedTaxPercentage = ISNULL(TaxPercentage, 16.00)
-                    FROM dbo.WN_Tax WITH (NOLOCK)
-                    WHERE ProvinceId = @ProvinceId
-                      AND StartDate <= @BookingDateAnchor
-                      AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
-                    ORDER BY StartDate DESC;
-                END
-                ELSE
-                BEGIN
-                    SET @AppliedTaxPercentage = 0.00;
-                END
-            END
-            ELSE
-            BEGIN
-                SET @TaxApplicable = 0;
-                SET @AppliedTaxPercentage = 0.00;
-            END
-            IF @TaxApplicable = 1 AND @AppliedTaxPercentage > 0
-            BEGIN
-                SET @TaxAmount = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
-            END
-            ELSE
-            BEGIN
-                SET @TaxAmount = 0.00;
-            END
-        END
-        DECLARE @TotalAmount DECIMAL(18,2) = @DiscountedRent + @DiscountedDeposit + @SupportChargeAmount + @TaxAmount;
-        DECLARE @ChallanNum NVARCHAR(50) = 'WN-' + CONVERT(NVARCHAR(8), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)), 112) + '-' + RIGHT(CAST(ABS(CHECKSUM(NEWID())) AS NVARCHAR(10)), 4);
-        DECLARE @ChallanTries INT = 0;
-        WHILE EXISTS (SELECT 1 FROM dbo.WN_Challans WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber = @ChallanNum)
-           OR EXISTS (SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber = @ChallanNum)
-        BEGIN
-            SET @ChallanTries = @ChallanTries + 1;
-            IF @ChallanTries > 200 THROW 50020, 'Could not generate a unique challan number. Please try again.', 1;
-            SET @ChallanNum = LEFT(@ChallanNum, 12) + RIGHT('0000' + CAST(ABS(CHECKSUM(NEWID())) % 10000 AS NVARCHAR(4)), 4);
-        END
-        DECLARE @ChallanValidUntil DATETIME2 = DATEADD(day, 7, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)));
-        DECLARE @CreatedByGuid UNIQUEIDENTIFIER = NULL;
-        IF @CreatedById IS NOT NULL
-            SELECT @CreatedByGuid = IdGUID FROM dbo.WN_Users WHERE Id = @CreatedById;
-        -- Insert Booking with all 5 Account Mapping columns
-        INSERT INTO dbo.WN_Bookings (
-            IdGUID, BookingDate, CustomerCode,
-            RentAccountId, SecurityRecivedId, SecurityReceivedId, AccountReceivableId, ServicesIncomeId, SalesTaxId,
-            Notes, RejectReason, CreatedOn, UpdatedOn, TransactionDate,
-            ChallanNumber, ValidityDate, UserId, SpaceId, PricingId,
-            StartOn, EndOn, BookingStatusId, CancelReason, IsDeleted, CreatedById, UpdatedById,
-            DiscountPercentage, DiscountAmount, DiscountType, SubtotalAmount, TotalAmount,
-            MonthlyRent, BillingPeriodMonths, AdvanceRentMonths, SecurityDepositMonths, SecurityDepositRequired, SecurityDepositPaid,
-            ShiftType, Capacity   -- CP_02: the booking's seats
-        )
-        VALUES (
-            NEWID(), SYSUTCDATETIME(), @CustomerCode,
-            @RentAccountId, @SecurityReceivedId, @SecurityReceivedId, @AccountReceivableId, @ServicesIncomeId, @SalesTaxId,
-            @Notes, NULL, SYSUTCDATETIME(), NULL, SYSUTCDATETIME(),
-            @ChallanNum, @ChallanValidUntil, @UserId, @SpaceId, @ResolvedPricingId,
-            @StartOn, @EndOn, 5, NULL, 0, @CreatedById, NULL,
-            @DiscountPercentage, @TotalDiscountAmount, ISNULL(@DiscountType, 'Percentage'), @RentAmount, @TotalAmount,
-            @MonthlyRent, @BillPeriodMonths, @AdvMonths, @SecMonths, @SecurityDeposit, 0.00,
-            @NormalizedShift, CASE WHEN @Capacity > 0 THEN @Capacity END   -- CP_02
-        );
-        DECLARE @BookingId INT = SCOPE_IDENTITY();
-        DECLARE @BookingGuid UNIQUEIDENTIFIER;
-        SELECT @BookingGuid = IdGUID FROM dbo.WN_Bookings WHERE Id = @BookingId;
-        DECLARE @SpaceName NVARCHAR(255), @SpaceCode NVARCHAR(50), @SpaceCategory NVARCHAR(50);
-        SELECT TOP 1 @SpaceName = s.Name, @SpaceCode = s.Code, @SpaceCategory = sc.Label
-        FROM dbo.WN_Spaces s WITH (NOLOCK)
-        JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-        JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-        WHERE s.Id = @SpaceId;
-        DECLARE @CustomerFullName NVARCHAR(255) = RTRIM(LTRIM(ISNULL(@CustomerFirstName, '') + ' ' + ISNULL(@CustomerLastName, '')));
-        IF @CustomerFullName = '' SET @CustomerFullName = ISNULL(@CustomerEmail, 'Customer');
-        EXEC dbo.WN_BookingDetails_Insert
-            @BookingGuid             = @BookingGuid,
-            @CustomerCode            = @CustomerCode,
-            @CustomerName            = @CustomerFullName,
-            @CustomerEmail           = @CustomerEmail,
-            @SpaceName               = @SpaceName,
-            @SpaceCode               = @SpaceCode,
-            @SpaceCategory           = @SpaceCategory,
-            @StartDateTime           = @StartOn,
-            @EndDateTime             = @EndOn,
-            @RentAmount              = @RentAmount,
-            @SecurityDeposit         = @SecurityDeposit,
-            @RentAccountId           = @RentAccountId,
-            @DepositAccountId        = @SecurityReceivedId,
-            @Notes                   = @Notes,
-            @SupportChargesId        = @SupportChargesId,
-            @AppliedChargePercentage = @AppliedChargePercentage,
-            @AppliedTaxPercentage    = @AppliedTaxPercentage,
-            @SupportChargeAmount     = @SupportChargeAmount,
-            @TaxAmount               = @TaxAmount,
-            @AccountReceivableId     = @AccountReceivableId,
-            @ServicesIncomeId        = @ServicesIncomeId,
-            @SalesTaxId              = @SalesTaxId,
-            @SecurityReceivedId      = @SecurityReceivedId;
-        INSERT INTO dbo.WN_Challans
-            (BookingId, ChallanNumber, ValidUntil, StatusId, CreatedById)
-        VALUES
-            (@BookingId, @ChallanNum, @ChallanValidUntil, 1, @CreatedById);
-        DECLARE @UnitPrice DECIMAL(18,2);
-        IF @OverrideUnitPrice IS NOT NULL AND @OverrideUnitPrice > 0
-            SET @UnitPrice = @OverrideUnitPrice;
-        ELSE IF @CategoryCode IN ('PrivateOffice', 'Private')
-            SET @UnitPrice = @SeatPrice * ISNULL(@Capacity, 1);
-        ELSE
-            SET @UnitPrice = @SeatPrice;
-        DECLARE @EffectiveRentQuantity DECIMAL(18,2) = CASE
-            WHEN @BillingPeriodCode = 'Monthly' AND ISNULL(@AdvMonths, 0) > 0 THEN CAST(@AdvMonths AS DECIMAL(18,2))
-            WHEN ISNULL(@Duration, 0) > 0 THEN @Duration
-            ELSE 1.0
-        END;
-        IF @EffectiveRentQuantity <= 0 SET @EffectiveRentQuantity = 1.0;
-        DECLARE @EffectiveSecMonths DECIMAL(18,2) = CASE WHEN ISNULL(@SecMonths, 0) > 0 THEN CAST(@SecMonths AS DECIMAL(18,2)) ELSE 1.0 END;
-        -- SD_01: deposit line = months x (deposit / months), no line discount (the deposit already has the rent discount)
-        DECLARE @EffectiveDepositUnitPrice DECIMAL(18,4) = CASE WHEN ISNULL(@SecMonths, 0) > 0 THEN ROUND(@SecurityDeposit / @SecMonths, 4) ELSE @SecurityDeposit END;
-        INSERT INTO dbo.WN_BookingLines
-            (BookingId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, IsDeleted, CreatedOn, CreatedById,
-             AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, SecurityReceivedId)
-        VALUES
-            (@BookingId, 1, 'Room Rent', @EffectiveRentQuantity, @UnitPrice, @DiscountOnRent, 0.0000, @RentAccountId, 0, SYSUTCDATETIME(), @CreatedById,
-             @AccountReceivableId, @RentAccountId, @ServicesIncomeId, @SalesTaxId, @SecurityReceivedId);
-        IF @SecurityDeposit > 0
-        BEGIN
-            INSERT INTO dbo.WN_BookingLines
-                (BookingId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, IsDeleted, CreatedOn, CreatedById,
-                 AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, SecurityReceivedId)
-            VALUES
-                (@BookingId, 2, 'Security Deposit (Refundable)', @EffectiveSecMonths, @EffectiveDepositUnitPrice, @DiscountOnDeposit, 0.0000, @SecurityReceivedId, 0, SYSUTCDATETIME(), @CreatedById,
-                 @AccountReceivableId, @RentAccountId, @ServicesIncomeId, @SalesTaxId, @SecurityReceivedId);
-            INSERT INTO dbo.WN_SecurityDeposits
-                (BookingId, UserId, Amount, AccountId, StatusId, Notes, UpdatedById, SecurityReceivedId,
-                 AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, CustomerId, RefId, RefNo)
-            VALUES
-                (@BookingId, @UserId, @SecurityDeposit, @SecurityReceivedId, 1, 'Initial security deposit for booking ' + ISNULL(@ChallanNum, CAST(@BookingId AS NVARCHAR(20))), @CreatedById, @SecurityReceivedId,
-                 @AccountReceivableId, @RentAccountId, @ServicesIncomeId, @SalesTaxId, @CustomerCode, NULL, NULL);
-        END
-        IF @SupportChargesId IS NOT NULL AND @SupportChargeAmount > 0
-        BEGIN
-            INSERT INTO dbo.WN_BookingLines
-                (BookingId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, IsDeleted, CreatedOn, CreatedById,
-                 AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, SecurityReceivedId)
-            VALUES
-                (@BookingId, @SupportChargesId, 'Support Services Portion', 1, @SupportChargeAmount, 0.00, @AppliedTaxPercentage / 100.0, @ServicesIncomeId, 0, SYSUTCDATETIME(), @CreatedById,
-                 @AccountReceivableId, @RentAccountId, @ServicesIncomeId, @SalesTaxId, @SecurityReceivedId);
-        END
-        COMMIT TRANSACTION;
-        SELECT
-            @BookingId AS BookingId,
-            @BookingGuid AS BookingPublicId,
-            @ChallanNum AS ChallanNumber,
-            @ChallanValidUntil AS ChallanValidUntil,
-            NULL AS ErrorMessage,
-            @RentAmount AS SubtotalAmount,
-            @TotalDiscountAmount AS DiscountAmount,
-            @TaxAmount AS TaxAmount,
-            @SecurityDeposit AS SecurityDeposit,
-            @TotalAmount AS TotalAmount,
-            @MonthlyRent AS MonthlyRent,
-            @BillPeriodMonths AS BillingPeriodMonths,
-            @NormalizedShift AS ShiftType;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        SELECT NULL AS BookingId, NULL AS BookingPublicId,
-               NULL AS ChallanNumber, NULL AS ChallanValidUntil,
-               ERROR_MESSAGE() AS ErrorMessage;
-    END CATCH
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	BEGIN TRANSACTION;
+	BEGIN TRY
+		DECLARE @NormalizedShift nvarchar(20) = CASE
+			WHEN @ShiftType IS NULL OR @ShiftType='' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
+			WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+			WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+			ELSE LOWER(@ShiftType)
+		END;
+		IF @SecurityDepositMonths IS NOT NULL AND (@SecurityDepositMonths < 0 OR @SecurityDepositMonths > 3)
+			RAISERROR('Security deposit must be 0, 1, 2 or 3 months.', 16, 1);
+		IF EXISTS (
+			SELECT 1
+			FROM dbo.WN_Bookings bk WITH (UPDLOCK, HOLDLOCK)
+			WHERE bk.SpaceId=@SpaceId
+				AND bk.IsDeleted=0
+				AND bk.BookingStatusId IN (1, 2, 5, 33)
+				AND @StartOn < bk.EndOn
+				AND @EndOn > bk.StartOn
+				AND (@NormalizedShift='24_7' OR ISNULL(bk.ShiftType, '24_7')='24_7' OR @NormalizedShift=ISNULL(bk.ShiftType, '24_7'))
+		)
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,'Space is already booked for the selected date range and shift.' AS ErrorMessage;
+			RETURN;
+		END
+		IF @UserId IS NULL
+		BEGIN
+			IF @UserEmail IS NOT NULL AND @UserEmail <> ''
+			BEGIN
+				SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email=@UserEmail;
+			END
+			IF @UserId IS NULL AND @CustomerEmail IS NOT NULL AND @CustomerEmail <> ''
+			BEGIN
+				SELECT TOP 1 @UserId = Id FROM dbo.WN_Users WHERE Email=@CustomerEmail;
+				IF @UserId IS NULL
+				BEGIN
+					SELECT TOP 1 @UserId = UserId FROM dbo.WN_Customers WHERE Email=@CustomerEmail;
+				END
+			END
+		END
+		IF @CustomerCode IS NULL AND @UserId IS NOT NULL
+		BEGIN
+			SELECT TOP 1 @CustomerCode = Code FROM dbo.WN_Customers WHERE UserId=@UserId;
+		END
+		IF @CustomerCode IS NULL AND @UserId IS NOT NULL
+		BEGIN
+			SELECT TOP 1 @CustomerCode = c.Code
+			FROM dbo.WN_Customers c JOIN
+				dbo.WN_Users u ON LOWER(LTRIM(RTRIM(u.Email)))=LOWER(LTRIM(RTRIM(c.Email)))
+			WHERE u.Id=@UserId AND c.Email IS NOT NULL AND LTRIM(RTRIM(c.Email)) <> '';
+		END
+		IF @CustomerCode IS NULL AND COALESCE(NULLIF(LTRIM(RTRIM(@CustomerEmail)), ''), NULLIF(LTRIM(RTRIM(@UserEmail)), '')) IS NOT NULL
+		BEGIN
+			SELECT TOP 1 @CustomerCode = Code
+			FROM dbo.WN_Customers
+			WHERE LOWER(LTRIM(RTRIM(Email)))=LOWER(COALESCE(NULLIF(LTRIM(RTRIM(@CustomerEmail)), ''), NULLIF(LTRIM(RTRIM(@UserEmail)), '')));
+		END
+		DECLARE @CategoryCode nvarchar(50) = NULL;
+		DECLARE @LocationId int = NULL;
+		DECLARE @BillingPeriodCode nvarchar(20) = 'Monthly';
+		DECLARE @SeatPrice decimal(18, 2) = 0.0;
+		DECLARE @SecurityDeposit decimal(18, 2) = 0.0;
+		DECLARE @AccountReceivableId int = NULL;
+		DECLARE @RentAccountId int = NULL;
+		DECLARE @ServicesIncomeId int = NULL;
+		DECLARE @SalesTaxId int = NULL;
+		DECLARE @SecurityReceivedId int = NULL;
+		DECLARE @ResolvedPricingId int = @PricingId;
+		SELECT TOP 1
+			 @CategoryCode = sc.Code
+			,@LocationId = s.LocationId
+			,@BillingPeriodCode = ISNULL(bp.Code, 'Monthly')
+			,@SeatPrice = ISNULL(s.Price, 0.0)
+			,@AccountReceivableId = COALESCE(s.AccountReceivableId, st.AccountReceivableId)
+			,@RentAccountId = COALESCE(s.RentAccountId, st.RentAccountId)
+			,@ServicesIncomeId = COALESCE(s.ServicesIncomeId, st.ServicesIncomeId)
+			,@SalesTaxId = COALESCE(s.SalesTaxId, st.SalesTaxId)
+			,@SecurityReceivedId = COALESCE(s.SecurityReceivedId, st.SecurityReceivedId, s.SecurityRecivedId)
+		FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId LEFT JOIN
+			dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id=s.BillingPeriodId
+		WHERE s.Id=@SpaceId;
+		-- PRC_02: what a space is charged comes from WN_SpaceConfig (the space's location + space type, else a space type of
+		-- the same category there), no longer from WN_Spaces.Price. Meeting room (MeetingRoom / Meeting / Conference):
+		-- PricePerHour, Hourly. Private office: PricePerMonth per seat (x Capacity below; the office's seats when none is
+		-- sent), Monthly. Shared space: PricePerMonth per seat, Monthly. 0 / NULL = no price: the booking is refused, unless
+		-- the caller sets the price itself (@OverrideSubtotal, @OverrideUnitPrice or @PerSeatBasePrice, i.e. a quotation).
+		-- Other categories keep WN_Spaces.Price. Existing bookings are never re-priced (WN_Bookings_Update leaves the price).
+		DECLARE @ConfigPeriod nvarchar(20) = CASE
+			WHEN @CategoryCode IN ('PrivateOffice', 'Private', 'SharedSpace', 'Shared') THEN 'Monthly'
+			WHEN @CategoryCode IN ('MeetingRoom', 'Meeting', 'Conference') THEN 'Hourly'
+		END;
+		IF @ConfigPeriod IS NOT NULL
+		BEGIN
+			DECLARE @ConfigPrice decimal(18, 2) = NULL;
+			SELECT TOP 1 @ConfigPrice = CASE WHEN @ConfigPeriod='Monthly' THEN NULLIF(pc.PricePerMonth, 0) ELSE NULLIF(pc.PricePerHour, 0) END
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) JOIN
+				dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=@SpaceId JOIN
+				dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC;
+			IF @ConfigPrice IS NULL AND ISNULL(@OverrideSubtotal, 0) <= 0 AND ISNULL(@OverrideUnitPrice, 0) <= 0 AND ISNULL(@PerSeatBasePrice, 0) <= 0
+			BEGIN
+				DECLARE @ConfigError nvarchar(300) = N'No ' + LOWER(@ConfigPeriod) + N' price is set for this space in the space configuration (WN_SpaceConfig), so it cannot be booked.';
+				THROW 50030, @ConfigError, 1;
+			END
+			SET @SeatPrice = ISNULL(@ConfigPrice, 0.0);
+			SET @BillingPeriodCode = @ConfigPeriod;
+			IF @CategoryCode IN ('PrivateOffice', 'Private') AND ISNULL(@Capacity, 0) <= 0
+				SELECT @Capacity = Capacity
+				FROM dbo.WN_Spaces WITH (NOLOCK)
+				WHERE Id=@SpaceId;
+		END
+		IF @PerSeatBasePrice IS NOT NULL AND @PerSeatBasePrice > @SeatPrice
+			SET @SeatPrice = @PerSeatBasePrice;
+		IF (@RentAccountId IS NULL OR @SecurityReceivedId IS NULL OR @AccountReceivableId IS NULL OR @SalesTaxId IS NULL OR @ServicesIncomeId IS NULL)
+		BEGIN
+			SELECT TOP 1
+				 @AccountReceivableId = COALESCE(@AccountReceivableId, cfg.AccountReceivableId)
+				,@RentAccountId = COALESCE(@RentAccountId, cfg.RentAccountId)
+				,@ServicesIncomeId = COALESCE(@ServicesIncomeId, cfg.ServicesIncomeId)
+				,@SalesTaxId = COALESCE(@SalesTaxId, cfg.SalesTaxId)
+				,@SecurityReceivedId = COALESCE(@SecurityReceivedId, cfg.SecurityReceivedId)
+			FROM dbo.WN_SpaceConfig cfg WITH (NOLOCK)
+			WHERE cfg.SpaceTypeId=(SELECT SpaceTypeId FROM dbo.WN_Spaces WHERE Id=@SpaceId)
+				AND (cfg.LocationId=@LocationId OR cfg.LocationId IS NULL)
+			ORDER BY CASE WHEN cfg.LocationId=@LocationId THEN 0 ELSE 1 END;
+		END
+		IF @RentAccountId IS NULL
+			SELECT TOP 1 @RentAccountId = RentAccountId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date));
+		IF @SecurityReceivedId IS NULL
+			SELECT TOP 1 @SecurityReceivedId = SecurityReceivedId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=2 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date));
+		IF @SalesTaxId IS NULL
+			SELECT TOP 1 @SalesTaxId = SalesTaxId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=3 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date));
+		IF @ServicesIncomeId IS NULL
+			SELECT TOP 1 @ServicesIncomeId = ServicesIncomeId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=4 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date));
+		IF @AccountReceivableId IS NULL
+			SELECT TOP 1 @AccountReceivableId = AccountReceivableId
+			FROM dbo.WN_ChargeTypeAccountMapping WITH (NOLOCK)
+			WHERE ChargeTypeId=1 AND (EffectiveTo IS NULL OR EffectiveTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date));
+		DECLARE @Duration decimal(18, 2) = 1.0;
+		DECLARE @RentAmount decimal(18, 2) = 0.0;
+		DECLARE @AdvMonths int = 1;
+		DECLARE @SecMonths int = 0;
+		DECLARE @BillPeriodMonths int = 1;
+		IF @BillingPeriodCode='Daily'
+		BEGIN
+			SET @Duration = CAST(DATEDIFF(day, @StartOn, @EndOn) AS decimal(18, 2));
+			IF @Duration <= 0
+				SET @Duration = 1.0;
+			SET @RentAmount = @SeatPrice * @Duration * ISNULL(@Capacity, 1);
+			SET @AdvMonths = 0;
+			SET @SecMonths = 0;
+			SET @BillPeriodMonths = 0;
+		END
+		ELSE IF @BillingPeriodCode='Hourly'
+		BEGIN
+			SET @Duration = CAST(DATEDIFF(hour, @StartOn, @EndOn) AS decimal(18, 2));
+			IF @Duration <= 0
+				SET @Duration = 1.0;
+			SET @RentAmount = @SeatPrice * @Duration * ISNULL(@Capacity, 1);
+			SET @AdvMonths = 0;
+			SET @SecMonths = 0;
+			SET @BillPeriodMonths = 0;
+		END
+		ELSE
+		BEGIN
+			IF @BillingPeriodMonths IS NOT NULL AND @BillingPeriodMonths > 0
+				SET @Duration = CAST(@BillingPeriodMonths AS decimal(18, 2));
+			ELSE
+				SET @Duration = CAST(DATEDIFF(month, @StartOn, @EndOn) AS decimal(18, 2));
+			IF @Duration <= 0
+				SET @Duration = 1.0;
+			IF @CategoryCode IN ('PrivateOffice', 'Private')
+			BEGIN
+				SET @RentAmount = @SeatPrice * ISNULL(@Capacity, 1) * ISNULL(@AdvanceRentMonths, 1);
+			END
+			ELSE
+			BEGIN
+				SET @RentAmount = @SeatPrice * ISNULL(@AdvanceRentMonths, 1);
+			END
+			SET @AdvMonths = ISNULL(@AdvanceRentMonths, 1);
+			SET @SecMonths = CASE
+				WHEN @CategoryCode IN ('PrivateOffice', 'Private') OR ISNULL(@SecurityDepositAmount, 0) > 0 THEN ISNULL(@SecurityDepositMonths, 0)
+				ELSE 0
+			END;
+			SET @BillPeriodMonths = ISNULL(@BillingPeriodMonths, 1);
+		END
+		IF @OverrideDuration IS NOT NULL AND @OverrideDuration > 0
+			SET @Duration = @OverrideDuration;
+		IF @OverrideSubtotal IS NOT NULL AND @OverrideSubtotal > 0
+			SET @RentAmount = @OverrideSubtotal;
+		DECLARE @MonthlyRent decimal(18, 2) = 0.0;
+		IF @CategoryCode IN ('PrivateOffice', 'Private')
+			SET @MonthlyRent = @SeatPrice * ISNULL(@Capacity, 1);
+		ELSE
+			SET @MonthlyRent = @SeatPrice;
+		IF (@MonthlyRent <= 0 OR @MonthlyRent IS NULL) AND @OverrideSubtotal IS NOT NULL AND @OverrideSubtotal > 0 AND ISNULL(@AdvMonths, 1) > 0
+		BEGIN
+			SET @MonthlyRent = ROUND(@OverrideSubtotal / ISNULL(@AdvMonths, 1), 2);
+		END
+		DECLARE @DiscountAmt decimal(18, 2) = ISNULL(@DiscountAmount, 0);
+		IF @DiscountAmt <= 0 AND ISNULL(@DiscountPercentage, 0) > 0
+			SET @DiscountAmt = ROUND(@RentAmount * (@DiscountPercentage / 100.0), 2);
+		ELSE IF @DiscountAmt > 0 AND ISNULL(@DiscountPercentage, 0) <= 0 AND @RentAmount > 0
+			SET @DiscountPercentage = ROUND((@DiscountAmt / @RentAmount) * 100.0, 2);
+		DECLARE @DiscountOnRent decimal(18, 2) = 0.00;
+		DECLARE @DiscountOnDeposit decimal(18, 2) = 0.00;
+		IF @DiscountAmt > 0
+			SET @DiscountOnRent = CASE WHEN @DiscountAmt <= @RentAmount THEN @DiscountAmt ELSE @RentAmount END;
+		DECLARE @DepositDiscountFraction decimal(18, 10) = CASE
+			WHEN ISNULL(@DiscountAmount, 0) <= 0 AND ISNULL(@DiscountPercentage, 0) > 0 THEN @DiscountPercentage / 100.0
+			WHEN @RentAmount > 0 THEN @DiscountOnRent / @RentAmount
+			ELSE 0
+		END;
+		IF @DepositDiscountFraction > 1
+			SET @DepositDiscountFraction = 1;
+		IF @DepositDiscountFraction < 0
+			SET @DepositDiscountFraction = 0;
+		SET @SecurityDeposit = CASE
+			WHEN @BillingPeriodCode IN ('Daily', 'Hourly') THEN 0.00
+			WHEN ISNULL(@SecurityDepositAmount, 0) > 0 THEN ROUND(@SecurityDepositAmount, 2)
+			WHEN @SecMonths > 0 THEN ROUND(@MonthlyRent * @SecMonths * (1.0 - @DepositDiscountFraction), 2)
+			ELSE 0.00
+		END;
+		DECLARE @DiscountedRent decimal(18, 2) = @RentAmount - @DiscountOnRent;
+		DECLARE @DiscountedDeposit decimal(18, 2) = @SecurityDeposit - @DiscountOnDeposit;
+		DECLARE @TotalDiscountAmount decimal(18, 2) = @DiscountOnRent + @DiscountOnDeposit;
+		DECLARE @SupportChargeAmount decimal(18, 2) = 0.00;
+		DECLARE @TaxAmount decimal(18, 2) = 0.00;
+		DECLARE @AppliedChargePercentage decimal(5, 2) = 0.00;
+		DECLARE @AppliedTaxPercentage decimal(5, 2) = 0.00;
+		IF @SupportChargesId IS NOT NULL AND @CategoryCode IN ('PrivateOffice', 'Private')
+		BEGIN
+			DECLARE @ChargePercentage decimal(5, 2);
+			DECLARE @TaxApplicable bit = 0;
+			DECLARE @ProvinceId int = NULL;
+			SELECT TOP 1 @ProvinceId = loc.ProvinceId FROM dbo.WN_Locations loc WITH (NOLOCK) WHERE loc.Id=@LocationId;
+			DECLARE @BookingDateAnchor date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date);
+			SELECT TOP 1 @ChargePercentage = ChargePercentage
+			FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+			WHERE ChargeTypeId=@SupportChargesId
+				AND StartDate <= @BookingDateAnchor
+				AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
+			ORDER BY StartDate DESC;
+			IF @ChargePercentage IS NULL
+				SET @ChargePercentage = 10.00;
+			SET @AppliedChargePercentage = @ChargePercentage;
+			SET @SupportChargeAmount = ROUND(@RentAmount * (@ChargePercentage / 100.0), 2);
+			IF @ProvinceId IS NOT NULL
+			BEGIN
+				SELECT TOP 1 @TaxApplicable = ISNULL(TaxApplicable, 0)
+				FROM dbo.WN_ProvinceChargeTypeTax WITH (NOLOCK)
+				WHERE ProvinceId=@ProvinceId AND ChargeTypeId=@SupportChargesId;
+				IF @TaxApplicable=1
+				BEGIN
+					SELECT TOP 1 @AppliedTaxPercentage = ISNULL(TaxPercentage, 16.00)
+					FROM dbo.WN_Tax WITH (NOLOCK)
+					WHERE ProvinceId=@ProvinceId
+						AND StartDate <= @BookingDateAnchor
+						AND (EndDate IS NULL OR EndDate > @BookingDateAnchor)
+					ORDER BY StartDate DESC;
+				END
+				ELSE
+				BEGIN
+					SET @AppliedTaxPercentage = 0.00;
+				END
+			END
+			ELSE
+			BEGIN
+				SET @TaxApplicable = 0;
+				SET @AppliedTaxPercentage = 0.00;
+			END
+			IF @TaxApplicable=1 AND @AppliedTaxPercentage > 0
+			BEGIN
+				SET @TaxAmount = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);
+			END
+			ELSE
+			BEGIN
+				SET @TaxAmount = 0.00;
+			END
+		END
+		DECLARE @TotalAmount decimal(18, 2) = @DiscountedRent + @DiscountedDeposit + @SupportChargeAmount + @TaxAmount;
+		DECLARE @ChallanNum nvarchar(50) = 'WN-' + CONVERT(nvarchar(8), CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS datetime2(0)), 112) + '-' + RIGHT(CAST(ABS(CHECKSUM(NEWID())) AS nvarchar(10)), 4);
+		DECLARE @ChallanTries int = 0;
+		WHILE EXISTS (SELECT 1 FROM dbo.WN_Challans WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber=@ChallanNum)
+			OR EXISTS (SELECT 1 FROM dbo.WN_Bookings WITH (UPDLOCK, HOLDLOCK) WHERE ChallanNumber=@ChallanNum)
+		BEGIN
+			SET @ChallanTries = @ChallanTries + 1;
+			IF @ChallanTries > 200
+				THROW 50020, 'Could not generate a unique challan number. Please try again.', 1;
+			SET @ChallanNum = LEFT(@ChallanNum, 12) + RIGHT('0000' + CAST(ABS(CHECKSUM(NEWID())) % 10000 AS nvarchar(4)), 4);
+		END
+		DECLARE @ChallanValidUntil datetime2 = DATEADD(day, 7, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS datetime2(0)));
+		DECLARE @CreatedByGuid uniqueidentifier = NULL;
+		IF @CreatedById IS NOT NULL
+			SELECT @CreatedByGuid = IdGUID FROM dbo.WN_Users WHERE Id=@CreatedById;
+		INSERT INTO [dbo].[WN_Bookings]
+		(
+			 [IdGUID]
+			,[BookingDate]
+			,[CustomerCode]
+			,[RentAccountId]
+			,[SecurityRecivedId]
+			,[SecurityReceivedId]
+			,[AccountReceivableId]
+			,[ServicesIncomeId]
+			,[SalesTaxId]
+			,[Notes]
+			,[RejectReason]
+			,[CreatedOn]
+			,[UpdatedOn]
+			,[TransactionDate]
+			,[ChallanNumber]
+			,[ValidityDate]
+			,[UserId]
+			,[SpaceId]
+			,[PricingId]
+			,[StartOn]
+			,[EndOn]
+			,[BookingStatusId]
+			,[CancelReason]
+			,[IsDeleted]
+			,[CreatedById]
+			,[UpdatedById]
+			,[DiscountPercentage]
+			,[DiscountAmount]
+			,[DiscountType]
+			,[SubtotalAmount]
+			,[TotalAmount]
+			,[MonthlyRent]
+			,[BillingPeriodMonths]
+			,[AdvanceRentMonths]
+			,[SecurityDepositMonths]
+			,[SecurityDepositRequired]
+			,[SecurityDepositPaid]
+			,[ShiftType]
+			,[Capacity]
+		)
+		VALUES
+		(
+			 NEWID()
+			,SYSUTCDATETIME()
+			,@CustomerCode
+			,@RentAccountId
+			,@SecurityReceivedId
+			,@SecurityReceivedId
+			,@AccountReceivableId
+			,@ServicesIncomeId
+			,@SalesTaxId
+			,@Notes
+			,NULL
+			,SYSUTCDATETIME()
+			,NULL
+			,SYSUTCDATETIME()
+			,@ChallanNum
+			,@ChallanValidUntil
+			,@UserId
+			,@SpaceId
+			,@ResolvedPricingId
+			,@StartOn
+			,@EndOn
+			,5
+			,NULL
+			,0
+			,@CreatedById
+			,NULL
+			,@DiscountPercentage
+			,@TotalDiscountAmount
+			,ISNULL(@DiscountType, 'Percentage')
+			,@RentAmount
+			,@TotalAmount
+			,@MonthlyRent
+			,@BillPeriodMonths
+			,@AdvMonths
+			,@SecMonths
+			,@SecurityDeposit
+			,0.00
+			,@NormalizedShift
+			,CASE WHEN @Capacity > 0 THEN @Capacity END
+		);
+		DECLARE @BookingId int = SCOPE_IDENTITY();
+		DECLARE @BookingGuid uniqueidentifier;
+		SELECT @BookingGuid = IdGUID FROM dbo.WN_Bookings WHERE Id=@BookingId;
+		DECLARE
+			 @SpaceName nvarchar(255)
+			,@SpaceCode nvarchar(50)
+			,@SpaceCategory nvarchar(50);
+		SELECT TOP 1
+			 @SpaceName = s.Name
+			,@SpaceCode = s.Code
+			,@SpaceCategory = sc.Label
+		FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+		WHERE s.Id=@SpaceId;
+		DECLARE @CustomerFullName nvarchar(255) = RTRIM(LTRIM(ISNULL(@CustomerFirstName, '') + ' ' + ISNULL(@CustomerLastName, '')));
+		IF @CustomerFullName=''
+			SET @CustomerFullName = ISNULL(@CustomerEmail, 'Customer');
+		EXEC dbo.WN_BookingDetails_Insert
+			 @BookingGuid = @BookingGuid
+			,@CustomerCode = @CustomerCode
+			,@CustomerName = @CustomerFullName
+			,@CustomerEmail = @CustomerEmail
+			,@SpaceName = @SpaceName
+			,@SpaceCode = @SpaceCode
+			,@SpaceCategory = @SpaceCategory
+			,@StartDateTime = @StartOn
+			,@EndDateTime = @EndOn
+			,@RentAmount = @RentAmount
+			,@SecurityDeposit = @SecurityDeposit
+			,@RentAccountId = @RentAccountId
+			,@DepositAccountId = @SecurityReceivedId
+			,@Notes = @Notes
+			,@SupportChargesId = @SupportChargesId
+			,@AppliedChargePercentage = @AppliedChargePercentage
+			,@AppliedTaxPercentage = @AppliedTaxPercentage
+			,@SupportChargeAmount = @SupportChargeAmount
+			,@TaxAmount = @TaxAmount
+			,@AccountReceivableId = @AccountReceivableId
+			,@ServicesIncomeId = @ServicesIncomeId
+			,@SalesTaxId = @SalesTaxId
+			,@SecurityReceivedId = @SecurityReceivedId;
+		INSERT INTO [dbo].[WN_Challans]
+		(
+			 [BookingId]
+			,[ChallanNumber]
+			,[ValidUntil]
+			,[StatusId]
+			,[CreatedById]
+		)
+		VALUES
+		(
+			 @BookingId
+			,@ChallanNum
+			,@ChallanValidUntil
+			,1
+			,@CreatedById
+		);
+		DECLARE @UnitPrice decimal(18, 2);
+		IF @OverrideUnitPrice IS NOT NULL AND @OverrideUnitPrice > 0
+			SET @UnitPrice = @OverrideUnitPrice;
+		ELSE IF @CategoryCode IN ('PrivateOffice', 'Private')
+			SET @UnitPrice = @SeatPrice * ISNULL(@Capacity, 1);
+		ELSE
+			SET @UnitPrice = @SeatPrice;
+		DECLARE @EffectiveRentQuantity decimal(18, 2) = CASE
+			WHEN @BillingPeriodCode='Monthly' AND ISNULL(@AdvMonths, 0) > 0 THEN CAST(@AdvMonths AS decimal(18, 2))
+			WHEN ISNULL(@Duration, 0) > 0 THEN @Duration
+			ELSE 1.0
+		END;
+		IF @EffectiveRentQuantity <= 0
+			SET @EffectiveRentQuantity = 1.0;
+		DECLARE @EffectiveSecMonths decimal(18, 2) = CASE WHEN ISNULL(@SecMonths, 0) > 0 THEN CAST(@SecMonths AS decimal(18, 2)) ELSE 1.0 END;
+		DECLARE @EffectiveDepositUnitPrice decimal(18, 4) = CASE
+			WHEN ISNULL(@SecMonths, 0) > 0 THEN ROUND(@SecurityDeposit / @SecMonths, 4)
+			ELSE @SecurityDeposit
+		END;
+		INSERT INTO [dbo].[WN_BookingLines]
+		(
+			 [BookingId]
+			,[ChargeTypeId]
+			,[Description]
+			,[Quantity]
+			,[UnitPrice]
+			,[DiscountAmount]
+			,[TaxRate]
+			,[AccountId]
+			,[IsDeleted]
+			,[CreatedOn]
+			,[CreatedById]
+			,[AccountReceivableId]
+			,[RentAccountId]
+			,[ServicesIncomeId]
+			,[SalesTaxId]
+			,[SecurityReceivedId]
+		)
+		VALUES
+		(
+			 @BookingId
+			,1
+			,'Room Rent'
+			,@EffectiveRentQuantity
+			,@UnitPrice
+			,@DiscountOnRent
+			,0.0000
+			,@RentAccountId
+			,0
+			,SYSUTCDATETIME()
+			,@CreatedById
+			,@AccountReceivableId
+			,@RentAccountId
+			,@ServicesIncomeId
+			,@SalesTaxId
+			,@SecurityReceivedId
+		);
+		IF @SecurityDeposit > 0
+		BEGIN
+			INSERT INTO [dbo].[WN_BookingLines]
+			(
+				 [BookingId]
+				,[ChargeTypeId]
+				,[Description]
+				,[Quantity]
+				,[UnitPrice]
+				,[DiscountAmount]
+				,[TaxRate]
+				,[AccountId]
+				,[IsDeleted]
+				,[CreatedOn]
+				,[CreatedById]
+				,[AccountReceivableId]
+				,[RentAccountId]
+				,[ServicesIncomeId]
+				,[SalesTaxId]
+				,[SecurityReceivedId]
+			)
+			VALUES
+			(
+				 @BookingId
+				,2
+				,'Security Deposit (Refundable)'
+				,@EffectiveSecMonths
+				,@EffectiveDepositUnitPrice
+				,@DiscountOnDeposit
+				,0.0000
+				,@SecurityReceivedId
+				,0
+				,SYSUTCDATETIME()
+				,@CreatedById
+				,@AccountReceivableId
+				,@RentAccountId
+				,@ServicesIncomeId
+				,@SalesTaxId
+				,@SecurityReceivedId
+			);
+			INSERT INTO [dbo].[WN_SecurityDeposits]
+			(
+				 [BookingId]
+				,[UserId]
+				,[Amount]
+				,[AccountId]
+				,[StatusId]
+				,[Notes]
+				,[UpdatedById]
+				,[SecurityReceivedId]
+				,[AccountReceivableId]
+				,[RentAccountId]
+				,[ServicesIncomeId]
+				,[SalesTaxId]
+				,[CustomerId]
+				,[RefId]
+				,[RefNo]
+			)
+			VALUES
+			(
+				 @BookingId
+				,@UserId
+				,@SecurityDeposit
+				,@SecurityReceivedId
+				,1
+				,'Initial security deposit for booking ' + ISNULL(@ChallanNum, CAST(@BookingId AS nvarchar(20)))
+				,@CreatedById
+				,@SecurityReceivedId
+				,@AccountReceivableId
+				,@RentAccountId
+				,@ServicesIncomeId
+				,@SalesTaxId
+				,@CustomerCode
+				,NULL
+				,NULL
+			);
+		END
+		IF @SupportChargesId IS NOT NULL AND @SupportChargeAmount > 0
+		BEGIN
+			INSERT INTO [dbo].[WN_BookingLines]
+			(
+				 [BookingId]
+				,[ChargeTypeId]
+				,[Description]
+				,[Quantity]
+				,[UnitPrice]
+				,[DiscountAmount]
+				,[TaxRate]
+				,[AccountId]
+				,[IsDeleted]
+				,[CreatedOn]
+				,[CreatedById]
+				,[AccountReceivableId]
+				,[RentAccountId]
+				,[ServicesIncomeId]
+				,[SalesTaxId]
+				,[SecurityReceivedId]
+			)
+			VALUES
+			(
+				 @BookingId
+				,@SupportChargesId
+				,'Support Services Portion'
+				,1
+				,@SupportChargeAmount
+				,0.00
+				,@AppliedTaxPercentage / 100.0
+				,@ServicesIncomeId
+				,0
+				,SYSUTCDATETIME()
+				,@CreatedById
+				,@AccountReceivableId
+				,@RentAccountId
+				,@ServicesIncomeId
+				,@SalesTaxId
+				,@SecurityReceivedId
+			);
+		END
+		COMMIT TRANSACTION;
+		SELECT
+			 @BookingId AS BookingId
+			,@BookingGuid AS BookingPublicId
+			,@ChallanNum AS ChallanNumber
+			,@ChallanValidUntil AS ChallanValidUntil
+			,NULL AS ErrorMessage
+			,@RentAmount AS SubtotalAmount
+			,@TotalDiscountAmount AS DiscountAmount
+			,@TaxAmount AS TaxAmount
+			,@SecurityDeposit AS SecurityDeposit
+			,@TotalAmount AS TotalAmount
+			,@MonthlyRent AS MonthlyRent
+			,@BillPeriodMonths AS BillingPeriodMonths
+			,@NormalizedShift AS ShiftType;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		SELECT
+			 NULL AS BookingId
+			,NULL AS BookingPublicId
+			,NULL AS ChallanNumber
+			,NULL AS ChallanValidUntil
+			,ERROR_MESSAGE() AS ErrorMessage;
+	END CATCH
 END;
-
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_InsertFreeMeetingRoom]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_InsertFreeMeetingRoom]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -5653,9 +6402,9 @@ BEGIN
             IsFree, EntitlementId, TotalAmount, ShiftType
         )
         VALUES (
-            NEWID(), SYSUTCDATETIME(), NULL,
+            NEWID(), SYSDATETIME(), NULL,
             NULL, NULL, @Notes, NULL,
-            SYSUTCDATETIME(), NULL, SYSUTCDATETIME(),
+            SYSDATETIME(), NULL, SYSDATETIME(),
             @ChallanNum, @Today, @UserId, @SpaceId, 0,
             @StartOn, @EndOn, 33,
             NULL, 0, @CreatedById, NULL,
@@ -5674,7 +6423,7 @@ BEGIN
         VALUES (
             @UserId, @PrivateBookingId, @EntitlementId, @BookingId, @SpaceId,
             @UsageDate, @StartOn, @EndOn, @AllocatedMinutes, @DurationMinutes, @DurationHours,
-            'Confirmed', SYSUTCDATETIME(), @CreatedById
+            'Confirmed', SYSDATETIME(), @CreatedById
         );
 
         COMMIT TRANSACTION;
@@ -5692,186 +6441,217 @@ BEGIN
     END CATCH;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_InsertSmart]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_InsertSmart]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE   PROCEDURE [dbo].[WN_Bookings_InsertSmart]
-    @UserEmail         NVARCHAR(256),
-    @CategoryCode      NVARCHAR(30),
-    @StartOn           DATETIME2,
-    @EndOn             DATETIME2,
-    @Capacity          INT           = NULL,
-    @Notes             NVARCHAR(MAX) = NULL,
-    @CreatedById       INT           = NULL,
-    @CustomerEmail     NVARCHAR(255) = NULL,
-    @CustomerFirstName NVARCHAR(100) = NULL,
-    @CustomerLastName  NVARCHAR(100) = NULL,
-    @CustomerPhone     NVARCHAR(50)  = NULL,
-    @CustomerCnic      NVARCHAR(50)  = NULL,
-    @CustomerAddress   NVARCHAR(500) = NULL,
-    @CustomerCityId    INT           = NULL,
-    @CustomerNotes     NVARCHAR(1000) = NULL,
-    @ShiftType         NVARCHAR(20)  = '24_7',
-    @LocationId        INT           = NULL   -- QA_03: book a space of this location only (NULL = any location, as before)
+(
+	 @UserEmail nvarchar(256)
+	,@CategoryCode nvarchar(30)
+	,@StartOn datetime2
+	,@EndOn datetime2
+	,@Capacity int = NULL
+	,@Notes nvarchar(MAX) = NULL
+	,@CreatedById int = NULL
+	,@CustomerEmail nvarchar(255) = NULL
+	,@CustomerFirstName nvarchar(100) = NULL
+	,@CustomerLastName nvarchar(100) = NULL
+	,@CustomerPhone nvarchar(50) = NULL
+	,@CustomerCnic nvarchar(50) = NULL
+	,@CustomerAddress nvarchar(500) = NULL
+	,@CustomerCityId int = NULL
+	,@CustomerNotes nvarchar(1000) = NULL
+	,@ShiftType nvarchar(20) = '24_7'
+	,@LocationId int = NULL
+	,@SecurityDepositMonths int = NULL
+)
 AS
 BEGIN
-    -- Books the first free space of a category (smallest first) and issues its challan (WN_Bookings_Insert).
-    -- QA_03 changes:
-    --   * @LocationId: only spaces of that location (the location the customer chose).
-    --   * The same booking sent again within 2 minutes (same user, category, location, start and end; e.g. the app
-    --     timed out and the customer tried again) is not booked twice: the existing booking is returned with
-    --     IsDuplicate = 1.
-    --   * Spaces with an active price for the booking period are picked first (a free space without a price used to
-    --     be picked and the booking failed with "No active ... pricing").
-    --   * A private office is charged for the whole office (seat price x the office's seats), as staff bookings and
-    --     quotations charge it; it used to be charged for one seat.
-    SET NOCOUNT ON;
-    BEGIN TRANSACTION;
-    BEGIN TRY
-        DECLARE @NormalizedShift NVARCHAR(20) = CASE
-            WHEN @ShiftType IS NULL OR @ShiftType = '' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
-            WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
-            WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
-            ELSE LOWER(@ShiftType)
-        END;
-        DECLARE @UserId      INT;
-        DECLARE @SpaceId     INT;
-        DECLARE @PricingId   INT;
-        DECLARE @DuplicateId INT;
-        DECLARE @ChargedSeats INT = NULL;
-        DECLARE @TodayPk DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
-        DECLARE @BillingPeriodCode NVARCHAR(20) = CASE WHEN @CategoryCode IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END;
-        SELECT @UserId = Id FROM dbo.WN_Users WITH (NOLOCK)
-        WHERE Email = @UserEmail AND IsActive = 1;
-        IF @UserId IS NULL
-        BEGIN
-            ROLLBACK TRANSACTION;
-            SELECT NULL AS BookingId, NULL AS BookingPublicId,
-                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
-                   'User not found or inactive.' AS ErrorMessage;
-            RETURN;
-        END
-        -- The same booking a moment ago (created within the last 2 minutes; CreatedOn is UTC): return it. WN_Bookings is
-        -- read without NOLOCK on purpose: a first request still being saved is waited for, never half-read.
-        SELECT TOP 1 @DuplicateId = b.Id
-        FROM dbo.WN_Bookings        b
-        JOIN dbo.WN_Spaces          s  WITH (NOLOCK) ON s.Id  = b.SpaceId
-        JOIN dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-        JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-        WHERE b.UserId          = @UserId
-          AND b.IsDeleted       = 0
-          AND b.BookingStatusId IN (1, 2, 5, 33)
-          AND b.StartOn         = @StartOn
-          AND b.EndOn           = @EndOn
-          AND sc.Code           = @CategoryCode
-          AND (@LocationId IS NULL OR s.LocationId = @LocationId)
-          AND b.CreatedOn      >= DATEADD(SECOND, -120, SYSUTCDATETIME())
-        ORDER BY b.Id DESC;
-        IF @DuplicateId IS NOT NULL
-        BEGIN
-            ROLLBACK TRANSACTION;
-            SELECT b.Id AS BookingId, b.IdGUID AS BookingPublicId,
-                   b.ChallanNumber, b.ValidityDate AS ChallanValidUntil,
-                   NULL AS ErrorMessage,
-                   b.SubtotalAmount, b.DiscountAmount, b.SecurityDepositRequired AS SecurityDeposit,
-                   b.TotalAmount, b.MonthlyRent, b.BillingPeriodMonths, b.ShiftType,
-                   CAST(1 AS BIT) AS IsDuplicate
-            FROM dbo.WN_Bookings b
-            WHERE b.Id = @DuplicateId;
-            RETURN;
-        END
-        SELECT TOP 1 @SpaceId = s.Id
-        FROM dbo.WN_Spaces          s  WITH (UPDLOCK)
-        JOIN dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-        JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-        WHERE s.IsActive  = 1
-          AND sc.Code     = @CategoryCode
-          AND (@LocationId IS NULL OR s.LocationId = @LocationId)
-          AND (@Capacity  IS NULL OR s.Capacity >= @Capacity)
-          AND NOT EXISTS (
-              SELECT 1 FROM dbo.WN_Bookings bk
-              WHERE bk.SpaceId         = s.Id
-                AND bk.IsDeleted       = 0
-                AND bk.BookingStatusId IN (1, 2, 5, 33)
-                AND @StartOn           < bk.EndOn
-                AND @EndOn             > bk.StartOn
-                AND (
-                    @NormalizedShift = '24_7'
-                    OR ISNULL(bk.ShiftType, '24_7') = '24_7'
-                    OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
-                )
-          )
-        ORDER BY CASE WHEN EXISTS (
-                     SELECT 1
-                     FROM dbo.WN_SpacePricing   sp WITH (NOLOCK)
-                     JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = sp.BillingPeriodId
-                     WHERE sp.SpaceId       = s.Id
-                       AND sp.IsActive      = 1
-                       AND bp.Code          = @BillingPeriodCode
-                       AND sp.EffectiveFrom <= @TodayPk
-                       AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > @TodayPk)
-                 ) THEN 0 ELSE 1 END,
-                 s.Capacity ASC, TRY_CAST(s.Code AS INT), s.Code;
-        IF @SpaceId IS NULL
-        BEGIN
-            ROLLBACK TRANSACTION;
-            SELECT NULL AS BookingId, NULL AS BookingPublicId,
-                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
-                   'No available space for the requested period.' AS ErrorMessage;
-            RETURN;
-        END
-        SELECT TOP 1 @PricingId = sp.Id
-        FROM dbo.WN_SpacePricing   sp
-        JOIN dbo.WN_BillingPeriods bp ON bp.Id = sp.BillingPeriodId
-        WHERE sp.SpaceId       = @SpaceId
-          AND sp.IsActive      = 1
-          AND bp.Code          = @BillingPeriodCode
-          AND sp.EffectiveFrom <= @TodayPk
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > @TodayPk)
-        ORDER BY sp.EffectiveFrom DESC;
-        IF @PricingId IS NULL
-        BEGIN
-            ROLLBACK TRANSACTION;
-            SELECT NULL AS BookingId, NULL AS BookingPublicId,
-                   NULL AS ChallanNumber, NULL AS ChallanValidUntil,
-                   'No active ' + @BillingPeriodCode + ' pricing found for selected space.' AS ErrorMessage;
-            RETURN;
-        END
-        -- A private office is rented whole: WN_Bookings_Insert charges seat price x @Capacity (the office's seats).
-        IF @CategoryCode IN ('PrivateOffice', 'Private')
-            SELECT @ChargedSeats = s.Capacity FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = @SpaceId;
-        COMMIT TRANSACTION;
-        EXEC dbo.WN_Bookings_Insert
-            @UserId            = @UserId,
-            @SpaceId           = @SpaceId,
-            @PricingId         = @PricingId,
-            @StartOn           = @StartOn,
-            @EndOn             = @EndOn,
-            @Notes             = @Notes,
-            @CreatedById       = @CreatedById,
-            @UserEmail         = @UserEmail,
-            @CustomerEmail     = @CustomerEmail,
-            @CustomerFirstName = @CustomerFirstName,
-            @CustomerLastName  = @CustomerLastName,
-            @CustomerPhone     = @CustomerPhone,
-            @CustomerCnic      = @CustomerCnic,
-            @CustomerAddress   = @CustomerAddress,
-            @CustomerCityId    = @CustomerCityId,
-            @CustomerNotes     = @CustomerNotes,
-            @ShiftType         = @NormalizedShift,
-            @Capacity          = @ChargedSeats;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        SELECT NULL AS BookingId, NULL AS BookingPublicId,
-               NULL AS ChallanNumber, NULL AS ChallanValidUntil,
-               ERROR_MESSAGE() AS ErrorMessage;
-    END CATCH
+	SET NOCOUNT ON;
+	BEGIN TRANSACTION;
+	BEGIN TRY
+		DECLARE @NormalizedShift nvarchar(20) = CASE
+			WHEN @ShiftType IS NULL OR @ShiftType='' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
+			WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+			WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+			ELSE LOWER(@ShiftType)
+		END;
+		DECLARE @UserId int;
+		DECLARE @SpaceId int;
+		DECLARE @PricingId int;
+		DECLARE @DuplicateId int;
+		DECLARE @ChargedSeats int = NULL;
+		DECLARE @TodayPk date = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS date);
+		DECLARE @BillingPeriodCode nvarchar(20) = CASE WHEN @CategoryCode IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END;
+
+		-- Option B: Dynamic security deposit months rule: Private office defaults to 2 months; shared / meeting default to 0.
+		DECLARE @ResolvedSecMonths int = ISNULL(@SecurityDepositMonths, CASE
+			WHEN @CategoryCode IN ('PrivateOffice', 'Private') THEN 2
+			ELSE 0
+		END);
+
+		SELECT @UserId = Id
+		FROM dbo.WN_Users WITH (NOLOCK)
+		WHERE Email=@UserEmail AND IsActive=1;
+		IF @UserId IS NULL
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,'User not found or inactive.' AS ErrorMessage;
+			RETURN;
+		END
+		SELECT TOP 1 @DuplicateId = b.Id
+		FROM dbo.WN_Bookings b JOIN
+			dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=b.SpaceId JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+		WHERE b.UserId=@UserId
+			AND b.IsDeleted=0
+			AND b.BookingStatusId IN (1, 2, 5, 33)
+			AND b.StartOn=@StartOn
+			AND b.EndOn=@EndOn
+			AND sc.Code=@CategoryCode
+			AND (@LocationId IS NULL OR s.LocationId=@LocationId)
+			AND b.CreatedOn >= DATEADD(SECOND, -120, SYSUTCDATETIME())
+		ORDER BY b.Id DESC;
+		IF @DuplicateId IS NOT NULL
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 b.Id AS BookingId
+				,b.IdGUID AS BookingPublicId
+				,b.ChallanNumber
+				,b.ValidityDate AS ChallanValidUntil
+				,NULL AS ErrorMessage
+				,b.SubtotalAmount
+				,b.DiscountAmount
+				,b.SecurityDepositRequired AS SecurityDeposit
+				,b.TotalAmount
+				,b.MonthlyRent
+				,b.BillingPeriodMonths
+				,b.ShiftType
+				,CAST(1 AS bit) AS IsDuplicate
+			FROM dbo.WN_Bookings b
+			WHERE b.Id=@DuplicateId;
+			RETURN;
+		END
+		SELECT TOP 1 @SpaceId = s.Id
+		FROM dbo.WN_Spaces s WITH (UPDLOCK) JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId
+		WHERE s.IsActive=1
+			AND sc.Code=@CategoryCode
+			AND (@LocationId IS NULL OR s.LocationId=@LocationId)
+			AND (@Capacity IS NULL OR s.Capacity >= @Capacity)
+			AND NOT EXISTS (
+				SELECT 1
+				FROM dbo.WN_Bookings bk
+				WHERE bk.SpaceId=s.Id
+					AND bk.IsDeleted=0
+					AND bk.BookingStatusId IN (1, 2, 5, 33)
+					AND @StartOn < bk.EndOn
+					AND @EndOn > bk.StartOn
+					AND (@NormalizedShift='24_7'
+						OR ISNULL(bk.ShiftType, '24_7')='24_7'
+						OR @NormalizedShift=ISNULL(bk.ShiftType, '24_7'))
+			)
+		ORDER BY CASE
+			WHEN ISNULL((
+				SELECT TOP 1 CASE WHEN @BillingPeriodCode='Monthly' THEN pc.PricePerMonth ELSE pc.PricePerHour END
+				FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+					dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+				WHERE pc.LocationId=s.LocationId AND pc.Status=1
+					AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+				ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+			), 0) > 0 THEN 0
+			ELSE 1
+		END, s.Capacity ASC, TRY_CAST(s.Code AS int), s.Code;
+		IF @SpaceId IS NULL
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,'No available space for the requested period.' AS ErrorMessage;
+			RETURN;
+		END
+		SELECT TOP 1 @PricingId = sp.Id
+		FROM dbo.WN_SpacePricing sp JOIN
+			dbo.WN_BillingPeriods bp ON bp.Id=sp.BillingPeriodId
+		WHERE sp.SpaceId=@SpaceId
+			AND sp.IsActive=1
+			AND bp.Code=@BillingPeriodCode
+			AND sp.EffectiveFrom <= @TodayPk
+			AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > @TodayPk)
+		ORDER BY sp.EffectiveFrom DESC;
+		SET @PricingId = ISNULL(@PricingId, 0);
+		IF ISNULL((
+			SELECT TOP 1 CASE WHEN @BillingPeriodCode='Monthly' THEN pc.PricePerMonth ELSE pc.PricePerHour END
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) JOIN
+				dbo.WN_Spaces s WITH (NOLOCK) ON s.Id=@SpaceId JOIN
+				dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		), 0) <= 0
+		BEGIN
+			ROLLBACK TRANSACTION;
+			SELECT
+				 NULL AS BookingId
+				,NULL AS BookingPublicId
+				,NULL AS ChallanNumber
+				,NULL AS ChallanValidUntil
+				,'No ' + LOWER(@BillingPeriodCode) + ' price is set for the selected space in the space configuration.' AS ErrorMessage;
+			RETURN;
+		END
+		IF @CategoryCode IN ('PrivateOffice', 'Private')
+			SELECT @ChargedSeats = s.Capacity
+			FROM dbo.WN_Spaces s WITH (NOLOCK)
+			WHERE s.Id=@SpaceId;
+		COMMIT TRANSACTION;
+		EXEC dbo.WN_Bookings_Insert
+			 @UserId = @UserId
+			,@SpaceId = @SpaceId
+			,@PricingId = @PricingId
+			,@StartOn = @StartOn
+			,@EndOn = @EndOn
+			,@Notes = @Notes
+			,@CreatedById = @CreatedById
+			,@UserEmail = @UserEmail
+			,@CustomerEmail = @CustomerEmail
+			,@CustomerFirstName = @CustomerFirstName
+			,@CustomerLastName = @CustomerLastName
+			,@CustomerPhone = @CustomerPhone
+			,@CustomerCnic = @CustomerCnic
+			,@CustomerAddress = @CustomerAddress
+			,@CustomerCityId = @CustomerCityId
+			,@CustomerNotes = @CustomerNotes
+			,@ShiftType = @NormalizedShift
+			,@Capacity = @ChargedSeats
+			,@SecurityDepositMonths = @ResolvedSecMonths;
+	END TRY
+	BEGIN CATCH
+		IF @@TRANCOUNT > 0
+			ROLLBACK TRANSACTION;
+		SELECT
+			 NULL AS BookingId
+			,NULL AS BookingPublicId
+			,NULL AS ChallanNumber
+			,NULL AS ChallanValidUntil
+			,ERROR_MESSAGE() AS ErrorMessage;
+	END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Reassign]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_Reassign]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -5917,7 +6697,7 @@ BEGIN
         UPDATE dbo.WN_Bookings SET
             SpaceId     = @NewSpaceId,
             PricingId   = @NewPricingId,
-            UpdatedOn   = SYSUTCDATETIME(),
+            UpdatedOn   = SYSDATETIME(),
             UpdatedById = @UpdatedById
         WHERE Id = @Id;
         SET @Affected = @@ROWCOUNT;
@@ -5931,7 +6711,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -5988,7 +6768,7 @@ BEGIN
             StartOn     = ISNULL(@StartOn, StartOn),
             EndOn       = ISNULL(@EndOn,   EndOn),
             Notes       = ISNULL(@Notes,   Notes),
-            UpdatedOn   = SYSUTCDATETIME(),
+            UpdatedOn   = SYSDATETIME(),
             UpdatedById = @UpdatedById
         WHERE Id = @Id AND IsDeleted = 0;
         SET @Affected = @@ROWCOUNT;
@@ -6002,15 +6782,11 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_UpdateSecurityDeposit]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_UpdateSecurityDeposit]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- SD_01: Security Deposit (Months) of an existing booking (PUT api/booking/{id} with SecurityDepositMonths). Private
--- offices take 0, 1, 2 or 3 months; shared spaces and meeting rooms are always 0. The amount is months x monthly rent x
--- (1 - rent discount), 2 decimals. The same months change nothing; a new month count is refused once the booking has an
--- invoice (issued invoices never change). Result: SecurityDepositMonths, SecurityDepositRequired, ErrorMessage.
 CREATE   PROCEDURE [dbo].[WN_Bookings_UpdateSecurityDeposit]
     @BookingId             INT,
     @SecurityDepositMonths INT,
@@ -6117,7 +6893,7 @@ BEGIN
             TotalAmount             = CASE WHEN TotalAmount IS NULL THEN NULL
                                            WHEN TotalAmount + @NewAmount - @OldAmount < 0 THEN 0
                                            ELSE TotalAmount + @NewAmount - @OldAmount END,
-            UpdatedOn               = SYSUTCDATETIME(),
+            UpdatedOn               = SYSDATETIME(),
             UpdatedById             = COALESCE(@UpdatedById, UpdatedById)
         WHERE Id = @BookingId;
         -- SD_01: the booking details row (WN_BookingDetails.BookingGuid = WN_Bookings.IdGUID); its total holds the deposit.
@@ -6142,7 +6918,7 @@ BEGIN
                     (BookingId, ChargeTypeId, Description, Quantity, UnitPrice, DiscountAmount, TaxRate, AccountId, IsDeleted, CreatedOn, CreatedById,
                      AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, SecurityReceivedId)
                 VALUES
-                    (@BookingId, 2, 'Security Deposit (Refundable)', @Months, @UnitPrice, 0.00, 0.0000, @SecRecId, 0, SYSUTCDATETIME(), @UpdatedById,
+                    (@BookingId, 2, 'Security Deposit (Refundable)', @Months, @UnitPrice, 0.00, 0.0000, @SecRecId, 0, SYSDATETIME(), @UpdatedById,
                      @ARId, @RentId, @SvcId, @TaxId, @SecRecId);
             END
             ELSE
@@ -6193,7 +6969,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Bookings_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Bookings_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -6207,7 +6983,7 @@ CREATE   PROCEDURE [dbo].[WN_Bookings_UpdateStatus]
         SET NOCOUNT ON;
         UPDATE dbo.WN_Bookings SET
             BookingStatusId = @BookingStatusId,
-            UpdatedOn       = SYSUTCDATETIME(),
+            UpdatedOn       = SYSDATETIME(),
             UpdatedById     = @UpdatedById
         WHERE Id = @Id AND IsDeleted = 0;
         DECLARE @Updated INT = @@ROWCOUNT;
@@ -6218,7 +6994,25 @@ CREATE   PROCEDURE [dbo].[WN_Bookings_UpdateStatus]
             WHERE BookingId = @Id AND StatusId = 1;
     END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_BookTour_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_BookingStatuses_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 1. dbo.WN_BookingStatuses_GetList
+CREATE   PROCEDURE [dbo].[WN_BookingStatuses_GetList]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT CAST(Id AS INT) AS Id, LTRIM(RTRIM(Code)) AS Code 
+    FROM dbo.WN_BookingStatuses WITH (NOLOCK) 
+    ORDER BY Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_BookTour_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -6245,7 +7039,7 @@ BEGIN
     SELECT SCOPE_IDENTITY() AS NewId, @NewGUID AS NewIdGuid;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Branches_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Branches_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -6272,7 +7066,7 @@ BEGIN
     ORDER BY b.[Description] ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CalculateInvoiceAmounts]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CalculateInvoiceAmounts]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -6453,7 +7247,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Breakdown]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Breakdown]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -6731,11 +7525,12 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Dashboard]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Dashboard]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+-- 3. Alter dbo.WN_Ceo_Dashboard
 CREATE   PROCEDURE [dbo].[WN_Ceo_Dashboard]
     @LocationId    INT = NULL,             -- NULL = all locations
     @PMonths       INT = 1,                -- 1 = this month, 3 = this quarter, 12 = this year (to date)
@@ -6745,41 +7540,17 @@ CREATE   PROCEDURE [dbo].[WN_Ceo_Dashboard]
     @VoidStatusIds NVARCHAR(400) = NULL,   -- invoice StatusIds void / cancelled, CSV
     @ExpiringDays  INT = 90,               -- leases ending in the next N days
     @InquiriesByLocation BIT = NULL,       -- QA_07: 1 = tour inquiries follow @LocationId by their branch
-                                           -- (WN_Contacts.LocationId; all locations = every inquiry); NULL / 0 = every
-                                           -- inquiry of every location (as before QA_07)
     @From          DATE = NULL,            -- CS_01: first day of a custom range (with @To; replaces @PMonths)
-    @To            DATE = NULL             -- CS_01: last day of a custom range (included)
+    @To            DATE = NULL,            -- CS_01: last day of a custom range (included)
+    @LocationIds   NVARCHAR(MAX) = NULL    -- Optional comma-separated location IDs for location-bound roles
 AS
 BEGIN
-    -- CEO dashboard (read-only). Same rules as the admin overview (api/dashboard/overview) and the super admin role
-    -- dashboard (api/dashboard/role), so the numbers match:
-    --   spaces = WN_Spaces.Status = 1; live bookings = not deleted, BookingStatusId 1, 2, 5, 33;
-    --   invoices = not void, located by booking -> space (with a location filter only invoices of those spaces);
-    --   outstanding = GrandTotal - WHT - PaidTotal of open invoices; overdue = open and past DueOn;
-    --   invoiced / collected = GrandTotal issued in the period (CEO_03: within it, start <= issue date < end; collected = now paid);
-    --   CP_01: an invoice is placed in the month its BILLING PERIOD starts, not the month it was issued: PeriodOn =
-    --   BillingPeriodStart, else the date after Period in Notes (Recurring Invoice for Period yyyy-mm-dd to ...), else
-    --   IssuedOn (invoiced, collected, the 12-month series, top customers: up to this month); billed in advance = open, PeriodOn after
-    --   today and not due yet (DueOn NULL or today or later): left out of outstanding and aging, counted in
-    --   BilledInAdvance / BilledInAdvanceCount (appended to [1]). An unpaid invoice past its due date stays outstanding.
-    --   new bookings = created in the period, not deleted, not rejected / cancelled / no show (3, 4, 6, 86);
-    --   quotations = active (IsActive = 1), created in the period;
-    --   tour inquiries (QA_07, @InquiriesByLocation = 1) = those of @LocationId by WN_Contacts.LocationId, every
-    --   inquiry with all locations (as the Sales Manager dashboard since BR_02).
-    -- Result sets: [0] locations, [1] money, [2] last 12 months, [3] aging, [4] top customers (12 months),
-    -- [5] occupancy, [6] occupancy by space type, [7] occupancy by location, [8] leases expiring (first 50), [9] sales
-    -- funnel (InqByLocation = 1: the inquiries follow @LocationId), [10] inquiries by type, [11] team per location,
-    -- [12] team people, [13] QA_07: all leases expiring (how many, their monthly rent).
-    -- CS_01: @From / @To = a custom range for every period figure (previous = as many days just before it); the
-    -- 12-month series, aging, top customers (12 months), occupancy right now and the leases expiring are not period figures.
     SET NOCOUNT ON;
     IF @PMonths NOT IN (1, 3, 12) SET @PMonths = 1;
     IF @LocationId <= 0 SET @LocationId = NULL;
-    -- CS_01: a custom range (@From - @To, both days included) instead of the calendar period of @PMonths; previous
-    -- period = as many days just before it. Without both days (or @From after @To): the calendar period, as before.
+
     DECLARE @Custom BIT = CASE WHEN @From IS NOT NULL AND @To IS NOT NULL AND @From <= @To THEN 1 ELSE 0 END;
     DECLARE @CustomDays INT = CASE WHEN @Custom = 1 THEN DATEDIFF(DAY, @From, @To) + 1 ELSE 0 END;
-    -- QA_07: tour inquiries by branch when asked for and the branch column exists (BR_01).
     DECLARE @InqByLoc BIT = CASE WHEN @InquiriesByLocation = 1 AND COL_LENGTH(N'dbo.WN_Contacts', N'LocationId') IS NOT NULL THEN 1 ELSE 0 END;
     DECLARE @InqLocationId INT = CASE WHEN @InqByLoc = 1 THEN @LocationId ELSE NULL END;
     DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, SYSDATETIME());
@@ -6789,25 +7560,21 @@ BEGIN
         WHEN 12 THEN DATEFROMPARTS(YEAR(@Today), 1, 1)
         WHEN 3  THEN DATEFROMPARTS(YEAR(@Today), ((MONTH(@Today) - 1) / 3) * 3 + 1, 1)
         ELSE @MonthStart END;
-    IF @Custom = 1 SET @PStart = @From;                                                     -- CS_01
+    IF @Custom = 1 SET @PStart = @From;
     DECLARE @PrevStart DATE = CASE WHEN @Custom = 1 THEN DATEADD(DAY, -@CustomDays, @PStart) ELSE DATEADD(MONTH, -@PMonths, @PStart) END;
-    DECLARE @PrevEnd DATE = CASE WHEN @Custom = 1 THEN @PStart                              -- CS_01: the days just before the range
-                                 ELSE DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevStart) END;   -- same number of days, exclusive
-    -- CS_01: created before this day (custom: the day after @To); the calendar periods have no end (to date, as before).
+    DECLARE @PrevEnd DATE = CASE WHEN @Custom = 1 THEN @PStart
+                                 ELSE DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevStart) END;
     DECLARE @CEnd DATETIME2(0) = CASE WHEN @Custom = 1 THEN CAST(DATEADD(DAY, 1, @To) AS DATETIME2(0)) ELSE CAST(N'9999-12-31' AS DATETIME2(0)) END;
-    -- CS_01: the same bounds for the columns written in UTC (SYSUTCDATETIME: bookings CreatedOn, quotations CreatedDate,
-    -- tour inquiries CreatedOn): a custom range is in Pakistan days (UTC+5, no daylight saving), so 5 hours earlier.
-    -- The calendar periods keep their comparisons as they were.
     DECLARE @UShift INT = CASE WHEN @Custom = 1 THEN -5 ELSE 0 END;
     DECLARE @UStart DATETIME2(0) = DATEADD(HOUR, @UShift, CAST(@PStart AS DATETIME2(0)));
     DECLARE @UEnd DATETIME2(0) = CASE WHEN @Custom = 1 THEN DATEADD(HOUR, -5, @CEnd) ELSE @CEnd END;
     DECLARE @UPrevStart DATETIME2(0) = DATEADD(HOUR, @UShift, CAST(@PrevStart AS DATETIME2(0)));
     DECLARE @UPrevEnd DATETIME2(0) = DATEADD(HOUR, @UShift, CAST(@PrevEnd AS DATETIME2(0)));
     DECLARE @PEnd DATE = CASE WHEN @Custom = 1 THEN DATEADD(DAY, 1, @To)
-                              ELSE DATEADD(MONTH, @PMonths, @PStart) END;                    -- CEO_03: first day after the period
-    DECLARE @PeriodAgo DATETIME2(0) = CASE WHEN @Custom = 1 THEN DATEADD(DAY, -@CustomDays, @Now)   -- CS_01: as many days ago
-                                           ELSE DATEADD(MONTH, -@PMonths, @Now) END;         -- same moment, one period ago
-    DECLARE @SeriesStart DATE = DATEADD(MONTH, -11, @MonthStart);                          -- 12 months incl. this one
+                              ELSE DATEADD(MONTH, @PMonths, @PStart) END;
+    DECLARE @PeriodAgo DATETIME2(0) = CASE WHEN @Custom = 1 THEN DATEADD(DAY, -@CustomDays, @Now)
+                                           ELSE DATEADD(MONTH, -@PMonths, @Now) END;
+    DECLARE @SeriesStart DATE = DATEADD(MONTH, -11, @MonthStart);
     DECLARE @Earliest DATE = CASE WHEN @PrevStart < @SeriesStart THEN @PrevStart ELSE @SeriesStart END;
     DECLARE @ExpEnd DATETIME2(0) = DATEADD(DAY, ISNULL(@ExpiringDays, 90), @Now);
     DECLARE @Open TABLE (Id INT PRIMARY KEY);
@@ -6816,27 +7583,21 @@ BEGIN
     INSERT INTO @Open (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@OpenStatusIds, N''), N',') WHERE TRY_CAST(value AS INT) IS NOT NULL;
     INSERT INTO @Paid (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@PaidStatusIds, N''), N',') WHERE TRY_CAST(value AS INT) IS NOT NULL;
     INSERT INTO @Void (Id) SELECT DISTINCT TRY_CAST(value AS INT) FROM STRING_SPLIT(ISNULL(@VoidStatusIds, N''), N',') WHERE TRY_CAST(value AS INT) IS NOT NULL;
-    -- Spaces in scope; occupied = a confirmed booking (CP_02: 2, 33; pending no longer counts) running right now.
-    -- CP_02: rooms (IsRoom) = space category PrivateOffice or SharedSpace (WN_SpaceTypes.CategoryId -> WN_SpaceCategories),
-    -- as the Rooms / Seats sections; occupancy is measured on rooms only, per category (meeting rooms etc. left out).
-    -- @Spaces itself keeps every active space (invoices, new bookings and quotations use it). Seats = WN_Spaces.Capacity
-    -- (none = 1 seat, as dbo.WN_Ceo_Seats); SeatsSold = the seats of the confirmed bookings running now (booking Capacity
-    -- when > 0, else its quotation's (converted first), else the room's; each at most the room's seats), at most the room's
-    -- seats. CreatedOn: rooms that existed at a past moment (the 12 months and one period ago).
+
     DECLARE @Spaces TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200), LocationId INT NULL, SpaceTypeId INT NULL, IsOccupied INT NOT NULL,
-                           CategoryCode NVARCHAR(30) NULL, IsRoom BIT NOT NULL, CreatedOn DATETIME NULL,       -- CP_02
-                           Seats INT NOT NULL, SeatsSold INT NOT NULL);                                        -- CP_02
-    INSERT INTO @Spaces (Id, Name, LocationId, SpaceTypeId, IsOccupied, CategoryCode, IsRoom, CreatedOn, Seats, SeatsSold)   -- CP_02
+                           CategoryCode NVARCHAR(30) NULL, IsRoom BIT NOT NULL, CreatedOn DATETIME NULL,
+                           Seats INT NOT NULL, SeatsSold INT NOT NULL);
+    INSERT INTO @Spaces (Id, Name, LocationId, SpaceTypeId, IsOccupied, CategoryCode, IsRoom, CreatedOn, Seats, SeatsSold)
     SELECT s.Id, CAST(COALESCE(NULLIF(s.Name, N''), s.Code) AS NVARCHAR(200)), s.LocationId, s.SpaceTypeId,
-           CASE WHEN ISNULL(cur.Bookings, 0) > 0 THEN 1 ELSE 0 END,                                          -- CP_02: confirmed only
-           cat.Code, CASE WHEN cat.Code IN (N'PrivateOffice', N'SharedSpace') THEN 1 ELSE 0 END, s.CreatedOn, rs.Seats,   -- CP_02
-           CASE WHEN ISNULL(cur.Seats, 0) > rs.Seats THEN rs.Seats ELSE ISNULL(cur.Seats, 0) END             -- CP_02
+           CASE WHEN ISNULL(cur.Bookings, 0) > 0 THEN 1 ELSE 0 END,
+           cat.Code, CASE WHEN cat.Code IN (N'PrivateOffice', N'SharedSpace') THEN 1 ELSE 0 END, s.CreatedOn, rs.Seats,
+           CASE WHEN ISNULL(cur.Seats, 0) > rs.Seats THEN rs.Seats ELSE ISNULL(cur.Seats, 0) END
       FROM dbo.WN_Spaces s WITH (NOLOCK)
      OUTER APPLY (SELECT TOP 1 CAST(sc.Code AS NVARCHAR(30)) AS Code, CAST(COALESCE(NULLIF(sc.Label, N''), sc.Code) AS NVARCHAR(200)) AS Label
                     FROM dbo.WN_SpaceTypes st WITH (NOLOCK)
                     JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-                   WHERE st.Id = s.SpaceTypeId) cat                                                        -- CP_02
-     CROSS APPLY (SELECT CASE WHEN ISNULL(s.Capacity, 0) > 0 THEN CAST(s.Capacity AS INT) ELSE 1 END AS Seats) rs   -- CP_02
+                   WHERE st.Id = s.SpaceTypeId) cat
+     CROSS APPLY (SELECT CASE WHEN ISNULL(s.Capacity, 0) > 0 THEN CAST(s.Capacity AS INT) ELSE 1 END AS Seats) rs
      OUTER APPLY (SELECT COUNT(*) AS Bookings, SUM(bs.Seats) AS Seats
                     FROM dbo.WN_Bookings b WITH (NOLOCK)
                    OUTER APPLY (SELECT TOP 1 q.Capacity FROM dbo.WN_Quotations q WITH (NOLOCK)
@@ -6845,32 +7606,31 @@ BEGIN
                    CROSS APPLY (SELECT CASE WHEN b.Capacity > 0 THEN b.Capacity WHEN qc.Capacity > 0 THEN qc.Capacity ELSE rs.Seats END AS Seats) b0
                    CROSS APPLY (SELECT CASE WHEN b0.Seats > rs.Seats THEN rs.Seats ELSE b0.Seats END AS Seats) bs
                    WHERE b.SpaceId = s.Id AND ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
-                     AND b.StartOn <= @Now AND b.EndOn >= @Now) cur                                        -- CP_02
-     WHERE s.Status = 1 AND (@LocationId IS NULL OR s.LocationId = @LocationId);
-    -- CP_02: confirmed bookings only (2, 33; was 1, 2, 5, 33). NetMonthly (leases expiring only) = the monthly rent after
-    -- the % and fixed PKR discounts, as the Rooms section (dbo.WN_Ceo_RoomReport, RM_02): MonthlyRent (NULL / 0: the one
-    -- of dbo.WN_vw_BookingSummary) x (1 - DiscountPercentage / 100) - the fixed discount a month.
+                     AND b.StartOn <= @Now AND b.EndOn >= @Now) cur
+     WHERE s.Status = 1
+       AND (@LocationId IS NULL OR s.LocationId = @LocationId)
+       AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N',') WHERE TRY_CAST(value AS INT) IS NOT NULL));
+
     DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, StartOn DATETIME2(0), EndOn DATETIME2(0), StatusId INT,
                          UserId INT NULL, CustomerCode NVARCHAR(50) NULL, MonthlyRent DECIMAL(18,2) NULL,
-                         NetMonthly DECIMAL(18,2) NULL);                                                       -- CP_02
-    INSERT INTO @Live (Id, SpaceId, StartOn, EndOn, StatusId, UserId, CustomerCode, MonthlyRent, NetMonthly)    -- CP_02
+                         NetMonthly DECIMAL(18,2) NULL);
+    INSERT INTO @Live (Id, SpaceId, StartOn, EndOn, StatusId, UserId, CustomerCode, MonthlyRent, NetMonthly)
     SELECT b.Id, b.SpaceId, b.StartOn, b.EndOn, b.BookingStatusId, b.UserId, b.CustomerCode, b.MonthlyRent,
            CASE WHEN b.EndOn >= @Now AND b.EndOn <= @ExpEnd
-                THEN CAST(ROUND(mr.MonthlyRent * (1 - ISNULL(b.DiscountPercentage, 0) / 100.0) - fx.FixedMonthly, 2) AS DECIMAL(18,2)) END   -- CP_02
+                THEN CAST(ROUND(mr.MonthlyRent * (1 - ISNULL(b.DiscountPercentage, 0) / 100.0) - fx.FixedMonthly, 2) AS DECIMAL(18,2)) END
       FROM dbo.WN_Bookings b WITH (NOLOCK)
       JOIN @Spaces sp ON sp.Id = b.SpaceId
      OUTER APPLY (SELECT TOP 1 v.MonthlyRent FROM dbo.WN_vw_BookingSummary v WITH (NOLOCK)
-                   WHERE ISNULL(b.MonthlyRent, 0) = 0 AND b.EndOn >= @Now AND b.EndOn <= @ExpEnd AND v.BookingId = b.Id) vr   -- CP_02
-     CROSS APPLY (SELECT CAST(COALESCE(NULLIF(b.MonthlyRent, 0), vr.MonthlyRent) AS DECIMAL(18,2)) AS MonthlyRent) mr       -- CP_02
+                   WHERE ISNULL(b.MonthlyRent, 0) = 0 AND b.EndOn >= @Now AND b.EndOn <= @ExpEnd AND v.BookingId = b.Id) vr
+     CROSS APPLY (SELECT CAST(COALESCE(NULLIF(b.MonthlyRent, 0), vr.MonthlyRent) AS DECIMAL(18,2)) AS MonthlyRent) mr
      CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(b.DiscountPercentage, 0) = 0
                                     AND LOWER(LTRIM(RTRIM(ISNULL(b.DiscountType, N'')))) IN (N'amount', N'fixed')
                                     AND ISNULL(mr.MonthlyRent, 0) > 0
                                THEN CASE WHEN COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) > mr.MonthlyRent THEN mr.MonthlyRent
                                          ELSE COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) END
-                               ELSE 0 END AS DECIMAL(18,2)) AS FixedMonthly) fx                            -- CP_02 (RM_02)
-     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33);                                        -- CP_02
-    -- New bookings (created) from the earliest date any section needs; Amount = what the bookings list shows
-    -- (first non-void invoice of the booking = its challan, else the booking total).
+                               ELSE 0 END AS DECIMAL(18,2)) AS FixedMonthly) fx
+     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33);
+
     DECLARE @New TABLE (Id INT PRIMARY KEY, LocationId INT NULL, CreatedOn DATETIME NULL, Amount DECIMAL(18,4) NOT NULL);
     INSERT INTO @New
     SELECT b.Id, sp.LocationId, b.CreatedOn, ISNULL(COALESCE(NULLIF(fi.GrandTotal, 0), b.TotalAmount), 0)
@@ -6879,83 +7639,86 @@ BEGIN
      OUTER APPLY (SELECT TOP 1 ISNULL(i.GrandTotal, 0) AS GrandTotal FROM dbo.WN_Invoices i WITH (NOLOCK)
                    WHERE i.BookingId = b.Id AND ISNULL(i.StatusId, 0) NOT IN (5, 40) ORDER BY i.Id) fi
      WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId NOT IN (3, 4, 6, 86) AND b.CreatedOn >= DATEADD(HOUR, @UShift, CAST(@Earliest AS DATETIME2(0)));
+
     DECLARE @Inv TABLE (Id INT PRIMARY KEY, UserId INT NULL, CustomerCode NVARCHAR(50) NULL, LocationId INT NULL,
                         IssuedOn DATE NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4) NOT NULL, PaidTotal DECIMAL(18,4) NOT NULL,
                         WhtAmount DECIMAL(18,4) NOT NULL, IsOpen BIT NOT NULL, IsPaid BIT NOT NULL,
-                        PeriodOn DATE NULL, IsAdvance BIT NOT NULL,   -- CP_01: billing period start; billed in advance
-                        Deposit DECIMAL(18,4) NOT NULL, Collected DECIMAL(18,4) NOT NULL);   -- CP_02: security deposit; paid so far without it
+                        PeriodOn DATE NULL, IsAdvance BIT NOT NULL,
+                        Deposit DECIMAL(18,4) NOT NULL, Collected DECIMAL(18,4) NOT NULL);
     INSERT INTO @Inv
     SELECT i.Id, ISNULL(b.UserId, i.UserId), b.CustomerCode, sp.LocationId, i.IssuedOn, i.DueOn,
            ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), ISNULL(i.WHTAmount, 0),
            CASE WHEN o.Id IS NULL THEN 0 ELSE 1 END, CASE WHEN p.Id IS NULL THEN 0 ELSE 1 END,
-           pd.PeriodOn, CASE WHEN o.Id IS NOT NULL AND pd.PeriodOn > @Today AND (i.DueOn IS NULL OR i.DueOn >= @Today) AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0 THEN 1 ELSE 0 END,   -- CP_02: billed in advance only with something left to pay
-           cp.Deposit, cc.Collected   -- CP_02
+           pd.PeriodOn, CASE WHEN o.Id IS NOT NULL AND pd.PeriodOn > @Today AND (i.DueOn IS NULL OR i.DueOn >= @Today) AND ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) > 0 THEN 1 ELSE 0 END,
+           cp.Deposit, cc.Collected
       FROM dbo.WN_Invoices i WITH (NOLOCK)
       LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
       LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
       LEFT JOIN @Open o ON o.Id = i.StatusId
       LEFT JOIN @Paid p ON p.Id = i.StatusId
-     CROSS APPLY (SELECT COALESCE(CAST(i.BillingPeriodStart AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N'%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%', i.Notes), 0) + 7, 10), 23), i.IssuedOn) AS PeriodOn) pd   -- CP_01
-     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0 WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END AS DECIMAL(18,4)) AS Deposit,   -- CP_02: refundable security deposit (inside GrandTotal)
-                         CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp   -- CP_02: paid so far (Paid = in full; WHT left only = settled)
-     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.GrandTotal, 0) > 0 THEN cp.Settled * (ISNULL(i.GrandTotal, 0) - cp.Deposit) / i.GrandTotal ELSE 0 END AS DECIMAL(18,4)) AS Collected) cc   -- CP_02: collected without the deposit's share
+     CROSS APPLY (SELECT COALESCE(CAST(i.BillingPeriodStart AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N'%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%', i.Notes), 0) + 7, 10), 23), i.IssuedOn) AS PeriodOn) pd
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0 WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END AS DECIMAL(18,4)) AS Deposit,
+                         CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.GrandTotal, 0) > 0 THEN cp.Settled * (ISNULL(i.GrandTotal, 0) - cp.Deposit) / i.GrandTotal ELSE 0 END AS DECIMAL(18,4)) AS Collected) cc
      WHERE i.StatusId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @Void v WHERE v.Id = i.StatusId) AND ISNULL(i.StatusId, 0) <> 40
-       AND (@LocationId IS NULL OR sp.Id IS NOT NULL);
-    -- Locations shown: active ones, plus any that still has active spaces.
+       AND (@LocationId IS NULL AND @LocationIds IS NULL OR sp.Id IS NOT NULL);
+
     DECLARE @Loc TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200));
     INSERT INTO @Loc
     SELECT l.Id, ISNULL(NULLIF(LTRIM(RTRIM(CAST(l.Name AS NVARCHAR(200)))), N''), CONCAT(N'Location ', l.Id))
       FROM dbo.WN_Locations l WITH (NOLOCK)
-     WHERE l.IsActive = 1 OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.LocationId = l.Id AND s.Status = 1);
-    -- [0] locations (for the location filter; never narrowed)
+     WHERE (l.IsActive = 1 OR EXISTS (SELECT 1 FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.LocationId = l.Id AND s.Status = 1))
+       AND (@LocationIds IS NULL OR l.Id IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N',') WHERE TRY_CAST(value AS INT) IS NOT NULL));
+
+    -- [0] locations
     SELECT Id AS LocationId, Name FROM @Loc ORDER BY Name;
-    -- CP_02: the invoice windows. Calendar periods: whole billing months up to this one (an invoice raised in advance
-    -- for a later month is not counted yet), against the same months one period earlier (month: Oct vs Sep; quarter:
-    -- Oct vs Jul; year: Jan-Oct vs Jan-Oct last year), as the 12-month series. A custom range: as before.
-    DECLARE @IPEnd DATE = CASE WHEN @Custom = 1 THEN @PEnd ELSE DATEADD(MONTH, 1, @MonthStart) END;   -- CP_02
-    DECLARE @IPrevStart DATE = @PrevStart;   -- CP_02
-    DECLARE @IPrevEnd DATE = CASE WHEN @Custom = 1 THEN @PrevEnd ELSE DATEADD(MONTH, -@PMonths, @IPEnd) END;   -- CP_02
-    -- [1] money. CP_02: invoiced = GrandTotal less the security deposit (SecurityDeposits apart); collected = paid so
-    -- far on those invoices (partial payments count, a Paid invoice in full, WHT left only = settled), less the
-    -- deposit's share; outstanding / overdue / billed in advance only invoices with something left to pay.
+
+    DECLARE @IPEnd DATE = CASE WHEN @Custom = 1 THEN @PEnd ELSE DATEADD(MONTH, 1, @MonthStart) END;
+    DECLARE @IPrevStart DATE = @PrevStart;
+    DECLARE @IPrevEnd DATE = CASE WHEN @Custom = 1 THEN @PrevEnd ELSE DATEADD(MONTH, -@PMonths, @IPEnd) END;
+
+    -- [1] money
     SELECT
-        (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd) AS Invoiced,   -- CEO_03 / CP_01: billing period starts within the period; CP_02
-        (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodOn >= @IPrevStart AND PeriodOn < @IPrevEnd) AS InvoicedPrev,   -- CP_02
-        (SELECT ISNULL(SUM(Collected), 0) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd) AS Collected,   -- CP_02
-        (SELECT ISNULL(SUM(Collected), 0) FROM @Inv WHERE PeriodOn >= @IPrevStart AND PeriodOn < @IPrevEnd) AS CollectedPrev,   -- CP_02
-        (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE IsOpen = 1 AND IsAdvance = 0 AND GrandTotal - WhtAmount - PaidTotal > 0) AS Outstanding,   -- WHT is withheld by the customer, not owed; CP_01: not billed in advance; CP_02
-        (SELECT COUNT(*) FROM @Inv WHERE IsOpen = 1 AND IsAdvance = 0 AND GrandTotal - WhtAmount - PaidTotal > 0) AS OutstandingCount,   -- CP_02
-        (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE IsOpen = 1 AND DueOn < @Today AND GrandTotal - WhtAmount - PaidTotal > 0) AS Overdue,   -- CP_02
-        (SELECT COUNT(*) FROM @Inv WHERE IsOpen = 1 AND DueOn < @Today AND GrandTotal - WhtAmount - PaidTotal > 0) AS OverdueCount,   -- CP_02
-        (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE IsAdvance = 1) AS BilledInAdvance,   -- CP_01: open, period not started, not due
+        (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd) AS Invoiced,
+        (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodOn >= @IPrevStart AND PeriodOn < @IPrevEnd) AS InvoicedPrev,
+        (SELECT ISNULL(SUM(Collected), 0) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd) AS Collected,
+        (SELECT ISNULL(SUM(Collected), 0) FROM @Inv WHERE PeriodOn >= @IPrevStart AND PeriodOn < @IPrevEnd) AS CollectedPrev,
+        (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE IsOpen = 1 AND IsAdvance = 0 AND GrandTotal - WhtAmount - PaidTotal > 0) AS Outstanding,
+        (SELECT COUNT(*) FROM @Inv WHERE IsOpen = 1 AND IsAdvance = 0 AND GrandTotal - WhtAmount - PaidTotal > 0) AS OutstandingCount,
+        (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE IsOpen = 1 AND DueOn < @Today AND GrandTotal - WhtAmount - PaidTotal > 0) AS Overdue,
+        (SELECT COUNT(*) FROM @Inv WHERE IsOpen = 1 AND DueOn < @Today AND GrandTotal - WhtAmount - PaidTotal > 0) AS OverdueCount,
+        (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE IsAdvance = 1) AS BilledInAdvance,
         (SELECT COUNT(*) FROM @Inv WHERE IsAdvance = 1) AS BilledInAdvanceCount,
-        (SELECT ISNULL(SUM(Deposit), 0) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd) AS SecurityDeposits,   -- CP_02: deposits billed (not in Invoiced)
-        (SELECT ISNULL(SUM(Deposit), 0) FROM @Inv WHERE PeriodOn >= @IPrevStart AND PeriodOn < @IPrevEnd) AS SecurityDepositsPrev,   -- CP_02
-        (SELECT COUNT(*) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd AND Deposit > 0) AS SecurityDepositsCount,   -- CP_02: invoices with a deposit
-        @IPrevStart AS InvoicePrevFrom, DATEADD(DAY, -1, @IPrevEnd) AS InvoicePrevTo;   -- CP_02: the previous invoice window (days included)
-    -- [2] last 12 months, oldest first (occupancy at month end, or now for this month)
+        (SELECT ISNULL(SUM(Deposit), 0) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd) AS SecurityDeposits,
+        (SELECT ISNULL(SUM(Deposit), 0) FROM @Inv WHERE PeriodOn >= @IPrevStart AND PeriodOn < @IPrevEnd) AS SecurityDepositsPrev,
+        (SELECT COUNT(*) FROM @Inv WHERE PeriodOn >= @PStart AND PeriodOn < @IPEnd AND Deposit > 0) AS SecurityDepositsCount,
+        @IPrevStart AS InvoicePrevFrom, DATEADD(DAY, -1, @IPrevEnd) AS InvoicePrevTo;
+
+    -- [2] last 12 months
     ;WITH m AS (
         SELECT n, DATEADD(MONTH, -n, @MonthStart) AS MStart
           FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
     )
     SELECT CONVERT(CHAR(7), m.MStart, 126) AS [Month],
-           (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodOn >= m.MStart AND PeriodOn < DATEADD(MONTH, 1, m.MStart)) AS Invoiced,   -- CP_02: without deposits
-           (SELECT ISNULL(SUM(Collected), 0) FROM @Inv WHERE PeriodOn >= m.MStart AND PeriodOn < DATEADD(MONTH, 1, m.MStart)) AS Collected,   -- CP_02: paid so far
+           (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodOn >= m.MStart AND PeriodOn < DATEADD(MONTH, 1, m.MStart)) AS Invoiced,
+           (SELECT ISNULL(SUM(Collected), 0) FROM @Inv WHERE PeriodOn >= m.MStart AND PeriodOn < DATEADD(MONTH, 1, m.MStart)) AS Collected,
            (SELECT COUNT(*) FROM @New WHERE CreatedOn >= m.MStart AND CreatedOn < DATEADD(MONTH, 1, m.MStart)) AS NewBookings,
            (SELECT COUNT(DISTINCT lv.SpaceId) FROM @Live lv JOIN @Spaces t ON t.Id = lv.SpaceId
-             WHERE t.IsRoom = 1 AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At) AND lv.StartOn <= x.At AND lv.EndOn >= x.At) AS Occupied,   -- CP_02: rooms, confirmed, existing then
-           (SELECT COUNT(*) FROM @Spaces t WHERE t.IsRoom = 1 AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At)) AS TotalSpaces,   -- CP_02
+             WHERE t.IsRoom = 1 AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At) AND lv.StartOn <= x.At AND lv.EndOn >= x.At) AS Occupied,
+           (SELECT COUNT(*) FROM @Spaces t WHERE t.IsRoom = 1 AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At)) AS TotalSpaces,
            (SELECT COUNT(DISTINCT lv.SpaceId) FROM @Live lv JOIN @Spaces t ON t.Id = lv.SpaceId
-             WHERE t.CategoryCode = N'PrivateOffice' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At) AND lv.StartOn <= x.At AND lv.EndOn >= x.At) AS PrivateOfficeOccupied,   -- CP_02
-           (SELECT COUNT(*) FROM @Spaces t WHERE t.CategoryCode = N'PrivateOffice' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At)) AS PrivateOfficeTotal,   -- CP_02
+             WHERE t.CategoryCode = N'PrivateOffice' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At) AND lv.StartOn <= x.At AND lv.EndOn >= x.At) AS PrivateOfficeOccupied,
+           (SELECT COUNT(*) FROM @Spaces t WHERE t.CategoryCode = N'PrivateOffice' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At)) AS PrivateOfficeTotal,
            (SELECT COUNT(DISTINCT lv.SpaceId) FROM @Live lv JOIN @Spaces t ON t.Id = lv.SpaceId
-             WHERE t.CategoryCode = N'SharedSpace' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At) AND lv.StartOn <= x.At AND lv.EndOn >= x.At) AS SharedSpaceOccupied,   -- CP_02
-           (SELECT COUNT(*) FROM @Spaces t WHERE t.CategoryCode = N'SharedSpace' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At)) AS SharedSpaceTotal   -- CP_02
+             WHERE t.CategoryCode = N'SharedSpace' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At) AND lv.StartOn <= x.At AND lv.EndOn >= x.At) AS SharedSpaceOccupied,
+           (SELECT COUNT(*) FROM @Spaces t WHERE t.CategoryCode = N'SharedSpace' AND (t.CreatedOn IS NULL OR t.CreatedOn <= x.At)) AS SharedSpaceTotal
       FROM m
-     CROSS APPLY (SELECT CASE WHEN m.n = 0 THEN @Now ELSE DATEADD(SECOND, -1, CAST(DATEADD(MONTH, 1, m.MStart) AS DATETIME2(0))) END AS At) x
-     ORDER BY m.MStart;
-    -- [3] receivables aging: open balance by days past due
-    SELECT b.BucketKey, b.Label, b.SortOrder, ISNULL(SUM(x.Balance), 0) AS Amount, COUNT(x.Id) AS Invoices
+     CROSS APPLY (SELECT CASE WHEN m.n = 0 THEN @Now ELSE DATEADD(SECOND, -1, CAST(DATEADD(MONTH, 1, m.MStart) AS DATETIME2(0))) END AS At) x;
+
+    -- [3] aging
+    SELECT b.BucketKey AS Bucket, b.Label,
+           ISNULL(SUM(x.Balance), 0) AS Amount,
+           COUNT(x.Id) AS [Count]
       FROM (VALUES ('not_due', N'Not due', 0), ('1_30', N'1-30 days', 1), ('31_60', N'31-60 days', 2),
                    ('61_90', N'61-90 days', 3), ('90_plus', N'90+ days', 4)) b(BucketKey, Label, SortOrder)
       LEFT JOIN (
@@ -6965,16 +7728,16 @@ BEGIN
                         WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 60 THEN 2
                         WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 90 THEN 3
                         ELSE 4 END AS SortOrder
-              FROM @Inv i WHERE i.IsOpen = 1 AND i.IsAdvance = 0   -- CP_01: billed in advance is not owed yet
-               AND i.GrandTotal - i.WhtAmount - i.PaidTotal > 0   -- CP_02: something left to pay
+              FROM @Inv i WHERE i.IsOpen = 1 AND i.IsAdvance = 0
+               AND i.GrandTotal - i.WhtAmount - i.PaidTotal > 0
       ) x ON x.SortOrder = b.SortOrder
      GROUP BY b.BucketKey, b.Label, b.SortOrder
      ORDER BY b.SortOrder;
-    -- [4] top 5 customers by invoiced amount, last 12 months (customer as on the overview: booking customer code,
-    --     else the invoice / booking user’s customer record, else the user)
+
+    -- [4] top 5 customers
     SELECT TOP 5 t.CustomerId, MAX(t.Customer) AS Name, SUM(t.GrandTotal) AS Amount, COUNT(*) AS Invoices
       FROM (
-            SELECT i.GrandTotal - i.Deposit AS GrandTotal, cust.Id AS CustomerId,   -- CP_02: without the security deposit
+            SELECT i.GrandTotal - i.Deposit AS GrandTotal, cust.Id AS CustomerId,
                    COALESCE(NULLIF(cust.Name, N''), NULLIF(u.Name, N''), NULLIF(u.UserName, N''), CONCAT(N'Customer #', i.UserId)) AS Customer
               FROM @Inv i
               LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
@@ -6985,22 +7748,20 @@ BEGIN
                               OR (u.Email IS NOT NULL AND cu.Email = u.Email)
                            ORDER BY CASE WHEN i.CustomerCode IS NOT NULL AND cu.Code = i.CustomerCode THEN 0
                                          WHEN cu.UserId = i.UserId THEN 1 ELSE 2 END, cu.Id) cust
-             WHERE i.PeriodOn >= @SeriesStart AND i.PeriodOn < DATEADD(MONTH, 1, @MonthStart)   -- CP_01: by billing period, within the 12 months of [2]
+             WHERE i.PeriodOn >= @SeriesStart AND i.PeriodOn < DATEADD(MONTH, 1, @MonthStart)
       ) t
      GROUP BY t.CustomerId, CASE WHEN t.CustomerId IS NULL THEN t.Customer END
      ORDER BY SUM(t.GrandTotal) DESC;
-    -- [5] occupancy. CP_02: rooms only (PrivateOffice / SharedSpace), confirmed bookings; Prev = one period ago, of the rooms
-    --     that existed then (WN_Spaces.CreatedOn; TotalSpacesPrev); ActiveBookings = confirmed bookings running now on any
-    --     space in scope. Appended: TotalSpacesPrev, TotalSeats, SeatsSold, then per category (PrivateOffice..., SharedSpace...)
-    --     Total, Occupied, OccupiedPrev, TotalPrev, Seats, SeatsSold.
+
+    -- [5] occupancy
     SELECT a.TotalSpaces, a.OccupiedSpaces, p.OccupiedSpacesPrev,
            (SELECT COUNT(*) FROM @Live WHERE StartOn <= @Now AND EndOn >= @Now) AS ActiveBookings,
            (SELECT COUNT(*) FROM @New WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd) AS NewBookings,
            (SELECT COUNT(*) FROM @New WHERE CreatedOn >= @UPrevStart AND CreatedOn < @UPrevEnd) AS NewBookingsPrev,
-           a.TotalSpacesPrev, a.TotalSeats, a.SeatsSold,                                                          -- CP_02
-           a.PrivateOfficeTotal, a.PrivateOfficeOccupied, p.PrivateOfficeOccupiedPrev, a.PrivateOfficeTotalPrev,   -- CP_02
+           a.TotalSpacesPrev, a.TotalSeats, a.SeatsSold,
+           a.PrivateOfficeTotal, a.PrivateOfficeOccupied, p.PrivateOfficeOccupiedPrev, a.PrivateOfficeTotalPrev,
            a.PrivateOfficeSeats, a.PrivateOfficeSeatsSold,
-           a.SharedSpaceTotal, a.SharedSpaceOccupied, p.SharedSpaceOccupiedPrev, a.SharedSpaceTotalPrev,           -- CP_02
+           a.SharedSpaceTotal, a.SharedSpaceOccupied, p.SharedSpaceOccupiedPrev, a.SharedSpaceTotalPrev,
            a.SharedSpaceSeats, a.SharedSpaceSeatsSold
       FROM (SELECT COUNT(*) AS TotalSpaces, ISNULL(SUM(sp.IsOccupied), 0) AS OccupiedSpaces,
                    ISNULL(SUM(CASE WHEN (sp.CreatedOn IS NULL OR sp.CreatedOn <= @PeriodAgo) THEN 1 ELSE 0 END), 0) AS TotalSpacesPrev,
@@ -7015,33 +7776,38 @@ BEGIN
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'SharedSpace' AND (sp.CreatedOn IS NULL OR sp.CreatedOn <= @PeriodAgo) THEN 1 ELSE 0 END), 0) AS SharedSpaceTotalPrev,
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'SharedSpace' THEN sp.Seats ELSE 0 END), 0) AS SharedSpaceSeats,
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'SharedSpace' THEN sp.SeatsSold ELSE 0 END), 0) AS SharedSpaceSeatsSold
-              FROM @Spaces sp WHERE sp.IsRoom = 1) a                                                              -- CP_02
+              FROM @Spaces sp WHERE sp.IsRoom = 1) a
      CROSS JOIN (SELECT COUNT(DISTINCT lv.SpaceId) AS OccupiedSpacesPrev,
                         COUNT(DISTINCT CASE WHEN t.CategoryCode = N'PrivateOffice' THEN lv.SpaceId END) AS PrivateOfficeOccupiedPrev,
                         COUNT(DISTINCT CASE WHEN t.CategoryCode = N'SharedSpace' THEN lv.SpaceId END) AS SharedSpaceOccupiedPrev
-                   FROM @Live lv JOIN @Spaces t ON t.Id = lv.SpaceId
-                  WHERE t.IsRoom = 1 AND (t.CreatedOn IS NULL OR t.CreatedOn <= @PeriodAgo)
-                    AND lv.StartOn <= @PeriodAgo AND lv.EndOn >= @PeriodAgo) p;                                   -- CP_02
-    -- [6] CP_02: occupancy by room CATEGORY (right now; was by space type): Private Office, then Shared Space, always both
-    --     (zeros when none), as the Rooms section. SpaceTypeId (0) and Name (the category label) keep the column order;
-    --     appended CategoryId, CategoryCode, Seats, SeatsSold.
-    SELECT 0 AS SpaceTypeId, c.Label AS Name, COUNT(sp.Id) AS Total, ISNULL(SUM(sp.IsOccupied), 0) AS Occupied,
-           c.Id AS CategoryId, c.Code AS CategoryCode, ISNULL(SUM(sp.Seats), 0) AS Seats, ISNULL(SUM(sp.SeatsSold), 0) AS SeatsSold
-      FROM (SELECT CAST(sc.Id AS INT) AS Id, CAST(sc.Code AS NVARCHAR(30)) AS Code,
-                   CAST(COALESCE(NULLIF(sc.Label, N''), sc.Code) AS NVARCHAR(200)) AS Label
-              FROM dbo.WN_SpaceCategories sc WITH (NOLOCK)
-             WHERE sc.Code IN (N'PrivateOffice', N'SharedSpace')) c
-      LEFT JOIN @Spaces sp ON sp.CategoryCode = c.Code AND sp.IsRoom = 1
-     GROUP BY c.Id, c.Code, c.Label
-     ORDER BY CASE c.Code WHEN N'PrivateOffice' THEN 0 ELSE 1 END, c.Id;
-    -- [7] occupancy by location (right now). CP_02: rooms only, confirmed; appended Seats, SeatsSold and per category
-    --     (PrivateOffice..., SharedSpace...) Total, Occupied, Seats, SeatsSold; a 'No location' row (LocationId NULL, last)
-    --     for rooms not tied to a shown location, only when there is any (so the rows add up to [5]).
-    SELECT x.LocationId, x.Name, x.Total, x.Occupied, x.Seats, x.SeatsSold, x.PrivateOfficeTotal, x.PrivateOfficeOccupied, x.PrivateOfficeSeats, x.PrivateOfficeSeatsSold, x.SharedSpaceTotal, x.SharedSpaceOccupied, x.SharedSpaceSeats, x.SharedSpaceSeatsSold
+                   FROM dbo.WN_Bookings lv WITH (NOLOCK)
+                   JOIN @Spaces t ON t.Id = lv.SpaceId
+                  WHERE t.IsRoom = 1 AND ISNULL(lv.IsDeleted, 0) = 0 AND lv.BookingStatusId IN (2, 33)
+                    AND lv.StartOn <= @PeriodAgo AND lv.EndOn >= @PeriodAgo) p;
+
+    -- [6] occupancy by space type
+    SELECT st.Id AS SpaceTypeId,
+           CAST(COALESCE(NULLIF(st.Name, N''), NULLIF(CAST(st.Description AS NVARCHAR(200)), N''), sc.Label) AS NVARCHAR(200)) AS Name,
+           COUNT(sp.Id) AS Total,
+           ISNULL(SUM(sp.IsOccupied), 0) AS Occupied
+      FROM dbo.WN_SpaceTypes st WITH (NOLOCK)
+      JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
+      JOIN @Spaces sp ON sp.SpaceTypeId = st.Id
+     WHERE sp.IsRoom = 1
+     GROUP BY st.Id, st.Name, st.Description, sc.Label
+     ORDER BY COUNT(sp.Id) DESC, Name;
+
+    -- [7] occupancy by location
+    SELECT x.LocationId, x.Name, x.Total, x.Occupied,
+           x.TotalSeats, x.SeatsSold,
+           x.PrivateOfficeTotal, x.PrivateOfficeOccupied,
+           x.PrivateOfficeSeats, x.PrivateOfficeSeatsSold,
+           x.SharedSpaceTotal, x.SharedSpaceOccupied,
+           x.SharedSpaceSeats, x.SharedSpaceSeatsSold
       FROM (SELECT l.Id AS LocationId, l.Name, 0 AS Sort,
                    COUNT(sp.Id) AS Total,
                    ISNULL(SUM(sp.IsOccupied), 0) AS Occupied,
-                   ISNULL(SUM(sp.Seats), 0) AS Seats,
+                   ISNULL(SUM(sp.Seats), 0) AS TotalSeats,
                    ISNULL(SUM(sp.SeatsSold), 0) AS SeatsSold,
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'PrivateOffice' THEN 1 ELSE 0 END), 0) AS PrivateOfficeTotal,
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'PrivateOffice' THEN sp.IsOccupied ELSE 0 END), 0) AS PrivateOfficeOccupied,
@@ -7059,7 +7825,7 @@ BEGIN
             SELECT NULL, N'No location', 1,
                    COUNT(sp.Id) AS Total,
                    ISNULL(SUM(sp.IsOccupied), 0) AS Occupied,
-                   ISNULL(SUM(sp.Seats), 0) AS Seats,
+                   ISNULL(SUM(sp.Seats), 0) AS TotalSeats,
                    ISNULL(SUM(sp.SeatsSold), 0) AS SeatsSold,
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'PrivateOffice' THEN 1 ELSE 0 END), 0) AS PrivateOfficeTotal,
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'PrivateOffice' THEN sp.IsOccupied ELSE 0 END), 0) AS PrivateOfficeOccupied,
@@ -7071,12 +7837,13 @@ BEGIN
                    ISNULL(SUM(CASE WHEN sp.CategoryCode = N'SharedSpace' THEN sp.SeatsSold ELSE 0 END), 0) AS SharedSpaceSeatsSold
               FROM @Spaces sp
              WHERE sp.IsRoom = 1 AND (sp.LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @Loc l WHERE l.Id = sp.LocationId))
-            HAVING COUNT(sp.Id) > 0) x                                                                           -- CP_02
+            HAVING COUNT(sp.Id) > 0) x
      ORDER BY x.Sort, x.Name;
-    -- [8] confirmed leases ending in the next @ExpiringDays days, soonest first (the first 50; [13] counts them all)
+
+    -- [8] leases expiring
     SELECT TOP 50 lv.Id AS BookingId,
            COALESCE(NULLIF(cust.Name, N''), NULLIF(u.Name, N''), NULLIF(u.UserName, N''), NULLIF(u.Email, N''), N'Customer') AS Customer,
-           sp.Name AS Space, loc.Name AS Location, lv.EndOn, ISNULL(lv.NetMonthly, 0) AS MonthlyAmount   -- CP_02: after discounts
+           sp.Name AS Space, loc.Name AS Location, lv.EndOn, ISNULL(lv.NetMonthly, 0) AS MonthlyAmount
       FROM @Live lv
       JOIN @Spaces sp ON sp.Id = lv.SpaceId
       LEFT JOIN @Loc loc ON loc.Id = sp.LocationId
@@ -7090,44 +7857,35 @@ BEGIN
                                  WHEN cu.UserId = lv.UserId THEN 1 ELSE 2 END, cu.Id) cust
      WHERE lv.StatusId IN (2, 33) AND lv.EndOn >= @Now AND lv.EndOn <= @ExpEnd
      ORDER BY lv.EndOn, lv.Id;
-    -- [9] sales funnel: created in the period
-    --     inquiries = Tour Inquiries page rows; quotations = active, on spaces in scope (as the sales pipeline);
-    --     accepted = accepted by the customer or further (agreement sent, signed, converted); bookings = new bookings;
-    --     QA_07: the inquiries of @LocationId by branch when @InquiriesByLocation = 1 (InqByLocation)
-    --     SM_04: QuotationsBooked = those quotations that were booked (Converted): conversion = QuotationsBooked / Quotations
+
+    -- [9] sales funnel
     DECLARE @Inq TABLE (Id INT, Name NVARCHAR(MAX), PhoneNumber NVARCHAR(MAX), InquiryType NVARCHAR(20), ReferenceName NVARCHAR(MAX),
                         StatusId INT, CreatedOn DATETIME2, FeedbackOutcome NVARCHAR(MAX), FeedbackReason NVARCHAR(MAX));
-    -- CP_02 (F7): quotations (CreatedDate) and tour inquiries (CreatedOn) are UTC; every period, the calendar ones too,
-    -- starts at Pakistan midnight = 5 hours before UTC midnight. @SStart / @SEnd bound them in [9] - [12].
-    DECLARE @SStart DATETIME2(0) = DATEADD(HOUR, -5, CAST(@PStart AS DATETIME2(0)));             -- CP_02
-    DECLARE @SEnd DATETIME2(0) = @UEnd;                                                          -- CP_02 (calendar: no end)
-    DECLARE @InqFrom DATETIME2 = CAST(@SStart AS DATETIME2);                                -- CS_01: inquiries are UTC; CP_02: from Pakistan midnight
-    DECLARE @InqTo DATETIME2 = CASE WHEN @Custom = 1 THEN CAST(@UEnd AS DATETIME2) END;      -- CS_01 (NULL = no end)
+    DECLARE @SStart DATETIME2(0) = DATEADD(HOUR, -5, CAST(@PStart AS DATETIME2(0)));
+    DECLARE @SEnd DATETIME2(0) = @UEnd;
+    DECLARE @InqFrom DATETIME2 = CAST(@SStart AS DATETIME2);
+    DECLARE @InqTo DATETIME2 = CASE WHEN @Custom = 1 THEN CAST(@UEnd AS DATETIME2) END;
     INSERT INTO @Inq EXEC dbo.WN_Ceo_InquiryRows @From = @InqFrom, @To = @InqTo, @LocationId = @InqLocationId;
-    -- CP_02 (F6): one location chosen and the inquiries follow it by branch: how many inquiries of the period have no
-    -- branch (not counted above; NULL otherwise).
-    DECLARE @InqNoBranch INT = NULL;                                                             -- CP_02
+
+    DECLARE @InqNoBranch INT = NULL;
     DECLARE @InqNb TABLE (Id INT, Name NVARCHAR(MAX), PhoneNumber NVARCHAR(MAX), InquiryType NVARCHAR(20), ReferenceName NVARCHAR(MAX),
-                          StatusId INT, CreatedOn DATETIME2, FeedbackOutcome NVARCHAR(MAX), FeedbackReason NVARCHAR(MAX));   -- CP_02
-    IF @InqLocationId IS NOT NULL                                                                -- CP_02
+                          StatusId INT, CreatedOn DATETIME2, FeedbackOutcome NVARCHAR(MAX), FeedbackReason NVARCHAR(MAX));
+    IF @InqLocationId IS NOT NULL
     BEGIN
-        INSERT INTO @InqNb EXEC dbo.WN_Ceo_InquiryRows @From = @InqFrom, @To = @InqTo, @LocationId = NULL, @NoBranchOnly = 1;   -- CP_02
-        SET @InqNoBranch = (SELECT COUNT(*) FROM @InqNb);                                        -- CP_02
+        INSERT INTO @InqNb EXEC dbo.WN_Ceo_InquiryRows @From = @InqFrom, @To = @InqTo, @LocationId = NULL, @NoBranchOnly = 1;
+        SET @InqNoBranch = (SELECT COUNT(*) FROM @InqNb);
     END
     DECLARE @Quotations INT, @Accepted INT, @QuotationValue DECIMAL(18,2), @QuotationsBooked INT;
     SELECT @Quotations = COUNT(q.Id),
            @Accepted = ISNULL(SUM(CASE WHEN q.Status IN ('Accepted', 'AgreementSent', 'Signed', 'Converted') THEN 1 ELSE 0 END), 0),
            @QuotationValue = ISNULL(SUM(q.TotalAmount), 0),
-           @QuotationsBooked = ISNULL(SUM(CASE WHEN q.Status = 'Converted' AND bk.Id IS NOT NULL THEN 1 ELSE 0 END), 0)   -- CP_02: booking live
+           @QuotationsBooked = ISNULL(SUM(CASE WHEN q.Status = 'Converted' AND bk.Id IS NOT NULL THEN 1 ELSE 0 END), 0)
       FROM dbo.WN_Quotations q WITH (NOLOCK)
       JOIN @Spaces sp ON sp.Id = q.SpaceId
-      LEFT JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (3, 4, 6, 86)   -- CP_02 (F1)
-     WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= @SStart AND q.CreatedDate < @SEnd;   -- CP_02 (F7)
-    -- CP_02 (F2 / F5): the period's new bookings (the Bookings stage: @New) with their seller and contract value.
-    --   seller = who made the booking's quotation (WN_Quotations.CreatedById, the converted one first), else who created
-    --   the booking (WN_Bookings.CreatedById), as the Discounts section; value = WN_vw_BookingSummary.TotalContractAmount
-    --   (QA_02: the rent of the whole lease after the discount), else WN_Bookings.TotalAmount.
-    DECLARE @Sold TABLE (Id INT PRIMARY KEY, SellerId INT NULL, Value DECIMAL(18,2) NOT NULL, FromQuotation BIT NOT NULL);   -- CP_02
+      LEFT JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (3, 4, 6, 86)
+     WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= @SStart AND q.CreatedDate < @SEnd;
+
+    DECLARE @Sold TABLE (Id INT PRIMARY KEY, SellerId INT NULL, Value DECIMAL(18,2) NOT NULL, FromQuotation BIT NOT NULL);
     INSERT INTO @Sold (Id, SellerId, Value, FromQuotation)
     SELECT n.Id, COALESCE(qs.CreatedById, b.CreatedById),
            ISNULL(COALESCE(cv.TotalContractAmount, b.TotalAmount), 0),
@@ -7141,20 +7899,23 @@ BEGIN
                             q.Version DESC, q.Id DESC) qs
      OUTER APPLY (SELECT TOP 1 v.TotalContractAmount FROM dbo.WN_vw_BookingSummary v WITH (NOLOCK) WHERE v.BookingId = b.Id) cv
      WHERE n.CreatedOn >= @UStart AND n.CreatedOn < @UEnd;
+
     SELECT (SELECT COUNT(*) FROM @Inq) AS Inquiries,
            @Quotations AS Quotations, @Accepted AS Accepted, @QuotationValue AS QuotationValue,
            (SELECT COUNT(*) FROM @New WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd) AS Bookings,
            (SELECT ISNULL(SUM(Amount), 0) FROM @New WHERE CreatedOn >= @UStart AND CreatedOn < @UEnd) AS BookingValue,
            @InqByLoc AS InqByLocation,
            @QuotationsBooked AS QuotationsBooked,
-           (SELECT ISNULL(SUM(Value), 0) FROM @Sold) AS BookedValue,                        -- CP_02 (F5): contract value of the new bookings
-           (SELECT COUNT(*) FROM @Sold WHERE FromQuotation = 1) AS BookingsFromQuotations,   -- CP_02 (F4)
-           @InqNoBranch AS InquiriesNoBranch;                                                -- CP_02 (F6)
-    -- [10] inquiries by type (Website, WhatsApp, WalkIn, Reference, NotSet); the same inquiries as [9]
+           (SELECT ISNULL(SUM(Value), 0) FROM @Sold) AS BookedValue,
+           (SELECT COUNT(*) FROM @Sold WHERE FromQuotation = 1) AS BookingsFromQuotations,
+           @InqNoBranch AS InquiriesNoBranch;
+
+    -- [10] inquiries by type
     SELECT COALESCE(NULLIF(LTRIM(RTRIM(InquiryType)), N''), N'NotSet') AS InquiryType, COUNT(*) AS Inquiries
       FROM @Inq
      GROUP BY COALESCE(NULLIF(LTRIM(RTRIM(InquiryType)), N''), N'NotSet');
-    -- Staff and their locations (same as the super admin staff overview): main location + WN_UserLocations.
+
+    -- Staff and locations
     DECLARE @UL TABLE (UserId INT, LocationId INT, PRIMARY KEY (UserId, LocationId));
     INSERT INTO @UL SELECT Id, LocationId FROM dbo.WN_Users WITH (NOLOCK) WHERE IsActive = 1 AND RoleId IN (2, 16) AND LocationId IS NOT NULL;
     IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
@@ -7162,50 +7923,50 @@ BEGIN
           JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId
          WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
            AND NOT EXISTS (SELECT 1 FROM @UL x WHERE x.UserId = ul.UserId AND x.LocationId = ul.LocationId);
-    -- [11] team per location: staff assigned, quotations created in the period on its spaces, how many converted
+
+    -- [11] team per location
     SELECT l.Id AS LocationId, l.Name,
            (SELECT COUNT(*) FROM @UL ul JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId WHERE ul.LocationId = l.Id AND u.RoleId = 2) AS Admins,
            (SELECT COUNT(*) FROM @UL ul JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId WHERE ul.LocationId = l.Id AND u.RoleId = 16) AS SalesExecutives,
            (SELECT COUNT(*) FROM dbo.WN_Quotations q WITH (NOLOCK) JOIN @Spaces sp ON sp.Id = q.SpaceId
-              JOIN dbo.WN_Users cu WITH (NOLOCK) ON cu.Id = q.CreatedById AND cu.RoleId = 16   -- CP_02 (F3): sales executives' quotations
+              JOIN dbo.WN_Users cu WITH (NOLOCK) ON cu.Id = q.CreatedById AND cu.RoleId = 16
              WHERE sp.LocationId = l.Id AND ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= @SStart AND q.CreatedDate < @SEnd) AS Quotations,
            (SELECT COUNT(*) FROM dbo.WN_Quotations q WITH (NOLOCK) JOIN @Spaces sp ON sp.Id = q.SpaceId
-              JOIN dbo.WN_Users cu WITH (NOLOCK) ON cu.Id = q.CreatedById AND cu.RoleId = 16   -- CP_02 (F3)
-              JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (3, 4, 6, 86)   -- CP_02 (F1)
+              JOIN dbo.WN_Users cu WITH (NOLOCK) ON cu.Id = q.CreatedById AND cu.RoleId = 16
+              JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (3, 4, 6, 86)
              WHERE sp.LocationId = l.Id AND ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= @SStart AND q.CreatedDate < @SEnd
                AND q.Status = 'Converted') AS Converted,
-           CAST(1 AS BIT) AS SalesExecutivesOnly   -- CP_02 (F3): Quotations / Converted count sales executives' quotations only
+           CAST(1 AS BIT) AS SalesExecutivesOnly
       FROM @Loc l
      WHERE @LocationId IS NULL OR l.Id = @LocationId
      ORDER BY l.Name;
-    -- [12] admins and sales executives: quotations they created in the period and how many converted (as the
-    --      super admin staff overview; with a location filter only staff of that location and its quotations)
+
+    -- [12] staff
     SELECT u.Id AS UserId, COALESCE(NULLIF(u.Name, N''), NULLIF(u.UserName, N''), u.Email) AS Name, u.RoleId,
            STUFF((SELECT N', ' + l.Name FROM @UL ul JOIN @Loc l ON l.Id = ul.LocationId
                    WHERE ul.UserId = u.Id ORDER BY l.Name FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'') AS Locations,
            COUNT(q.Id) AS Quotations,
-           ISNULL(SUM(CASE WHEN q.Status = 'Converted' AND bk.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS Converted,   -- CP_02 (F1)
+           ISNULL(SUM(CASE WHEN q.Status = 'Converted' AND bk.Id IS NOT NULL THEN 1 ELSE 0 END), 0) AS Converted,
            ISNULL(SUM(CASE WHEN q.Status = 'Converted' AND bk.Id IS NOT NULL THEN q.TotalAmount ELSE 0 END), 0) AS ConvertedValue,
-           ISNULL(MAX(sb.Bookings), 0) AS SoldBookings, ISNULL(MAX(sb.Value), 0) AS SoldValue   -- CP_02 (F2): new bookings they sold, contract value
+           ISNULL(MAX(sb.Bookings), 0) AS SoldBookings, ISNULL(MAX(sb.Value), 0) AS SoldValue
       FROM dbo.WN_Users u WITH (NOLOCK)
-      LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.CreatedById = u.Id AND q.CreatedDate >= @SStart AND q.CreatedDate < @SEnd   -- CP_02 (F7)
+      LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.CreatedById = u.Id AND q.CreatedDate >= @SStart AND q.CreatedDate < @SEnd
             AND ISNULL(q.IsActive, 1) = 1
             AND (@LocationId IS NULL OR q.SpaceId IN (SELECT Id FROM @Spaces))
-      LEFT JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (3, 4, 6, 86)   -- CP_02 (F1)
-     OUTER APPLY (SELECT COUNT(*) AS Bookings, SUM(sd.Value) AS Value FROM @Sold sd WHERE sd.SellerId = u.Id) sb   -- CP_02 (F2)
+      LEFT JOIN dbo.WN_Bookings bk WITH (NOLOCK) ON bk.Id = q.BookingId AND ISNULL(bk.IsDeleted, 0) = 0 AND bk.BookingStatusId NOT IN (3, 4, 6, 86)
+     OUTER APPLY (SELECT COUNT(*) AS Bookings, SUM(sd.Value) AS Value FROM @Sold sd WHERE sd.SellerId = u.Id) sb
      WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
        AND (@LocationId IS NULL OR EXISTS (SELECT 1 FROM @UL ul WHERE ul.UserId = u.Id AND ul.LocationId = @LocationId))
      GROUP BY u.Id, u.Name, u.UserName, u.Email, u.RoleId
      ORDER BY COUNT(q.Id) DESC, COALESCE(NULLIF(u.Name, N''), NULLIF(u.UserName, N''), u.Email);
-    -- [13] QA_07: every confirmed lease ending in the next @ExpiringDays days ([8] lists only the first 50) and their
-    --      monthly rent (same rows as [8])
-    SELECT COUNT(*) AS ExpiringCount, ISNULL(SUM(ISNULL(lv.NetMonthly, 0)), 0) AS ExpiringMonthly   -- CP_02: after discounts
+
+    -- [13] all leases expiring
+    SELECT COUNT(*) AS ExpiringCount, ISNULL(SUM(ISNULL(lv.NetMonthly, 0)), 0) AS ExpiringMonthly
       FROM @Live lv
      WHERE lv.StatusId IN (2, 33) AND lv.EndOn >= @Now AND lv.EndOn <= @ExpEnd;
 END;
-
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Discounts]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Discounts]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -7391,7 +8152,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_InquiryRows]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_InquiryRows]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -7460,38 +8221,21 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Received]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Received]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+-- 2. Alter dbo.WN_Ceo_Received
 CREATE   PROCEDURE [dbo].[WN_Ceo_Received]
     @LocationId    INT = NULL,             -- NULL = all locations
     @PMonths       INT = 1,                -- 1 = this month, 3 = this quarter, 12 = this year (to date)
     @BizNow        DATETIME2(0) = NULL,    -- business (Pakistan) wall-clock time from the app clock
     @From          DATE = NULL,            -- first day of a custom range (with @To; replaces @PMonths)
-    @To            DATE = NULL             -- last day of a custom range (included)
+    @To            DATE = NULL,            -- last day of a custom range (included)
+    @LocationIds   NVARCHAR(MAX) = NULL    -- Optional comma-separated location IDs for location-bound roles
 AS
 BEGIN
-    -- CP_02: CEO dashboard "Received" (read-only): money actually received, by the day it was received, whatever
-    -- invoice (or billing period) it was for. Called by the API beside dbo.WN_Ceo_Dashboard, with the same period
-    -- parameters and the same location rule.
-    --   received = active fee receipts (WN_FeeReceipts.Status = 1) by ReceiptDate (a Pakistan date), amount TotalAmount
-    --              (what was taken in: net of the WHT the customer withheld)
-    --            + paid payments (WN_Payments.StatusId = 2: online payments and payments recorded on an invoice) by
-    --              PaidOn (else CreatedOn), written in UTC (SYSUTCDATETIME), so 5 hours later is the Pakistan day; amount Amount.
-    --   Not counted twice: a paid payment for an invoice that has an active fee receipt is left out (the receipt counts).
-    --   (WN_FeeReceipts_Insert never writes a WN_Payments row and refuses an invoice with anything paid, and
-    --   WN_RecordInvoicePayment never writes a receipt, so both exist for one invoice only when the same money was
-    --   recorded twice.)
-    --   location = by booking -> active space, as the dashboard's invoices: receipt -> invoice -> booking; payment -> its
-    --   booking, else its invoice's booking (as dbo.WN_Payments_GetListFiltered). With a location only that location's;
-    --   with all locations also those not tied to one.
-    --   period = to date, as the dashboard's dated figures: calendar month / quarter / year from its first day to today,
-    --   previous = the same number of days from the first day of the previous period (never past the period start);
-    --   custom = @From .. @To, previous = as many days just before it.
-    -- Result sets: [0] Received, ReceivedPrev, Count, CountPrev, FromReceipts, FromPayments (the period's split);
-    -- [1] the last 12 months (this month included, oldest first): Month (yyyy-MM), Received, Count.
     SET NOCOUNT ON;
     IF @PMonths IS NULL OR @PMonths NOT IN (1, 3, 12) SET @PMonths = 1;
     IF @LocationId <= 0 SET @LocationId = NULL;
@@ -7505,19 +8249,23 @@ BEGIN
         WHEN 3  THEN DATEFROMPARTS(YEAR(@Today), ((MONTH(@Today) - 1) / 3) * 3 + 1, 1)
         ELSE @MonthStart END;
     IF @Custom = 1 SET @PStart = @From;
-    DECLARE @PEnd DATE = CASE WHEN @Custom = 1 THEN DATEADD(DAY, 1, @To) ELSE DATEADD(DAY, 1, @Today) END;   -- first day after (to date)
+    DECLARE @PEnd DATE = CASE WHEN @Custom = 1 THEN DATEADD(DAY, 1, @To) ELSE DATEADD(DAY, 1, @Today) END;
     DECLARE @PrevStart DATE = CASE WHEN @Custom = 1 THEN DATEADD(DAY, -@CustomDays, @PStart) ELSE DATEADD(MONTH, -@PMonths, @PStart) END;
     DECLARE @PrevEnd DATE = CASE WHEN @Custom = 1 THEN @PStart
-                                 ELSE DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevStart) END;   -- same number of days, exclusive
-    IF @PrevEnd > @PStart SET @PrevEnd = @PStart;   -- e.g. 31 March against February: never into the current period
-    DECLARE @SeriesStart DATE = DATEADD(MONTH, -11, @MonthStart);                          -- 12 months incl. this one
+                                 ELSE DATEADD(DAY, DATEDIFF(DAY, @PStart, @Today) + 1, @PrevStart) END;
+    IF @PrevEnd > @PStart SET @PrevEnd = @PStart;
+    DECLARE @SeriesStart DATE = DATEADD(MONTH, -11, @MonthStart);
     DECLARE @SeriesEnd DATE = DATEADD(MONTH, 1, @MonthStart);
     DECLARE @Earliest DATE = CASE WHEN @PrevStart < @SeriesStart THEN @PrevStart ELSE @SeriesStart END;
     DECLARE @Latest DATE = CASE WHEN @PEnd > @SeriesEnd THEN @PEnd ELSE @SeriesEnd END;
+
     DECLARE @Spaces TABLE (Id INT PRIMARY KEY, LocationId INT NULL);
     INSERT INTO @Spaces (Id, LocationId)
     SELECT s.Id, s.LocationId FROM dbo.WN_Spaces s WITH (NOLOCK)
-     WHERE s.Status = 1 AND (@LocationId IS NULL OR s.LocationId = @LocationId);
+     WHERE s.Status = 1
+       AND (@LocationId IS NULL OR s.LocationId = @LocationId)
+       AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N',') WHERE TRY_CAST(value AS INT) IS NOT NULL));
+
     DECLARE @Rec TABLE (Kind CHAR(1) NOT NULL, Id INT NOT NULL, ReceivedOn DATE NOT NULL, Amount DECIMAL(18,4) NOT NULL,
                         PRIMARY KEY (Kind, Id));
     -- fee receipts (R)
@@ -7528,20 +8276,22 @@ BEGIN
       LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
       LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
      WHERE fr.Status = 1 AND fr.ReceiptDate >= @Earliest AND fr.ReceiptDate < @Latest
-       AND (@LocationId IS NULL OR sp.Id IS NOT NULL);
-    -- paid payments (P), not for an invoice that has an active fee receipt
+       AND (@LocationId IS NULL AND @LocationIds IS NULL OR sp.Id IS NOT NULL);
+
+    -- paid payments (P)
     INSERT INTO @Rec (Kind, Id, ReceivedOn, Amount)
     SELECT 'P', p.Id, pd.PaidDay, ISNULL(p.Amount, 0)
       FROM dbo.WN_Payments p WITH (NOLOCK)
       LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = p.InvoiceId
       LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = COALESCE(p.BookingIdInt, i.BookingId)
       LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
-     CROSS APPLY (SELECT CAST(DATEADD(HOUR, 5, COALESCE(p.PaidOn, p.CreatedOn)) AS DATE) AS PaidDay) pd   -- UTC -> Pakistan day
+     CROSS APPLY (SELECT CAST(DATEADD(HOUR, 5, COALESCE(p.PaidOn, p.CreatedOn)) AS DATE) AS PaidDay) pd
      WHERE p.StatusId = 2 AND pd.PaidDay >= @Earliest AND pd.PaidDay < @Latest
-       AND (@LocationId IS NULL OR sp.Id IS NOT NULL)
+       AND (@LocationId IS NULL AND @LocationIds IS NULL OR sp.Id IS NOT NULL)
        AND NOT EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
                         WHERE fr.Status = 1 AND i.PublicId IS NOT NULL AND fr.InvoiceIdGUID = i.PublicId);
-    -- [0] the period and the previous one
+
+    -- [0] period and previous
     SELECT
         (SELECT ISNULL(SUM(Amount), 0) FROM @Rec WHERE ReceivedOn >= @PStart AND ReceivedOn < @PEnd) AS Received,
         (SELECT ISNULL(SUM(Amount), 0) FROM @Rec WHERE ReceivedOn >= @PrevStart AND ReceivedOn < @PrevEnd) AS ReceivedPrev,
@@ -7549,7 +8299,8 @@ BEGIN
         (SELECT COUNT(*) FROM @Rec WHERE ReceivedOn >= @PrevStart AND ReceivedOn < @PrevEnd) AS CountPrev,
         (SELECT ISNULL(SUM(Amount), 0) FROM @Rec WHERE Kind = 'R' AND ReceivedOn >= @PStart AND ReceivedOn < @PEnd) AS FromReceipts,
         (SELECT ISNULL(SUM(Amount), 0) FROM @Rec WHERE Kind = 'P' AND ReceivedOn >= @PStart AND ReceivedOn < @PEnd) AS FromPayments;
-    -- [1] last 12 months, oldest first
+
+    -- [1] last 12 months
     ;WITH m AS (
         SELECT DATEADD(MONTH, -n, @MonthStart) AS MStart
           FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
@@ -7560,9 +8311,8 @@ BEGIN
      GROUP BY m.MStart
      ORDER BY m.MStart;
 END;
-
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Bookings]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Bookings]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -7636,7 +8386,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Inquiries]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Inquiries]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -7672,15 +8422,19 @@ BEGIN
      ORDER BY CreatedOn DESC, Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Invoices]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Invoices]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
-SET QUOTED_IDENTIFIER ON
+SET QUOTED_IDENTIFIER OFF
 GO
+
+-- ==============================================================================
+-- 5. dbo.WN_Ceo_Records_Invoices
+-- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_Ceo_Records_Invoices]
     @MonthStart    DATE = NULL,           -- CP_01: billing period starts in this month
-    @LocationId    INT = NULL,            -- invoices of this location’s spaces
-    @NoLocation    BIT = 0,               -- 1 = only invoices not tied to a location (breakdown row ’none’)
+    @LocationId    INT = NULL,            -- invoices of this location's spaces
+    @NoLocation    BIT = 0,               -- 1 = only invoices not tied to a location (breakdown row 'none')
     @Bucket        NVARCHAR(20) = NULL,   -- open invoices in this aging bucket: not_due | 1_30 | 31_60 | 61_90 | 90_plus
     @CustomerId    INT = NULL,            -- this customer (without a month: the last 12 months, as top customers)
     @Status        NVARCHAR(20) = NULL,   -- open | overdue | paid | advance (CP_01: billed in advance) | collected | deposit (CP_02)
@@ -7689,26 +8443,18 @@ CREATE   PROCEDURE [dbo].[WN_Ceo_Records_Invoices]
     @PaidStatusIds NVARCHAR(400) = NULL,
     @VoidStatusIds NVARCHAR(400) = NULL,
     @Top           INT = 200,
-    @From          DATE = NULL,           -- CS_01: billing period starts (CP_01) on or after this day (a custom period’s revenue)
+    @From          DATE = NULL,           -- CS_01: billing period starts (CP_01) on or after this day (a custom period's revenue)
     @To            DATE = NULL            -- CS_01: billing period starts (CP_01) on or before this day
 AS
 BEGIN
-    -- CEO dashboard drill-down level 3 (read-only): invoices, newest first. Which invoices count (not void, location
-    -- by booking -> space, open / paid / aging) as dbo.WN_Ceo_Dashboard; the columns paid, balance and status as the
-    -- invoice list (dbo.WN_GetInvoicesList). CS_01: @From / @To = issued in that range (days included).
-    -- CP_01: month / @From / @To / the 12 months of a customer by billing period (PeriodOn = BillingPeriodStart, else
-    -- the date after Period in Notes, else IssuedOn; the 12 months end with this month), as the dashboard; billed in advance (open, PeriodOn after today,
-    -- not due yet) is not open / in an aging bucket, @Status advance = only those. Rows by billing period, newest
-    -- first; PeriodStart / PeriodEnd (NULL when unknown) appended to [1].
-    -- Result sets: [0] Total (all matching), [1] the first @Top rows.
     SET NOCOUNT ON;
     IF @LocationId <= 0 SET @LocationId = NULL;
     IF @Top IS NULL OR @Top < 1 SET @Top = 200;
     SET @Status = NULLIF(LOWER(LTRIM(RTRIM(@Status))), N'');
-    DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, SYSDATETIME());
+    DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)));
     DECLARE @Today DATE = CAST(@Now AS DATE);
     DECLARE @SeriesStart DATE = DATEADD(MONTH, -11, DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1));
-    DECLARE @SeriesEnd DATE = DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1));   -- CP_01: first day after this month
+    DECLARE @SeriesEnd DATE = DATEADD(MONTH, 1, DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1));
     DECLARE @MonthEnd DATE = CASE WHEN @MonthStart IS NULL THEN NULL ELSE DATEADD(MONTH, 1, @MonthStart) END;
     DECLARE @BucketNo INT = CASE @Bucket WHEN N'not_due' THEN 0 WHEN N'1_30' THEN 1 WHEN N'31_60' THEN 2
                                          WHEN N'61_90' THEN 3 WHEN N'90_plus' THEN 4 ELSE NULL END;
@@ -7727,15 +8473,14 @@ BEGIN
     INSERT INTO @Spaces (Id, LocationId)
     SELECT s.Id, s.LocationId FROM dbo.WN_Spaces s WITH (NOLOCK)
      WHERE s.Status = 1 AND (@LocationId IS NULL OR s.LocationId = @LocationId);
-    -- customer as on the dashboard’s top customers: booking customer code, else the user’s customer record, else the user
     DECLARE @Inv TABLE (Id INT PRIMARY KEY, LocationId INT NULL, IssuedOn DATE NULL, Customer NVARCHAR(400) NULL,
-                        PeriodOn DATE NULL, PeriodStart DATE NULL, PeriodEnd DATE NULL,   -- CP_01
-                        Billed DECIMAL(18,4) NULL, Collected DECIMAL(18,4) NULL, Balance DECIMAL(18,4) NULL);   -- CP_02
-    INSERT INTO @Inv (Id, LocationId, IssuedOn, Customer, PeriodOn, PeriodStart, PeriodEnd, Billed, Collected, Balance)   -- CP_02
+                        PeriodOn DATE NULL, PeriodStart DATE NULL, PeriodEnd DATE NULL,
+                        Billed DECIMAL(18,4) NULL, Collected DECIMAL(18,4) NULL, Balance DECIMAL(18,4) NULL);
+    INSERT INTO @Inv (Id, LocationId, IssuedOn, Customer, PeriodOn, PeriodStart, PeriodEnd, Billed, Collected, Balance)
     SELECT i.Id, sp.LocationId, i.IssuedOn,
            COALESCE(NULLIF(cust.Name, N''), NULLIF(u.Name, N''), NULLIF(u.UserName, N''), CONCAT(N'Customer #', ISNULL(b.UserId, i.UserId))),
            pd.PeriodOn, ps.PeriodStart, ps.PeriodEnd,
-           ISNULL(i.GrandTotal, 0) - cp.Deposit, cc.Collected, bl.Balance   -- CP_02
+           ISNULL(i.GrandTotal, 0) - cp.Deposit, cc.Collected, bl.Balance
       FROM dbo.WN_Invoices i WITH (NOLOCK)
       LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
       LEFT JOIN @Spaces sp ON sp.Id = b.SpaceId
@@ -7755,52 +8500,61 @@ BEGIN
                               WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 90 THEN 3
                               ELSE 4 END AS AgeBucket) ab
      CROSS APPLY (SELECT COALESCE(CAST(i.BillingPeriodStart AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N'%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%', i.Notes), 0) + 7, 10), 23)) AS PeriodStart,
-                         COALESCE(CAST(i.BillingPeriodEnd AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N'%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] to [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%', i.Notes), 0) + 21, 10), 23)) AS PeriodEnd) ps   -- CP_01
-     CROSS APPLY (SELECT COALESCE(ps.PeriodStart, i.IssuedOn) AS PeriodOn) pd   -- CP_01: billing period start, else issue date
-     CROSS APPLY (SELECT CASE WHEN p.Id IS NOT NULL THEN 0 ELSE ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) END AS Balance) bl   -- CP_02: owed now; 0 when paid
-     CROSS APPLY (SELECT CASE WHEN o.Id IS NOT NULL AND pd.PeriodOn > @Today AND (i.DueOn IS NULL OR i.DueOn >= @Today) AND bl.Balance > 0 THEN 1 ELSE 0 END AS IsAdvance) adv   -- CP_01: billed in advance; CP_02: something left to pay
-     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0 WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END AS DECIMAL(18,4)) AS Deposit,   -- CP_02: refundable security deposit (inside GrandTotal)
-                         CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp   -- CP_02: paid so far (Paid = in full; WHT left only = settled)
-     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.GrandTotal, 0) > 0 THEN cp.Settled * (ISNULL(i.GrandTotal, 0) - cp.Deposit) / i.GrandTotal ELSE 0 END AS DECIMAL(18,4)) AS Collected) cc   -- CP_02: collected without the deposit's share
+                         COALESCE(CAST(i.BillingPeriodEnd AS DATE), TRY_CONVERT(DATE, SUBSTRING(i.Notes, NULLIF(PATINDEX(N'%Period [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] to [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]%', i.Notes), 0) + 21, 10), 23)) AS PeriodEnd) ps
+     CROSS APPLY (SELECT COALESCE(ps.PeriodStart, i.IssuedOn) AS PeriodOn) pd
+     CROSS APPLY (SELECT CASE WHEN p.Id IS NOT NULL THEN 0 ELSE ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) END AS Balance) bl
+     CROSS APPLY (SELECT CASE WHEN o.Id IS NOT NULL AND pd.PeriodOn > @Today AND (i.DueOn IS NULL OR i.DueOn >= @Today) AND bl.Balance > 0 THEN 1 ELSE 0 END AS IsAdvance) adv
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0 WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END AS DECIMAL(18,4)) AS Deposit,
+                         CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.GrandTotal, 0) > 0 THEN cp.Settled * (ISNULL(i.GrandTotal, 0) - cp.Deposit) / i.GrandTotal ELSE 0 END AS DECIMAL(18,4)) AS Collected) cc
      WHERE i.StatusId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @Void v WHERE v.Id = i.StatusId) AND ISNULL(i.StatusId, 0) <> 40
        AND (@LocationId IS NULL OR sp.Id IS NOT NULL)
        AND (ISNULL(@NoLocation, 0) = 0 OR sp.LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @Loc l WHERE l.Id = sp.LocationId))
-       AND (@MonthStart IS NULL OR (pd.PeriodOn >= @MonthStart AND pd.PeriodOn < @MonthEnd))   -- CP_01
-       AND (@From IS NULL OR pd.PeriodOn >= @From)                                         -- CS_01
+       AND (@MonthStart IS NULL OR (pd.PeriodOn >= @MonthStart AND pd.PeriodOn < @MonthEnd))
+       AND (@From IS NULL OR pd.PeriodOn >= @From)
        AND (@To IS NULL OR pd.PeriodOn <= @To)
-       AND (@Bucket IS NULL OR (o.Id IS NOT NULL AND adv.IsAdvance = 0 AND ab.AgeBucket = ISNULL(@BucketNo, -1) AND bl.Balance > 0))   -- CP_02: something left to pay
+       AND (@Bucket IS NULL OR (o.Id IS NOT NULL AND adv.IsAdvance = 0 AND ab.AgeBucket = ISNULL(@BucketNo, -1) AND bl.Balance > 0))
        AND (@Status IS NULL
-            OR (@Status = N'open' AND o.Id IS NOT NULL AND adv.IsAdvance = 0 AND bl.Balance > 0)   -- CP_02
-            OR (@Status = N'overdue' AND o.Id IS NOT NULL AND i.DueOn < @Today AND bl.Balance > 0)   -- CP_02
-            OR (@Status = N'collected' AND cc.Collected > 0)   -- CP_02: something paid (the Collected drill)
-            OR (@Status = N'deposit' AND cp.Deposit > 0)   -- CP_02: with a security deposit (the Security deposits drill)
+            OR (@Status = N'open' AND o.Id IS NOT NULL AND adv.IsAdvance = 0 AND bl.Balance > 0)
+            OR (@Status = N'overdue' AND o.Id IS NOT NULL AND i.DueOn < @Today AND bl.Balance > 0)
+            OR (@Status = N'collected' AND cc.Collected > 0)
+            OR (@Status = N'deposit' AND cp.Deposit > 0)
             OR (@Status = N'paid' AND p.Id IS NOT NULL)
-            OR (@Status = N'advance' AND adv.IsAdvance = 1))   -- CP_01
+            OR (@Status = N'advance' AND adv.IsAdvance = 1))
        AND (@CustomerId IS NULL OR (cust.Id = @CustomerId AND (@MonthStart IS NOT NULL OR (pd.PeriodOn >= @SeriesStart AND pd.PeriodOn < @SeriesEnd))));
-    SELECT COUNT(*) AS Total,   -- CP_02: the totals of every matching invoice (not only the first @Top)
+    SELECT COUNT(*) AS Total,
            ISNULL(SUM(Billed), 0) AS Billed, ISNULL(SUM(Collected), 0) AS Collected, ISNULL(SUM(CASE WHEN Balance > 0 THEN Balance ELSE 0 END), 0) AS Balance
       FROM @Inv;
     SELECT TOP (@Top)
            i.Id AS InvoiceId, i.InvoiceNumber, x.Customer, loc.Name AS Location, i.IssuedOn, i.DueOn,
            ISNULL(i.GrandTotal, 0) AS Total,
            ISNULL(i.PaidTotal, 0) AS Paid,
-           x.Balance AS Balance,   -- CP_02: GrandTotal - WHT - PaidTotal (WHT is withheld, not owed); 0 when paid
-           COALESCE(
-               CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
-               (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
-                  FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
-               'Unknown') AS Status,
-           x.PeriodStart, x.PeriodEnd,   -- CP_01: billing period (NULL when unknown)
-           ISNULL(i.WHTAmount, 0) AS Wht, ISNULL(i.GrandTotal, 0) - x.Billed AS Deposit,   -- CP_02: WHT withheld; security deposit
-           x.Billed, x.Collected   -- CP_02: GrandTotal less the deposit; paid so far less the deposit's share
+           x.Balance AS Balance,
+           CASE
+               WHEN bs.BaseStatus IN ('Paid', 'Cancelled') THEN bs.BaseStatus
+               WHEN x.Balance <= 0 THEN 'Paid'
+               WHEN bs.BaseStatus IN ('Unpaid', 'Partial') AND i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+               WHEN ISNULL(i.PaidTotal, 0) > 0 THEN 'Partial'
+               ELSE bs.BaseStatus
+           END AS Status,
+           x.PeriodStart, x.PeriodEnd,
+           ISNULL(i.WHTAmount, 0) AS Wht, ISNULL(i.GrandTotal, 0) - x.Billed AS Deposit,
+           x.Billed, x.Collected
       FROM @Inv x
       JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = x.Id
       LEFT JOIN @Loc loc ON loc.Id = x.LocationId
-     ORDER BY x.PeriodOn DESC, x.Id DESC;   -- CP_01: by billing period
-END;
+      CROSS APPLY (
+          SELECT COALESCE(
+              CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
+              (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
+                 FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
+              'Unknown') AS BaseStatus
+      ) bs
+     ORDER BY x.PeriodOn DESC, x.Id DESC;
+END
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Leases]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Leases]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -7878,7 +8632,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Quotations]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Quotations]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -7936,7 +8690,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Receipts]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Receipts]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8028,7 +8782,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Sales]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Sales]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8105,7 +8859,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Spaces]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Records_Spaces]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8192,48 +8946,25 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_RoomReport]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_RoomReport]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+-- 1. Alter dbo.WN_Ceo_RoomReport
 CREATE   PROCEDURE [dbo].[WN_Ceo_RoomReport]
-    @LocationId INT = NULL,           -- NULL = all locations (the CEO dashboard’s location picker)
+    @LocationId INT = NULL,           -- NULL = all locations (the CEO dashboardâ€™s location picker)
     @PMonths    INT = 1,              -- 1 = this month, 3 = this quarter, 12 = this year (to date)
     @BizNow     DATETIME2(0) = NULL,  -- business (Pakistan) wall-clock time from the app clock
     @From       DATE = NULL,          -- CS_01: first day of a custom range (with @To; replaces @PMonths)
-    @To         DATE = NULL           -- CS_01: last day of a custom range (included)
+    @To         DATE = NULL,          -- CS_01: last day of a custom range (included)
+    @LocationIds NVARCHAR(MAX) = NULL -- Optional comma-separated location IDs for location-bound roles
 AS
 BEGIN
-    -- CEO room report (read-only). Same period rules as dbo.WN_Ceo_Dashboard (period start = first day of this month /
-    -- quarter / year by the Pakistan date of @BizNow).
-    --   rooms = active spaces (WN_Spaces.Status = 1, as the CEO dashboard) sold monthly: space category PrivateOffice or
-    --   SharedSpace (not MeetingRoom / Conference, hourly); list price per seat = RM_01: the space’s own price
-    --   (WN_Spaces.Price, when the space is priced monthly and above 0), else its active Monthly
-    --   WN_SpacePricing.SeatPrice today (latest EffectiveFrom); NULL when it has neither.
-    --   confirmed bookings = BookingStatusId 2, 33, not deleted.
-    --   occupied now = a confirmed booking covers @BizNow; occupied days = days from the period start to today on which
-    --   a confirmed booking covered part of the day; period days = days from the period start to today (both included).
-    --   sales = confirmed bookings on those rooms still running on or after the period start (EndOn after it) and
-    --   starting before the period end (CP_02: calendar periods too). Customer as the CEO dashboard’s leases (company, else first + last name, else the
-    --   user’s name / user name / email). Shift = WN_Bookings.ShiftType normalised: morning... / shift_morning... / 2 =
-    --   Morning, evening... / night... / shift_evening... / 3 = Evening, anything else (24/7, 24_7, 24/7-I8, empty) = 24/7.
-    --   SeatsSold = booking Capacity when > 0, else the space Capacity. ListSeatPriceAtSale = RM_01: the space’s own
-    --   price (WN_Spaces.Price, as above), else the booking’s own Monthly pricing row (PricingId), else today’s list price.
-    --   MonthlyRent = WN_Bookings.MonthlyRent (whole room per month),
-    --   when NULL / 0 the one of dbo.WN_vw_BookingSummary; SoldMonthly = MonthlyRent x (1 - DiscountPercentage / 100),
-    --   RM_02: less the booking's fixed PKR discount a month (DiscountType Amount / Fixed with no percentage:
-    --   DiscountValue, else DiscountAmount, at most the rent; same rule as CeoDiscountsService.FixedMonthly).
-    --   ShiftDiscountCapPct = WN_OfferingType.DiscountCap of the room’s location for that shift (Description 24/7...,
-    --   Morning..., Evening...; active row first), 0 when none.
-    --   CS_01: @From / @To = a custom range: period start = @From, period days = @From .. @To (at most today), sales =
-    --   confirmed bookings overlapping the range.
-    -- Result sets: [0] rooms (by location, then room code), [1] sales (by room, then start).
     SET NOCOUNT ON;
     IF @PMonths IS NULL OR @PMonths NOT IN (1, 3, 12) SET @PMonths = 1;
     IF @LocationId <= 0 SET @LocationId = NULL;
-    -- CS_01: a custom range (@From - @To, both days included) instead of the calendar period of @PMonths; previous
-    -- period = as many days just before it. Without both days (or @From after @To): the calendar period, as before.
+
     DECLARE @Custom BIT = CASE WHEN @From IS NOT NULL AND @To IS NOT NULL AND @From <= @To THEN 1 ELSE 0 END;
     DECLARE @CustomDays INT = CASE WHEN @Custom = 1 THEN DATEDIFF(DAY, @From, @To) + 1 ELSE 0 END;
     DECLARE @Now DATETIME2(0) = ISNULL(@BizNow, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0)));
@@ -8242,13 +8973,12 @@ BEGIN
         WHEN 12 THEN DATEFROMPARTS(YEAR(@Today), 1, 1)
         WHEN 3  THEN DATEFROMPARTS(YEAR(@Today), ((MONTH(@Today) - 1) / 3) * 3 + 1, 1)
         ELSE DATEFROMPARTS(YEAR(@Today), MONTH(@Today), 1) END;
-    IF @Custom = 1 SET @PStart = @From;                                                     -- CS_01
+    IF @Custom = 1 SET @PStart = @From;
     DECLARE @PFrom DATETIME2(0) = CAST(@PStart AS DATETIME2(0));
     DECLARE @PEndAt DATETIME2(0) = CASE WHEN @Custom = 1 THEN CAST(DATEADD(DAY, 1, @To) AS DATETIME2(0))
-                                    ELSE CAST(DATEADD(MONTH, @PMonths, @PStart) AS DATETIME2(0)) END;   -- CS_01: range end, exclusive; CP_02: calendar period end too
-    DECLARE @PeriodDays INT = DATEDIFF(DAY, @PStart, CASE WHEN @Custom = 1 AND @To < @Today THEN @To ELSE @Today END) + 1;   -- period start .. today (CS_01: .. @To)
-    -- Rooms in scope with the list price per seat: RM_01 the space’s own monthly price (WN_Spaces.Price), else today’s
-    -- active Monthly pricing row (latest EffectiveFrom).
+                                    ELSE CAST(DATEADD(MONTH, @PMonths, @PStart) AS DATETIME2(0)) END;
+    DECLARE @PeriodDays INT = DATEDIFF(DAY, @PStart, CASE WHEN @Custom = 1 AND @To < @Today THEN @To ELSE @Today END) + 1;
+
     DECLARE @Rooms TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200) NULL, Code NVARCHAR(100) NULL, LocationId INT NULL,
                           Location NVARCHAR(200) NULL, SpaceType NVARCHAR(200) NULL, CategoryCode NVARCHAR(30) NOT NULL,
                           Capacity INT NOT NULL, ListSeatPrice DECIMAL(18,2) NULL, SpaceSeatPrice DECIMAL(18,2) NULL);
@@ -8263,7 +8993,7 @@ BEGIN
       LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
       LEFT JOIN dbo.WN_BillingPeriods sbp WITH (NOLOCK) ON sbp.Id = s.BillingPeriodId
      CROSS APPLY (SELECT CAST(CASE WHEN s.Price > 0 AND (s.BillingPeriodId IS NULL OR sbp.Code = N'Monthly')
-                                   THEN s.Price END AS DECIMAL(18,2)) AS SeatPrice) sp   -- RM_01: the space's own price
+                                   THEN s.Price END AS DECIMAL(18,2)) AS SeatPrice) sp
      OUTER APPLY (SELECT TOP 1 p.SeatPrice
                     FROM dbo.WN_SpacePricing p WITH (NOLOCK)
                     JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = p.BillingPeriodId
@@ -8271,16 +9001,17 @@ BEGIN
                      AND (p.EffectiveFrom IS NULL OR p.EffectiveFrom <= @Today) AND (p.EffectiveTo IS NULL OR p.EffectiveTo > @Today)
                    ORDER BY p.EffectiveFrom DESC, p.Id DESC) lp
      WHERE s.Status = 1 AND sc.Code IN (N'PrivateOffice', N'SharedSpace')
-       AND (@LocationId IS NULL OR s.LocationId = @LocationId);
-    -- Confirmed bookings on those rooms still running on or after the period start.
+       AND (@LocationId IS NULL OR s.LocationId = @LocationId)
+       AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N',') WHERE TRY_CAST(value AS INT) IS NOT NULL));
+
     DECLARE @Conf TABLE (SpaceId INT NOT NULL, Id INT NOT NULL, StartOn DATETIME2(0) NULL, EndOn DATETIME2(0) NOT NULL, PRIMARY KEY (SpaceId, Id));
     INSERT INTO @Conf (SpaceId, Id, StartOn, EndOn)
     SELECT b.SpaceId, b.Id, b.StartOn, b.EndOn
       FROM dbo.WN_Bookings b WITH (NOLOCK)
       JOIN @Rooms r ON r.Id = b.SpaceId
      WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33) AND b.EndOn > @PFrom
-       AND (b.StartOn IS NULL OR b.StartOn < @PEndAt);                                   -- CP_02: starting before the period end (calendar periods too)
-    -- Days of the period so far (at most 366).
+       AND (b.StartOn IS NULL OR b.StartOn < @PEndAt);
+
     DECLARE @Days TABLE (DayStart DATETIME2(0) PRIMARY KEY, DayEnd DATETIME2(0) NOT NULL);
     INSERT INTO @Days (DayStart, DayEnd)
     SELECT DATEADD(DAY, n.i, @PFrom), DATEADD(DAY, n.i + 1, @PFrom)
@@ -8289,6 +9020,7 @@ BEGIN
              CROSS JOIN (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9)) b(d)
              CROSS JOIN (VALUES (0),(1),(2),(3)) c(d)) n
      WHERE n.i < @PeriodDays;
+
     -- [0] rooms
     SELECT r.Id AS SpaceId, r.Name, r.Code, r.LocationId, r.Location, r.SpaceType, r.CategoryCode, r.Capacity, r.ListSeatPrice,
            CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
@@ -8297,25 +9029,26 @@ BEGIN
            (SELECT COUNT(*) FROM @Days d
              WHERE EXISTS (SELECT 1 FROM @Conf c WHERE c.SpaceId = r.Id AND c.StartOn < d.DayEnd AND c.EndOn > d.DayStart)) AS OccupiedDays,
            @PeriodDays AS PeriodDays,
-           (SELECT MIN(nb.StartOn) FROM dbo.WN_Bookings nb WITH (NOLOCK)                                  -- CP_02: the next confirmed booking
-             WHERE nb.SpaceId = r.Id AND ISNULL(nb.IsDeleted, 0) = 0 AND nb.BookingStatusId IN (2, 33)    -- starting after the period (and after now)
+           (SELECT MIN(nb.StartOn) FROM dbo.WN_Bookings nb WITH (NOLOCK)
+             WHERE nb.SpaceId = r.Id AND ISNULL(nb.IsDeleted, 0) = 0 AND nb.BookingStatusId IN (2, 33)
                AND nb.StartOn >= @PEndAt AND nb.StartOn > @Now) AS UpcomingStartOn
       FROM @Rooms r
      ORDER BY r.Location, CASE WHEN TRY_CAST(r.Code AS INT) IS NULL THEN 1 ELSE 0 END, TRY_CAST(r.Code AS INT), r.Code, r.Name, r.Id;
-    -- [1] sales: confirmed bookings on the rooms, running on or after the period start
+
+    -- [1] sales
     SELECT b.Id AS BookingId, b.SpaceId,
            COALESCE(NULLIF(cust.Name, N''), NULLIF(u.Name, N''), NULLIF(u.UserName, N''), NULLIF(u.Email, N''), N'Customer') AS Customer,
            b.ShiftType AS ShiftRaw, sh.Shift,
-           CASE WHEN r.Capacity > 0 AND bs.Seats > r.Capacity THEN r.Capacity ELSE bs.Seats END AS SeatsSold,   -- CP_02: booking, else quotation, else room seats; at most the room's
+           CASE WHEN r.Capacity > 0 AND bs.Seats > r.Capacity THEN r.Capacity ELSE bs.Seats END AS SeatsSold,
            b.StartOn, b.EndOn,
-           COALESCE(r.SpaceSeatPrice, bpr.SeatPrice, r.ListSeatPrice) AS ListSeatPriceAtSale,   -- RM_01: the space's own price first
+           COALESCE(r.SpaceSeatPrice, bpr.SeatPrice, r.ListSeatPrice) AS ListSeatPriceAtSale,
            mr.MonthlyRent, ISNULL(b.DiscountPercentage, 0) AS DiscountPct,
-           CAST(ROUND(mr.MonthlyRent * (1 - ISNULL(b.DiscountPercentage, 0) / 100.0) - fx.FixedMonthly, 2) AS DECIMAL(18,2)) AS SoldMonthly,   -- RM_02
+           CAST(ROUND(mr.MonthlyRent * (1 - ISNULL(b.DiscountPercentage, 0) / 100.0) - fx.FixedMonthly, 2) AS DECIMAL(18,2)) AS SoldMonthly,
            ISNULL(cap.DiscountCap, 0) AS ShiftDiscountCapPct,
-           fx.FixedMonthly,                                                              -- CP_02: fixed PKR a month taken off SoldMonthly
+           fx.FixedMonthly,
            CAST(CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(b.DiscountType, N'')))) IN (N'amount', N'fixed')
                       AND (ISNULL(b.DiscountAmount, 0) > 0 OR ISNULL(b.DiscountValue, 0) > 0)
-                     THEN 1 ELSE 0 END AS BIT) AS FixedDiscount                            -- CP_02: a fixed PKR discount (counts as under)
+                     THEN 1 ELSE 0 END AS BIT) AS FixedDiscount
       FROM @Conf c
       JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = c.Id
       JOIN @Rooms r ON r.Id = c.SpaceId
@@ -8345,14 +9078,14 @@ BEGIN
                                     AND ISNULL(mr.MonthlyRent, 0) > 0
                                THEN CASE WHEN COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) > mr.MonthlyRent THEN mr.MonthlyRent
                                          ELSE COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) END
-                               ELSE 0 END AS DECIMAL(18,2)) AS FixedMonthly) fx   -- RM_02: fixed PKR discount a month
-     OUTER APPLY (SELECT TOP 1 q.Capacity                                                  -- CP_02: seats of the booking's quotation
+                               ELSE 0 END AS DECIMAL(18,2)) AS FixedMonthly) fx
+     OUTER APPLY (SELECT TOP 1 q.Capacity
                     FROM dbo.WN_Quotations q WITH (NOLOCK)
                    WHERE q.BookingId = b.Id AND q.Capacity > 0
                    ORDER BY CASE WHEN q.Status = N'Converted' THEN 0 ELSE 1 END, CASE WHEN ISNULL(q.IsActive, 1) = 1 THEN 0 ELSE 1 END,
                             q.Version DESC, q.Id DESC) qc
      CROSS APPLY (SELECT CASE WHEN b.Capacity > 0 THEN b.Capacity WHEN qc.Capacity > 0 THEN qc.Capacity
-                              ELSE r.Capacity END AS Seats) bs                                  -- CP_02: booking, else quotation, else room seats
+                              ELSE r.Capacity END AS Seats) bs
      OUTER APPLY (SELECT TOP 1 o.DiscountCap
                     FROM dbo.WN_OfferingType o WITH (NOLOCK)
                    WHERE o.LocationId = r.LocationId
@@ -8362,9 +9095,8 @@ BEGIN
                    ORDER BY CASE WHEN o.Status = 1 THEN 0 ELSE 1 END, o.Id) cap
      ORDER BY c.SpaceId, b.StartOn, b.Id;
 END;
-
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Ceo_Seats]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Ceo_Seats]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8562,7 +9294,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Challan_ExtendValidity]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Challan_ExtendValidity]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8593,7 +9325,7 @@ BEGIN
 
     UPDATE dbo.WN_Bookings
     SET ValidityDate = @NewExpiryDate,
-        UpdatedOn    = GETUTCDATE()
+        UpdatedOn    = GETDATE()
     WHERE Id = @BookingId;
 
     IF EXISTS (
@@ -8611,11 +9343,11 @@ BEGIN
         INSERT INTO dbo.WN_ChallanValidityLog
             (BookingId, OldExpiryDate, NewExpiryDate, UpdatedBy, UpdatedAt, Remarks)
         VALUES
-            (@BookingId, @OldExpiryDate, @NewExpiryDate, @UpdatedBy, GETUTCDATE(), @Remarks);
+            (@BookingId, @OldExpiryDate, @NewExpiryDate, @UpdatedBy, GETDATE(), @Remarks);
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Challan_Search]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Challan_Search]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8653,7 +9385,7 @@ BEGIN
     ORDER BY b.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_ExtendValidity]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Challans_ExtendValidity]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8682,7 +9414,7 @@ BEGIN
         (@ChallanId, @OldValidUntil, @NewValidUntil, @UpdatedById, @Remarks);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_GetByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Challans_GetByBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8700,7 +9432,7 @@ BEGIN
     ORDER BY c.CreatedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_GetFullByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Challans_GetFullByBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8794,7 +9526,7 @@ BEGIN
     ORDER BY bl.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Challans_Search]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Challans_Search]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8821,7 +9553,7 @@ BEGIN
     ORDER BY c.CreatedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Cities_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Cities_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8841,7 +9573,7 @@ BEGIN
     ORDER BY ci.Description ASC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Companies_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Companies_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8863,7 +9595,201 @@ BEGIN
     ORDER BY CompanyName ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Complaints_UpdateBranch]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_GetAwaitingResolutionReply]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 6. dbo.WN_Complaints_GetAwaitingResolutionReply
+CREATE   PROCEDURE [dbo].[WN_Complaints_GetAwaitingResolutionReply]
+    @Phones NVARCHAR(MAX),
+    @Since DATETIME2
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT TOP 1 c.Id, c.ComplaintNo, c.Source, c.CustomerName, c.PhoneNumber, c.Email, c.Branch, c.Category, c.Description,
+                 c.Status, c.IsFollowUp, c.PreviousComplaintId, p.ComplaintNo AS PreviousComplaintNo,
+                 c.ResolvedNotificationSent, c.ResolvedNotificationSentAt, c.ResolutionResponse, c.ResolutionResponseAt,
+                 c.StaffNotes, c.CreatedOn, c.UpdatedOn, bl.Id AS LocationId, CAST(bl.Name AS NVARCHAR(200)) AS LocationName
+    FROM dbo.WN_Complaints c WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Complaints p WITH (NOLOCK) ON p.Id = c.PreviousComplaintId
+    OUTER APPLY (SELECT TOP 1 l.Id, l.Name FROM dbo.WN_Locations l WITH (NOLOCK)
+                  WHERE LOWER(LTRIM(RTRIM(CAST(l.Name AS NVARCHAR(100))))) = LOWER(LTRIM(RTRIM(ISNULL(c.Branch, N''))))
+                  ORDER BY l.Id) bl
+    JOIN STRING_SPLIT(@Phones, ',') ph ON c.PhoneNumber = LTRIM(RTRIM(ph.value))
+    WHERE c.Status = N'resolved' 
+      AND c.ResolvedNotificationSent = 1 
+      AND c.ResolutionResponse IS NULL
+      AND c.ResolvedNotificationSentAt >= @Since
+    ORDER BY c.ResolvedNotificationSentAt DESC, c.Id DESC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 2. dbo.WN_Complaints_GetById
+CREATE   PROCEDURE [dbo].[WN_Complaints_GetById]
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT c.Id, c.ComplaintNo, c.Source, c.CustomerName, c.PhoneNumber, c.Email, c.Branch, c.Category, c.Description,
+           c.Status, c.IsFollowUp, c.PreviousComplaintId, p.ComplaintNo AS PreviousComplaintNo,
+           c.ResolvedNotificationSent, c.ResolvedNotificationSentAt, c.ResolutionResponse, c.ResolutionResponseAt,
+           c.StaffNotes, c.CreatedOn, c.UpdatedOn, bl.Id AS LocationId, CAST(bl.Name AS NVARCHAR(200)) AS LocationName
+    FROM dbo.WN_Complaints c WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Complaints p WITH (NOLOCK) ON p.Id = c.PreviousComplaintId
+    OUTER APPLY (SELECT TOP 1 l.Id, l.Name FROM dbo.WN_Locations l WITH (NOLOCK)
+                  WHERE LOWER(LTRIM(RTRIM(CAST(l.Name AS NVARCHAR(100))))) = LOWER(LTRIM(RTRIM(ISNULL(c.Branch, N''))))
+                  ORDER BY l.Id) bl
+    WHERE c.Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =========================================================================================
+-- SECTION 1: Complaints (dbo.WN_Complaints_*)
+-- =========================================================================================
+
+-- 1. dbo.WN_Complaints_GetList
+CREATE   PROCEDURE [dbo].[WN_Complaints_GetList]
+    @Status NVARCHAR(50) = NULL,
+    @Search NVARCHAR(200) = NULL,
+    @Offset INT = 0,
+    @Limit INT = 50,
+    @LocationIds NVARCHAR(MAX) = NULL,
+    @NoBranch BIT = 1
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT c.Id, c.ComplaintNo, c.Source, c.CustomerName, c.PhoneNumber, c.Email, c.Branch, c.Category, c.Description,
+           c.Status, c.IsFollowUp, c.PreviousComplaintId, p.ComplaintNo AS PreviousComplaintNo,
+           c.ResolvedNotificationSent, c.ResolvedNotificationSentAt, c.ResolutionResponse, c.ResolutionResponseAt,
+           c.StaffNotes, c.CreatedOn, c.UpdatedOn, bl.Id AS LocationId, CAST(bl.Name AS NVARCHAR(200)) AS LocationName,
+           COUNT(*) OVER () AS TotalCount
+    FROM dbo.WN_Complaints c WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Complaints p WITH (NOLOCK) ON p.Id = c.PreviousComplaintId
+    OUTER APPLY (SELECT TOP 1 l.Id, l.Name FROM dbo.WN_Locations l WITH (NOLOCK)
+                  WHERE LOWER(LTRIM(RTRIM(CAST(l.Name AS NVARCHAR(100))))) = LOWER(LTRIM(RTRIM(ISNULL(c.Branch, N''))))
+                  ORDER BY l.Id) bl
+    WHERE (@Status IS NULL OR c.Status = @Status)
+      AND (@Search IS NULL OR c.ComplaintNo LIKE '%' + @Search + '%' 
+                           OR c.CustomerName LIKE '%' + @Search + '%' 
+                           OR c.PhoneNumber LIKE '%' + @Search + '%'
+                           OR c.Category LIKE '%' + @Search + '%' 
+                           OR c.Description LIKE '%' + @Search + '%')
+      AND (@LocationIds IS NULL
+           OR (bl.Id IS NULL AND @NoBranch = 1)
+           OR CHARINDEX(N',' + CAST(bl.Id AS NVARCHAR(20)) + N',', N',' + @LocationIds + N',') > 0)
+    ORDER BY CASE c.Status WHEN N'open' THEN 0 WHEN N'in_progress' THEN 1 WHEN N'resolved' THEN 2 ELSE 3 END, c.CreatedOn DESC
+    OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_GetOpenIds]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 8. dbo.WN_Complaints_GetOpenIds
+CREATE   PROCEDURE [dbo].[WN_Complaints_GetOpenIds]
+    @LocationIds NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT c.Id 
+    FROM dbo.WN_Complaints c WITH (NOLOCK) 
+    WHERE c.Status = N'open'
+      AND (@LocationIds IS NULL
+           OR NOT EXISTS (SELECT 1 FROM dbo.WN_Locations lbx WITH (NOLOCK) WHERE LOWER(LTRIM(RTRIM(CAST(lbx.Name AS NVARCHAR(100))))) = LOWER(LTRIM(RTRIM(CAST(ISNULL(c.Branch, N'') AS NVARCHAR(100))))))
+           OR EXISTS (
+                SELECT 1 FROM dbo.WN_Locations lbx WITH (NOLOCK) 
+                JOIN STRING_SPLIT(@LocationIds, ',') lid ON lbx.Id = TRY_CAST(lid.value AS INT)
+                WHERE LOWER(LTRIM(RTRIM(CAST(lbx.Name AS NVARCHAR(100))))) = LOWER(LTRIM(RTRIM(CAST(ISNULL(c.Branch, N'') AS NVARCHAR(100)))))
+           )
+      );
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 3. dbo.WN_Complaints_Insert
+CREATE   PROCEDURE [dbo].[WN_Complaints_Insert]
+    @No NVARCHAR(50),
+    @Source NVARCHAR(50),
+    @Name NVARCHAR(200) = NULL,
+    @Phone NVARCHAR(50) = NULL,
+    @Email NVARCHAR(200) = NULL,
+    @Branch NVARCHAR(100) = NULL,
+    @Category NVARCHAR(100),
+    @Description NVARCHAR(MAX),
+    @IsFollowUp BIT,
+    @PrevId INT = NULL,
+    @CreatedById INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO dbo.WN_Complaints (ComplaintNo, Source, CustomerName, PhoneNumber, Email, Branch, Category, Description,
+                                   IsFollowUp, PreviousComplaintId, CreatedById)
+    OUTPUT INSERTED.Id
+    VALUES (@No, @Source, @Name, @Phone, @Email, @Branch, @Category, @Description, @IsFollowUp, @PrevId, @CreatedById);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_MarkResolvedNotificationSent]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 5. dbo.WN_Complaints_MarkResolvedNotificationSent
+CREATE   PROCEDURE [dbo].[WN_Complaints_MarkResolvedNotificationSent]
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE dbo.WN_Complaints
+    SET ResolvedNotificationSent = 1, 
+        ResolvedNotificationSentAt = SYSDATETIME(),
+        ResolutionResponse = NULL, 
+        ResolutionResponseAt = NULL, 
+        UpdatedOn = SYSDATETIME()
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_SetResolutionResponse]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 7. dbo.WN_Complaints_SetResolutionResponse
+CREATE   PROCEDURE [dbo].[WN_Complaints_SetResolutionResponse]
+    @Id INT,
+    @Response NVARCHAR(MAX),
+    @Status NVARCHAR(50) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE dbo.WN_Complaints
+    SET ResolutionResponse = @Response, 
+        ResolutionResponseAt = SYSDATETIME(),
+        Status = COALESCE(@Status, Status), 
+        UpdatedOn = SYSDATETIME()
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_UpdateBranch]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8883,7 +9809,30 @@ BEGIN
     SELECT @@ROWCOUNT AS Updated;   -- 0 = not found
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Complaints_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 4. dbo.WN_Complaints_UpdateStatus
+CREATE   PROCEDURE [dbo].[WN_Complaints_UpdateStatus]
+    @Id INT,
+    @Status NVARCHAR(50),
+    @Notes NVARCHAR(MAX) = NULL,
+    @By INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    UPDATE dbo.WN_Complaints
+    SET Status = @Status, 
+        StaffNotes = COALESCE(@Notes, StaffNotes), 
+        UpdatedById = @By, 
+        UpdatedOn = SYSDATETIME()
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Contacts_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8904,7 +9853,7 @@ BEGIN
     DELETE FROM dbo.WN_BookTour WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Contacts_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -8988,7 +9937,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_GetRecent]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Contacts_GetRecent]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9050,7 +9999,7 @@ BEGIN
     ORDER BY x.CreatedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Contacts_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9078,7 +10027,7 @@ BEGIN
     SELECT Id, PublicId FROM dbo.WN_Contacts WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateInquiryType]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateInquiryType]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9094,7 +10043,7 @@ BEGIN
     UPDATE dbo.WN_Contacts SET
         InquiryType   = NULLIF(LTRIM(RTRIM(@InquiryType)), N''),
         ReferenceName = CASE WHEN @InquiryType = N'Reference' THEN NULLIF(LTRIM(RTRIM(@ReferenceName)), N'') END,
-        UpdatedOn     = SYSUTCDATETIME(),
+        UpdatedOn     = SYSDATETIME(),
         UpdatedById   = @UpdatedById
     WHERE PublicId = @PublicId;
 
@@ -9102,7 +10051,7 @@ BEGIN
     SELECT @@ROWCOUNT AS Updated;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateLocation]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateLocation]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9119,7 +10068,7 @@ BEGIN
     SET @LocationIds = NULLIF(REPLACE(LTRIM(RTRIM(@LocationIds)), N' ', N''), N'');
     UPDATE dbo.WN_Contacts SET
         LocationId  = @LocationId,
-        UpdatedOn   = SYSUTCDATETIME(),
+        UpdatedOn   = SYSDATETIME(),
         UpdatedById = @UpdatedById
     WHERE PublicId = @PublicId
       AND (@LocationIds IS NULL OR LocationId IS NULL
@@ -9128,7 +10077,7 @@ BEGIN
     SELECT @@ROWCOUNT AS Updated;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Contacts_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9147,7 +10096,7 @@ BEGIN
     BEGIN
         UPDATE dbo.WN_Contacts SET
             StatusId    = @StatusId,
-            UpdatedOn   = SYSUTCDATETIME(),
+            UpdatedOn   = SYSDATETIME(),
             UpdatedById = @UpdatedById
         WHERE Id = @Id;
         IF @@ROWCOUNT > 0 OR @Source = N'contact' RETURN;
@@ -9158,7 +10107,7 @@ BEGIN
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateAdvanceInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CreateAdvanceInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9292,7 +10241,7 @@ BEGIN
     END CATCH
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateBookingWithAutoAssignment]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CreateBookingWithAutoAssignment]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9412,7 +10361,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateCustomInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CreateCustomInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9495,7 +10444,7 @@ BEGIN
     END CATCH
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CreateSurchargeInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CreateSurchargeInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9642,7 +10591,7 @@ BEGIN
     END CATCH
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_GetByCustomerId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_GetByCustomerId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9697,7 +10646,7 @@ BEGIN
     ORDER BY dt.SortOrder ASC, d.SlotNo ASC, d.VersionNo DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9747,7 +10696,7 @@ BEGIN
     WHERE d.Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_InsertOrReplace]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_InsertOrReplace]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9836,7 +10785,7 @@ BEGIN
     COMMIT TRANSACTION;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_SetStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomerKYCDocuments_SetStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9860,7 +10809,31 @@ BEGIN
     WHERE Id = @DocumentId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_CheckLocationAccess]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 16. dbo.WN_Customers_CheckLocationAccess
+CREATE   PROCEDURE [dbo].[WN_Customers_CheckLocationAccess]
+    @CustomerId INT,
+    @LocationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT TOP 1 1 AS HasAccess
+    FROM dbo.WN_Customers c WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = c.UserId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.CustomerCode = c.Code OR (c.UserId IS NOT NULL AND b.UserId = c.UserId)
+    LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId
+    WHERE c.Id = @CustomerId
+      AND (sb.LocationId = @LocationId OR u.LocationId = @LocationId);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Customers_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9878,7 +10851,62 @@ BEGIN
        OR (@Id IS NOT NULL AND Id = @Id);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByEmail]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetBasicInfo]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 15. dbo.WN_Customers_GetBasicInfo
+CREATE   PROCEDURE [dbo].[WN_Customers_GetBasicInfo]
+    @IdOrGuid NVARCHAR(64)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    DECLARE @IsGuid BIT = 0;
+    DECLARE @GuidVal UNIQUEIDENTIFIER = NULL;
+    DECLARE @IsInt BIT = 0;
+    DECLARE @IntVal INT = NULL;
+
+    IF TRY_CONVERT(UNIQUEIDENTIFIER, @IdOrGuid) IS NOT NULL
+    BEGIN
+        SET @IsGuid = 1;
+        SET @GuidVal = TRY_CONVERT(UNIQUEIDENTIFIER, @IdOrGuid);
+    END
+    ELSE IF TRY_CONVERT(INT, @IdOrGuid) IS NOT NULL
+    BEGIN
+        SET @IsInt = 1;
+        SET @IntVal = TRY_CONVERT(INT, @IdOrGuid);
+    END
+
+    SELECT TOP 1
+        c.Id, 
+        c.IdGUID, 
+        c.Code, 
+        c.FirstName, 
+        c.LastName, 
+        LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))) AS FullName,
+        c.Company, 
+        c.Email, 
+        c.PhoneNumber, 
+        c.CnicOrPassport, 
+        c.Address, 
+        c.CityId, 
+        ci.Description AS CityName,
+        c.IsActive, 
+        c.Notes, 
+        c.CreatedAt,
+        c.UserId
+    FROM dbo.WN_Customers c WITH (NOLOCK)
+    LEFT JOIN dbo.City ci WITH (NOLOCK) ON ci.Id = c.CityId
+    WHERE (@IsGuid = 1 AND c.IdGUID = @GuidVal)
+       OR (@IsInt = 1 AND c.Id = @IntVal)
+       OR (c.Code = @IdOrGuid);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByEmail]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9893,7 +10921,7 @@ BEGIN
     WHERE Email = @Email;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByGuid]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByGuid]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9915,7 +10943,7 @@ BEGIN
        OR (@Id IS NOT NULL AND c.Id = @Id);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9939,7 +10967,7 @@ BEGIN
        OR (@Id IS NOT NULL AND c.Id = @Id);
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByUserId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetByUserId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -9954,7 +10982,7 @@ BEGIN
     WHERE UserId = @UserId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetKycList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetKycList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10038,7 +11066,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10070,7 +11098,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetListFiltered]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10123,7 +11151,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_GetOverview]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_GetOverview]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10422,35 +11450,35 @@ BEGIN
      ORDER BY t.SortOn DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-CREATE PROCEDURE [dbo].[WN_Customers_Insert]
-    @FirstName                   NVARCHAR(100),
-    @LastName                    NVARCHAR(100)  = NULL,
-    @Email                       NVARCHAR(255),
-    @PhoneNumber                 NVARCHAR(50)   = NULL,
-    @CnicOrPassport              NVARCHAR(50)   = NULL,
-    @Address                     NVARCHAR(500)  = NULL,
-    @CityId                      INT            = NULL,
-    @Notes                       NVARCHAR(1000) = NULL,
-    @CreatedBy                   NVARCHAR(255)  = NULL,
-    @UserId                      INT            = NULL,
-    @Company                     NVARCHAR(255)  = NULL,
-    @NTN                         NVARCHAR(100)  = NULL,
-    @SecpRegistrationNo          NVARCHAR(100)  = NULL,
-    @CustomerTypeId              NVARCHAR(225)  = NULL,
-    @CountryId                   INT            = NULL,
+-- 7. CREATE OR ALTER PROCEDURE [dbo].[WN_Customers_Insert]
+CREATE   PROCEDURE [dbo].[WN_Customers_Insert]
+    @FirstName                    NVARCHAR(100),
+    @LastName                     NVARCHAR(100)  = NULL,
+    @Email                        NVARCHAR(255),
+    @PhoneNumber                  NVARCHAR(50)   = NULL,
+    @CnicOrPassport               NVARCHAR(50)   = NULL,
+    @Address                      NVARCHAR(500)  = NULL,
+    @CityId                       INT            = NULL,
+    @Notes                        NVARCHAR(1000) = NULL,
+    @CreatedBy                    NVARCHAR(255)  = NULL,
+    @UserId                       INT            = NULL,
+    @Company                      NVARCHAR(255)  = NULL,
+    @NTN                          NVARCHAR(100)  = NULL,
+    @SecpRegistrationNo           NVARCHAR(100)  = NULL,
+    @CustomerTypeId               NVARCHAR(225)  = NULL,
+    @CountryId                    INT            = NULL,
     @IdentificationDocumentTypeId NVARCHAR(225) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET QUOTED_IDENTIFIER ON;
 
-    -- Treat 0 or negative foreign keys / IDs as NULL
     IF @CountryId IS NULL OR @CountryId <= 0 SET @CountryId = NULL;
     IF @CityId IS NULL OR @CityId <= 0 SET @CityId = NULL;
     IF @UserId IS NULL OR @UserId <= 0 SET @UserId = NULL;
@@ -10464,7 +11492,6 @@ BEGIN
         ORDER BY u.IsActive DESC, u.Id ASC;
     END
 
-    -- Treat empty strings and '0' as NULL for string / optional fields
     IF @CustomerTypeId IS NULL OR LTRIM(RTRIM(@CustomerTypeId)) IN ('', '0') SET @CustomerTypeId = NULL;
     IF @IdentificationDocumentTypeId IS NULL OR LTRIM(RTRIM(@IdentificationDocumentTypeId)) IN ('', '0') SET @IdentificationDocumentTypeId = NULL;
     IF LTRIM(RTRIM(@Company)) = '' SET @Company = NULL;
@@ -10520,7 +11547,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Search]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_Search]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10549,7 +11576,7 @@ BEGIN
     ORDER BY c.FirstName;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10640,7 +11667,7 @@ BEGIN
        OR (@Id IS NOT NULL AND c.Id = @Id);
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Customers_UpdateAgreementDetails]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Customers_UpdateAgreementDetails]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10677,11 +11704,11 @@ BEGIN
         Company            = ISNULL(@CompanyName, Company),
         NTN                = ISNULL(@NTN, NTN),
         SecpRegistrationNo = ISNULL(@SecpRegistrationNo, SecpRegistrationNo),
-        UpdatedAt          = SYSUTCDATETIME()
+        UpdatedAt          = SYSDATETIME()
     WHERE Id = @CustomerId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomersTemp_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomersTemp_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10745,13 +11772,11 @@ BEGIN
 	  SELECT SCOPE_IDENTITY() ID
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomersVendors_SyncOnInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomersVendors_SyncOnInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- Enhanced Helper Procedure: WN_CustomersVendors_SyncOnInvoice
 CREATE   PROCEDURE [dbo].[WN_CustomersVendors_SyncOnInvoice]
     @CustomerId  INT = NULL,
     @UserId      INT = NULL,
@@ -10957,12 +11982,12 @@ SELECT @ShortGUID;
     VALUES (
         @TargetName, @CustomerCode, 1, @Address,
         @CNIC, @Passport, @ResolvedCityId, @CountryId, @Phone, @Email,
-        @CompanyId, @CreatedById, SYSUTCDATETIME(), @ShortGUID, @HashGUID,
+        @CompanyId, @CreatedById, SYSDATETIME(), @ShortGUID, @HashGUID,
         @BranchId, @ProvinceId
     );
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetBookings]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetBookings]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -10971,11 +11996,10 @@ CREATE   PROCEDURE [dbo].[WN_CustomInvoice_GetBookings]
     @UserId INT
 AS
 BEGIN
-    -- CI_01: the customer bookings (WN_Bookings.UserId, or the customer code of the user), most recent first.
-    -- Label: #id space (start to end).
     SET NOCOUNT ON;
     SELECT TOP 100
            b.Id AS BookingId,
+           b.SpaceId,
            CONCAT(N'#', b.Id, N' ', COALESCE(NULLIF(LTRIM(RTRIM(s.Name)), N''), s.Code, N'Booking'), N' (',
                   CONVERT(NVARCHAR(11), b.StartOn, 106), N' to ', CONVERT(NVARCHAR(11), b.EndOn, 106), N')') AS Label,
            COALESCE(NULLIF(LTRIM(RTRIM(s.Name)), N''), s.Code) AS SpaceName,
@@ -10994,7 +12018,7 @@ BEGIN
      ORDER BY b.StartOn DESC, b.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetLedgerDefaults]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetLedgerDefaults]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11032,7 +12056,7 @@ BEGIN
       LEFT JOIN dbo.AccountsCOA sc WITH (NOLOCK) ON sc.Id = @DefSec;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11043,11 +12067,12 @@ CREATE   PROCEDURE [dbo].[WN_CustomInvoice_GetList]
     @PageSize INT           = 20
 AS
 BEGIN
-    -- CI_01: custom invoices (InvoiceTypeId 7 / IsCustom = 1), newest first, one page; TotalCount (all matches) on every row.
     SET NOCOUNT ON;
     IF @Page IS NULL OR @Page < 1 SET @Page = 1;
     IF @PageSize IS NULL OR @PageSize < 1 OR @PageSize > 100 SET @PageSize = 20;
     SET @Search = NULLIF(LTRIM(RTRIM(@Search)), N'');
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+
     SELECT i.Id AS InvoiceId,
            i.InvoiceNumber,
            COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), N''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, N'') + N' ' + ISNULL(c.LastName, N''))), N''), u.Name, u.Email) AS CustomerName,
@@ -11055,9 +12080,14 @@ BEGIN
                   CONVERT(NVARCHAR(11), b.StartOn, 106), N' to ', CONVERT(NVARCHAR(11), b.EndOn, 106), N')') END AS BookingLabel,
            i.GrandTotal,
            i.IssuedOn,
-           COALESCE(CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
-                    CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END,
-                    'Unknown') AS StatusLabel,
+           CASE
+               WHEN i.StatusId IN (5, 40) THEN 'Cancelled'
+               WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 'Paid'
+               WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN
+                   CASE WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue' ELSE 'Partial' END
+               WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+               ELSE 'Unpaid'
+           END AS StatusLabel,
            i.CustomReason AS Reason,
            COALESCE(NULLIF(LTRIM(RTRIM(cb.Name)), N''), cb.Email) AS CreatedBy,
            v.Code AS VoucherCode,
@@ -11089,8 +12119,9 @@ BEGIN
      ORDER BY i.Id DESC
      OFFSET (@Page - 1) * @PageSize ROWS FETCH NEXT @PageSize ROWS ONLY;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetReplaceable]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetReplaceable]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11122,7 +12153,25 @@ BEGIN
      ORDER BY i.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_GetSpaces]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_CustomInvoice_GetSpaces]
+    @LocationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT s.Id AS SpaceId, s.Code, LTRIM(RTRIM(s.Name)) AS Name,
+           CONCAT(COALESCE(NULLIF(LTRIM(RTRIM(s.Name)), N''), s.Code), CASE WHEN NULLIF(s.Code, N'') IS NOT NULL AND NULLIF(LTRIM(RTRIM(s.Name)), N'') IS NOT NULL THEN CONCAT(N' (', s.Code, N')') ELSE N'' END) AS Label,
+           s.LocationId
+      FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.LocationId = @LocationId AND ISNULL(s.IsActive, 1) = 1
+     ORDER BY COALESCE(NULLIF(LTRIM(RTRIM(s.Name)), N''), s.Code), s.Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11148,16 +12197,10 @@ CREATE   PROCEDURE [dbo].[WN_CustomInvoice_Insert]
     @CustomerLedgerDebit     DECIMAL(18,4),
     @CustomerLedgerNarration NVARCHAR(500),
     @ReplaceInvoiceId        INT = NULL,
+    @SpaceId                 INT = NULL,
     @Lines                   dbo.TT_WN_CustomInvoiceLedgerLine READONLY
 AS
 BEGIN
-    -- CI_01: a custom invoice (InvoiceTypeId 7, IsCustom = 1) with its own GL voucher. In ONE transaction: the invoice
-    -- (number INV-<year>-<MAX(Id)+1> as WN_Invoices_Insert, status Un Paid) and its lines (dbo.WN_InvoiceLines, for the
-    -- PDF), a JV (dbo.Vouchers_Insert, RefNo = invoice number) with one dbo.Ledgers_Insert per posted line, the customer
-    -- ledger debit (dbo.CustomerLedger_Insert), WN_Invoices.VoucherId, dbo.WN_CustomInvoices and one dbo.WN_AuditLog row
-    -- (EntityName WN_CustomInvoice). With @ReplaceInvoiceId: that unpaid invoice of the same booking is cancelled (row
-    -- kept) and its JV and customer ledger debit are reversed. Any error rolls everything back. Business rules: error
-    -- 51000 with a message for the screen. Returns one row.
     SET NOCOUNT ON;
     SET XACT_ABORT ON;
     DECLARE @Msg NVARCHAR(2048);
@@ -11229,9 +12272,11 @@ BEGIN
     IF @BookingId IS NOT NULL
     BEGIN
         DECLARE @BkFound BIT = 0, @BkUserId INT = NULL, @BkCode NVARCHAR(50) = NULL, @BkLocationId INT = NULL;
-        SELECT TOP 1 @BkFound = 1, @BkUserId = b.UserId, @BkCode = NULLIF(LTRIM(RTRIM(b.CustomerCode)), N''), @BkLocationId = s.LocationId
+        SELECT TOP 1 @BkFound = 1, @BkUserId = b.UserId, @BkCode = NULLIF(LTRIM(RTRIM(b.CustomerCode)), N''),
+               @BkLocationId = COALESCE(s.LocationId, f.LocationId)
           FROM dbo.WN_Bookings b WITH (NOLOCK)
           LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+          LEFT JOIN dbo.WN_Floors f WITH (NOLOCK) ON f.Id = b.FloorId
          WHERE b.Id = @BookingId AND ISNULL(b.IsDeleted, 0) = 0;
         IF @BkFound = 0
             BEGIN SET @Msg = N'The booking was not found.'; THROW 51000, @Msg, 1; END
@@ -11242,14 +12287,34 @@ BEGIN
         ELSE IF @BkLocationId IS NOT NULL AND @LocationId <> @BkLocationId
             BEGIN SET @Msg = N'The location must be the location of the booking.'; THROW 51000, @Msg, 1; END
     END
+    -- 2b. Space (optional): must exist, belong to the location, and match the booking's space when the booking has one.
+    IF @SpaceId IS NOT NULL
+    BEGIN
+        DECLARE @SpFound BIT = 0, @SpLocationId INT = NULL;
+        SELECT TOP 1 @SpFound = 1, @SpLocationId = s.LocationId
+          FROM dbo.WN_Spaces s WITH (NOLOCK)
+         WHERE s.Id = @SpaceId;
+        IF @SpFound = 0
+            BEGIN SET @Msg = N'The space was not found.'; THROW 51000, @Msg, 1; END
+        IF @LocationId IS NULL SET @LocationId = @SpLocationId;
+        ELSE IF @SpLocationId IS NOT NULL AND @LocationId <> @SpLocationId
+            BEGIN SET @Msg = N'The space does not belong to the chosen location.'; THROW 51000, @Msg, 1; END
+        IF @BookingId IS NOT NULL
+        BEGIN
+            DECLARE @BkSpaceId INT = (SELECT TOP 1 SpaceId FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @BookingId);
+            IF @BkSpaceId IS NOT NULL AND @BkSpaceId <> @SpaceId
+                BEGIN SET @Msg = N'The space must be the space of the booking.'; THROW 51000, @Msg, 1; END
+        END
+    END
+    ELSE IF @BookingId IS NOT NULL
+        SELECT TOP 1 @SpaceId = SpaceId FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @BookingId;
     IF @LocationId IS NULL
         BEGIN SET @Msg = N'Choose the location.'; THROW 51000, @Msg, 1; END
     DECLARE @CompanyId INT = NULL, @BranchId INT = NULL;
     SELECT TOP 1 @CompanyId = CompanyId, @BranchId = BranchId FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id = @LocationId;
     IF @CompanyId IS NULL OR @BranchId IS NULL
         BEGIN SET @Msg = N'The location was not found, or it has no company or branch for the accounts.'; THROW 51000, @Msg, 1; END
-    -- 3. Header accounts from the posted lines where they map naturally: the default account of that kind (space type ->
-    --    space -> WN_ChargeTypeAccountMapping, as in WN_Invoices_Insert) when a line uses it, else the line with that amount.
+    -- 3. Header accounts from the posted lines where they map naturally
     DECLARE @OnDate DATE = @IssuedOn;
     DECLARE @DefAr INT = NULL, @DefRent INT = NULL, @DefServ INT = NULL, @DefTax INT = NULL, @DefSec INT = NULL;
     IF @BookingId IS NOT NULL
@@ -11325,15 +12390,15 @@ BEGIN
             CASE WHEN @TaxPercent IS NOT NULL THEN CONCAT(N' | Tax rate: ', CONVERT(NVARCHAR(20), CAST(@TaxPercent AS DECIMAL(9,2))), N' percent') ELSE N'' END,
             CASE WHEN @ReplaceInvoiceId IS NOT NULL THEN CONCAT(N' | Replaces ', @OldNumber) ELSE N'' END);
         INSERT INTO dbo.WN_Invoices (
-            PublicId, InvoiceNumber, UserId, BookingId, IssuedOn, DueOn,
+            PublicId, InvoiceNumber, UserId, BookingId, LocationId, IssuedOn, DueOn,
             SubTotal, DiscountTotal, TaxTotal, GrandTotal, PaidTotal, CurrencyCode, StatusId, Notes, CreatedOn, CreatedById,
             InvoiceTypeId, SecurityDepositAmount, AccountsCoaId, BillingPeriodStart, BillingPeriodEnd,
             AccountReceivableId, RentAccountId, ServicesIncomeId, SalesTaxId, SecurityReceivedId,
             RoomRentExclTax, ServiceCharges, TaxOnServiceCharges, WHTRate, WHTAmount, VoucherId, IsCustom, CustomReason
         )
         VALUES (
-            @PublicId, @InvoiceNumber, @UserId, @BookingId, @IssuedOn, @DueOn,
-            @RoomRentExclTax + @ServiceCharges, 0, @TaxOnServiceCharges, @GrandTotal, 0, N'PKR', @UnPaidId, @Notes, SYSUTCDATETIME(), @CreatedById,
+            @PublicId, @InvoiceNumber, @UserId, @BookingId, @LocationId, @IssuedOn, @DueOn,
+            @RoomRentExclTax + @ServiceCharges, 0, @TaxOnServiceCharges, @GrandTotal, 0, N'PKR', @UnPaidId, @Notes, SYSDATETIME(), @CreatedById,
             7, @SecurityDepositAmount, @RentAcc, @PeriodFrom, @PeriodTo,
             @ArAcc, @RentAcc, @ServAcc, @TaxAcc, @SecAcc,
             @RoomRentExclTax, @ServiceCharges, @TaxOnServiceCharges, 0, 0, NULL, 1, @CustomReason
@@ -11451,7 +12516,6 @@ BEGIN
                    Notes = CONCAT(Notes, CASE WHEN NULLIF(Notes, N'') IS NULL THEN N'' ELSE N' | ' END, N'Cancelled: replaced by custom invoice ', @InvoiceNumber)
              WHERE Id = @ReplaceInvoiceId;
             SET @ReversalText = CONCAT(N'Reversal of ', @OldNumber, N', replaced by ', @InvoiceNumber);
-            -- The old voucher: WN_Invoices.VoucherId, else the invoice JV by RefNo / RefId (older invoices have no VoucherId).
             IF @OldVoucherId IS NULL
                 SELECT TOP 1 @OldVoucherId = v.Id FROM dbo.Vouchers v WITH (NOLOCK)
                  WHERE v.RefId = @ReplaceInvoiceId AND v.RefNo = @OldNumber AND v.TypeId IN (1, 2)
@@ -11538,8 +12602,8 @@ BEGIN
             END
         END
         -- (g) Custom invoice details (replaced invoice, reversal voucher, voucher description, tax rate, chosen location).
-        INSERT INTO dbo.WN_CustomInvoices (InvoiceId, LocationId, ReplacedInvoiceId, ReversalVoucherId, VoucherDescription, TaxPercent, CreatedOn)
-        VALUES (@InvoiceId, @LocationId, @ReplaceInvoiceId, @RevVoucherId, @VoucherDescription, @TaxPercent, SYSUTCDATETIME());
+        INSERT INTO dbo.WN_CustomInvoices (InvoiceId, LocationId, SpaceId, ReplacedInvoiceId, ReversalVoucherId, VoucherDescription, TaxPercent, CreatedOn)
+        VALUES (@InvoiceId, @LocationId, @SpaceId, @ReplaceInvoiceId, @RevVoucherId, @VoucherDescription, @TaxPercent, SYSDATETIME());
         -- (h) One audit row with everything that was posted (the table triggers also record each row change).
         DECLARE @AuditUserId INT = COALESCE(CAST(SESSION_CONTEXT(N'AppUserId') AS INT), @CreatedById, -1);
         DECLARE @AuditEmail NVARCHAR(256) = CAST(SESSION_CONTEXT(N'AppUserEmail') AS NVARCHAR(256));
@@ -11547,7 +12611,7 @@ BEGIN
         DECLARE @AuditJson NVARCHAR(MAX) = (
             SELECT
                 JSON_QUERY((SELECT i.Id AS invoiceId, i.InvoiceNumber AS invoiceNumber, i.PublicId AS publicId, i.UserId AS userId,
-                                   i.BookingId AS bookingId, @LocationId AS locationId, i.IssuedOn AS issuedOn, i.DueOn AS dueOn,
+                                   i.BookingId AS bookingId, @LocationId AS locationId, @SpaceId AS spaceId, i.IssuedOn AS issuedOn, i.DueOn AS dueOn,
                                    i.BillingPeriodStart AS periodFrom, i.BillingPeriodEnd AS periodTo, i.RoomRentExclTax AS rent,
                                    i.ServiceCharges AS serviceCharges, i.TaxOnServiceCharges AS tax, @TaxPercent AS taxPercent,
                                    i.SecurityDepositAmount AS securityDeposit, i.GrandTotal AS grandTotal, i.StatusId AS statusId,
@@ -11579,7 +12643,7 @@ BEGIN
         )
         VALUES (
             N'WN_CustomInvoice', CAST(@InvoiceId AS NVARCHAR(64)), 'I', NULL, @AuditJson,
-            NULL, NULL, NULL, @AuditUserId, @AuditEmail, SYSUTCDATETIME(), @AuditSource
+            NULL, NULL, NULL, @AuditUserId, @AuditEmail, SYSDATETIME(), @AuditSource
         );
         COMMIT TRANSACTION;
         SELECT @InvoiceId AS InvoiceId, @InvoiceNumber AS InvoiceNumber, @PublicId AS PublicId,
@@ -11588,7 +12652,6 @@ BEGIN
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        -- One invoice per booking and period (unique index UQ_WN_Invoice_Booking_BillingPeriod): say which invoice has it.
         IF ERROR_NUMBER() IN (2601, 2627) AND ERROR_MESSAGE() LIKE N'%UQ[_]WN[_]Invoice[_]Booking[_]BillingPeriod%'
         BEGIN
             DECLARE @Clash NVARCHAR(50) = (SELECT TOP 1 InvoiceNumber FROM dbo.WN_Invoices WITH (NOLOCK)
@@ -11602,7 +12665,7 @@ BEGIN
     END CATCH
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_SearchAccounts]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_SearchAccounts]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11628,7 +12691,7 @@ BEGIN
      ORDER BY LTRIM(RTRIM(a.Description)), a.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_SearchCustomers]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_CustomInvoice_SearchCustomers]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11670,7 +12733,7 @@ BEGIN
      ORDER BY Name, c.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewBookings]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewBookings]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11745,7 +12808,7 @@ BEGIN
      ORDER BY CASE WHEN @List = N'ending' THEN x.EndOn END, b.CreatedOn DESC, b.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewInvoices]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewInvoices]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11847,7 +12910,7 @@ BEGIN
      ORDER BY CASE WHEN @Bucket IS NOT NULL THEN x.DueOn END, x.IssuedOn DESC, x.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Dash_OverviewSpaces]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -11939,7 +13002,7 @@ BEGIN
      ORDER BY CAST(loc.Name AS NVARCHAR(200)), COALESCE(NULLIF(s.Name, N''), s.Code), s.Code, s.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceInventory]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceInventory]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12040,7 +13103,7 @@ BEGIN
     OFFSET @Skip ROWS FETCH NEXT @PageSize ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceTypeDetails]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceTypeDetails]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12114,7 +13177,7 @@ BEGIN
     OFFSET @Skip ROWS FETCH NEXT @PageSize ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceTypeSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Dash_SpaceTypeSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12159,12 +13222,12 @@ BEGIN
      ORDER BY ISNULL(a.TotalSpaces, 0) DESC, l.Name, sc.Label, tn.SpaceType, t.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Dashboard_GetSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Dashboard_GetSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_Dashboard_GetSummary]
+CREATE   PROCEDURE [dbo].[WN_Dashboard_GetSummary]
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -12183,8 +13246,8 @@ BEGIN
     FROM dbo.WN_Bookings
     WHERE IsDeleted       = 0
       AND BookingStatusId IN (1, 2, 5, 33)
-      AND StartOn         <= SYSUTCDATETIME()
-      AND EndOn           >= SYSUTCDATETIME();
+      AND StartOn         <= SYSDATETIME()
+      AND EndOn           >= SYSDATETIME();
 
     SET @AvailableNow = @TotalSpaces - ISNULL(@OccupiedNow, 0);
 
@@ -12193,7 +13256,7 @@ BEGIN
     -- Active members: check new table first, fall back to old
     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Memberships') AND name = 'StatusId')
     BEGIN
-        DECLARE @sqlM NVARCHAR(MAX) = N'SELECT @cnt = COUNT(*) FROM dbo.WN_Memberships WHERE StatusId = 1 AND StartOn <= SYSUTCDATETIME() AND (EndOn IS NULL OR EndOn >= SYSUTCDATETIME());';
+        DECLARE @sqlM NVARCHAR(MAX) = N'SELECT @cnt = COUNT(*) FROM dbo.WN_Memberships WHERE StatusId = 1 AND StartOn <= SYSDATETIME() AND (EndOn IS NULL OR EndOn >= SYSDATETIME());';
         EXEC sp_executesql @sqlM, N'@cnt INT OUTPUT', @ActiveMembers OUTPUT;
     END
     ELSE
@@ -12205,13 +13268,13 @@ BEGIN
     SELECT @RevenueThisMonth = ISNULL(SUM(Amount), 0)
     FROM dbo.WN_Payments
     WHERE StatusId    = 2
-      AND YEAR(PaidOn)  = YEAR(SYSUTCDATETIME())
-      AND MONTH(PaidOn) = MONTH(SYSUTCDATETIME());
+      AND YEAR(PaidOn)  = YEAR(SYSDATETIME())
+      AND MONTH(PaidOn) = MONTH(SYSDATETIME());
 
     SELECT @BookingsToday = COUNT(*)
     FROM dbo.WN_Bookings
     WHERE IsDeleted = 0
-      AND CAST(CreatedOn AS DATE) = CAST(SYSUTCDATETIME() AS DATE);
+      AND CAST(CreatedOn AS DATE) = CAST(SYSDATETIME() AS DATE);
 
     -- Summary row
     SELECT
@@ -12245,7 +13308,7 @@ BEGIN
     ORDER BY v.BookedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_DeleteInvoiceLines]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_DeleteInvoiceLines]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12258,7 +13321,7 @@ BEGIN
     DELETE FROM dbo.WN_InvoiceLines WHERE InvoiceId = @InvoiceId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_DeviceTokens_Upsert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_DeviceTokens_Upsert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12285,12 +13348,12 @@ BEGIN
     ELSE
     BEGIN
         INSERT INTO dbo.WN_DeviceToken (UserId, Token, Platform, CreatedAt, IsActive)
-        VALUES (@UserId, @Token, @Platform, SYSUTCDATETIME(), 1);
+        VALUES (@UserId, @Token, @Platform, SYSDATETIME(), 1);
     END
     SELECT 1 AS Success;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_GetActive]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_GetActive]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12306,11 +13369,11 @@ BEGIN
     WHERE Email     = @Email
       AND Purpose   = @Purpose
       AND UsedOn    IS NULL
-      AND ExpiresOn > SYSUTCDATETIME()
+      AND ExpiresOn > SYSDATETIME()
     ORDER BY CreatedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12325,7 +13388,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     -- Invalidate any existing unused OTPs for same email+purpose
-    UPDATE dbo.WN_EmailOtps SET UsedOn = SYSUTCDATETIME()
+    UPDATE dbo.WN_EmailOtps SET UsedOn = SYSDATETIME()
     WHERE Email   = @Email
       AND Purpose = @Purpose
       AND UsedOn  IS NULL;
@@ -12336,7 +13399,7 @@ BEGIN
     SELECT Id FROM dbo.WN_EmailOtps WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_MarkUsed]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_EmailOtps_MarkUsed]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12346,11 +13409,131 @@ CREATE   PROCEDURE [dbo].[WN_EmailOtps_MarkUsed]
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_EmailOtps SET UsedOn = SYSUTCDATETIME()
+    UPDATE dbo.WN_EmailOtps SET UsedOn = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_EnsureCustomerSTInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_EmailOutbox_Add]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_EmailOutbox_Add]
+    @Kind        NVARCHAR(100),
+    @ToEmail     NVARCHAR(1000),
+    @Subject     NVARCHAR(500),
+    @MessageJson NVARCHAR(MAX)
+AS
+BEGIN
+    -- SS_02: holds one e-mail asked for while Email Sending was off.
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_EmailOutbox (Kind, ToEmail, Subject, MessageJson)
+    VALUES (LEFT(ISNULL(@Kind, N'E-mail'), 100), LEFT(ISNULL(@ToEmail, N''), 1000), LEFT(ISNULL(@Subject, N''), 500), @MessageJson);
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_EmailOutbox_Claim]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_EmailOutbox_Claim]
+    @Id  INT = NULL,
+    @Top INT = 20
+AS
+BEGIN
+    -- SS_02: @Id = that e-mail when it is Pending or Failed (Send now); else up to @Top Pending ones, oldest first. A
+    -- row left Sending for 15 minutes (the API stopped mid-send) counts as Pending again. Claimed rows become Sending
+    -- and are returned with MessageJson, so two senders never send the same e-mail.
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 20;
+    DECLARE @Claimed TABLE (Id INT, Kind NVARCHAR(100), ToEmail NVARCHAR(1000), Subject NVARCHAR(500), MessageJson NVARCHAR(MAX), Attempts INT);
+    IF @Id IS NOT NULL
+        UPDATE o SET Status = N'Sending', ClaimedOn = SYSUTCDATETIME()
+        OUTPUT inserted.Id, inserted.Kind, inserted.ToEmail, inserted.Subject, inserted.MessageJson, inserted.Attempts INTO @Claimed
+          FROM dbo.WN_EmailOutbox o WITH (ROWLOCK, UPDLOCK)
+         WHERE o.Id = @Id
+           AND (o.Status IN (N'Pending', N'Failed') OR (o.Status = N'Sending' AND o.ClaimedOn < DATEADD(MINUTE, -15, SYSUTCDATETIME())));
+    ELSE
+        UPDATE o SET Status = N'Sending', ClaimedOn = SYSUTCDATETIME()
+        OUTPUT inserted.Id, inserted.Kind, inserted.ToEmail, inserted.Subject, inserted.MessageJson, inserted.Attempts INTO @Claimed
+          FROM dbo.WN_EmailOutbox o WITH (ROWLOCK, UPDLOCK, READPAST)
+         WHERE o.Id IN (SELECT TOP (@Top) x.Id FROM dbo.WN_EmailOutbox x WITH (READPAST)
+                         WHERE x.Status = N'Pending'
+                            OR (x.Status = N'Sending' AND x.ClaimedOn < DATEADD(MINUTE, -15, SYSUTCDATETIME()))
+                         ORDER BY x.Id);
+    SELECT Id, Kind, ToEmail, Subject, MessageJson, Attempts FROM @Claimed ORDER BY Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_EmailOutbox_Discard]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_EmailOutbox_Discard]
+    @Id INT = NULL,
+    @By NVARCHAR(256) = NULL
+AS
+BEGIN
+    -- SS_02: stops e-mails for good (never sent): @Id = that one, NULL = every Pending / Failed one. Returns how many.
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_EmailOutbox
+       SET Status = N'Discarded', DiscardedOn = SYSUTCDATETIME(), DiscardedBy = LEFT(@By, 256), ClaimedOn = NULL
+     WHERE Status IN (N'Pending', N'Failed') AND (@Id IS NULL OR Id = @Id);
+    SELECT @@ROWCOUNT AS Discarded;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_EmailOutbox_Finish]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_EmailOutbox_Finish]
+    @Id    INT,
+    @Sent  BIT,
+    @Error NVARCHAR(1000) = NULL
+AS
+BEGIN
+    -- SS_02: after a claim. Sent -> Sent; not sent -> Pending again, or Failed after 3 attempts (a super admin can still
+    -- Send now or discard it). Only a row that is Sending changes (a discard in between wins).
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_EmailOutbox
+       SET Status    = CASE WHEN @Sent = 1 THEN N'Sent' WHEN Attempts + 1 >= 3 THEN N'Failed' ELSE N'Pending' END,
+           Attempts  = Attempts + 1,
+           SentOn    = CASE WHEN @Sent = 1 THEN SYSUTCDATETIME() ELSE SentOn END,
+           LastError = CASE WHEN @Sent = 1 THEN NULL ELSE LEFT(@Error, 1000) END,
+           ClaimedOn = NULL
+     WHERE Id = @Id AND Status = N'Sending';
+    SELECT Id, Status, Attempts, LastError FROM dbo.WN_EmailOutbox WITH (NOLOCK) WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_EmailOutbox_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_EmailOutbox_GetList]
+    @Status NVARCHAR(20) = NULL,
+    @Top    INT = 200
+AS
+BEGIN
+    -- SS_02: [0] counts per status; [1] the newest @Top e-mails of @Status (NULL = all), without MessageJson.
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 200;
+    SET @Status = NULLIF(LTRIM(RTRIM(@Status)), N'');
+    SELECT SUM(CASE WHEN Status = N'Pending' THEN 1 ELSE 0 END) AS Pending,
+           SUM(CASE WHEN Status = N'Sending' THEN 1 ELSE 0 END) AS Sending,
+           SUM(CASE WHEN Status = N'Sent' THEN 1 ELSE 0 END) AS Sent,
+           SUM(CASE WHEN Status = N'Failed' THEN 1 ELSE 0 END) AS Failed,
+           SUM(CASE WHEN Status = N'Discarded' THEN 1 ELSE 0 END) AS Discarded
+      FROM dbo.WN_EmailOutbox WITH (NOLOCK);
+    SELECT TOP (@Top) Id, Kind, ToEmail, Subject, Status, Attempts, LastError, CreatedOn, SentOn, DiscardedOn, DiscardedBy
+      FROM dbo.WN_EmailOutbox WITH (NOLOCK)
+     WHERE @Status IS NULL OR Status = @Status
+     ORDER BY Id DESC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_EnsureCustomerSTInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12384,12 +13567,12 @@ BEGIN
             'Room Rent (Exclusive of Service Charge)', @RoomRentAmount, 0.00, 0.00,
             'Service Charges', @ServiceChargeAmount, @STTaxRate, @TaxAmount,
             NULL, NULL, 0.00, 0.00,
-            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSUTCDATETIME(), 1
+            @SubTotal, @TaxAmount, @GrandTotal, NULL, SYSDATETIME(), 1
         );
     END
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_CreateDueMonthly]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_CreateDueMonthly]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12498,7 +13681,7 @@ BEGIN
                    @RoomRent, @Service, @Tax, @WHT, @Deposit,
                    @BillingMonth, @MonthNo, @MonthCount,
                    r1.CashInHandAccountId, r1.PaymentType, r1.BranchId, r1.CompanyId, 1, 1, @ReceiptDate,
-                   SYSUTCDATETIME(), NULL, r1.CreatedById,
+                   SYSDATETIME(), NULL, r1.CreatedById,
                    LEFT(CONCAT(N'Month ', @MonthNo, N' of ', @MonthCount, N', issued automatically (paid with ', @FirstCode, N').'), 500),
                    NULL, NULL, r1.DepositorName, r1.DepositorCNIC, NULL
               FROM dbo.WN_FeeReceipts r1
@@ -12538,7 +13721,7 @@ BEGIN
     SELECT InvoiceNumber, MonthNo, Error FROM @Failed;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetAccounts]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetAccounts]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -12603,31 +13786,24 @@ BEGIN
         a.Description ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 3. dbo.WN_FeeReceipts_GetById (ALTERED)
--- Ensures CustomerEmail is sourced ONLY from dbo.WN_Customers (c.Email).
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_FeeReceipts_GetById]
-    @Id                 INT              = NULL,
-    @IdGUID             UNIQUEIDENTIFIER = NULL,
-    @AllowedLocationIds NVARCHAR(MAX)    = NULL
+    @Id INT
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
-    IF @AllowedLocationIds IS NOT NULL
-        INSERT INTO @AllowedLocs (LocId)
-        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
-        FROM STRING_SPLIT(@AllowedLocationIds, ',')
-        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 62);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 12);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id), 63);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5);
 
-    SELECT TOP 1
+    SELECT
         fr.Id,
         fr.IdGUID,
         fr.Code,
@@ -12647,37 +13823,60 @@ BEGIN
         fr.CompanyId,
         fr.FeeStatus,
         fr.Status,
-        CASE fr.Status WHEN 1 THEN 'Active' WHEN 0 THEN 'Void' ELSE 'Unknown' END AS StatusLabel,
         fr.ReceiptDate,
-        fr.Remarks,
-        fr.VoidReason,
-        fr.DepositorName,
-        fr.DepositorCNIC,
         fr.CreatedOn,
         fr.UpdatedOn,
         fr.CreatedById,
-        creator.Name                        AS CreatedByName,
+        cr.Name                             AS CreatedByName,
+        fr.Remarks,
         fr.UpdatedById,
-        updater.Name                        AS UpdatedByName,
+        up.Name                             AS UpdatedByName,
+        fr.VoidReason,
+        fr.DepositorName,
+        fr.DepositorCNIC,
+        fr.VoucherId,
+        fr.BillingMonth,
+        fr.MonthNo,
+        fr.MonthCount,
         i.Id                                AS InvoiceId,
         i.InvoiceNumber,
         i.IssuedOn                          AS InvoiceIssuedOn,
         i.DueOn                             AS InvoiceDueOn,
-        i.GrandTotal                        AS InvoiceGrandTotal,
-        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, 'Customer')) AS CustomerName,
         c.Code                              AS CustomerCode,
+        c.FirstName                         AS CustomerFirstName,
+        c.LastName                          AS CustomerLastName,
         c.Email                             AS CustomerEmail,
-        c.PhoneNumber                       AS CustomerPhone,
-        c.Company                           AS CustomerCompany,
-        c.Address                           AS CustomerAddress,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name, 'Customer') AS CustomerDisplayName,
         x.LocationId                        AS LocationId,
         loc.Name                            AS LocationName,
-        loc.City                            AS LocationCity
+        fr.InvoiceTotal,
+        fr.PreviousPaid,
+        CAST(ROUND(ISNULL(fr.TotalAmount, 0), 2) AS DECIMAL(18,2)) AS AmountPaid,
+        fr.BalanceAfter,
+        invState.InvoiceBalanceNow,
+        invState.InvoicePaymentStatus
     FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
     LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = fr.InvoiceIdGUID
+    OUTER APPLY (
+        SELECT
+            CASE
+                WHEN i.Id IS NULL THEN NULL
+                WHEN i.StatusId IN (5, 40, @CancelledId) THEN CAST(0.00 AS DECIMAL(18,2))
+                WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 THEN CAST(0.00 AS DECIMAL(18,2))
+                ELSE CAST(ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) AS DECIMAL(18,2))
+            END AS InvoiceBalanceNow,
+            CASE
+                WHEN i.Id IS NULL THEN NULL
+                WHEN i.StatusId IN (5, 40, @CancelledId) THEN 'Cancelled'
+                WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, @PaidId)) THEN 'Paid'
+                WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12, @PartialId) THEN 'Partial'
+                WHEN i.StatusId IN (4, @OverdueId) OR (i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today) THEN 'Overdue'
+                ELSE 'Unpaid'
+            END AS InvoicePaymentStatus
+    ) invState
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     OUTER APPLY (
-        SELECT TOP 1 cu.Code, cu.FirstName, cu.LastName, cu.PhoneNumber, cu.Company, cu.Address, cu.Email
+        SELECT TOP 1 cu.Code, cu.FirstName, cu.LastName, cu.Company, cu.Email
         FROM dbo.WN_Customers cu WITH (NOLOCK)
         WHERE cu.IdGUID = fr.CustomerIdGUID
            OR (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND cu.Code = b.CustomerCode)
@@ -12686,41 +13885,41 @@ BEGIN
     ) c
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    CROSS APPLY (SELECT COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId) x
     LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
     LEFT JOIN dbo.AccountsCOA coa WITH (NOLOCK) ON coa.Id = fr.CashInHandAccountId
-    LEFT JOIN dbo.WN_Users creator WITH (NOLOCK) ON creator.Id = fr.CreatedById
-    LEFT JOIN dbo.WN_Users updater WITH (NOLOCK) ON updater.Id = fr.UpdatedById
-    WHERE ((@Id IS NOT NULL AND fr.Id = @Id)
-           OR (@Id IS NULL AND @IdGUID IS NOT NULL AND fr.IdGUID = @IdGUID))
-      AND (@AllowedLocationIds IS NULL OR x.LocationId IN (SELECT LocId FROM @AllowedLocs));
+    LEFT JOIN dbo.WN_Users cr WITH (NOLOCK) ON cr.Id = fr.CreatedById
+    LEFT JOIN dbo.WN_Users up WITH (NOLOCK) ON up.Id = fr.UpdatedById
+    WHERE fr.Id = @Id;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 4. dbo.WN_FeeReceipts_GetList (ALTERED)
--- Ensures CustomerEmail is sourced ONLY from dbo.WN_Customers (c.Email).
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_FeeReceipts_GetList]
     @Page               INT           = 1,
     @Limit              INT           = 10,
     @Search             NVARCHAR(200) = NULL,
     @LocationId         INT           = NULL,
-    @Status             TINYINT       = NULL,
+    @Status             INT           = NULL,
     @AllowedLocationIds NVARCHAR(MAX) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
-
-    IF @Page IS NULL OR @Page < 1 SET @Page = 1;
-    IF @Limit IS NULL OR @Limit < 1 SET @Limit = 10;
+    IF @Page < 1 SET @Page = 1;
+    IF @Limit < 1 SET @Limit = 10;
     IF @Limit > 100 SET @Limit = 100;
     DECLARE @Offset INT = (@Page - 1) * @Limit;
     SET @Search = NULLIF(LTRIM(RTRIM(@Search)), '');
+
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 62);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 12);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id), 63);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5);
 
     DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
     IF @AllowedLocationIds IS NOT NULL
@@ -12743,7 +13942,7 @@ BEGIN
     ) c
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    CROSS APPLY (SELECT COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId) x
     LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
     WHERE (@Status IS NULL OR fr.Status = @Status)
       AND (@LocationId IS NULL OR x.LocationId = @LocationId)
@@ -12778,31 +13977,57 @@ BEGIN
         fr.CompanyId,
         fr.FeeStatus,
         fr.Status,
-        CASE fr.Status WHEN 1 THEN 'Active' WHEN 0 THEN 'Void' ELSE 'Unknown' END AS StatusLabel,
         fr.ReceiptDate,
-        fr.Remarks,
-        fr.VoidReason,
-        fr.DepositorName,
-        fr.DepositorCNIC,
         fr.CreatedOn,
         fr.UpdatedOn,
         fr.CreatedById,
-        creator.Name                        AS CreatedByName,
+        cr.Name                             AS CreatedByName,
+        fr.Remarks,
         fr.UpdatedById,
-        updater.Name                        AS UpdatedByName,
+        up.Name                             AS UpdatedByName,
+        fr.VoidReason,
+        fr.DepositorName,
+        fr.DepositorCNIC,
+        fr.VoucherId,
+        fr.BillingMonth,
+        fr.MonthNo,
+        fr.MonthCount,
         i.Id                                AS InvoiceId,
         i.InvoiceNumber,
         i.IssuedOn                          AS InvoiceIssuedOn,
         i.DueOn                             AS InvoiceDueOn,
-        i.GrandTotal                        AS InvoiceGrandTotal,
-        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, 'Customer')) AS CustomerName,
         c.Code                              AS CustomerCode,
+        c.FirstName                         AS CustomerFirstName,
+        c.LastName                          AS CustomerLastName,
         c.Email                             AS CustomerEmail,
-        c.Company                           AS CustomerCompany,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name, 'Customer') AS CustomerDisplayName,
         x.LocationId                        AS LocationId,
-        loc.Name                            AS LocationName
+        loc.Name                            AS LocationName,
+        fr.InvoiceTotal,
+        fr.PreviousPaid,
+        CAST(ROUND(ISNULL(fr.TotalAmount, 0), 2) AS DECIMAL(18,2)) AS AmountPaid,
+        fr.BalanceAfter,
+        invState.InvoiceBalanceNow,
+        invState.InvoicePaymentStatus
     FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
     LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = fr.InvoiceIdGUID
+    OUTER APPLY (
+        SELECT
+            CASE
+                WHEN i.Id IS NULL THEN NULL
+                WHEN i.StatusId IN (5, 40, @CancelledId) THEN CAST(0.00 AS DECIMAL(18,2))
+                WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 THEN CAST(0.00 AS DECIMAL(18,2))
+                ELSE CAST(ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) AS DECIMAL(18,2))
+            END AS InvoiceBalanceNow,
+            CASE
+                WHEN i.Id IS NULL THEN NULL
+                WHEN i.StatusId IN (5, 40, @CancelledId) THEN 'Cancelled'
+                WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, @PaidId)) THEN 'Paid'
+                WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12, @PartialId) THEN 'Partial'
+                WHEN i.StatusId IN (4, @OverdueId) OR (i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today) THEN 'Overdue'
+                ELSE 'Unpaid'
+            END AS InvoicePaymentStatus
+    ) invState
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     OUTER APPLY (
         SELECT TOP 1 cu.Code, cu.FirstName, cu.LastName, cu.Company, cu.Email
@@ -12814,11 +14039,11 @@ BEGIN
     ) c
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    CROSS APPLY (SELECT COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId) x
     LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
     LEFT JOIN dbo.AccountsCOA coa WITH (NOLOCK) ON coa.Id = fr.CashInHandAccountId
-    LEFT JOIN dbo.WN_Users creator WITH (NOLOCK) ON creator.Id = fr.CreatedById
-    LEFT JOIN dbo.WN_Users updater WITH (NOLOCK) ON updater.Id = fr.UpdatedById
+    LEFT JOIN dbo.WN_Users cr WITH (NOLOCK) ON cr.Id = fr.CreatedById
+    LEFT JOIN dbo.WN_Users up WITH (NOLOCK) ON up.Id = fr.UpdatedById
     WHERE (@Status IS NULL OR fr.Status = @Status)
       AND (@LocationId IS NULL OR x.LocationId = @LocationId)
       AND (@AllowedLocationIds IS NULL OR x.LocationId IN (SELECT LocId FROM @AllowedLocs))
@@ -12834,28 +14059,24 @@ BEGIN
     ORDER BY fr.Id DESC
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetUnpaidInvoices]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_GetUnpaidInvoices]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 2. dbo.WN_FeeReceipts_GetUnpaidInvoices (ALTERED)
--- Ensures CustomerEmail is sourced ONLY from dbo.WN_Customers (c.Email).
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_FeeReceipts_GetUnpaidInvoices]
-    @Top                INT           = 25,
     @Search             NVARCHAR(200) = NULL,
     @LocationId         INT           = NULL,
-    @AllowedLocationIds NVARCHAR(MAX) = NULL
+    @AllowedLocationIds NVARCHAR(MAX) = NULL,
+    @Top                INT           = 200
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    IF @Top IS NULL OR @Top < 1 SET @Top = 25;
-    IF @Top > 200 SET @Top = 200;
-    SET @Search = NULLIF(LTRIM(RTRIM(@Search)), '');
+    IF @Top IS NULL OR @Top <= 0 SET @Top = 200;
+    IF @Top > 500 SET @Top = 500;
 
     DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
     IF @AllowedLocationIds IS NOT NULL
@@ -12864,34 +14085,66 @@ BEGIN
         FROM STRING_SPLIT(@AllowedLocationIds, ',')
         WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
 
-    DECLARE @UnPaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), 1);
-    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 2);
-    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 3);
-    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id), 4);
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+    DECLARE @UnPaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), 61);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 62);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 12);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id), 63);
     DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5);
 
     SELECT TOP (@Top)
-        i.Id                                  AS InvoiceId,
-        i.PublicId                            AS InvoiceIdGUID,
+        i.Id AS InvoiceId,
+        i.Id,
+        i.PublicId AS InvoiceIdGUID,
+        i.PublicId,
         i.InvoiceNumber,
-        CONCAT(ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, c.Email)), '-', ISNULL(c.Code, 'WN-N/A'), '-', i.InvoiceNumber) AS DisplayName,
-        ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, 'Customer')) AS CustomerName,
-        c.Code                                AS CustomerCode,
-        c.Email                               AS CustomerEmail,
-        c.PhoneNumber                         AS CustomerPhone,
-        c.Company                             AS CustomerCompany,
-        c.IdGUID                              AS CustomerIdGUID,
         i.IssuedOn,
         i.DueOn,
-        ISNULL(i.RoomRentExclTax, 0)          AS RoomRentExclTax,
-        ISNULL(i.ServiceCharges, 0)           AS ServiceCharges,
-        ISNULL(i.TaxOnServiceCharges, 0)      AS TaxOnServiceCharges,
-        ISNULL(i.WHTAmount, 0)                AS WHTAmount,
+        ROUND(i.GrandTotal, 2) AS GrandTotal,
+        ISNULL(ROUND(i.WHTAmount, 2), 0.00) AS WHTAmount,
+        n.NetReceivableAmount,
+        ISNULL(ROUND(i.PaidTotal, 2), 0.00) AS PaidTotal,
+        ROUND(n.NetReceivableAmount - ISNULL(i.PaidTotal, 0), 2) AS BalanceDue,
+        CASE 
+            WHEN ISNULL(i.PaidTotal, 0) > 0.005 THEN 12
+            WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN @OverdueId
+            ELSE @UnPaidId
+        END AS StatusId,
+        CASE
+            WHEN ISNULL(i.PaidTotal, 0) > 0.005 THEN 'Partial'
+            WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+            ELSE 'Unpaid'
+        END AS StatusLabel,
+        CAST(ROUND(ISNULL(i.PaidTotal, 0), 2) AS DECIMAL(18,2)) AS AmountPaid,
+        CAST(ROUND(n.NetReceivableAmount - ISNULL(i.PaidTotal, 0), 2) AS DECIMAL(18,2)) AS BalanceAmount,
+        CASE
+            WHEN ISNULL(i.PaidTotal, 0) > 0.005 THEN 'Partial'
+            WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+            ELSE 'Unpaid'
+        END AS PaymentStatus,
+        CAST(CASE WHEN i.InvoiceTypeId IN (6, 7) OR ISNULL(i.IsCustom, 0) = 1 OR ISNULL(i.WHTAmount, 0) > 0 THEN 0 ELSE 1 END AS BIT) AS AllowPartial,
+        c.FirstName,
+        c.LastName,
+        c.PhoneNumber,
+        c.PhoneNumber AS CustomerPhone,
+        c.Company,
+        c.Company AS CustomerCompany,
+        c.Code AS CustomerCode,
+        c.IdGUID AS CustomerIdGUID,
+        c.Email AS CustomerEmail,
+        COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name, 'Customer') AS CustomerDisplayName,
+        COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), NULLIF(LTRIM(RTRIM(c.Company)), ''), u.Name, 'Customer') AS CustomerName,
+        CONCAT(COALESCE(NULLIF(LTRIM(RTRIM(c.Company)), ''), NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), u.Name, 'Customer'), ' - ', ISNULL(c.Code, 'WN-N/A'), ' - ', i.InvoiceNumber) AS DisplayName,
+        ISNULL(i.AdvanceRentMonths, 0)         AS AdvanceRentMonths,
+        ISNULL(i.SecurityDepositMonths, 0)     AS SecurityDepositMonths,
+        ISNULL(i.BillingPeriodMonths, 1)       AS BillingPeriodMonths,
+        i.BillingPeriodStart,
+        i.BillingPeriodEnd,
+        ISNULL(i.RoomRentExclTax, 0)           AS RoomRentExclTax,
+        ISNULL(i.ServiceCharges, 0)            AS ServiceCharges,
+        ISNULL(i.TaxOnServiceCharges, 0)       AS TaxOnServiceCharges,
         ISNULL(i.WHTRate, 0)                  AS WHTRate,
         ISNULL(i.SecurityDepositAmount, 0)    AS SecurityDepositAmount,
-        ISNULL(i.GrandTotal, 0)               AS GrandTotal,
-        ISNULL(i.PaidTotal, 0)                AS PaidTotal,
-        n.NetReceivableAmount,
         i.InvoiceTypeId,
         i.CurrencyCode,
         i.BookingId,
@@ -12899,17 +14152,21 @@ BEGIN
         x.LocationId                          AS LocationId,
         loc.Name                              AS LocationName,
         loc.CompanyId,
-        loc.BranchId,
-        i.StatusId,
-        CASE WHEN i.StatusId IN (4, @OverdueId) THEN 'Overdue' WHEN ISNULL(i.PaidTotal, 0) > 0 THEN 'Partial' ELSE 'Unpaid' END AS StatusLabel,
-        CAST(ROUND(ISNULL(i.PaidTotal, 0), 2) AS DECIMAL(18,2)) AS AmountPaid,
-        CAST(CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN 0 ELSE 1 END AS BIT) AS AllowPartial,
-        CAST(ROUND(n.NetReceivableAmount - ISNULL(i.PaidTotal, 0), 2) AS DECIMAL(18,2)) AS BalanceAmount,
-        CASE WHEN ISNULL(i.PaidTotal, 0) > 0 THEN 'Partial' ELSE 'Unpaid' END AS PaymentStatus
+        loc.BranchId
     FROM dbo.WN_Invoices i WITH (NOLOCK)
-    CROSS APPLY (SELECT CAST(CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0
-                                  THEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0)
-                                  ELSE ISNULL(i.GrandTotal, 0) END AS DECIMAL(18,4)) AS NetReceivableAmount) n
+    CROSS APPLY (
+        SELECT CAST(
+            CASE
+                WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0
+                THEN ISNULL(i.GrandTotal, 0) - CASE
+                    WHEN ISNULL(i.WHTAmount, 0) > 0 THEN i.WHTAmount
+                    WHEN ISNULL(i.WHTRate, 0) > 0 THEN ROUND(ISNULL(i.GrandTotal, 0) * (i.WHTRate / 100.0), 4)
+                    ELSE 0
+                END
+                ELSE ISNULL(i.GrandTotal, 0)
+            END AS DECIMAL(18,4)
+        ) AS NetReceivableAmount
+    ) n
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     OUTER APPLY (SELECT TOP 1 cu.Code, cu.FirstName, cu.LastName, cu.PhoneNumber, cu.Company, cu.IdGUID, cu.Email
                    FROM dbo.WN_Customers cu WITH (NOLOCK)
@@ -12918,11 +14175,11 @@ BEGIN
                   ORDER BY CASE WHEN b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode THEN 0 ELSE 1 END, cu.Id) c
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    CROSS APPLY (SELECT ISNULL(s.LocationId, u.LocationId) AS LocationId) x
+    CROSS APPLY (SELECT COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId) x
     LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = x.LocationId
-    WHERE i.StatusId IN (1, 3, 4, @UnPaidId, @PartialId, @OverdueId)
-      AND i.StatusId <> 40
-      AND ROUND(n.NetReceivableAmount - ISNULL(i.PaidTotal, 0), 2) > 0
+    WHERE i.StatusId <> 40
+      AND ISNULL(i.StatusId, 0) NOT IN (5, @CancelledId)
+      AND ROUND(n.NetReceivableAmount - ISNULL(i.PaidTotal, 0), 2) > 0.005
       AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus = 'Approved')
       AND ISNULL(i.ApprovalStatus, '') NOT IN ('PendingApproval', 'Rejected')
       AND (@LocationId IS NULL OR x.LocationId = @LocationId)
@@ -12933,22 +14190,18 @@ BEGIN
           OR c.Code LIKE '%' + @Search + '%'
           OR c.FirstName LIKE '%' + @Search + '%'
           OR c.LastName LIKE '%' + @Search + '%'
-          OR c.Email LIKE '%' + @Search + '%'
+          OR c.Company LIKE '%' + @Search + '%'
           OR u.Name LIKE '%' + @Search + '%'
       )
-    ORDER BY i.Id DESC;
+    ORDER BY i.DueOn ASC, i.Id ASC;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 1. ALTER PROCEDURE dbo.WN_FeeReceipts_Insert
--- Allow receipt date to be selected freely, regardless of invoice creation/issue date
--- ==============================================================================
--- 3. Procedure dbo.WN_FeeReceipts_Insert with @Amount support
 CREATE   PROCEDURE [dbo].[WN_FeeReceipts_Insert]
     @InvoiceIdGUID       UNIQUEIDENTIFIER,
     @CashInHandAccountId INT           = NULL,
@@ -13282,7 +14535,7 @@ BEGIN
             1,
             1,
             @ReceiptDate,
-            SYSUTCDATETIME(), NULL, @CreatedById, NULLIF(LTRIM(RTRIM(@Remarks)), ''), NULL, NULL,
+            SYSDATETIME(), NULL, @CreatedById, NULLIF(LTRIM(RTRIM(@Remarks)), ''), NULL, NULL,
             NULLIF(LTRIM(RTRIM(@DepositorName)), ''), NULLIF(LTRIM(RTRIM(@DepositorCNIC)), ''),
             @Payable, @PrevPaid, @BalanceAfter,
             @VoucherId
@@ -13299,7 +14552,7 @@ BEGIN
             UPDATE dbo.WN_AccessCards
             SET Status    = 1,
                 EndDate   = ISNULL(@BillingPeriodEnd, EndDate),
-                UpdatedOn = SYSUTCDATETIME()
+                UpdatedOn = SYSDATETIME()
             WHERE BookingId = @BookingId;
 
         EXEC dbo.WN_FeeReceipts_PostVoucher @ReceiptId = @ReceiptId, @CreatedById = @CreatedById, @TransDate = @ReceiptTransDateTime;
@@ -13319,7 +14572,7 @@ BEGIN
     EXEC dbo.WN_FeeReceipts_GetById @Id = @ReceiptId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_PostVoucher]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_PostVoucher]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -13746,7 +14999,7 @@ BEGIN
     END CATCH;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_Void]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_FeeReceipts_Void]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -13850,7 +15103,7 @@ BEGIN
         SET Status      = 0,   -- 0 = Void
             VoidReason  = LTRIM(RTRIM(@VoidReason)),
             UpdatedById = @UpdatedById,
-            UpdatedOn   = SYSUTCDATETIME()
+            UpdatedOn   = SYSDATETIME()
         WHERE Id = @TargetReceiptId;
 
         -- Restore the invoice only while it is still Paid by this receipt (PaidTotal = this receipt's net amount,
@@ -13892,7 +15145,7 @@ BEGIN
     END CATCH;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Floors_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Floors_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -13911,7 +15164,7 @@ BEGIN
     ORDER BY f.LocationId, f.FloorNumber;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Floors_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Floors_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -13929,7 +15182,7 @@ BEGIN
     SELECT SCOPE_IDENTITY() AS Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -13942,7 +15195,7 @@ BEGIN
     UPDATE dbo.WN_GalleryImages SET IsActive = 0 WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_GetAll]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_GetAll]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -13964,7 +15217,7 @@ BEGIN
     ORDER BY g.SortOrder ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -13991,7 +15244,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14014,7 +15267,7 @@ BEGIN
     SELECT Id, IdGUID FROM dbo.WN_GalleryImages WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GalleryImages_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14036,7 +15289,7 @@ BEGIN
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetAvailableSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetAvailableSpaces]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14069,7 +15322,7 @@ BEGIN
     ORDER BY Priority ASC, CodeNumber ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetBookingBillingSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetBookingBillingSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14093,7 +15346,7 @@ BEGIN
     WHERE b.Id = @BookingId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetBookingInvoiceDetails]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetBookingInvoiceDetails]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14191,7 +15444,7 @@ BEGIN
     WHERE b.Id = @BookingId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetBookingLastInvoicePeriodEnd]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetBookingLastInvoicePeriodEnd]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14209,7 +15462,7 @@ BEGIN
     ORDER BY Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetCustomerArrears]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetCustomerArrears]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14230,7 +15483,7 @@ BEGIN
       AND (ApprovalStatus IS NULL OR ApprovalStatus <> 'PendingApproval');
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetCustomerSTInvoiceByPublicId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetCustomerSTInvoiceByPublicId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14328,7 +15581,7 @@ BEGIN
     WHERE st.PublicId = @PublicId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceByBookingId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceByBookingId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14347,23 +15600,95 @@ BEGIN
     ORDER BY Id ASC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceDetailsById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceDetailsById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 9. dbo.WN_GetInvoiceDetailsById (ALTERED)
--- Ensures CustomerEmail is sourced ONLY from dbo.WN_Customers (c.Email).
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_GetInvoiceDetailsById]
     @InvoiceId INT
 AS
 BEGIN
     SET NOCOUNT ON;
-    SELECT i.*,
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+
+    SELECT i.Id,
+           i.PublicId,
+           i.InvoiceNumber,
+           i.UserId,
+           i.BookingId,
+           i.MembershipId,
+           i.IssuedOn,
+           i.DueOn,
+           i.SubTotal,
+           i.DiscountTotal,
+           i.TaxTotal,
+           i.GrandTotal,
+           i.PaidTotal,
+           CASE
+               WHEN i.StatusId IN (5, 40) THEN 0.0000
+               WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 THEN 0.0000
+               ELSE ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0)
+           END AS BalanceDue,
+           i.CurrencyCode,
+           CASE
+               WHEN i.StatusId IN (5, 40) THEN i.StatusId
+               WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 62
+               WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN 12
+               WHEN i.StatusId IN (4, 63) OR (i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today) THEN 63
+               ELSE ISNULL(i.StatusId, 61)
+           END AS StatusId,
+           i.Notes,
+           i.CreatedOn,
+           i.UpdatedOn,
+           i.CreatedById,
+           i.InvoiceTypeId,
+           i.AdvanceRentMonths,
+           i.SecurityDepositMonths,
+           i.SecurityDepositAmount,
+           i.AccountsCoaId,
+           i.BillingPeriodMonths,
+           i.BillingPeriodStart,
+           i.BillingPeriodEnd,
+           i.AccountReceivableId,
+           i.RentAccountId,
+           i.ServicesIncomeId,
+           i.SalesTaxId,
+           i.SecurityReceivedId,
+           i.RoomRentExclTax,
+           i.ServiceCharges,
+           i.TaxOnServiceCharges,
+           i.WHTRate,
+           i.WHTAmount,
+           i.VoucherId,
+           i.IsCustom,
+           i.CustomReason,
+           i.OneBillRef,
+           i.OneBillNumber,
+           i.OneBillStatus,
+           i.OneBillAttempts,
+           i.OneBillError,
+           i.OneBillClaimedOn,
+           i.OneBillCreatedOn,
+           i.EzPayInvoiceId,
+           i.EzPayTranAuthId,
+           i.ApprovalStatus,
+           i.ViewedAt,
+           i.ViewedBy,
+           i.ApprovedAt,
+           i.ApprovedBy,
+           i.LocationId,
            ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, 'Customer')) AS CustomerName,
-           c.Email AS CustomerEmail, s.Name AS SpaceName
+           c.Email AS CustomerEmail,
+           s.Name AS SpaceName,
+           CASE
+               WHEN i.StatusId IN (5, 40) THEN 'Cancelled'
+               WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 'Paid'
+               WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN
+                   CASE WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue' ELSE 'Partial' END
+               WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+               ELSE 'Unpaid'
+           END AS StatusLabel
       FROM dbo.WN_Invoices i WITH (NOLOCK)
       LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
       OUTER APPLY (SELECT TOP 1 cx.FirstName, cx.LastName, cx.Email FROM dbo.WN_Customers cx WITH (NOLOCK)
@@ -14380,8 +15705,9 @@ BEGIN
      WHERE l.InvoiceId = @InvoiceId
      ORDER BY l.SortOrder, l.Id;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceEmailData]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceEmailData]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14423,7 +15749,7 @@ BEGIN
     WHERE i.Id = @InvoiceId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceForSTGeneration]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoiceForSTGeneration]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14438,15 +15764,11 @@ BEGIN
     WHERE PublicId = @PublicId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoicesList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoicesList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 5. dbo.WN_GetInvoicesList (ALTERED)
--- Ensures CustomerEmail is sourced ONLY from dbo.WN_Customers (c.Email).
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_GetInvoicesList]
     @Page        INT           = 1,
     @Limit       INT           = 10,
@@ -14459,27 +15781,7 @@ BEGIN
     IF @Page < 1 SET @Page = 1;
     IF @Limit < 1 SET @Limit = 10;
     DECLARE @Offset INT = (@Page - 1) * @Limit;
-
-    SELECT COUNT(1) AS TotalCount
-    FROM dbo.WN_Invoices i WITH (NOLOCK)
-    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
-    OUTER APPLY (
-        SELECT TOP 1 cu.Code, cu.FirstName, cu.LastName, cu.Email, cu.Company
-        FROM dbo.WN_Customers cu WITH (NOLOCK)
-        WHERE (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND cu.Code = b.CustomerCode)
-           OR cu.UserId = i.UserId
-        ORDER BY CASE WHEN b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode THEN 0 ELSE 1 END, cu.Id
-    ) c
-    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
-    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    WHERE (@LocationId IS NULL OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
-      AND (@TypeId IS NULL OR @TypeId <= 0 OR i.InvoiceTypeId = @TypeId)
-      AND i.StatusId <> 40
-      AND (@Search IS NULL OR @Search = '' 
-           OR i.InvoiceNumber LIKE '%' + @Search + '%' 
-           OR c.Email LIKE '%' + @Search + '%' 
-           OR c.FirstName LIKE '%' + @Search + '%'
-           OR c.LastName LIKE '%' + @Search + '%');
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
 
     SELECT 
         i.Id,
@@ -14496,17 +15798,24 @@ BEGIN
         ISNULL(i.TaxTotal, 0) AS TaxTotal,
         ISNULL(i.GrandTotal, 0) AS GrandTotal,
         ISNULL(i.PaidTotal, 0) AS PaidTotal,
-        CASE 
-            WHEN i.StatusId IN (2, 62) THEN 0.0000
-            ELSE ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) 
+        CASE
+            WHEN i.StatusId IN (5, 40) THEN 0.0000
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 THEN 0.0000
+            ELSE ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0)
         END AS BalanceDue,
         i.CurrencyCode,
-        i.StatusId,
+        CASE
+            WHEN i.StatusId IN (5, 40) THEN i.StatusId
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 62
+            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN 12
+            WHEN i.StatusId IN (4, 63) OR (i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today) THEN 63
+            ELSE ISNULL(i.StatusId, 61)
+        END AS StatusId,
         i.InvoiceTypeId,
         i.ApprovalStatus,
         i.Notes,
         i.CreatedOn,
-        ISNULL(s.LocationId, u.LocationId) AS LocationId,
+        COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId,
         loc.Name AS LocationName,
         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, 'Customer')) AS CustomerName,
         c.Email AS CustomerEmail,
@@ -14515,11 +15824,7 @@ BEGIN
         s.Code AS SpaceCode,
         ISNULL(b.MonthlyRent, 0) AS MonthlyRent,
         ISNULL(b.BillingPeriodMonths, 1) AS BillingPeriodMonths,
-        COALESCE(
-            CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
-            (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
-             FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
-            'Unknown') AS StatusLabel
+        st.StatusLabel
     FROM dbo.WN_Invoices i WITH (NOLOCK)
     LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
     OUTER APPLY (
@@ -14531,8 +15836,18 @@ BEGIN
     ) c
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = ISNULL(s.LocationId, u.LocationId)
-    WHERE (@LocationId IS NULL OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = COALESCE(i.LocationId, s.LocationId, u.LocationId)
+    CROSS APPLY (
+        SELECT CASE
+            WHEN i.StatusId IN (5, 40) THEN 'Cancelled'
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 'Paid'
+            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN
+                CASE WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue' ELSE 'Partial' END
+            WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+            ELSE 'Unpaid'
+        END AS StatusLabel
+    ) st
+    WHERE (@LocationId IS NULL OR i.LocationId = @LocationId OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
       AND (@TypeId IS NULL OR @TypeId <= 0 OR i.InvoiceTypeId = @TypeId)
       AND i.StatusId <> 40
       AND (@Search IS NULL OR @Search = '' 
@@ -14543,16 +15858,13 @@ BEGIN
     ORDER BY i.Id DESC
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetInvoicesListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetInvoicesListFiltered]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 6. dbo.WN_GetInvoicesListFiltered (ALTERED)
--- Ensures CustomerEmail is sourced ONLY from dbo.WN_Customers (c.Email).
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_GetInvoicesListFiltered]
     @Page        INT           = 1,
     @Limit       INT           = 10,
@@ -14568,7 +15880,7 @@ BEGIN
     SET NOCOUNT ON;
     IF @Page < 1 SET @Page = 1;
     IF @Limit < 1 SET @Limit = 10;
-    IF @Today IS NULL SET @Today = CAST(GETDATE() AS DATE);
+    IF @Today IS NULL SET @Today = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
     DECLARE @Offset INT = (@Page - 1) * @Limit;
 
     SELECT
@@ -14587,16 +15899,23 @@ BEGIN
         ISNULL(i.GrandTotal, 0) AS GrandTotal,
         ISNULL(i.PaidTotal, 0) AS PaidTotal,
         CASE
-            WHEN i.StatusId IN (2, 62) THEN 0.0000
+            WHEN i.StatusId IN (5, 40) THEN 0.0000
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 THEN 0.0000
             ELSE ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0)
         END AS BalanceDue,
         i.CurrencyCode,
-        i.StatusId,
+        CASE
+            WHEN i.StatusId IN (5, 40) THEN i.StatusId
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 62
+            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN 12
+            WHEN i.StatusId IN (4, 63) OR (i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today) THEN 63
+            ELSE ISNULL(i.StatusId, 61)
+        END AS StatusId,
         i.InvoiceTypeId,
         i.ApprovalStatus,
         i.Notes,
         i.CreatedOn,
-        ISNULL(s.LocationId, u.LocationId) AS LocationId,
+        COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId,
         loc.Name AS LocationName,
         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, 'Customer')) AS CustomerName,
         c.Email AS CustomerEmail,
@@ -14619,25 +15938,29 @@ BEGIN
     ) c
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = ISNULL(s.LocationId, u.LocationId)
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = COALESCE(i.LocationId, s.LocationId, u.LocationId)
     CROSS APPLY (
-        SELECT COALESCE(
-            CASE i.StatusId WHEN 1 THEN 'Unpaid' WHEN 2 THEN 'Paid' WHEN 3 THEN 'Partial' WHEN 4 THEN 'Overdue' WHEN 5 THEN 'Cancelled' END,
-            (SELECT CASE LTRIM(RTRIM(os.Description)) WHEN 'Un Paid' THEN 'Unpaid' WHEN 'Challan Expire' THEN 'Overdue' ELSE LTRIM(RTRIM(os.Description)) END
-             FROM dbo.OrderStatus os WITH (NOLOCK) WHERE os.Id = i.StatusId),
-            'Unknown') AS StatusLabel
+        SELECT CASE
+            WHEN i.StatusId IN (5, 40) THEN 'Cancelled'
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 'Paid'
+            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN 'Partial'
+            WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+            ELSE 'Unpaid'
+        END AS StatusLabel,
+        CASE
+            WHEN i.StatusId IN (5, 40) THEN 'Cancelled'
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 'Paid'
+            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN 'Partial'
+            ELSE 'Unpaid'
+        END AS BaseStatus
     ) sl
     CROSS APPLY (
         SELECT CASE
-            WHEN sl.StatusLabel IN ('Unpaid', 'Paid', 'Partial', 'Overdue', 'Cancelled') THEN sl.StatusLabel
-            WHEN ISNULL(i.GrandTotal, 0) > 0 AND ISNULL(i.PaidTotal, 0) >= ISNULL(i.GrandTotal, 0) THEN 'Paid'
-            WHEN ISNULL(i.PaidTotal, 0) > 0 THEN 'Partial'
-            ELSE 'Unpaid' END AS BaseStatus
-    ) bst
-    CROSS APPLY (
-        SELECT CASE WHEN bst.BaseStatus IN ('Unpaid', 'Partial') AND i.DueOn < @Today THEN 'Overdue' ELSE bst.BaseStatus END AS ListStatus
+            WHEN sl.BaseStatus IN ('Unpaid', 'Partial') AND i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
+            ELSE sl.BaseStatus
+        END AS ListStatus
     ) ls
-    WHERE (@LocationId IS NULL OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
+    WHERE (@LocationId IS NULL OR i.LocationId = @LocationId OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
       AND (@TypeId IS NULL OR @TypeId <= 0 OR i.InvoiceTypeId = @TypeId)
       AND i.StatusId <> 40
       AND (@Status IS NULL OR ls.ListStatus = @Status)
@@ -14651,8 +15974,9 @@ BEGIN
     ORDER BY i.Id DESC
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetRemainingBillingPeriods]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetRemainingBillingPeriods]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14683,11 +16007,16 @@ BEGIN
     WHERE p.BookingId = @BookingId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_GetStatementInvoicePdfData]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_GetStatementInvoicePdfData]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+
+-- ==============================================================================
+-- 9. ALTER dbo.WN_GetStatementInvoicePdfData
+-- Uses COALESCE(i.LocationId, ci.LocationId, s.LocationId, u.LocationId)
+-- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_GetStatementInvoicePdfData]
     @InvoiceId INT
 AS
@@ -14755,7 +16084,7 @@ BEGIN
             ELSE st.STInvoiceNumber
         END AS STInvoiceNumber,
         i.OneBillNumber,
-        COALESCE(ci.LocationId, loc.Id, s.LocationId, u.LocationId) AS LocationId
+        COALESCE(i.LocationId, ci.LocationId, loc.Id, s.LocationId, u.LocationId) AS LocationId
     FROM dbo.WN_Invoices i WITH (NOLOCK)
     LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = i.Id
     LEFT JOIN dbo.WN_CustomerSTInvoice st WITH (NOLOCK) ON st.CustomerInvoiceId = i.Id
@@ -14770,7 +16099,7 @@ BEGIN
         OR (u.Email IS NOT NULL AND u.Email <> '' AND c.Email = u.Email)
     ) AND (c.IsActive = 1 OR c.IsActive IS NULL)
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = COALESCE(i.LocationId, ci.LocationId, s.LocationId, u.LocationId)
     LEFT JOIN dbo.Branches br WITH (NOLOCK) ON br.Id = loc.BranchId
     LEFT JOIN dbo.Company comp WITH (NOLOCK) ON comp.Id = COALESCE(loc.CompanyId, br.CompanyId, u.CompanyId)
     WHERE i.Id = @InvoiceId;
@@ -14778,33 +16107,20 @@ BEGIN
     SELECT
         l.ChargeTypeId,
         l.Description,
-        ISNULL(l.Quantity, 1) AS Quantity,
-        ISNULL(l.UnitPrice, 0) AS UnitPrice,
-        (l.Quantity * l.UnitPrice - l.DiscountAmount) AS PriceExclVat,
-        l.TaxAmount AS VatAmount,
-        l.LineTotal AS TotalInclVat,
-        l.TaxRate,
-        ISNULL(ct.Label, 'Business Support Services') AS CategoryName
+        l.Quantity,
+        l.UnitPrice,
+        ISNULL(l.DiscountAmount, 0) AS DiscountAmount,
+        ISNULL(l.TaxRate, 0) AS TaxRate,
+        ISNULL(l.TaxAmount, 0) AS TaxAmount,
+        ISNULL(l.LineTotal, (l.Quantity * l.UnitPrice) - ISNULL(l.DiscountAmount, 0) + ISNULL(l.TaxAmount, 0)) AS LineTotal,
+        l.SortOrder
     FROM dbo.WN_InvoiceLines l WITH (NOLOCK)
-    LEFT JOIN dbo.WN_ChargeTypes ct WITH (NOLOCK) ON ct.Id = l.ChargeTypeId
     WHERE l.InvoiceId = @InvoiceId
-    ORDER BY l.SortOrder, l.Id;
-
-    DECLARE @UserId INT;
-    SELECT @UserId = UserId FROM dbo.WN_Invoices WHERE Id = @InvoiceId;
-
-    SELECT
-        ISNULL(SUM(GrandTotal - PaidTotal), 0) AS PriorBalance,
-        ISNULL(SUM(PaidTotal), 0) AS PaymentReceived
-    FROM dbo.WN_Invoices WITH (NOLOCK)
-    WHERE UserId = @UserId AND Id < @InvoiceId;
-
-    SELECT TOP 1 Description AS BankName, ShortDesc AS BankAccountNumber
-    FROM dbo.AccountsCOA WITH (NOLOCK)
-    WHERE AccountNature = 'Bank' OR Description LIKE '%Bank%';
+    ORDER BY l.SortOrder ASC, l.Id ASC;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Access_Extend]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Access_Extend]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14819,7 +16135,7 @@ BEGIN
   COMMIT;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Extend]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Extend]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14853,7 +16169,7 @@ BEGIN
 END
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_GetByBookingDetail]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_GetByBookingDetail]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14879,7 +16195,7 @@ BEGIN
 END
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Run]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_Run]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14960,7 +16276,7 @@ BEGIN
      WHERE x.ShouldBlock <> x.MachinesBlocked;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_SetApplied]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_AccessSuspension_SetApplied]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14976,7 +16292,7 @@ BEGIN
 END
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Activity_Recent]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Activity_Recent]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -14994,7 +16310,7 @@ BEGIN
   ORDER BY l.Id DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Booking_Attendees]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Booking_Attendees]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15012,7 +16328,7 @@ BEGIN
   WHERE e.booking_ref = @ref;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Booking_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Booking_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15023,7 +16339,7 @@ BEGIN
   DELETE FROM dbo.WN_HIK_Visitors WHERE booking_ref = @ref;  -- grants cascade via TR_WN_HIK_Visitors_GrantCascade
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Card_Register]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Card_Register]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15039,7 +16355,7 @@ BEGIN
   SELECT SCOPE_IDENTITY() AS id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Count]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Count]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15051,7 +16367,7 @@ BEGIN
   SELECT COUNT(*) AS n FROM dbo.WN_HIK_DashboardUsers WITH (NOLOCK);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15064,7 +16380,7 @@ BEGIN
   DELETE FROM dbo.WN_HIK_DashboardUsers WHERE username = @username;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15077,7 +16393,7 @@ BEGIN
   FROM dbo.WN_HIK_DashboardUsers WITH (NOLOCK) WHERE Username = @username;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_List]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_List]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15094,7 +16410,7 @@ BEGIN
   ORDER BY u.Username;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Rename]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Rename]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15109,7 +16425,7 @@ BEGIN
    WHERE username = @old_username;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_SetStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_SetStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15120,7 +16436,7 @@ BEGIN
   UPDATE dbo.WN_HIK_DashboardUsers SET Status = @status, Updated_by = COALESCE(@actor_id, Updated_by), Updated_at = SYSDATETIME() WHERE Username = @username;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Upsert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DashUser_Upsert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15142,7 +16458,187 @@ BEGIN
     VALUES (s.u, COALESCE(@name, s.u), @password_hash, @display_password, COALESCE(@role, 'user'), @actor_id);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_SetOnline]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_DevCache_GetSnapshots]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 6. dbo.WN_HIK_DevCache_GetSnapshots
+CREATE   PROCEDURE [dbo].[WN_HIK_DevCache_GetSnapshots]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT Device_id, Users_snapshot 
+    FROM dbo.WN_HIK_DevCache WITH (NOLOCK) 
+    WHERE Users_snapshot IS NOT NULL;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_Add]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_HIK_Device_Add]
+(
+	 @Name nvarchar(100)
+	,@Host nvarchar(64)
+	,@Host2 nvarchar(128) = NULL
+	,@Port int = 80
+	,@UseHttps bit = 0
+	,@Username nvarchar(64)
+	,@Password nvarchar(128)
+	,@Location nvarchar(128) = NULL
+	,@Grp nvarchar(64) = NULL
+	,@Code nvarchar(64) = NULL
+	,@LocationId int
+)
+AS
+BEGIN
+	-- HIK_DEV_01: adds a machine (dbo.WN_HIK_Device_UpsertByHost, as the HIK dashboard does), then its failover host,
+	-- room code and WorkNest location. A host + port that is already used is refused (Duplicate), never overwritten.
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Id int = NULL;
+	DECLARE @Ids TABLE (Id int);
+
+	SET @Host = LTRIM(RTRIM(@Host));
+	SET @Host2 = NULLIF(LTRIM(RTRIM(@Host2)), N'');
+	SET @Location = NULLIF(LTRIM(RTRIM(@Location)), N'');
+	SET @Grp = NULLIF(LTRIM(RTRIM(@Grp)), N'');
+	SET @Code = NULLIF(LTRIM(RTRIM(@Code)), N'');
+
+	BEGIN TRANSACTION;
+	SELECT @Id = Id FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK) WHERE Host = @Host AND Port = @Port;
+	IF @Id IS NOT NULL
+	BEGIN
+		COMMIT;
+		SELECT N'Duplicate' AS Result, @Id AS Id;
+		RETURN;
+	END
+	IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id = @LocationId)
+	BEGIN
+		COMMIT;
+		SELECT N'BadLocation' AS Result, CAST(NULL AS int) AS Id;
+		RETURN;
+	END
+
+	INSERT INTO @Ids (Id)
+	EXEC dbo.WN_HIK_Device_UpsertByHost
+		 @name = @Name
+		,@host = @Host
+		,@port = @Port
+		,@use_https = @UseHttps
+		,@username = @Username
+		,@password = @Password
+		,@location = @Location
+		,@grp = @Grp;
+	SELECT TOP (1) @Id = Id FROM @Ids;
+
+	UPDATE dbo.WN_HIK_Devices
+	SET
+		 Host2 = @Host2
+		,Code = @Code
+		,LocationId = @LocationId
+	WHERE Id = @Id;
+	COMMIT;
+
+	SELECT N'Added' AS Result, @Id AS Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_HIK_Device_Delete]
+(
+	 @Id int
+)
+AS
+BEGIN
+	-- HIK_DEV_01: deletes a machine, its roster snapshot and its queued operations; its access grants are deleted by the
+	-- cascade on FK_WN_HIK_grants_device. Door events and the sync log keep their rows (history).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Name nvarchar(200) = NULL;
+
+	BEGIN TRANSACTION;
+	SELECT @Name = Device_Name FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id;
+	IF @Name IS NULL
+	BEGIN
+		COMMIT;
+		SELECT N'NotFound' AS Result, @Id AS Id, CAST(NULL AS nvarchar(200)) AS Device_Name;
+		RETURN;
+	END
+
+	DELETE FROM dbo.WN_HIK_PendingOps WHERE device_id = @Id;
+	DELETE FROM dbo.WN_HIK_DevCache WHERE Device_id = @Id;
+	DELETE FROM dbo.WN_HIK_Devices WHERE Id = @Id;
+	COMMIT;
+
+	SELECT N'Deleted' AS Result, @Id AS Id, @Name AS Device_Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_HIK_Device_GetById]
+(
+	 @Id int
+)
+AS
+BEGIN
+	-- HIK_DEV_01: one machine for the CMS edit form. The password is never returned.
+	SET NOCOUNT ON;
+	SELECT
+		 d.Id
+		,d.Device_Name
+		,d.Host
+		,d.Host2
+		,d.Port
+		,d.Use_https
+		,d.Username
+		,d.Location
+		,d.Code
+		,d.Group_id
+		,g.Name AS GroupName
+		,d.LocationId
+		,wl.Name AS LocationName
+		,d.Model
+		,d.Serial
+		,d.Online
+		,d.Last_seen
+	FROM dbo.WN_HIK_Devices d WITH (NOLOCK)
+	LEFT JOIN dbo.WN_HIK_Groups g WITH (NOLOCK) ON g.Id = d.Group_id
+	LEFT JOIN dbo.WN_Locations wl WITH (NOLOCK) ON wl.Id = d.LocationId
+	WHERE d.Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_GetGroups]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_HIK_Device_GetGroups]
+AS
+BEGIN
+	-- HIK_DEV_01: the machine groups with how many machines each has. A group starting with "Entrance" marks entrance doors.
+	SET NOCOUNT ON;
+	SELECT
+		 g.Id
+		,LTRIM(RTRIM(g.Name)) AS Name
+		,CAST(CASE WHEN LTRIM(g.Name) LIKE N'Entrance%' THEN 1 ELSE 0 END AS bit) AS IsEntrance
+		,(SELECT COUNT(1) FROM dbo.WN_HIK_Devices d WITH (NOLOCK) WHERE d.Group_id = g.Id) AS Machines
+	FROM dbo.WN_HIK_Groups g WITH (NOLOCK)
+	ORDER BY CASE WHEN LTRIM(g.Name) LIKE N'Entrance%' THEN 0 ELSE 1 END, g.Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_SetOnline]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15162,7 +16658,95 @@ BEGIN
   UPDATE dbo.WN_HIK_DevCache SET Status = CASE WHEN @online = 1 THEN 1 ELSE 0 END WHERE Device_id = @device_id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_UpsertByHost]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_Update]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_HIK_Device_Update]
+(
+	 @Id int
+	,@Name nvarchar(100) = NULL
+	,@Host nvarchar(64) = NULL
+	,@Host2 nvarchar(128) = NULL
+	,@Port int = NULL
+	,@UseHttps bit = NULL
+	,@Username nvarchar(64) = NULL
+	,@Password nvarchar(128) = NULL
+	,@Location nvarchar(128) = NULL
+	,@Grp nvarchar(64) = NULL
+	,@Code nvarchar(64) = NULL
+	,@LocationId int = NULL
+)
+AS
+BEGIN
+	-- HIK_DEV_01: changes a machine. NULL keeps a value; '' clears Host2 / Location / Group / Code; an empty password keeps
+	-- the saved one. A group name that does not exist yet is created (as dbo.WN_HIK_Device_UpsertByHost does).
+	SET NOCOUNT ON;
+	SET XACT_ABORT ON;
+	DECLARE @Gid int = NULL;
+	DECLARE @Other int = NULL;
+	DECLARE @NewHost nvarchar(128);
+	DECLARE @NewPort int;
+
+	BEGIN TRANSACTION;
+	SELECT
+		 @NewHost = COALESCE(NULLIF(LTRIM(RTRIM(@Host)), N''), Host)
+		,@NewPort = COALESCE(@Port, Port)
+	FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK)
+	WHERE Id = @Id;
+	IF @NewHost IS NULL
+	BEGIN
+		COMMIT;
+		SELECT N'NotFound' AS Result, @Id AS Id;
+		RETURN;
+	END
+
+	SELECT @Other = Id FROM dbo.WN_HIK_Devices WITH (UPDLOCK, HOLDLOCK) WHERE Host = @NewHost AND Port = @NewPort AND Id <> @Id;
+	IF @Other IS NOT NULL
+	BEGIN
+		COMMIT;
+		SELECT N'Duplicate' AS Result, @Other AS Id;
+		RETURN;
+	END
+	IF @LocationId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id = @LocationId)
+	BEGIN
+		COMMIT;
+		SELECT N'BadLocation' AS Result, @Id AS Id;
+		RETURN;
+	END
+
+	IF @Grp IS NOT NULL AND LTRIM(RTRIM(@Grp)) <> N''
+	BEGIN
+		SET @Grp = LTRIM(RTRIM(@Grp));
+		SELECT @Gid = Id FROM dbo.WN_HIK_Groups WITH (UPDLOCK, HOLDLOCK) WHERE Name = @Grp;
+		IF @Gid IS NULL
+		BEGIN
+			INSERT INTO dbo.WN_HIK_Groups (Name) VALUES (@Grp);
+			SET @Gid = SCOPE_IDENTITY();
+		END
+	END
+
+	UPDATE dbo.WN_HIK_Devices
+	SET
+		 Device_Name = COALESCE(NULLIF(LTRIM(RTRIM(@Name)), N''), Device_Name)
+		,Host = @NewHost
+		,Host2 = CASE WHEN @Host2 IS NULL THEN Host2 ELSE NULLIF(LTRIM(RTRIM(@Host2)), N'') END
+		,Port = @NewPort
+		,Use_https = COALESCE(@UseHttps, Use_https)
+		,Username = COALESCE(NULLIF(LTRIM(RTRIM(@Username)), N''), Username)
+		,Password = COALESCE(NULLIF(@Password, N''), Password)
+		,Location = CASE WHEN @Location IS NULL THEN Location ELSE NULLIF(LTRIM(RTRIM(@Location)), N'') END
+		,Group_id = CASE WHEN @Grp IS NULL THEN Group_id ELSE @Gid END
+		,Code = CASE WHEN @Code IS NULL THEN Code ELSE NULLIF(LTRIM(RTRIM(@Code)), N'') END
+		,LocationId = COALESCE(@LocationId, LocationId)
+	WHERE Id = @Id;
+	COMMIT;
+
+	SELECT N'Updated' AS Result, @Id AS Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Device_UpsertByHost]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15193,7 +16777,7 @@ BEGIN
   SELECT Id AS id FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Host = @host AND Port = @port;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Employee_NextNumber]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Employee_NextNumber]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15208,7 +16792,7 @@ BEGIN
   WHERE n IS NOT NULL AND n >= @floor AND n < @ceiling;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Expiry_Run]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Expiry_Run]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15228,7 +16812,7 @@ BEGIN
   SELECT * FROM @expired;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_Ensure]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_Ensure]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15241,7 +16825,7 @@ BEGIN
   WHEN NOT MATCHED THEN INSERT (employee_id, device_id, sync_state) VALUES (s.e, s.d, 'pending');
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_MarkRemoving]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_MarkRemoving]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15255,7 +16839,7 @@ BEGIN
   UPDATE dbo.WN_HIK_AccessGrants SET sync_state = 'removing' WHERE employee_id = @employee_id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_PendingEmployees]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_PendingEmployees]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15270,7 +16854,7 @@ BEGIN
   WHERE sync_state IN ('pending','error','removing');
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_SetState]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Grant_SetState]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15286,7 +16870,7 @@ BEGIN
    WHERE id = @grant_id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Log_Write]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Log_Write]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15300,7 +16884,26 @@ BEGIN
   VALUES (@employee_id, @device_id, @action, @ok, @detail);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Settings_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_PendingOps_GetGrantDeviceIds]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 7. dbo.WN_HIK_PendingOps_GetGrantDeviceIds
+CREATE   PROCEDURE [dbo].[WN_HIK_PendingOps_GetGrantDeviceIds]
+    @EmployeeNo NVARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT DISTINCT device_id 
+    FROM dbo.WN_HIK_PendingOps WITH (NOLOCK) 
+    WHERE employee_no = @EmployeeNo AND op = 'grant';
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Settings_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15314,7 +16917,7 @@ BEGIN
   SELECT value FROM dbo.WN_HIK_Settings WITH (NOLOCK) WHERE [key] = @key;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Settings_Set]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Settings_Set]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15327,7 +16930,7 @@ BEGIN
   WHEN NOT MATCHED THEN INSERT ([key], value) VALUES (s.k, @value);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Stats_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Stats_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15347,7 +16950,7 @@ BEGIN
       WHERE sync_state IN ('pending','error','removing'))                      AS pendingSync;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Attendees_GetByRef]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Attendees_GetByRef]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15360,7 +16963,7 @@ BEGIN
     SELECT id, CONVERT(VARCHAR(19), valid_end, 126) AS ve FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE booking_ref = @BookingRef;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Booking_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Booking_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15374,7 +16977,7 @@ BEGIN
     FROM dbo.WN_Bookings b WITH (NOLOCK) WHERE b.Id = @BookingId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Booking_GetNext]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Booking_GetNext]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15392,7 +16995,7 @@ BEGIN
     ORDER BY b.StartOn ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_BookingRefs_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_BookingRefs_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15404,7 +17007,7 @@ BEGIN
     SELECT DISTINCT booking_ref FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE booking_ref LIKE N'WNB-%';
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Card_SetHolder]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Card_SetHolder]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15417,7 +17020,7 @@ BEGIN
     UPDATE dbo.WN_HIK_Cards SET Employee_name = @EmployeeName, Employee_no = @EmployeeNo WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_CardEmployees_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_CardEmployees_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15429,7 +17032,7 @@ BEGIN
     SELECT id, card_no FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE kind = N'card' AND status = N'active' AND card_no IS NOT NULL;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15444,7 +17047,7 @@ BEGIN
     WHERE @DeviceId IS NULL OR Device_id = @DeviceId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Invalidate]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Invalidate]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15458,7 +17061,7 @@ BEGIN
     WHERE @DeviceId IS NULL OR Device_id = @DeviceId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Save]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_DevCache_Save]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15478,7 +17081,7 @@ BEGIN
         WHEN NOT MATCHED THEN INSERT (Device_id, Users_snapshot, Users_UpdatedOn) VALUES (s.id, @Json, SYSDATETIME());
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Devices_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Devices_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15497,7 +17100,7 @@ BEGIN
              TRY_CAST(d.Code AS INT), d.Device_Name, d.Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Employee_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Employee_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15510,7 +17113,7 @@ BEGIN
     SELECT * FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE id = @EmployeeId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Event_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Event_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15539,7 +17142,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Events_GetLast]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Events_GetLast]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15553,7 +17156,38 @@ BEGIN
     FROM dbo.WN_HIK_Events WITH (NOLOCK) WHERE device_id = @DeviceId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Events_Purge]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_HIK_Sync_Events_Purge]
+    @Before DATETIME, @MaxRows INT = 50000
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Deleted INT = 0, @Batch INT = 1;
+    DECLARE @HasTrigger BIT = CASE WHEN OBJECT_ID(N'dbo.TR_WN_HIK_Events_Audit', N'TR') IS NOT NULL THEN 1 ELSE 0 END;
+
+    IF @HasTrigger = 1 DISABLE TRIGGER dbo.TR_WN_HIK_Events_Audit ON dbo.WN_HIK_Events;
+    BEGIN TRY
+        WHILE @Batch > 0 AND @Deleted < @MaxRows
+        BEGIN
+            DELETE TOP (5000) FROM dbo.WN_HIK_Events WHERE event_time < @Before;
+            SET @Batch = @@ROWCOUNT;
+            SET @Deleted = @Deleted + @Batch;
+        END
+        IF @HasTrigger = 1 ENABLE TRIGGER dbo.TR_WN_HIK_Events_Audit ON dbo.WN_HIK_Events;
+    END TRY
+    BEGIN CATCH
+        IF @HasTrigger = 1 ENABLE TRIGGER dbo.TR_WN_HIK_Events_Audit ON dbo.WN_HIK_Events;
+        THROW;
+    END CATCH
+
+    SELECT @Deleted AS Deleted;
+END
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15566,7 +17200,7 @@ BEGIN
     SELECT TOP 1 model_data FROM dbo.WN_HIK_FaceVault WITH (NOLOCK) WHERE employee_no = @EmployeeNo AND name = @Name;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Keys]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Keys]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15578,7 +17212,7 @@ BEGIN
     SELECT employee_no, name FROM dbo.WN_HIK_FaceVault WITH (NOLOCK);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Save]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FaceVault_Save]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15594,7 +17228,7 @@ BEGIN
     WHEN NOT MATCHED THEN INSERT (employee_no, name, model_data) VALUES (s.emp, s.nm, @ModelData);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FpVault_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FpVault_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15607,7 +17241,7 @@ BEGIN
     SELECT finger_no, template FROM dbo.WN_HIK_FpVault WITH (NOLOCK) WHERE employee_no = @EmployeeNo AND name = @Name;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FpVault_Save]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_FpVault_Save]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15624,7 +17258,7 @@ BEGIN
     WHEN NOT MATCHED THEN INSERT (employee_no, name, finger_no, template) VALUES (s.emp, s.nm, s.fno, @Template);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grant_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grant_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15637,7 +17271,7 @@ BEGIN
     DELETE FROM dbo.WN_HIK_AccessGrants WHERE id = @GrantId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grant_InsertSynced]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grant_InsertSynced]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15652,7 +17286,7 @@ BEGIN
         VALUES (@EmployeeId, @DeviceId, N'synced', SYSDATETIME());
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_CountPending]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_CountPending]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15664,7 +17298,7 @@ BEGIN
     SELECT COUNT(*) AS n FROM dbo.WN_HIK_AccessGrants WITH (NOLOCK) WHERE sync_state IN (N'pending', N'error', N'removing');
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_DeleteByEmployee]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_DeleteByEmployee]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15677,7 +17311,7 @@ BEGIN
     DELETE FROM dbo.WN_HIK_AccessGrants WHERE employee_id = @EmployeeId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_GetByEmployee]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_GetByEmployee]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15691,7 +17325,7 @@ BEGIN
     FROM dbo.WN_HIK_AccessGrants WITH (NOLOCK) WHERE employee_id = @EmployeeId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_ResetToPending]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Grants_ResetToPending]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15705,7 +17339,7 @@ BEGIN
     WHERE employee_id = @EmployeeId AND sync_state IN (N'synced', N'error');
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOp_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOp_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15718,7 +17352,7 @@ BEGIN
     DELETE FROM dbo.WN_HIK_PendingOps WHERE id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOp_Fail]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOp_Fail]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15731,7 +17365,7 @@ BEGIN
     UPDATE dbo.WN_HIK_PendingOps SET attempts = attempts + 1, last_error = @Error WHERE id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOps_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_PendingOps_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15745,7 +17379,7 @@ BEGIN
     FROM dbo.WN_HIK_PendingOps WITH (NOLOCK) ORDER BY id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Ref_HasAttendees]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Ref_HasAttendees]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15758,7 +17392,7 @@ BEGIN
     SELECT TOP 1 id FROM dbo.WN_HIK_Employees WITH (NOLOCK) WHERE booking_ref = @BookingRef;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_UserMeta_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_UserMeta_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15771,7 +17405,7 @@ BEGIN
     SELECT employee_no, name, cnic, tag_id FROM dbo.WN_HIK_Users WITH (NOLOCK) WHERE cnic IS NOT NULL OR tag_id IS NOT NULL;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Users_Rebuild]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Users_Rebuild]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15793,7 +17427,7 @@ BEGIN
     COMMIT;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Visitors_Retarget]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Sync_Visitors_Retarget]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15808,7 +17442,56 @@ BEGIN
     WHERE Booking_ref = @FromRef;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_HIK_Visitor_Create]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Tags_GetActive]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 4. dbo.WN_HIK_Tags_GetActive
+CREATE   PROCEDURE [dbo].[WN_HIK_Tags_GetActive]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT Id, Name 
+    FROM dbo.WN_HIK_Tags WITH (NOLOCK) 
+    WHERE Status = 1 
+    ORDER BY Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Tags_Upsert]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 5. dbo.WN_HIK_Tags_Upsert
+CREATE   PROCEDURE [dbo].[WN_HIK_Tags_Upsert]
+    @Name NVARCHAR(100)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    DECLARE @TrimmedName NVARCHAR(100) = LTRIM(RTRIM(@Name));
+    DECLARE @Id INT = (SELECT Id FROM dbo.WN_HIK_Tags WHERE Name = @TrimmedName);
+
+    IF @Id IS NULL
+    BEGIN
+        INSERT INTO dbo.WN_HIK_Tags (Name, Status) VALUES (@TrimmedName, 1);
+        SET @Id = SCOPE_IDENTITY();
+    END
+    ELSE
+    BEGIN
+        UPDATE dbo.WN_HIK_Tags SET Status = 1 WHERE Id = @Id;
+    END
+
+    SELECT @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_HIK_Visitor_Create]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15824,7 +17507,7 @@ BEGIN
   SELECT SCOPE_IDENTITY() AS id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_InsertInvoiceLine]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_InsertInvoiceLine]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15862,7 +17545,7 @@ BEGIN
     );
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_GetPending]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_GetPending]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15883,7 +17566,7 @@ BEGIN
     ORDER BY CreatedOn ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15916,7 +17599,7 @@ BEGIN
     SELECT SCOPE_IDENTITY() AS Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_IntegrationLog_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15935,11 +17618,11 @@ BEGIN
         ResponseBody  = ISNULL(@ResponseBody, ResponseBody),
         PaidAmount    = ISNULL(@PaidAmount,   PaidAmount),
         ProcessedById = @ProcessedById,
-        ProcessedOn   = SYSUTCDATETIME()
+        ProcessedOn   = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_ApplyWhtToLines]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoice_ApplyWhtToLines]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15966,7 +17649,7 @@ BEGIN
     RETURN 0;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_CheckExistingBillingPeriod]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoice_CheckExistingBillingPeriod]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -15995,7 +17678,7 @@ BEGIN
         SELECT 0 AS AlreadyExists;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_CreateRecurring]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoice_CreateRecurring]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -16201,7 +17884,7 @@ BEGIN
     END CATCH;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoice_CreateRecurring_Test]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoice_CreateRecurring_Test]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -16400,15 +18083,102 @@ BEGIN
     END CATCH;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_ApproveSingle]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_InvoiceDeliveryQueue_ClaimPending]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 12. NEW PROC: dbo.WN_Invoices_ApproveSingle
--- Exactly one conditional UPDATE ... WHERE Id = @InvoiceId AND ApprovalStatus = 'PendingApproval' AND ViewedAt IS NOT NULL AND ViewedBy = @UserId
--- ==============================================================================
+-- 6. dbo.WN_InvoiceDeliveryQueue_ClaimPending
+CREATE   PROCEDURE [dbo].[WN_InvoiceDeliveryQueue_ClaimPending]
+    @Top INT = 20,
+    @LockMinutes INT = 10
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Claimed TABLE (Id INT, InvoiceId INT, BookingId INT NULL, TargetEmail NVARCHAR(320) NULL, Attempts INT);
+
+    UPDATE TOP (@Top) q
+       SET NextRetryAt = DATEADD(minute, @LockMinutes, SYSUTCDATETIME())
+    OUTPUT inserted.Id, inserted.InvoiceId, inserted.BookingId, inserted.TargetEmail, inserted.Attempts INTO @Claimed
+      FROM dbo.WN_InvoiceDeliveryQueue q WITH (ROWLOCK, READPAST, UPDLOCK)
+      INNER JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = q.InvoiceId
+     WHERE q.Status = 'Pending'
+       AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')
+       AND (q.NextRetryAt IS NULL OR q.NextRetryAt <= SYSUTCDATETIME());
+
+    SELECT Id, InvoiceId, BookingId, TargetEmail, Attempts FROM @Claimed;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_InvoiceDeliveryQueue_MarkHeld]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 8. dbo.WN_InvoiceDeliveryQueue_MarkHeld
+CREATE   PROCEDURE [dbo].[WN_InvoiceDeliveryQueue_MarkHeld]
+    @Id INT,
+    @LastError NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_InvoiceDeliveryQueue
+    SET Status = 'HeldInPendingEmails', 
+        NextRetryAt = NULL, 
+        LastAttemptAt = SYSUTCDATETIME(), 
+        LastError = @LastError
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_InvoiceDeliveryQueue_MarkSent]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 7. dbo.WN_InvoiceDeliveryQueue_MarkSent
+CREATE   PROCEDURE [dbo].[WN_InvoiceDeliveryQueue_MarkSent]
+    @Id INT,
+    @Attempts INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_InvoiceDeliveryQueue 
+    SET Status = 'Sent', 
+        Attempts = @Attempts, 
+        LastAttemptAt = SYSUTCDATETIME(), 
+        NextRetryAt = NULL, 
+        LastError = NULL 
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_InvoiceDeliveryQueue_RecordFailure]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 9. dbo.WN_InvoiceDeliveryQueue_RecordFailure
+CREATE   PROCEDURE [dbo].[WN_InvoiceDeliveryQueue_RecordFailure]
+    @Id INT,
+    @Attempts INT,
+    @NextStatus NVARCHAR(50),
+    @NextMinutes INT,
+    @LastError NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_InvoiceDeliveryQueue 
+    SET Attempts = @Attempts, 
+        LastAttemptAt = SYSUTCDATETIME(), 
+        NextRetryAt = CASE WHEN @NextStatus = 'Pending' THEN DATEADD(minute, @NextMinutes, SYSUTCDATETIME()) ELSE NULL END, 
+        Status = @NextStatus, 
+        LastError = @LastError 
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_ApproveSingle]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE   PROCEDURE [dbo].[WN_Invoices_ApproveSingle]
     @InvoiceId INT,
     @UserId    INT
@@ -16417,9 +18187,9 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Invoices
        SET ApprovalStatus = 'Approved',
-           ApprovedAt     = SYSUTCDATETIME(),
+           ApprovedAt     = SYSDATETIME(),
            ApprovedBy     = @UserId,
-           UpdatedOn      = SYSUTCDATETIME()
+           UpdatedOn      = SYSDATETIME()
      WHERE Id = @InvoiceId
        AND ApprovalStatus = 'PendingApproval'
        AND ViewedAt IS NOT NULL
@@ -16428,15 +18198,49 @@ BEGIN
     SELECT @@ROWCOUNT AS RowsAffected;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_DeleteUnapproved]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_CancelById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 2. CREATE OR ALTER PROCEDURE dbo.WN_Invoices_DeleteUnapproved
--- Deletes / rejects an unapproved invoice (PendingApproval)
--- ==============================================================================
+-- 3. dbo.WN_Invoices_CancelById
+CREATE   PROCEDURE [dbo].[WN_Invoices_CancelById]
+    @Id INT,
+    @UpdatedBy INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_Invoices 
+    SET StatusId = 40, 
+        UpdatedOn = SYSUTCDATETIME()
+    WHERE Id = @Id;
+    SELECT @@ROWCOUNT;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_CancelByPublicId]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 4. dbo.WN_Invoices_CancelByPublicId
+CREATE   PROCEDURE [dbo].[WN_Invoices_CancelByPublicId]
+    @PublicId UNIQUEIDENTIFIER,
+    @UpdatedBy INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_Invoices 
+    SET StatusId = 40, 
+        UpdatedOn = SYSUTCDATETIME() 
+    WHERE PublicId = @PublicId;
+    SELECT @@ROWCOUNT;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_DeleteUnapproved]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE   PROCEDURE [dbo].[WN_Invoices_DeleteUnapproved]
     @InvoiceId INT,
     @UserId    INT = NULL
@@ -16480,7 +18284,7 @@ BEGIN
         UPDATE dbo.WN_Invoices
            SET StatusId       = 40,
                ApprovalStatus = 'Rejected',
-               UpdatedOn      = SYSUTCDATETIME()
+               UpdatedOn      = SYSDATETIME()
          WHERE Id = @InvoiceId
            AND ApprovalStatus = 'PendingApproval';
 
@@ -16489,7 +18293,7 @@ BEGIN
         BEGIN
             UPDATE dbo.WN_InvoiceDeliveryQueue
                SET Status        = 'Cancelled',
-                   LastAttemptAt = SYSUTCDATETIME()
+                   LastAttemptAt = SYSDATETIME()
              WHERE InvoiceId = @InvoiceId
                AND Status IN ('Pending', 'Failed');
         END;
@@ -16505,14 +18309,74 @@ BEGIN
     END CATCH;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetApprovalQueue]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_DirectApprove]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+-- 9. dbo.WN_Invoices_DirectApprove
+CREATE   PROCEDURE [dbo].[WN_Invoices_DirectApprove]
+    @Id INT,
+    @UserId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_Invoices 
+    SET ApprovalStatus = 'Approved', 
+        ApprovedAt = SYSUTCDATETIME(), 
+        ApprovedBy = @UserId,
+        UpdatedOn = SYSUTCDATETIME()
+    WHERE Id = @Id;
+    SELECT @@ROWCOUNT;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_FindExistingPeriodInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 8. dbo.WN_Invoices_FindExistingPeriodInvoice
+CREATE   PROCEDURE [dbo].[WN_Invoices_FindExistingPeriodInvoice]
+    @BookingId INT,
+    @BillingPeriodStart DATETIME,
+    @BillingPeriodEnd DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id, InvoiceNumber, GrandTotal, ApprovalStatus
+    FROM dbo.WN_Invoices WITH (NOLOCK)
+    WHERE BookingId = @BookingId 
+      AND BillingPeriodStart = @BillingPeriodStart 
+      AND BillingPeriodEnd = @BillingPeriodEnd
+      AND StatusId NOT IN (5, 40)
+    ORDER BY Id DESC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetApprovalFailureDetails]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 6. dbo.WN_Invoices_GetApprovalFailureDetails
+CREATE   PROCEDURE [dbo].[WN_Invoices_GetApprovalFailureDetails]
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT ApprovalStatus, ViewedAt, ViewedBy 
+    FROM dbo.WN_Invoices WITH (NOLOCK) 
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetApprovalQueue]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
 -- ==============================================================================
--- 7. dbo.WN_Invoices_GetApprovalQueue (ALTERED)
--- Ensures CustomerEmail is sourced ONLY from dbo.WN_Customers (c.Email).
+-- 8. ALTER dbo.WN_Invoices_GetApprovalQueue
+-- Uses COALESCE(i.LocationId, ci.LocationId, s.LocationId, u.LocationId)
 -- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_Invoices_GetApprovalQueue]
     @LocationId INT = NULL,
@@ -16546,7 +18410,7 @@ BEGIN
         i.ApprovedAt,
         i.ApprovedBy,
         i.CreatedOn,
-        COALESCE(ci.LocationId, s.LocationId, u.LocationId) AS LocationId,
+        COALESCE(i.LocationId, ci.LocationId, s.LocationId, u.LocationId) AS LocationId,
         loc.Name                                  AS LocationName,
         ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.FirstName, '') + ' ' + ISNULL(c.LastName, ''))), ''), ISNULL(u.Name, 'Customer')) AS CustomerName,
         c.Email                                   AS CustomerEmail,
@@ -16567,20 +18431,61 @@ BEGIN
     ) c
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
     LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = COALESCE(i.LocationId, ci.LocationId, s.LocationId, u.LocationId)
     LEFT JOIN dbo.WN_Users vu WITH (NOLOCK) ON vu.Id = i.ViewedBy
     WHERE i.ApprovalStatus = 'PendingApproval'
       AND i.StatusId <> 40
-      AND (@LocationId IS NULL OR ci.LocationId = @LocationId OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
+      AND (@LocationId IS NULL OR i.LocationId = @LocationId OR ci.LocationId = @LocationId OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
     ORDER BY i.DueOn ASC, i.Id ASC;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetApprovalStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_Invoices_GetList]
+-- 1. dbo.WN_Invoices_GetApprovalStatus
+CREATE   PROCEDURE [dbo].[WN_Invoices_GetApprovalStatus]
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT ApprovalStatus 
+    FROM dbo.WN_Invoices WITH (NOLOCK) 
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetBalanceAndType]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 17. dbo.WN_Invoices_GetBalanceAndType
+CREATE   PROCEDURE [dbo].[WN_Invoices_GetBalanceAndType]
+    @PublicId UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT TOP 1 ISNULL(i.InvoiceTypeId, 1) AS InvoiceTypeId,
+           CAST(CASE WHEN x.Payable - ROUND(ISNULL(i.PaidTotal, 0), 2) > 0 THEN x.Payable - ROUND(ISNULL(i.PaidTotal, 0), 2) ELSE 0 END
+                AS DECIMAL(18,2)) AS Balance
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.WHTAmount, 0) > 0 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(i.WHTAmount, 2)
+                                   WHEN i.InvoiceTypeId = 6 THEN ROUND(ISNULL(i.GrandTotal, 0), 2) - ROUND(ROUND(ISNULL(i.GrandTotal, 0), 2) * ISNULL(i.WHTRate, 0) / 100.0, 2)
+                                   ELSE ROUND(ISNULL(i.GrandTotal, 0), 2) END AS DECIMAL(18,2)) AS Payable) x
+     WHERE i.PublicId = @PublicId AND ISNULL(i.StatusId, 0) <> 40;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Invoices_GetList]
     @Page   INT           = 1,
     @Limit  INT           = 20,
     @Search NVARCHAR(255) = NULL
@@ -16588,17 +18493,36 @@ AS
 BEGIN
     SET NOCOUNT ON;
     DECLARE @Offset INT = (@Page - 1) * @Limit;
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+
     SELECT
         i.Id, i.PublicId, i.InvoiceNumber,
         i.UserId, u.Name AS UserName, u.Email AS UserEmail,
-        i.BookingId, i.MembershipId,
+        i.BookingId,
+        COALESCE(i.LocationId, s.LocationId) AS LocationId,
+        i.MembershipId,
         i.IssuedOn, i.DueOn,
         i.SubTotal, i.DiscountTotal, i.TaxTotal,
-        i.GrandTotal, i.PaidTotal, i.BalanceDue,
-        i.CurrencyCode, i.StatusId, i.Notes, i.CreatedOn,
+        i.GrandTotal, i.PaidTotal,
+        CASE
+            WHEN i.StatusId IN (5, 40) THEN 0.0000
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 THEN 0.0000
+            ELSE ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0)
+        END AS BalanceDue,
+        i.CurrencyCode,
+        CASE
+            WHEN i.StatusId IN (5, 40) THEN i.StatusId
+            WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (2, 62)) THEN 62
+            WHEN ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN (3, 12) THEN 12
+            WHEN i.StatusId IN (4, 63) OR (i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today) THEN 63
+            ELSE ISNULL(i.StatusId, 61)
+        END AS StatusId,
+        i.Notes, i.CreatedOn,
         COUNT(*) OVER () AS TotalCount
     FROM dbo.WN_Invoices i WITH (NOLOCK)
-    JOIN dbo.WN_Users    u WITH (NOLOCK) ON u.Id = i.UserId
+    JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
     WHERE ISNULL(i.StatusId, 0) <> 40
       AND (@Search IS NULL OR @Search = ''
            OR u.Name          LIKE '%' + @Search + '%'
@@ -16607,12 +18531,44 @@ BEGIN
     ORDER BY i.CreatedOn DESC
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetPendingApprovalLocationSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+-- 2. dbo.WN_Invoices_GetPendingApprovalLocationSummary
+CREATE   PROCEDURE [dbo].[WN_Invoices_GetPendingApprovalLocationSummary]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT 
+        ISNULL(s.LocationId, u.LocationId) AS LocationId,
+        ISNULL(loc.Name, 'Location') AS LocationName,
+        COUNT(i.Id) AS PendingCount,
+        SUM(ISNULL(i.GrandTotal, 0)) AS PendingTotal
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = ISNULL(s.LocationId, u.LocationId)
+    WHERE i.ApprovalStatus = 'PendingApproval'
+      AND i.StatusId <> 40
+      AND ISNULL(s.LocationId, u.LocationId) IS NOT NULL
+    GROUP BY ISNULL(s.LocationId, u.LocationId), loc.Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_GetSummary]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- ==============================================================================
+-- 11. ALTER dbo.WN_Invoices_GetSummary
+-- Includes LocationId resolved from i.LocationId / Booking
+-- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_Invoices_GetSummary]
     @Id INT
 AS
@@ -16621,7 +18577,9 @@ BEGIN
     SELECT
         i.Id, i.PublicId, i.InvoiceNumber,
         i.UserId, u.Name AS UserName, u.Email AS UserEmail,
-        i.BookingId, i.MembershipId,
+        i.BookingId,
+        COALESCE(i.LocationId, s.LocationId) AS LocationId,
+        i.MembershipId,
         i.IssuedOn, i.DueOn,
         i.SubTotal, i.DiscountTotal, i.TaxTotal,
         i.GrandTotal, i.PaidTotal, i.BalanceDue,
@@ -16635,11 +18593,14 @@ BEGIN
          ORDER BY il.SortOrder
          FOR JSON PATH) AS InvoiceLines
     FROM dbo.WN_Invoices i WITH (NOLOCK)
-    JOIN dbo.WN_Users    u WITH (NOLOCK) ON u.Id = i.UserId
+    JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
     WHERE i.Id = @Id;
-END
+END;
+
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -16660,7 +18621,7 @@ CREATE   PROCEDURE [dbo].[WN_Invoices_Insert]
     @GrandTotal             DECIMAL(18, 4)      = NULL,
     @PaidTotal              DECIMAL(18, 4)      = 0.0000,
     @CurrencyCode           NVARCHAR(10)        = 'PKR',
-    @StatusId               TINYINT             = NULL, -- NULL = OrderStatus ’Un Paid’ (looked up below)
+    @StatusId               TINYINT             = NULL, -- NULL = OrderStatus â€™Un Paidâ€™ (looked up below)
     @Notes                  NVARCHAR(MAX)       = NULL,
     @InvoiceTypeId          INT                 = 1, -- 1: Standard, 2: Advance, 3: Recurring, 4: Custom, 5: Surcharge, 6: WHT (set here for WHT bookings)
     @AdvanceRentMonths      INT                 = NULL,
@@ -16791,7 +18752,7 @@ BEGIN
             FROM dbo.WN_SecurityDeposits WITH (NOLOCK)
             WHERE BookingId = @BookingId;
         END
-        -- The booking’s security deposit belongs on its FIRST invoice only. Later invoices (next / recurring / custom /
+        -- The bookingâ€™s security deposit belongs on its FIRST invoice only. Later invoices (next / recurring / custom /
         -- surcharge) used to get the full deposit forced on too, so they failed the breakdown check or booked it again.
         IF NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE BookingId = @BookingId AND InvoiceTypeId <> 7 AND IsCustom = 0) -- CI_03: a custom invoice is never the first invoice
         BEGIN
@@ -16849,7 +18810,7 @@ BEGIN
         JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
         WHERE b.Id = @BookingId;
     END
-    -- Fallback: lookup via User’s latest booking if not provided
+    -- Fallback: lookup via Userâ€™s latest booking if not provided
     IF @LocationId IS NULL AND @UserId IS NOT NULL
     BEGIN
         SELECT TOP 1 @LocationId = s.LocationId
@@ -16999,7 +18960,7 @@ BEGIN
         LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
         WHERE b.Id = @BookingId;
     END
-    -- (b) Fallback from User’s latest booking if not provided
+    -- (b) Fallback from Userâ€™s latest booking if not provided
     IF @ResolvedSpaceId IS NULL AND @UserId IS NOT NULL
     BEGIN
         SELECT TOP 1 
@@ -17111,7 +19072,7 @@ BEGIN
     SET @SalesTaxId_Loc         = COALESCE(@StTaxId,  @SpTaxId,  NULLIF(@SalesTaxId, 0),          @MapTaxId);
     SET @ServicesIncomeId_Loc   = COALESCE(@StServId, @SpServId, NULLIF(@ServicesIncomeId, 0),    @MapServId);
     SET @WhtAccountId_Loc       = COALESCE(@WhtRateAccountId, @MapWhtId);
-    -- WHT invoices (InvoiceTypeId 6): the five accounts come ONLY from the booked space’s type (WN_SpaceTypes),
+    -- WHT invoices (InvoiceTypeId 6): the five accounts come ONLY from the booked spaceâ€™s type (WN_SpaceTypes),
     -- each falling back to the booked space (WN_Spaces) when NULL there. No parameter / WN_ChargeTypeAccountMapping
     -- fallback, and no WHT account: WN_WHTaxRate.WHAccountId is not posted.
     IF @IsWhtInvoice = 1
@@ -17201,7 +19162,8 @@ BEGIN
             TaxOnServiceCharges,
             WHTRate,
             WHTAmount,
-            VoucherId
+            VoucherId,
+            CustomerCode
         )
         VALUES (
             @PublicId,
@@ -17219,7 +19181,7 @@ BEGIN
             @CurrencyCode,
             @StatusId,
             @Notes,
-            SYSUTCDATETIME(),
+            SYSDATETIME(),
             @CreatedById,
             @InvoiceTypeId,
             @AdvanceRentMonths,
@@ -17239,7 +19201,8 @@ BEGIN
             @TaxOnServiceCharges,
             ISNULL(@WHTRate, 0.0000),
             ISNULL(@WHTAmount, 0.0000),
-            @VoucherId
+            @VoucherId,
+            NULLIF(LTRIM(RTRIM(@CustomerCode)), '')
         );
         SET @InvoiceId = SCOPE_IDENTITY();
         SET @GeneratedInvoiceNumber = @InvoiceNumber;
@@ -17547,15 +19510,11 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Invoices_RecordViewed]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_RecordViewed]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 11. NEW PROC: dbo.WN_Invoices_RecordViewed
--- Sets ViewedAt and ViewedBy only if ApprovalStatus = 'PendingApproval'
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_Invoices_RecordViewed]
     @InvoiceId INT,
     @UserId    INT
@@ -17563,7 +19522,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Invoices
-       SET ViewedAt = SYSUTCDATETIME(),
+       SET ViewedAt = SYSDATETIME(),
            ViewedBy = @UserId
      WHERE Id = @InvoiceId
        AND ApprovalStatus = 'PendingApproval';
@@ -17571,7 +19530,207 @@ BEGIN
     SELECT @@ROWCOUNT AS RowsAffected;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_KYCDocumentTypes_GetActive]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_ResolveByGuid]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 2. dbo.WN_Invoices_ResolveByGuid
+CREATE   PROCEDURE [dbo].[WN_Invoices_ResolveByGuid]
+    @Guid UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id FROM (
+        SELECT st.CustomerInvoiceId AS Id, 0 AS Pref 
+        FROM dbo.WN_CustomerSTInvoice st WITH (NOLOCK) 
+        WHERE st.PublicId = @Guid
+        UNION ALL
+        SELECT i.Id, 1 
+        FROM dbo.WN_Invoices i WITH (NOLOCK) 
+        WHERE i.PublicId = @Guid
+    ) x
+    ORDER BY Pref;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Invoices_UpdateIssueDate]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Invoices_UpdateIssueDate]
+    @InvoiceId         INT,
+    @NewIssueDate      DATE,
+    @Reason            NVARCHAR(500),
+    @UpdatedBy         INT,
+    @UpdatedByEmail    NVARCHAR(256) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    -- 1. Input validations
+    IF @InvoiceId IS NULL OR @InvoiceId <= 0
+    BEGIN
+        RAISERROR('Invalid invoice ID.', 16, 1);
+        RETURN -1;
+    END
+
+    IF @NewIssueDate IS NULL
+    BEGIN
+        RAISERROR('New issue date is required.', 16, 1);
+        RETURN -1;
+    END
+
+    SET @Reason = LTRIM(RTRIM(@Reason));
+    IF @Reason IS NULL OR @Reason = ''
+    BEGIN
+        RAISERROR('Reason for updating issue date is required.', 16, 1);
+        RETURN -1;
+    END
+
+    IF LEN(@Reason) < 5
+    BEGIN
+        RAISERROR('Reason must be at least 5 characters long.', 16, 1);
+        RETURN -1;
+    END
+
+    -- 2. Fetch invoice under lock
+    DECLARE @OldIssuedOn DATE;
+    DECLARE @DueOn DATE;
+    DECLARE @StatusId TINYINT;
+    DECLARE @InvoiceNumber NVARCHAR(50);
+    DECLARE @PublicId UNIQUEIDENTIFIER;
+    DECLARE @VoucherId INT;
+
+    SELECT 
+        @OldIssuedOn   = IssuedOn,
+        @DueOn         = DueOn,
+        @StatusId      = StatusId,
+        @InvoiceNumber = InvoiceNumber,
+        @PublicId      = PublicId,
+        @VoucherId     = VoucherId
+    FROM dbo.WN_Invoices WITH (UPDLOCK, HOLDLOCK)
+    WHERE Id = @InvoiceId;
+
+    IF @OldIssuedOn IS NULL
+    BEGIN
+        RAISERROR('Invoice not found.', 16, 1);
+        RETURN -1;
+    END
+
+    -- 3. Business rule validations
+    IF @StatusId IN (40, 86)
+    BEGIN
+        RAISERROR('Cancelled or deleted invoices cannot be edited.', 16, 1);
+        RETURN -1;
+    END
+
+    IF @NewIssueDate = @OldIssuedOn
+    BEGIN
+        RAISERROR('The new issue date is the same as the current issue date.', 16, 1);
+        RETURN -1;
+    END
+
+    IF @NewIssueDate > @DueOn
+    BEGIN
+        RAISERROR('The new issue date cannot be after the due date.', 16, 1);
+        RETURN -1;
+    END
+
+    -- Check active fee receipts: cannot backdate/postdate issue after receipt payment date
+    IF EXISTS (
+        SELECT 1 
+        FROM dbo.WN_FeeReceipts fr WITH (NOLOCK) 
+        WHERE fr.InvoiceIdGUID = @PublicId 
+          AND ISNULL(fr.Status, 1) = 1 
+          AND fr.ReceiptDate < @NewIssueDate
+    )
+    BEGIN
+        RAISERROR('The new issue date cannot be after an existing fee receipt payment date on this invoice.', 16, 1);
+        RETURN -1;
+    END
+
+    -- 4. Apply updates within a single transaction
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Set session context for audit triggers
+        EXEC sp_set_session_context N'AppUserId', @UpdatedBy;
+        IF @UpdatedByEmail IS NOT NULL
+            EXEC sp_set_session_context N'AppUserEmail', @UpdatedByEmail;
+        EXEC sp_set_session_context N'SourceApp', N'WorkNest.API';
+
+        -- A. Update invoice
+        UPDATE dbo.WN_Invoices
+        SET IssuedOn  = @NewIssueDate,
+            UpdatedOn = SYSDATETIME()
+        WHERE Id = @InvoiceId;
+
+        -- B. Update associated Voucher(s)
+        UPDATE dbo.Vouchers
+        SET TransDate   = CAST(@NewIssueDate AS SMALLDATETIME),
+            UpdatedById = @UpdatedBy,
+            UpdatedTime = SYSDATETIME()
+        WHERE (Id = @VoucherId AND @VoucherId IS NOT NULL)
+           OR (RefNo = @InvoiceNumber AND RefId = @InvoiceId AND TypeId IN (1, 2));
+
+        -- C. Update associated CustomerLedger debit row(s)
+        UPDATE dbo.CustomerLedger
+        SET LedgerDate  = CAST(@NewIssueDate AS SMALLDATETIME),
+            UpdatedById = @UpdatedBy,
+            UpdatedTime = SYSDATETIME()
+        WHERE RefNo = @InvoiceNumber 
+          AND RefId = @InvoiceId 
+          AND ISNULL(Debit, 0) > 0;
+
+        -- D. Insert explicit audit log entry capturing the reason (symmetrical keys for clean UI diff)
+        INSERT INTO dbo.WN_AuditLog (
+            EntityName, RecordId, Operation, OldValues, NewValues,
+            ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+        )
+        VALUES (
+            N'WN_Invoices',
+            CAST(@InvoiceId AS NVARCHAR(64)),
+            'U',
+            (SELECT @OldIssuedOn AS IssuedOn, CAST('' AS NVARCHAR(500)) AS Reason FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+            (SELECT @NewIssueDate AS IssuedOn, @Reason AS Reason FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+            NULL, NULL, NULL,
+            @UpdatedBy,
+            @UpdatedByEmail,
+            SYSDATETIME(),
+            N'WorkNest.API'
+        );
+
+        COMMIT TRANSACTION;
+
+        -- Return updated invoice summary
+        SELECT 
+            Id AS InvoiceId,
+            InvoiceNumber,
+            IssuedOn,
+            DueOn,
+            StatusId,
+            UpdatedOn
+        FROM dbo.WN_Invoices
+        WHERE Id = @InvoiceId;
+
+        RETURN 0;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        DECLARE @ErrMsg NVARCHAR(4000) = ERROR_MESSAGE();
+        DECLARE @ErrSeverity INT = ERROR_SEVERITY();
+        DECLARE @ErrState INT = ERROR_STATE();
+        RAISERROR(@ErrMsg, @ErrSeverity, @ErrState);
+        RETURN -1;
+    END CATCH
+END
+
+GO
+/****** Object:  StoredProcedure [dbo].[WN_KYCDocumentTypes_GetActive]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17608,7 +19767,7 @@ BEGIN
     ORDER BY SortOrder ASC, Id ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_LeaseTemplates_GetActiveByName]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_LeaseTemplates_GetActiveByName]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17635,13 +19794,11 @@ BEGIN
     ORDER BY t.Id DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_LeaseTemplates_Publish]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_LeaseTemplates_Publish]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 6. Stored Procedure: WN_LeaseTemplates_Publish
 CREATE   PROCEDURE [dbo].[WN_LeaseTemplates_Publish]
     @Name NVARCHAR(100),
     @ContentHtml NVARCHAR(MAX),
@@ -17676,7 +19833,7 @@ BEGIN
             @Name,
             @ContentHtml,
             1,
-            SYSUTCDATETIME(),
+            SYSDATETIME(),
             @CreatedBy
         );
 
@@ -17689,7 +19846,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_ListStatusOptions_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_ListStatusOptions_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17747,7 +19904,7 @@ BEGIN
         SELECT CAST(NULL AS NVARCHAR(50)) AS Value, CAST(NULL AS NVARCHAR(100)) AS Label WHERE 1 = 0;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Locations_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17760,7 +19917,7 @@ BEGIN
     UPDATE dbo.WN_Locations SET IsActive = 0 WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_GetActive]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Locations_GetActive]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17785,7 +19942,7 @@ BEGIN
     ORDER BY l.Name ASC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_GetAll]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Locations_GetAll]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17808,7 +19965,7 @@ BEGIN
     ORDER BY l.Name ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Locations_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17847,7 +20004,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Locations_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17870,7 +20027,7 @@ BEGIN
         OpeningTime, ClosingTime, Latitude, Longitude, IsActive, CreatedOn, CreatedById
     ) VALUES (
         NEWID(), @BranchId, @Name, @Address, @CityId,
-        @OpeningTime, @ClosingTime, @Latitude, @Longitude, 1, GETUTCDATE(), @CreatedById
+        @OpeningTime, @ClosingTime, @Latitude, @Longitude, 1, GETDATE(), @CreatedById
     );
 
     SELECT l.Id, l.IdGUID AS PublicId, l.IdGUID, l.Name, l.Address, l.CityId, l.OpeningTime, l.ClosingTime, l.IsActive, l.CreatedOn
@@ -17878,7 +20035,7 @@ BEGIN
     WHERE l.Id = SCOPE_IDENTITY();
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Locations_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Locations_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -17906,7 +20063,41 @@ BEGIN
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_GetPaged]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Lock_AcquireAppLock]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 4. dbo.WN_Lock_AcquireAppLock
+CREATE   PROCEDURE [dbo].[WN_Lock_AcquireAppLock]
+    @Resource NVARCHAR(255),
+    @LockMode NVARCHAR(32) = 'Exclusive',
+    @LockOwner NVARCHAR(32) = 'Session',
+    @LockTimeout INT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @r INT;
+    EXEC @r = sp_getapplock @Resource = @Resource, @LockMode = @LockMode, @LockOwner = @LockOwner, @LockTimeout = @LockTimeout;
+    SELECT @r;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Lock_ReleaseAppLock]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 5. dbo.WN_Lock_ReleaseAppLock
+CREATE   PROCEDURE [dbo].[WN_Lock_ReleaseAppLock]
+    @Resource NVARCHAR(255),
+    @LockOwner NVARCHAR(32) = 'Session'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    EXEC sp_releaseapplock @Resource = @Resource, @LockOwner = @LockOwner;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_GetPaged]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18036,7 +20227,7 @@ BEGIN
     END
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_GetStats]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_GetStats]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18062,12 +20253,11 @@ BEGIN
       AND EventAt < @TomorrowUtcStart;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_LoginHistory_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- 3. Procedure: Record a Login/Logout/Failed event
 CREATE   PROCEDURE [dbo].[WN_LoginHistory_Insert]
     @UserId INT = NULL,
     @Email NVARCHAR(256) = NULL,
@@ -18095,13 +20285,13 @@ BEGIN
         @FailureReason,
         @IpAddress,
         @UserAgent,
-        SYSUTCDATETIME()
+        SYSDATETIME()
     );
 
     SELECT SCOPE_IDENTITY() AS LoginId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_BookFree]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_BookFree]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18187,7 +20377,7 @@ BEGIN
          @DurationHours = @DurationHours, @Notes = @Notes, @CreatedById = @CreatedById;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_CancelFree]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_CancelFree]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18236,7 +20426,7 @@ BEGIN
            @Error                                                  AS ErrorMessage;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetEntitlement]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetEntitlement]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18306,7 +20496,7 @@ BEGIN
        AND e.MonthStartDate = @MonthStart;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetMyFree]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetMyFree]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18348,7 +20538,7 @@ BEGIN
      ORDER BY b.StartOn DESC, b.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetRooms]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MeetingRooms_GetRooms]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18413,7 +20603,7 @@ BEGIN
      ORDER BY b.SpaceId, b.StartOn;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18426,7 +20616,7 @@ BEGIN
     UPDATE dbo.WN_MembershipPlanFeatures SET IsActive = 0 WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_GetByPlan]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_GetByPlan]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18446,7 +20636,7 @@ BEGIN
     ORDER BY SortOrder;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18464,7 +20654,7 @@ BEGIN
     SELECT Id, PublicId FROM dbo.WN_MembershipPlanFeatures WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlanFeatures_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18484,7 +20674,7 @@ BEGIN
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18494,11 +20684,11 @@ CREATE   PROCEDURE [dbo].[WN_MembershipPlans_Delete]
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_MembershipPlans SET IsActive = 0, UpdatedOn = SYSUTCDATETIME()
+    UPDATE dbo.WN_MembershipPlans SET IsActive = 0, UpdatedOn = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetAll]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetAll]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18521,7 +20711,7 @@ BEGIN
     ORDER BY mp.Price ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18545,7 +20735,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_GetSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18569,7 +20759,7 @@ BEGIN
     WHERE mp.Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18594,7 +20784,7 @@ BEGIN
     SELECT Id, PublicId FROM dbo.WN_MembershipPlans WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MembershipPlans_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18617,11 +20807,11 @@ BEGIN
         Price           = ISNULL(@Price,           Price),
         IncludesHours   = ISNULL(@IncludesHours,   IncludesHours),
         CurrencyCode    = ISNULL(@CurrencyCode,    CurrencyCode),
-        UpdatedOn       = SYSUTCDATETIME()
+        UpdatedOn       = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Memberships_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18634,7 +20824,7 @@ BEGIN
     DECLARE @sql NVARCHAR(MAX);
     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Memberships') AND name = 'StatusId')
     BEGIN
-        SET @sql = N'UPDATE dbo.WN_Memberships SET StatusId = 3, UpdatedOn = SYSUTCDATETIME() WHERE Id = @Id;';
+        SET @sql = N'UPDATE dbo.WN_Memberships SET StatusId = 3, UpdatedOn = SYSDATETIME() WHERE Id = @Id;';
         EXEC sp_executesql @sql, N'@Id INT', @Id;
     END
     ELSE
@@ -18643,7 +20833,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetByPlanId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetByPlanId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18684,7 +20874,7 @@ BEGIN
     EXEC sp_executesql @sql, N'@PlanId INT', @PlanId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18752,7 +20942,7 @@ BEGIN
         @Search, @Offset, @Limit;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Memberships_GetSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18800,7 +20990,7 @@ BEGIN
     EXEC sp_executesql @sql, N'@Id INT', @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Memberships_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18839,7 +21029,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Memberships_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Memberships_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18854,7 +21044,7 @@ BEGIN
     DECLARE @sql NVARCHAR(MAX);
     IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WN_Memberships') AND name = 'StatusId')
     BEGIN
-        SET @sql = N'UPDATE dbo.WN_Memberships SET StatusId = @StatusId, UpdatedOn = SYSUTCDATETIME() WHERE Id = @Id;';
+        SET @sql = N'UPDATE dbo.WN_Memberships SET StatusId = @StatusId, UpdatedOn = SYSDATETIME() WHERE Id = @Id;';
         EXEC sp_executesql @sql, N'@StatusId TINYINT, @Id INT', @StatusId, @Id;
     END
     ELSE
@@ -18866,7 +21056,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MessageTemplates_Get]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MessageTemplates_Get]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18885,7 +21075,7 @@ BEGIN
      WHERE t.TemplateKey = LTRIM(RTRIM(@TemplateKey));
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_MessageTemplates_Save]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_MessageTemplates_Save]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -18904,11 +21094,11 @@ BEGIN
         THROW 50001, N'The template key and the wording are required.', 1;
     BEGIN TRANSACTION;
     UPDATE dbo.WN_MessageTemplates WITH (UPDLOCK, SERIALIZABLE)
-       SET Template = @Template, UpdatedById = @UpdatedById, UpdatedOn = SYSUTCDATETIME()
+       SET Template = @Template, UpdatedById = @UpdatedById, UpdatedOn = SYSDATETIME()
      WHERE TemplateKey = @TemplateKey;
     IF @@ROWCOUNT = 0
         INSERT INTO dbo.WN_MessageTemplates (TemplateKey, Template, UpdatedById, UpdatedOn)
-        VALUES (@TemplateKey, @Template, @UpdatedById, SYSUTCDATETIME());
+        VALUES (@TemplateKey, @Template, @UpdatedById, SYSDATETIME());
     COMMIT TRANSACTION;
     SELECT t.TemplateKey, t.Template, t.UpdatedById, t.UpdatedOn,
            COALESCE(NULLIF(LTRIM(RTRIM(u.Name)), N''), NULLIF(LTRIM(RTRIM(u.Email)), N'')) AS UpdatedByName
@@ -18917,7 +21107,246 @@ BEGIN
      WHERE t.TemplateKey = @TemplateKey;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_ClaimInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Claim]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Claim]
+    @LocationId     INT,
+    @LeaseSeconds   INT = 300,
+    @MinGapSeconds  INT = 30
+AS
+BEGIN
+    -- NET_ALERT_01: one API instance takes the location for this check. Claimed = 1 only when nobody holds a live lease
+    -- (ClaimedAt within @LeaseSeconds) and the last check ended at least @MinGapSeconds ago, so two instances ticking at
+    -- the same moment never both check it. DbNow = the database clock (UTC) the check works with.
+    SET NOCOUNT ON;
+    DECLARE @Now DATETIME2(0) = SYSUTCDATETIME();
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_NetworkAlertLocks WHERE LocationId = @LocationId)
+    BEGIN TRY
+        INSERT INTO dbo.WN_NetworkAlertLocks (LocationId) VALUES (@LocationId);
+    END TRY
+    BEGIN CATCH
+        IF ERROR_NUMBER() NOT IN (2601, 2627) THROW;
+    END CATCH;
+    UPDATE dbo.WN_NetworkAlertLocks
+       SET ClaimedAt = @Now
+     WHERE LocationId = @LocationId
+       AND (ClaimedAt IS NULL OR ClaimedAt < DATEADD(SECOND, -@LeaseSeconds, @Now))
+       AND (LastRunAt IS NULL OR LastRunAt <= DATEADD(SECOND, -@MinGapSeconds, @Now));
+    SELECT CAST(CASE WHEN @@ROWCOUNT > 0 THEN 1 ELSE 0 END AS BIT) AS Claimed, @Now AS DbNow;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_HikDevices_Get]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_HikDevices_Get]
+    @LocationId INT
+AS
+BEGIN
+    -- NET_ALERT_01: the location's access machines. Online is refreshed by HIK Sync (every 2 minutes for machines that
+    -- were online); Last_seen (server time) is the last time one answered.
+    SET NOCOUNT ON;
+    SELECT Id, Device_Name AS Name, Host, Online, Last_seen AS LastSeen
+      FROM dbo.WN_HIK_Devices WITH (NOLOCK)
+     WHERE LocationId = @LocationId
+     ORDER BY Device_Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Locations_GetActive]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Locations_GetActive]
+AS
+BEGIN
+    -- NET_ALERT_01: one row per active recipient of every location that has one (the service's work list).
+    SET NOCOUNT ON;
+    SELECT r.LocationId, ISNULL(l.Name, CONCAT(N'Location ', r.LocationId)) AS LocationName, r.Email
+      FROM dbo.WN_NetworkAlertRecipients r WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = r.LocationId
+     WHERE r.IsActive = 1
+     ORDER BY r.LocationId, r.Email;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Log_Add]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Log_Add]
+    @LocationId INT,
+    @Kind       NVARCHAR(20),
+    @Subject    NVARCHAR(300),
+    @Summary    NVARCHAR(1000),
+    @Recipients NVARCHAR(1000),
+    @Status     NVARCHAR(10),
+    @Error      NVARCHAR(500) = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: records one alert e-mail (Kind alert | reminder | recovery | test; Status Sent | Held | Failed).
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_NetworkAlertLog (LocationId, Kind, Subject, Summary, Recipients, Status, Error)
+    VALUES (@LocationId, LEFT(@Kind, 20), LEFT(@Subject, 300), LEFT(@Summary, 1000), LEFT(@Recipients, 1000), LEFT(@Status, 10), LEFT(@Error, 500));
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Log_Get]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Log_Get]
+    @Top INT = 50
+AS
+BEGIN
+    -- NET_ALERT_01: the newest @Top alert e-mails (SentAt is UTC).
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 50;
+    SELECT TOP (@Top) g.Id, g.LocationId, l.Name AS LocationName, g.Kind, g.Subject, g.Summary, g.Recipients, g.Status, g.Error, g.SentAt
+      FROM dbo.WN_NetworkAlertLog g WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = g.LocationId
+     ORDER BY g.Id DESC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Recipient_Add]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Recipient_Add]
+    @LocationId INT,
+    @Email      NVARCHAR(256),
+    @CreatedBy  NVARCHAR(256) = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: adds one recipient (active). 50011 = no such location; 50010 = already in the list.
+    SET NOCOUNT ON;
+    SET @Email = LOWER(LTRIM(RTRIM(@Email)));
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WHERE Id = @LocationId)
+        THROW 50011, N'Location not found.', 1;
+    IF EXISTS (SELECT 1 FROM dbo.WN_NetworkAlertRecipients WHERE LocationId = @LocationId AND Email = @Email)
+        THROW 50010, N'This e-mail is already in the list.', 1;
+    INSERT INTO dbo.WN_NetworkAlertRecipients (LocationId, Email, CreatedBy) VALUES (@LocationId, @Email, LEFT(@CreatedBy, 256));
+    SELECT r.Id, r.LocationId, l.Name AS LocationName, r.Email, r.IsActive, r.CreatedOn, r.CreatedBy
+      FROM dbo.WN_NetworkAlertRecipients r
+      LEFT JOIN dbo.WN_Locations l ON l.Id = r.LocationId
+     WHERE r.Id = SCOPE_IDENTITY();
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Recipient_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Recipient_Delete]
+    @Id INT
+AS
+BEGIN
+    -- NET_ALERT_01: removes one recipient. Returns the rows removed (0 = not found).
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_NetworkAlertRecipients WHERE Id = @Id;
+    SELECT @@ROWCOUNT AS Removed;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Recipient_Set]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Recipient_Set]
+    @Id       INT,
+    @IsActive BIT
+AS
+BEGIN
+    -- NET_ALERT_01: turns one recipient on / off. Returns the rows changed (0 = not found).
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_NetworkAlertRecipients SET IsActive = @IsActive WHERE Id = @Id;
+    SELECT @@ROWCOUNT AS Changed;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Recipients_Get]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Recipients_Get]
+    @LocationId INT = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: the alert recipients, per location (NULL = every location), with the location name.
+    SET NOCOUNT ON;
+    SELECT r.Id, r.LocationId, l.Name AS LocationName, r.Email, r.IsActive, r.CreatedOn, r.CreatedBy
+      FROM dbo.WN_NetworkAlertRecipients r WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = r.LocationId
+     WHERE @LocationId IS NULL OR r.LocationId = @LocationId
+     ORDER BY r.LocationId, r.Email;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_Release]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_Release]
+    @LocationId INT
+AS
+BEGIN
+    -- NET_ALERT_01: ends the check: the lease is free again, LastRunAt = now.
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_NetworkAlertLocks SET ClaimedAt = NULL, LastRunAt = SYSUTCDATETIME() WHERE LocationId = @LocationId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_State_Get]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_State_Get]
+    @LocationId INT
+AS
+BEGIN
+    -- NET_ALERT_01: the location's items that are down, or recovered without the "back online" e-mail yet (RecoveredAt NULL).
+    SET NOCOUNT ON;
+    SELECT Kind, ItemKey, LocationId, Name, Detail, DownSince, FirstAlertAt, LastReminderAt, RecoveredAt
+      FROM dbo.WN_NetworkAlertState WITH (NOLOCK)
+     WHERE LocationId = @LocationId AND RecoveredAt IS NULL
+     ORDER BY Kind, Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_NetworkAlert_State_Save]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_NetworkAlert_State_Save]
+    @Kind           NVARCHAR(10),
+    @ItemKey        NVARCHAR(200),
+    @LocationId     INT,
+    @Name           NVARCHAR(200),
+    @Detail         NVARCHAR(500) = NULL,
+    @DownSince      DATETIME2(0),
+    @FirstAlertAt   DATETIME2(0) = NULL,
+    @LastReminderAt DATETIME2(0) = NULL,
+    @RecoveredAt    DATETIME2(0) = NULL
+AS
+BEGIN
+    -- NET_ALERT_01: writes one item's whole state (insert, or update the row of this location / kind / key).
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_NetworkAlertState WITH (UPDLOCK, HOLDLOCK)
+       SET Name = @Name, Detail = @Detail, DownSince = @DownSince, FirstAlertAt = @FirstAlertAt,
+           LastReminderAt = @LastReminderAt, RecoveredAt = @RecoveredAt, UpdatedAt = SYSUTCDATETIME()
+     WHERE LocationId = @LocationId AND Kind = @Kind AND ItemKey = @ItemKey;
+    IF @@ROWCOUNT = 0
+        INSERT INTO dbo.WN_NetworkAlertState (Kind, ItemKey, LocationId, Name, Detail, DownSince, FirstAlertAt, LastReminderAt, RecoveredAt)
+        VALUES (@Kind, @ItemKey, @LocationId, @Name, @Detail, @DownSince, @FirstAlertAt, @LastReminderAt, @RecoveredAt);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_OneBill_ClaimInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19031,7 +21460,7 @@ BEGIN
      WHERE i.Id = @InvoiceId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_GetByInvoice]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_OneBill_GetByInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19049,7 +21478,7 @@ BEGIN
      WHERE i.Id = @InvoiceId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_GetPending]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_OneBill_GetPending]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19100,7 +21529,7 @@ BEGIN
      ORDER BY x.InvoiceId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_RecordPayment]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_OneBill_RecordPayment]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19223,7 +21652,7 @@ BEGIN
                         SET @StatusAfter = @PaidId;
                         IF @BookingId > 0
                             UPDATE dbo.WN_AccessCards
-                               SET Status = 1, EndDate = ISNULL(@BillingPeriodEnd, EndDate), UpdatedOn = SYSUTCDATETIME()
+                               SET Status = 1, EndDate = ISNULL(@BillingPeriodEnd, EndDate), UpdatedOn = SYSDATETIME()
                              WHERE BookingId = @BookingId;
                     END
                     ELSE
@@ -19237,7 +21666,7 @@ BEGIN
                             IF @AccessValidUntil > ISNULL(@BillingPeriodEnd, @AccessValidUntil)
                                 SET @AccessValidUntil = @BillingPeriodEnd;
                             UPDATE dbo.WN_AccessCards
-                               SET Status = 1, EndDate = @AccessValidUntil, UpdatedOn = SYSUTCDATETIME()
+                               SET Status = 1, EndDate = @AccessValidUntil, UpdatedOn = SYSDATETIME()
                              WHERE BookingId = @BookingId;
                         END;
                     END;
@@ -19251,7 +21680,7 @@ BEGIN
                     INSERT INTO dbo.WN_Payments (IdGUID, Amount, TransactionRef, InvoiceId, PaymentMethodId,
                                                  CurrencyCode, StatusId, PaidOn, CreatedOn, Notes, UserIdInt, BookingIdInt)
                     VALUES (NEWID(), @ezpayRcvdAmount, @Ref, @InvoiceId, 1,
-                            'PKR', 2, SYSUTCDATETIME(), SYSUTCDATETIME(), @Notes, @UserId, @BookingId);
+                            'PKR', 2, SYSDATETIME(), SYSDATETIME(), @Notes, @UserId, @BookingId);
 
                     SET @Outcome = 'Applied';
                     SET @Message = 'Payment of ' + CONVERT(VARCHAR(30), @ezpayRcvdAmount) + ' recorded on invoice ' + @InvoiceNumber
@@ -19282,7 +21711,7 @@ BEGIN
     END CATCH;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_OneBill_SetResult]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_OneBill_SetResult]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19315,7 +21744,26 @@ BEGIN
     SELECT @Updated AS Updated;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_OrderStatus_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 3. dbo.WN_OrderStatus_GetList
+CREATE   PROCEDURE [dbo].[WN_OrderStatus_GetList]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT Id, Description 
+    FROM dbo.OrderStatus WITH (NOLOCK) 
+    WHERE ISNULL(Status, 1) = 1
+    ORDER BY Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Payments_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19325,16 +21773,16 @@ CREATE   PROCEDURE [dbo].[WN_Payments_Delete]
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_Payments SET StatusId = 5, UpdatedOn = SYSUTCDATETIME()
+    UPDATE dbo.WN_Payments SET StatusId = 5, UpdatedOn = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GenerateVoucher]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_GenerateVoucher]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE     PROCEDURE [dbo].[WN_Payments_GenerateVoucher]
+CREATE   PROCEDURE [dbo].[WN_Payments_GenerateVoucher]
     @UserId      INT,
     @BookingId   INT           = NULL,
     @Amount      DECIMAL(18,4),
@@ -19390,7 +21838,7 @@ BEGIN
         INSERT INTO dbo.WN_Payments
             (UserId, BookingId, PaymentMethodId, Amount, CurrencyCode,
              TransactionRef, StatusId, ExpiresOn, CreatedAt)
-        VALUES (@UG,@BG,5,@Amt,''PKR'',@Ref,1,@Exp,SYSUTCDATETIME());
+        VALUES (@UG,@BG,5,@Amt,''PKR'',@Ref,1,@Exp,SYSDATETIME());
         SET @OutId = SCOPE_IDENTITY();
         SELECT @OutGuid = PublicId FROM dbo.WN_Payments WHERE Id = @OutId;';
         
@@ -19411,7 +21859,7 @@ BEGIN
         N'Voucher generated successfully' AS Message;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetByMembershipId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_GetByMembershipId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19433,7 +21881,7 @@ BEGIN
     ORDER BY p.CreatedOn DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19488,7 +21936,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_GetListFiltered]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19563,7 +22011,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetMyList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_GetMyList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19655,7 +22103,7 @@ CREATE   PROCEDURE [dbo].[WN_Payments_GetMyList]
             EXEC sp_executesql @sql, N'@UserEmail NVARCHAR(256)', @UserEmail;
         END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_GetSummary]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_GetSummary]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19700,7 +22148,7 @@ BEGIN
     EXEC sp_executesql @sql, N'@Id INT', @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_InitiatePayFast]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_InitiatePayFast]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19734,7 +22182,7 @@ BEGIN
         DECLARE @sql2 NVARCHAR(MAX) = N'
         INSERT INTO dbo.WN_Payments
             (UserId, BookingId, PaymentMethodId, Amount, CurrencyCode, GatewayRef, StatusId, CreatedAt)
-        VALUES (@UG,@BG,4,@Amt,''PKR'',@GRef,1,SYSUTCDATETIME());
+        VALUES (@UG,@BG,4,@Amt,''PKR'',@GRef,1,SYSDATETIME());
         SELECT Id, PublicId FROM dbo.WN_Payments WHERE Id = SCOPE_IDENTITY();';
         EXEC sp_executesql @sql2,
             N'@UG UNIQUEIDENTIFIER,@BG UNIQUEIDENTIFIER,@Amt DECIMAL(18,4),@GRef NVARCHAR(200)',
@@ -19742,7 +22190,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19784,7 +22232,7 @@ BEGIN
         INSERT INTO dbo.WN_Payments
             (UserId, BookingId, PaymentMethodId, Amount, CurrencyCode,
              TransactionRef, StatusId, ExpiresOn, CreatedAt)
-        VALUES (@UG,@BG,@PM,@Amt,@Cur,@Ref,1,@Exp,SYSUTCDATETIME());
+        VALUES (@UG,@BG,@PM,@Amt,@Cur,@Ref,1,@Exp,SYSDATETIME());
         SELECT Id, PublicId FROM dbo.WN_Payments WHERE Id = SCOPE_IDENTITY();';
         EXEC sp_executesql @sql2,
             N'@UG UNIQUEIDENTIFIER,@BG UNIQUEIDENTIFIER,@PM TINYINT,@Amt DECIMAL(18,4),@Cur NVARCHAR(10),@Ref NVARCHAR(200),@Exp DATETIME2',
@@ -19792,7 +22240,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_InsertCard]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_InsertCard]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19815,7 +22263,7 @@ BEGIN
         SET @sql = N'INSERT INTO dbo.WN_Payments
             (UserId, BookingId, MembershipId, PaymentMethodId,
              Amount, CurrencyCode, TransactionRef, GatewayRef, StatusId, PaidOn, CreatedById)
-        VALUES (@UserId,@BookingId,@MembershipId,2,@Amt,''PKR'',@Ref,@GRef,2,SYSUTCDATETIME(),@CBy);
+        VALUES (@UserId,@BookingId,@MembershipId,2,@Amt,''PKR'',@Ref,@GRef,2,SYSDATETIME(),@CBy);
         SELECT Id, PublicId FROM dbo.WN_Payments WHERE Id = SCOPE_IDENTITY();';
         EXEC sp_executesql @sql,
             N'@UserId INT,@BookingId INT,@MembershipId INT,@Amt DECIMAL(18,4),@Ref NVARCHAR(200),@GRef NVARCHAR(200),@CBy INT',
@@ -19830,7 +22278,7 @@ BEGIN
         INSERT INTO dbo.WN_Payments
             (UserId, BookingId, PaymentMethodId, Amount, CurrencyCode,
              TransactionRef, GatewayRef, StatusId, PaidOn, CreatedAt)
-        VALUES (@UG,@BG,2,@Amt,''PKR'',@Ref,@GRef,2,SYSUTCDATETIME(),SYSUTCDATETIME());
+        VALUES (@UG,@BG,2,@Amt,''PKR'',@Ref,@GRef,2,SYSDATETIME(),SYSDATETIME());
         SELECT Id, PublicId FROM dbo.WN_Payments WHERE Id = SCOPE_IDENTITY();';
         EXEC sp_executesql @sql2,
             N'@UG UNIQUEIDENTIFIER,@BG UNIQUEIDENTIFIER,@Amt DECIMAL(18,4),@Ref NVARCHAR(200),@GRef NVARCHAR(200)',
@@ -19838,7 +22286,7 @@ BEGIN
     END
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19852,12 +22300,12 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Payments SET
         StatusId  = @StatusId,
-        PaidOn    = CASE WHEN @StatusId = 2 THEN SYSUTCDATETIME() ELSE PaidOn END,
-        UpdatedOn = SYSUTCDATETIME()
+        PaidOn    = CASE WHEN @StatusId = 2 THEN SYSDATETIME() ELSE PaidOn END,
+        UpdatedOn = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByGuid]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByGuid]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19874,8 +22322,8 @@ BEGIN
 
             UPDATE dbo.WN_Payments
             SET    StatusId  = @StatusId,
-                   PaidOn    = CASE WHEN @StatusId = 2 THEN SYSUTCDATETIME() ELSE PaidOn END,
-                   UpdatedOn = SYSUTCDATETIME()
+                   PaidOn    = CASE WHEN @StatusId = 2 THEN SYSDATETIME() ELSE PaidOn END,
+                   UpdatedOn = SYSDATETIME()
             WHERE  IdGUID = @IdGUID;
         COMMIT TRANSACTION;
     END TRY
@@ -19885,7 +22333,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByPublicId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByPublicId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19898,12 +22346,12 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Payments SET
         StatusId  = @StatusId,
-        PaidOn    = CASE WHEN @StatusId = 2 THEN SYSUTCDATETIME() ELSE PaidOn END,
-        UpdatedOn = SYSUTCDATETIME()
+        PaidOn    = CASE WHEN @StatusId = 2 THEN SYSDATETIME() ELSE PaidOn END,
+        UpdatedOn = SYSDATETIME()
     WHERE IdGUID = @PublicId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByRef]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Payments_UpdateStatusByRef]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19916,12 +22364,12 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Payments SET
         StatusId  = @StatusId,
-        PaidOn    = CASE WHEN @StatusId = 2 THEN SYSUTCDATETIME() ELSE PaidOn END,
-        UpdatedOn = SYSUTCDATETIME()
+        PaidOn    = CASE WHEN @StatusId = 2 THEN SYSDATETIME() ELSE PaidOn END,
+        UpdatedOn = SYSDATETIME()
     WHERE TransactionRef = @TransactionRef;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19934,7 +22382,7 @@ BEGIN
     UPDATE dbo.WN_MembershipPlanFeatures SET IsActive = 0 WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_GetByPlan]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_GetByPlan]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19954,7 +22402,7 @@ BEGIN
     ORDER BY SortOrder;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19974,7 +22422,7 @@ BEGIN
     SELECT Id, PublicId FROM dbo.WN_MembershipPlanFeatures WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_PlanFeatures_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -19994,7 +22442,7 @@ BEGIN
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_PricingPlans_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_PricingPlans_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20017,7 +22465,7 @@ BEGIN
     WHERE p.IsActive = 1;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_QueueInvoiceDeliveryFailure]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_QueueInvoiceDeliveryFailure]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20034,17 +22482,15 @@ BEGIN
         InvoiceId, BookingId, TargetEmail, Attempts, LastAttemptAt, NextRetryAt, Status, LastError, CreatedOn
     )
     VALUES (
-        @InvoiceId, @BookingId, @TargetEmail, 1, SYSUTCDATETIME(), DATEADD(minute, 5, SYSUTCDATETIME()), 'Pending', @LastError, SYSUTCDATETIME()
+        @InvoiceId, @BookingId, @TargetEmail, 1, SYSDATETIME(), DATEADD(minute, 5, SYSDATETIME()), 'Pending', @LastError, SYSDATETIME()
     );
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_QuotationActivities_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_QuotationActivities_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 2. Insert Quotation Activity Log
 CREATE   PROCEDURE [dbo].[WN_QuotationActivities_Insert]
     @QuotationId INT,
     @Version INT,
@@ -20059,11 +22505,11 @@ BEGIN
         IdGUID, QuotationId, Version, ActivityType, Message, CustomerNote, CreatedByUserId, CreatedDate
     )
     VALUES (
-        NEWID(), @QuotationId, @Version, @ActivityType, @Message, @CustomerNote, @CreatedByUserId, SYSUTCDATETIME()
+        NEWID(), @QuotationId, @Version, @ActivityType, @Message, @CustomerNote, @CreatedByUserId, SYSDATETIME()
     );
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_QuotationDetails_GetByQuotation]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_QuotationDetails_GetByQuotation]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20080,7 +22526,7 @@ BEGIN
     ORDER BY Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_ConvertToBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_ConvertToBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20217,7 +22663,7 @@ CREATE   PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
             FROM dbo.WN_Bookings
             WHERE Id > @MaxBookingIdBefore
               AND SpaceId = @SpaceId
-              AND BookingDate >= DATEADD(MINUTE, -1, SYSUTCDATETIME())
+              AND BookingDate >= DATEADD(MINUTE, -1, SYSDATETIME())
             ORDER BY Id DESC;
             IF @NewBookingId IS NULL
             BEGIN
@@ -20226,13 +22672,13 @@ CREATE   PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
                     @NewBookingPublicId = IdGUID
                 FROM dbo.WN_Bookings
                 WHERE SpaceId = @SpaceId
-                  AND BookingDate >= DATEADD(MINUTE, -1, SYSUTCDATETIME())
+                  AND BookingDate >= DATEADD(MINUTE, -1, SYSDATETIME())
                 ORDER BY Id DESC;
             END
             UPDATE dbo.WN_Quotations
             SET Status = 'Converted', 
                 BookingId = @NewBookingId,
-                UpdatedDate = SYSUTCDATETIME(),
+                UpdatedDate = SYSDATETIME(),
                 UpdatedById = @CreatedById
             WHERE Id = @QuotationId;
             -- Copy WHT settings to the new booking
@@ -20280,7 +22726,7 @@ CREATE   PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
                 QuotationId, Version, ActivityType, Message, CustomerNote, CreatedByUserId, CreatedDate
             )
             VALUES (
-                @QuotationId, 1, 'Converted', 'Quotation converted to booking (ID: ' + CAST(ISNULL(@NewBookingId, 0) AS NVARCHAR(20)) + ')', NULL, @CreatedById, SYSUTCDATETIME()
+                @QuotationId, 1, 'Converted', 'Quotation converted to booking (ID: ' + CAST(ISNULL(@NewBookingId, 0) AS NVARCHAR(20)) + ')', NULL, @CreatedById, SYSDATETIME()
             );
             COMMIT TRANSACTION;
             SELECT 
@@ -20294,7 +22740,7 @@ CREATE   PROCEDURE [dbo].[WN_Quotations_ConvertToBooking]
         END CATCH
     END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetById]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20398,7 +22844,27 @@ BEGIN
     WHERE q.Id = @Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetHistory]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetCustomerEmail]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 18. dbo.WN_Quotations_GetCustomerEmail
+CREATE   PROCEDURE [dbo].[WN_Quotations_GetCustomerEmail]
+    @QuotationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT cu.Email 
+    FROM dbo.WN_Quotations q WITH (NOLOCK)
+    JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
+    WHERE q.Id = @QuotationId AND NULLIF(LTRIM(RTRIM(cu.Email)), '') IS NOT NULL;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetHistory]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20415,7 +22881,7 @@ BEGIN
     ORDER BY Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20519,7 +22985,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetListFiltered]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetListFiltered]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20560,7 +23026,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetLocationAndCompanyDetails]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_GetLocationAndCompanyDetails]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20588,14 +23054,11 @@ BEGIN
     WHERE q.Id = @QuotationId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ======================================================================================
--- 1. PROCEDURE: dbo.WN_Quotations_Insert
--- ======================================================================================
 CREATE   PROCEDURE [dbo].[WN_Quotations_Insert]
     @QuotationNumber      NVARCHAR(50),
     @ValidUntil           DATE,
@@ -20720,7 +23183,7 @@ BEGIN
         VALUES (
             @QuotationNumber, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE), @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
             @SubtotalAmount, @SafeDiscountPct, @DiscountAmount, @TotalAmount, @Remarks, 'Active', @NewVersion, 1,
-            SYSUTCDATETIME(), @CreatedById, ISNULL(@DiscountType, 'Percentage'), @SecDeposit, @FloorId, ISNULL(@BillingPeriodMonths, 3),
+            SYSDATETIME(), @CreatedById, ISNULL(@DiscountType, 'Percentage'), @SecDeposit, @FloorId, ISNULL(@BillingPeriodMonths, 3),
             @SupportChargesId, @AppliedChargePercentage, @AppliedTaxPercentage, @SupportChargeAmount, @TaxAmount
         );
 
@@ -20765,13 +23228,11 @@ BEGIN
     END CATCH;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Quotations_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Quotations_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 1. Update Quotation Status
 CREATE   PROCEDURE [dbo].[WN_Quotations_UpdateStatus]
     @QuotationId INT,
     @Status NVARCHAR(50)
@@ -20780,19 +23241,15 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Quotations
     SET Status = @Status,
-        UpdatedDate = SYSUTCDATETIME()
+        UpdatedDate = SYSDATETIME()
     WHERE Id = @QuotationId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_RecordInvoicePayment]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_RecordInvoicePayment]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 2. ALTER PROCEDURE dbo.WN_RecordInvoicePayment
--- Blocks payment on unapproved (PendingApproval / Rejected) invoices.
--- ==============================================================================
 CREATE   PROCEDURE [dbo].[WN_RecordInvoicePayment]
     @InvoiceId INT,
     @PaidAmount DECIMAL(18,4),
@@ -20864,7 +23321,7 @@ BEGIN
             UPDATE dbo.WN_AccessCards
             SET Status = 1,
                 EndDate = ISNULL(@BillingPeriodEnd, EndDate),
-                UpdatedOn = SYSUTCDATETIME()
+                UpdatedOn = SYSDATETIME()
             WHERE BookingId = @BookingId;
         END;
     END
@@ -20879,7 +23336,7 @@ BEGIN
             UPDATE dbo.WN_AccessCards
             SET Status = 1,
                 EndDate = @AccessValidUntil,
-                UpdatedOn = SYSUTCDATETIME()
+                UpdatedOn = SYSDATETIME()
             WHERE BookingId = @BookingId;
         END;
     END;
@@ -20894,7 +23351,7 @@ BEGIN
     )
     VALUES (
         NEWID(), @PaidAmount, @TransactionRef, @InvoiceId, 1, 
-        'PKR', 2, SYSUTCDATETIME(), SYSUTCDATETIME(), @Notes, @UserId, @BookingId
+        'PKR', 2, SYSDATETIME(), SYSDATETIME(), @Notes, @UserId, @BookingId
     );
 
     COMMIT TRANSACTION;
@@ -20906,7 +23363,213 @@ BEGIN
         @NewStatusId AS StatusId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_RecurringInvoice_GenerateMonthlyInvoices]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_RecordScope_GetEntityLocations]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =========================================================================================
+-- SECTION 3: Record Scope (dbo.WN_RecordScope_*)
+-- =========================================================================================
+
+-- 20. dbo.WN_RecordScope_GetEntityLocations
+CREATE   PROCEDURE [dbo].[WN_RecordScope_GetEntityLocations]
+    @Kind NVARCHAR(50),
+    @Id INT = NULL,
+    @Guid UNIQUEIDENTIFIER = NULL,
+    @Email NVARCHAR(256) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @Kind = 'Booking'
+    BEGIN
+        SELECT s.LocationId FROM dbo.WN_Bookings b WITH (NOLOCK)
+          LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+         WHERE (@Id IS NOT NULL AND b.Id = @Id) OR (@Guid IS NOT NULL AND b.IdGUID = @Guid);
+        RETURN;
+    END
+
+    IF @Kind = 'Payment'
+    BEGIN
+        SELECT COALESCE(s.LocationId, i.LocationId, s2.LocationId) AS LocationId
+          FROM dbo.WN_Payments p WITH (NOLOCK)
+          LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = p.BookingIdInt
+          LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+          LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = p.InvoiceId
+          LEFT JOIN dbo.WN_Bookings b2 WITH (NOLOCK) ON b2.Id = i.BookingId
+          LEFT JOIN dbo.WN_Spaces s2 WITH (NOLOCK) ON s2.Id = b2.SpaceId
+         WHERE (@Id IS NOT NULL AND p.Id = @Id) OR (@Guid IS NOT NULL AND p.IdGUID = @Guid);
+        RETURN;
+    END
+
+    IF @Kind = 'Agreement'
+    BEGIN
+        SELECT COALESCE(sb.LocationId, sq.LocationId) AS LocationId
+          FROM dbo.WN_Agreements a WITH (NOLOCK)
+          LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+          LEFT JOIN dbo.WN_Spaces sq WITH (NOLOCK) ON sq.Id = q.SpaceId
+          LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = a.BookingId
+          LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId
+         WHERE a.Id = @Id;
+        RETURN;
+    END
+
+    IF @Kind = 'Customer'
+    BEGIN
+        DECLARE @C TABLE (Id INT, Code NVARCHAR(50), UserId INT);
+        INSERT INTO @C SELECT c.Id, c.Code, c.UserId FROM dbo.WN_Customers c WITH (NOLOCK)
+         WHERE (@Id IS NOT NULL AND c.Id = @Id) OR (@Guid IS NOT NULL AND c.IdGUID = @Guid);
+        SELECT CAST(NULL AS INT) AS LocationId FROM @C
+        UNION ALL
+        SELECT u.LocationId FROM @C c JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = c.UserId
+        UNION ALL
+        SELECT s.LocationId FROM @C c
+          JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.CustomerCode = c.Code OR (c.UserId IS NOT NULL AND b.UserId = c.UserId)
+          JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId;
+        RETURN;
+    END
+
+    IF @Kind = 'Quotation'
+    BEGIN
+        SELECT s.LocationId FROM dbo.WN_Quotations q WITH (NOLOCK)
+          LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = q.SpaceId
+         WHERE q.Id = @Id;
+        RETURN;
+    END
+
+    IF @Kind = 'BookingDetail'
+    BEGIN
+        SELECT s.LocationId
+          FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+          LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = d.BookingGuid
+          LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+         WHERE d.Id = @Id;
+        RETURN;
+    END
+
+    IF @Kind = 'Space'
+    BEGIN
+        SELECT s.LocationId FROM dbo.WN_Spaces s WITH (NOLOCK)
+         WHERE (@Id IS NOT NULL AND s.Id = @Id) OR (@Guid IS NOT NULL AND s.IdGUID = @Guid);
+        RETURN;
+    END
+
+    IF @Kind = 'Location'
+    BEGIN
+        SELECT l.Id AS LocationId FROM dbo.WN_Locations l WITH (NOLOCK)
+         WHERE (@Id IS NOT NULL AND l.Id = @Id) OR (@Guid IS NOT NULL AND l.IdGUID = @Guid);
+        RETURN;
+    END
+
+    IF @Kind = 'AccessCard'
+    BEGIN
+        SELECT COALESCE(NULLIF(a.LocationId, 0), s.LocationId, sb.LocationId) AS LocationId
+          FROM dbo.WN_AccessCards a WITH (NOLOCK)
+          LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = a.SpaceId
+          LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = a.BookingId
+          LEFT JOIN dbo.WN_Spaces sb WITH (NOLOCK) ON sb.Id = b.SpaceId
+         WHERE (@Id IS NOT NULL AND a.Id = @Id) OR (@Guid IS NOT NULL AND a.IdGUID = @Guid);
+        RETURN;
+    END
+
+    IF @Kind = 'Invoice'
+    BEGIN
+        DECLARE @I TABLE (Id INT, BookingId INT NULL, UserId INT NULL, LocationId INT NULL);
+        INSERT INTO @I SELECT i.Id, i.BookingId, i.UserId, i.LocationId FROM dbo.WN_Invoices i WITH (NOLOCK)
+         WHERE (@Id IS NOT NULL AND i.Id = @Id)
+            OR (@Guid IS NOT NULL AND (i.PublicId = @Guid OR i.Id IN (
+                   SELECT st.CustomerInvoiceId FROM dbo.WN_CustomerSTInvoice st WITH (NOLOCK) WHERE st.PublicId = @Guid)));
+        SELECT COALESCE(x.LocationId, s.LocationId) AS LocationId FROM @I x
+          LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = x.BookingId
+          LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        UNION ALL
+        SELECT u.LocationId FROM @I x JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = x.UserId;
+        DECLARE @Ids NVARCHAR(MAX) = STUFF((SELECT N',' + CAST(x.Id AS NVARCHAR(12)) FROM @I x FOR XML PATH('')), 1, 1, N'');
+        IF @Ids IS NOT NULL AND COL_LENGTH(N'dbo.WN_CustomInvoices', N'LocationId') IS NOT NULL
+        BEGIN
+            DECLARE @CiSql NVARCHAR(MAX) = N'SELECT ci.LocationId FROM dbo.WN_CustomInvoices ci WITH (NOLOCK) WHERE ci.InvoiceId IN (' + @Ids + N');';
+            EXEC sp_executesql @CiSql;
+        END
+        RETURN;
+    END
+
+    -- Default: User / Membership
+    DECLARE @U TABLE (Id INT, LocationId INT NULL, IsGeneral BIT);
+    IF @Kind = 'Membership'
+    BEGIN
+        DECLARE @MT NVARCHAR(128) =
+            CASE WHEN COL_LENGTH(N'dbo.WN_Memberships', N'StartOn') IS NOT NULL THEN N'dbo.WN_Memberships'
+                 WHEN OBJECT_ID(N'dbo.WN_MemberShips_Temp', N'U') IS NOT NULL THEN N'dbo.WN_MemberShips_Temp' END;
+        DECLARE @M TABLE (UserId INT NULL);
+        IF @MT IS NOT NULL
+        BEGIN
+            DECLARE @MSql NVARCHAR(400) = N'SELECT m.UserId FROM ' + @MT + N' m WITH (NOLOCK) WHERE m.Id = @Id;';
+            INSERT INTO @M EXEC sp_executesql @MSql, N'@Id INT', @Id;
+        END
+        SELECT CAST(NULL AS INT) AS LocationId FROM @M;
+        INSERT INTO @U SELECT u.Id, u.LocationId, CASE WHEN r.RoleName = N'general' THEN 1 ELSE 0 END
+          FROM dbo.WN_Users u WITH (NOLOCK) LEFT JOIN dbo.WN_Roles r WITH (NOLOCK) ON r.Id = u.RoleId
+         WHERE u.Id IN (SELECT m.UserId FROM @M m);
+    END
+    ELSE
+    BEGIN
+        INSERT INTO @U SELECT u.Id, u.LocationId, CASE WHEN r.RoleName = N'general' THEN 1 ELSE 0 END
+          FROM dbo.WN_Users u WITH (NOLOCK) LEFT JOIN dbo.WN_Roles r WITH (NOLOCK) ON r.Id = u.RoleId
+         WHERE (@Id IS NOT NULL AND u.Id = @Id) OR (@Guid IS NOT NULL AND u.IdGUID = @Guid) OR (@Email IS NOT NULL AND u.Email = @Email);
+    END
+
+    SELECT LocationId FROM @U;
+    IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
+        SELECT ul.LocationId FROM dbo.WN_UserLocations ul WITH (NOLOCK) JOIN @U x ON x.Id = ul.UserId;
+    SELECT s.LocationId FROM @U x
+      JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.UserId = x.Id
+      JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+     WHERE x.IsGeneral = 1 AND ISNULL(b.IsDeleted, 0) = 0
+    UNION ALL
+    SELECT s.LocationId FROM @U x
+      JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.UserId = x.Id
+      JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.CustomerCode = c.Code
+      JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+     WHERE x.IsGeneral = 1 AND ISNULL(b.IsDeleted, 0) = 0;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_RecordScope_GetPaymentIdByGuid]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 21. dbo.WN_RecordScope_GetPaymentIdByGuid
+CREATE   PROCEDURE [dbo].[WN_RecordScope_GetPaymentIdByGuid]
+    @Guid UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id FROM dbo.WN_Payments WITH (NOLOCK) WHERE IdGUID = @Guid;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_RecordScope_GetPaymentIdsInLocations]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 22. dbo.WN_RecordScope_GetPaymentIdsInLocations
+CREATE   PROCEDURE [dbo].[WN_RecordScope_GetPaymentIdsInLocations]
+    @LocationIds NVARCHAR(MAX)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT p.Id
+    FROM dbo.WN_Payments p WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = p.BookingIdInt
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+    LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = p.InvoiceId
+    LEFT JOIN dbo.WN_Bookings b2 WITH (NOLOCK) ON b2.Id = i.BookingId
+    LEFT JOIN dbo.WN_Spaces s2 WITH (NOLOCK) ON s2.Id = b2.SpaceId
+    JOIN STRING_SPLIT(@LocationIds, ',') lid ON COALESCE(s.LocationId, i.LocationId, s2.LocationId) = TRY_CAST(lid.value AS INT);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_RecurringInvoice_GenerateMonthlyInvoices]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20962,7 +23625,7 @@ BEGIN
     SELECT @InvoicesGenerated AS Generated, @InvoicesSkipped AS Skipped;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_GetByHash]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_GetByHash]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -20980,7 +23643,7 @@ BEGIN
     WHERE rt.TokenHash = @TokenHash;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21001,7 +23664,7 @@ BEGIN
     SELECT Id FROM dbo.WN_RefreshTokens WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_Revoke]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_Revoke]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21013,12 +23676,12 @@ AS
 BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_RefreshTokens SET
-        RevokedOn          = SYSUTCDATETIME(),
+        RevokedOn          = SYSDATETIME(),
         ReplacedByTokenId  = @ReplacedByTokenId
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_RevokeAllForUser]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_RefreshTokens_RevokeAllForUser]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21029,12 +23692,12 @@ AS
 BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_RefreshTokens SET
-        RevokedOn = SYSUTCDATETIME()
+        RevokedOn = SYSDATETIME()
     WHERE UserId    = @UserId
       AND RevokedOn IS NULL;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Refunds_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Refunds_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21073,7 +23736,7 @@ BEGIN
     SELECT Id, PublicId FROM dbo.WN_Refunds WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Refunds_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Refunds_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21087,26 +23750,222 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_Refunds SET
         StatusId      = @StatusId,
-        ProcessedOn   = CASE WHEN @StatusId = 2 THEN SYSUTCDATETIME() ELSE ProcessedOn END,
+        ProcessedOn   = CASE WHEN @StatusId = 2 THEN SYSDATETIME() ELSE ProcessedOn END,
         ProcessedById = ISNULL(@ProcessedById, ProcessedById)
     WHERE Id = @Id;
 
     IF @StatusId = 2
         UPDATE dbo.WN_Payments SET
             StatusId  = 4,
-            UpdatedOn = SYSUTCDATETIME()
+            UpdatedOn = SYSDATETIME()
         WHERE Id = (SELECT PaymentId FROM dbo.WN_Refunds WHERE Id = @Id);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_ReRestrictLapsedPartialPayments]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Reports_CompleteRun]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ==============================================================================
--- 6. UPDATE dbo.WN_ReRestrictLapsedPartialPayments
--- Exclude PendingApproval invoices
--- ==============================================================================
+-- 10. dbo.WN_Reports_CompleteRun
+CREATE   PROCEDURE [dbo].[WN_Reports_CompleteRun]
+    @Key NVARCHAR(50),
+    @Period NVARCHAR(20),
+    @Status NVARCHAR(20),
+    @Recipients NVARCHAR(MAX),
+    @Error NVARCHAR(1000) = NULL,
+    @At DATETIME2
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_ScheduledReportRuns
+       SET Status = @Status, Recipients = @Recipients, Error = @Error, SentAt = @At
+     WHERE ReportKey = @Key AND PeriodKey = @Period;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Reports_GetForecast]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =========================================================================================
+-- SECTION 2: Reports (dbo.WN_Reports_*)
+-- =========================================================================================
+
+-- 6. dbo.WN_Reports_GetForecast
+CREATE   PROCEDURE [dbo].[WN_Reports_GetForecast]
+    @LocationIds NVARCHAR(MAX) = NULL,
+    @FirstMonth DATE,
+    @Months INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @First DATE = @FirstMonth;
+    DECLARE @Last DATE = DATEADD(MONTH, @Months, @First);
+
+    DECLARE @Spaces TABLE (Id INT PRIMARY KEY, LocationId INT NOT NULL);
+    INSERT INTO @Spaces (Id, LocationId)
+    SELECT s.Id, ISNULL(s.LocationId, 0)
+      FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.Status = 1 
+       AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')));
+
+    DECLARE @Live TABLE (Id INT PRIMARY KEY, SpaceId INT, LocationId INT, StartOn DATE, EndOn DATE, StatusId INT, Rent DECIMAL(18,2));
+    INSERT INTO @Live
+    SELECT b.Id, b.SpaceId, sp.LocationId, CAST(b.StartOn AS DATE), CAST(b.EndOn AS DATE), b.BookingStatusId,
+           mr.MonthlyRent * (100 - d.Pct) / 100 - fx.FixedMonthly
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN @Spaces sp ON sp.Id = b.SpaceId
+     OUTER APPLY (SELECT TOP 1 v.MonthlyRent FROM dbo.WN_vw_BookingSummary v WITH (NOLOCK)
+                   WHERE ISNULL(b.MonthlyRent, 0) = 0 AND v.BookingId = b.Id) vr
+     CROSS APPLY (SELECT CAST(ISNULL(COALESCE(NULLIF(b.MonthlyRent, 0), vr.MonthlyRent), 0) AS DECIMAL(18,2)) AS MonthlyRent) mr
+     CROSS APPLY (SELECT CASE WHEN ISNULL(b.DiscountPercentage, 0) BETWEEN 0.01 AND 100 THEN b.DiscountPercentage
+                              ELSE 0 END AS Pct) d
+     CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(b.DiscountPercentage, 0) = 0
+                                    AND LOWER(LTRIM(RTRIM(ISNULL(b.DiscountType, '')))) IN ('amount', 'fixed')
+                                    AND mr.MonthlyRent > 0
+                               THEN CASE WHEN COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) > mr.MonthlyRent THEN mr.MonthlyRent
+                                         ELSE COALESCE(NULLIF(b.DiscountValue, 0), b.DiscountAmount, 0) END
+                               ELSE 0 END AS DECIMAL(18,2)) AS FixedMonthly) fx
+     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33)
+       AND b.StartOn < @Last AND b.EndOn >= @First;
+
+    ;WITH m AS (
+        SELECT n, DATEADD(MONTH, n, @First) AS MStart, EOMONTH(DATEADD(MONTH, n, @First)) AS MEnd
+          FROM (VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9),(10),(11)) v(n)
+         WHERE n < @Months
+    ), loc AS (
+        SELECT LocationId, COUNT(*) AS TotalSpaces FROM @Spaces GROUP BY LocationId
+    )
+    SELECT m.n, CONVERT(VARCHAR(7), m.MStart, 126) AS Month, loc.LocationId, l.Name AS LocationName, loc.TotalSpaces,
+           (SELECT COUNT(DISTINCT x.SpaceId) FROM @Live x
+             WHERE x.LocationId = loc.LocationId AND x.StartOn <= m.MEnd AND x.EndOn >= m.MEnd) AS OccupiedSpaces,
+           ISNULL(r.ExpectedRent, 0) AS ExpectedRent, ISNULL(r.ConfirmedRent, 0) AS ConfirmedRent,
+           (SELECT COUNT(*) FROM @Live x
+             WHERE x.LocationId = loc.LocationId AND x.StatusId IN (2, 33) AND x.EndOn BETWEEN m.MStart AND m.MEnd) AS LeasesEnding,
+           (SELECT COUNT(*) FROM @Live x
+             WHERE x.LocationId = loc.LocationId AND x.StartOn BETWEEN m.MStart AND m.MEnd) AS LeasesStarting,
+           (SELECT COUNT(*) FROM @Live x
+             WHERE x.LocationId = loc.LocationId AND x.StatusId IN (1, 5) AND x.StartOn BETWEEN m.MStart AND m.MEnd) AS PendingStarting
+      FROM m
+     CROSS JOIN loc
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = loc.LocationId
+     OUTER APPLY (
+           SELECT SUM(x.Rent * dd.Days / 30) AS ExpectedRent,
+                  SUM(CASE WHEN x.StatusId IN (2, 33) THEN x.Rent * dd.Days / 30 ELSE 0 END) AS ConfirmedRent
+             FROM @Live x
+            CROSS APPLY (SELECT CASE WHEN x.StartOn <= m.MStart THEN 1 WHEN DAY(x.StartOn) > 30 THEN 30 ELSE DAY(x.StartOn) END AS FromDay,
+                                CASE WHEN x.EndOn >= m.MEnd THEN 30 WHEN DAY(x.EndOn) > 30 THEN 30 ELSE DAY(x.EndOn) END AS ToDay) fd
+            CROSS APPLY (SELECT CASE WHEN fd.ToDay >= fd.FromDay THEN fd.ToDay - fd.FromDay + 1 ELSE 0 END AS Days) dd
+            WHERE x.LocationId = loc.LocationId AND x.StartOn <= m.MEnd AND x.EndOn >= m.MStart) r
+     ORDER BY m.n, l.Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Reports_GetSuperAdminEmails]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 8. dbo.WN_Reports_GetSuperAdminEmails
+CREATE   PROCEDURE [dbo].[WN_Reports_GetSuperAdminEmails]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT DISTINCT LTRIM(RTRIM(Email)) AS Email
+      FROM dbo.WN_Users WITH (NOLOCK)
+     WHERE RoleId = 1 AND IsActive = 1 AND Email LIKE '%_@_%._%';
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Reports_GetWeeklyExtras]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 7. dbo.WN_Reports_GetWeeklyExtras
+CREATE   PROCEDURE [dbo].[WN_Reports_GetWeeklyExtras]
+    @WeekStart DATETIME2,
+    @BizNow DATETIME2
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @Now DATETIME2(0) = @BizNow;
+    DECLARE @In30 DATETIME2(0) = DATEADD(DAY, 30, @Now), @In60 DATETIME2(0) = DATEADD(DAY, 60, @Now);
+
+    -- [0] tour inquiries received in the last 7 days
+    SELECT COUNT(*) AS NewInquiries 
+    FROM dbo.WN_Contacts ct WITH (NOLOCK) 
+    WHERE ct.CreatedOn >= @WeekStart;
+
+    -- [1] running leases expiring in the next 30 / 60 days, per location
+    SELECT s.LocationId,
+           SUM(CASE WHEN b.EndOn <= @In30 THEN 1 ELSE 0 END) AS Expiring30,
+           COUNT(*) AS Expiring60
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+     WHERE s.Status = 1 AND ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
+       AND b.EndOn >= @Now AND b.EndOn <= @In60
+     GROUP BY s.LocationId;
+
+    -- [2] the first 10 of them
+    SELECT TOP 10 b.Id AS BookingId, b.EndOn, b.MonthlyRent,
+           COALESCE(NULLIF(s.Name, ''), s.Code) AS Space, l.Name AS Location,
+           COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email) AS Customer
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
+     OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK) WHERE c2.Code = b.CustomerCode OR c2.UserId = b.UserId) cu
+     WHERE s.Status = 1 AND ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
+       AND b.EndOn >= @Now AND b.EndOn <= @In60
+     ORDER BY b.EndOn, b.Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Reports_TryClaimRun]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 9. dbo.WN_Reports_TryClaimRun
+CREATE   PROCEDURE [dbo].[WN_Reports_TryClaimRun]
+    @Key NVARCHAR(50),
+    @Period NVARCHAR(20),
+    @At DATETIME2,
+    @RetryBefore DATETIME2
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRAN;
+
+    DECLARE @Status NVARCHAR(20), @At0 DATETIME2(0);
+    SELECT @Status = Status, @At0 = SentAt
+      FROM dbo.WN_ScheduledReportRuns WITH (UPDLOCK, HOLDLOCK)
+     WHERE ReportKey = @Key AND PeriodKey = @Period;
+
+    IF @Status IS NULL
+    BEGIN
+        INSERT INTO dbo.WN_ScheduledReportRuns (ReportKey, PeriodKey, SentAt, Recipients, Status, Error)
+        VALUES (@Key, @Period, @At, NULL, N'Sending', NULL);
+        SELECT 'Claimed' AS Result;
+    END
+    ELSE IF @Status = N'Failed' AND @At0 < @RetryBefore
+    BEGIN
+        UPDATE dbo.WN_ScheduledReportRuns 
+           SET Status = N'Sending', SentAt = @At, Error = NULL
+         WHERE ReportKey = @Key AND PeriodKey = @Period;
+        SELECT 'Claimed' AS Result;
+    END
+    ELSE
+        SELECT CASE WHEN @Status = N'Failed' THEN 'RetryLater' ELSE 'Taken' END AS Result;
+
+    COMMIT;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_ReRestrictLapsedPartialPayments]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE   PROCEDURE [dbo].[WN_ReRestrictLapsedPartialPayments]
 AS
 BEGIN
@@ -21116,7 +23975,7 @@ BEGIN
 
     UPDATE ac
     SET ac.Status = 85, -- 2 = Restricted 
-        ac.UpdatedOn = SYSUTCDATETIME()
+        ac.UpdatedOn = SYSDATETIME()
     FROM dbo.WN_AccessCards ac
     INNER JOIN dbo.WN_Invoices i ON i.BookingId = ac.BookingId
     WHERE ac.EndDate < CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))
@@ -21125,20 +23984,418 @@ BEGIN
       AND i.StatusId NOT IN (2, 5) AND i.StatusId NOT IN (SELECT Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) IN ('Paid', 'Cancelled'));
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Roles_GetAll]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_RoleDashboard_GetLocationComparison]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
+-- 3. dbo.WN_RoleDashboard_GetLocationComparison
+CREATE   PROCEDURE [dbo].[WN_RoleDashboard_GetLocationComparison]
+    @PStart DATETIME2,
+    @PEnd DATETIME2 = NULL,
+    @Today DATE,
+    @BizNow DATETIME2,
+    @OpenInvoiceStatusIds NVARCHAR(MAX) = N'1,2,3',
+    @VoidStatusIds NVARCHAR(MAX) = N'5,40'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Now DATETIME2(0) = @BizNow;
 
-CREATE PROCEDURE [dbo].[WN_Roles_GetAll]
+    DECLARE @OpenStatuses TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @OpenStatuses SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@OpenInvoiceStatusIds, ',');
+
+    DECLARE @VoidStatuses TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @VoidStatuses SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@VoidStatusIds, ',');
+
+    SELECT l.Id, l.Name,
+           (SELECT COUNT(*) FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Status = 1 AND s.LocationId = l.Id) AS TotalSpaces,
+           (SELECT COUNT(DISTINCT b.SpaceId) FROM dbo.WN_Bookings b WITH (NOLOCK) JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+             WHERE s.LocationId = l.Id AND s.Status = 1 AND ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33)
+               AND b.StartOn <= @Now AND b.EndOn >= @Now) AS OccupiedSpaces,
+           (SELECT COUNT(*) FROM dbo.WN_Bookings b WITH (NOLOCK) JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+             WHERE s.LocationId = l.Id AND ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 2, 5, 33)
+               AND b.StartOn <= @Now AND b.EndOn >= @Now) AS ActiveBookings,
+           inv.Invoiced, inv.Collected, inv.Outstanding, inv.Overdue
+      FROM dbo.WN_Locations l WITH (NOLOCK)
+     OUTER APPLY (
+           SELECT ISNULL(SUM(CASE WHEN i.IssuedOn >= @PStart AND (@PEnd IS NULL OR i.IssuedOn < @PEnd) THEN i.GrandTotal ELSE 0 END), 0) AS Invoiced,
+                  ISNULL(SUM(CASE WHEN i.IssuedOn >= @PStart AND (@PEnd IS NULL OR i.IssuedOn < @PEnd) THEN i.PaidTotal ELSE 0 END), 0) AS Collected,
+                  ISNULL(SUM(CASE WHEN op.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) ELSE 0 END), 0) AS Outstanding,
+                  ISNULL(SUM(CASE WHEN op.Id IS NOT NULL AND i.DueOn < @Today THEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) ELSE 0 END), 0) AS Overdue
+             FROM dbo.WN_Invoices i WITH (NOLOCK)
+             JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+             JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+             LEFT JOIN @OpenStatuses op ON op.Id = i.StatusId
+             LEFT JOIN @VoidStatuses vd ON vd.Id = i.StatusId
+            WHERE s.LocationId = l.Id 
+              AND vd.Id IS NULL 
+              AND ISNULL(i.StatusId, 0) <> 40) inv
+     ORDER BY l.Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_RoleDashboard_GetSales]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =========================================================================================
+-- SECTION 1: Role Dashboard (dbo.WN_RoleDashboard_*)
+-- =========================================================================================
+
+-- 1. dbo.WN_RoleDashboard_GetSales
+CREATE   PROCEDURE [dbo].[WN_RoleDashboard_GetSales]
+    @LocationIds NVARCHAR(MAX) = NULL,
+    @PStart DATETIME2,
+    @PEnd DATETIME2 = NULL,
+    @UtcShift INT = 0,
+    @Today DATE,
+    @BizNow DATETIME2,
+    @OpenInvoiceStatusIds NVARCHAR(MAX) = N'1,2,3',
+    @RenewalDays INT = 30
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @Spaces TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200), LocationId INT NULL);
+    INSERT INTO @Spaces (Id, Name, LocationId)
+    SELECT s.Id, COALESCE(NULLIF(s.Name, ''), s.Code), s.LocationId
+      FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.Status = 1 
+       AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')));
+
+    DECLARE @Now DATETIME2(0) = @BizNow;
+
+    -- [0] quotation pipeline
+    SELECT COUNT(*) AS Created,
+           SUM(CASE WHEN q.Status IN ('Draft') THEN 1 ELSE 0 END) AS Draft,
+           SUM(CASE WHEN q.Status IN ('Sent') THEN 1 ELSE 0 END) AS Sent,
+           SUM(CASE WHEN q.Status IN ('Accepted') THEN 1 ELSE 0 END) AS Accepted,
+           SUM(CASE WHEN q.Status IN ('AgreementStage', 'AgreementSent', 'Signed') THEN 1 ELSE 0 END) AS AgreementStage,
+           SUM(CASE WHEN q.Status IN ('Converted') THEN 1 ELSE 0 END) AS Converted,
+           SUM(CASE WHEN q.Status IN ('Declined', 'Rejected', 'Expired', 'Cancelled') THEN 1 ELSE 0 END) AS Lost,
+           ISNULL(SUM(CASE WHEN q.Status IN ('Converted') THEN q.TotalAmount ELSE 0 END), 0) AS ConvertedValue
+      FROM dbo.WN_Quotations q WITH (NOLOCK)
+      JOIN @Spaces sp ON sp.Id = q.SpaceId
+     WHERE ISNULL(q.IsActive, 1) = 1 AND q.CreatedDate >= DATEADD(MINUTE, -@UtcShift, @PStart)
+       AND (@PEnd IS NULL OR q.CreatedDate < DATEADD(MINUTE, -@UtcShift, @PEnd));
+
+    -- [1] agreements sent but not signed yet
+    SELECT TOP 8 a.Id, q.QuotationNumber AS Reference, a.SentDate AS [Date], q.TotalAmount AS Amount,
+           sp.Name AS Space, 
+           COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, NULLIF(u.Name, ''), NULLIF(u.UserName, ''), 'Customer') AS Customer
+      FROM dbo.WN_Agreements a WITH (NOLOCK)
+      JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.Id = a.QuotationId
+      JOIN @Spaces sp ON sp.Id = q.SpaceId
+      LEFT JOIN dbo.WN_Customers cu WITH (NOLOCK) ON cu.Id = q.CustomerId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = cu.UserId
+     WHERE a.BookingId IS NULL AND a.SignedDate IS NULL AND a.SentDate IS NOT NULL
+       AND ISNULL(q.Status, '') NOT IN ('Declined', 'Rejected', 'Cancelled', 'Expired', 'Converted')
+       AND NOT EXISTS (SELECT 1 FROM dbo.WN_Agreements a2 WITH (NOLOCK) WHERE a2.QuotationId = a.QuotationId AND a2.Id > a.Id)
+     ORDER BY a.SentDate;
+
+    -- [2] bookings waiting for confirmation
+    SELECT TOP 8 b.Id AS BookingId, CONCAT('#', b.Id) AS Reference, b.StartOn AS [Date], b.TotalAmount AS Amount,
+           sp.Name AS Space, 
+           COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, NULLIF(u.Name, ''), NULLIF(u.UserName, ''), 'Customer') AS Customer
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN @Spaces sp ON sp.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+      OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK)
+                    WHERE (b.CustomerCode IS NOT NULL AND c2.Code = b.CustomerCode)
+                       OR (b.UserId IS NOT NULL AND c2.UserId = b.UserId)
+                       OR (u.Email IS NOT NULL AND c2.Email = u.Email)) cu
+     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (1, 5) AND b.EndOn >= @Now
+     ORDER BY b.StartOn;
+
+    -- [3] tour inquiries
+    DECLARE @NewInquiries INT = (
+        SELECT COUNT(*) 
+        FROM dbo.WN_Contacts ct WITH (NOLOCK) 
+        WHERE ct.StatusId = 1
+          AND (@LocationIds IS NULL OR ct.LocationId IS NULL OR ct.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+    ) + (
+        SELECT COUNT(*) 
+        FROM dbo.WN_BookTour bt WITH (NOLOCK) 
+        WHERE ISNULL(bt.Status, 1) IN (0, 1) 
+          AND NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts cbt WITH (NOLOCK) WHERE cbt.PublicId = bt.IdGUID)
+    );
+
+    DECLARE @InquiriesInPeriod INT = (
+        SELECT COUNT(*) 
+        FROM dbo.WN_Contacts ct WITH (NOLOCK) 
+        WHERE ct.CreatedOn >= DATEADD(MINUTE, -@UtcShift, @PStart) 
+          AND (@PEnd IS NULL OR ct.CreatedOn < DATEADD(MINUTE, -@UtcShift, @PEnd))
+          AND (@LocationIds IS NULL OR ct.LocationId IS NULL OR ct.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+    );
+
+    DECLARE @FollowUpsDue INT = 0, @ConvertedInquiries INT = 0;
+    IF OBJECT_ID(N'dbo.WN_ContactFeedback', N'U') IS NOT NULL
+    BEGIN
+        SELECT @FollowUpsDue = COUNT(*) FROM (
+            SELECT ContactId, Outcome, FollowUpOn, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) rn
+              FROM dbo.WN_ContactFeedback WITH (NOLOCK)) f
+         WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today
+           AND (@LocationIds IS NULL OR EXISTS (
+                SELECT 1 FROM dbo.WN_Contacts ct WITH (NOLOCK) 
+                WHERE ct.Id = f.ContactId 
+                  AND (ct.LocationId IS NULL OR ct.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+           ));
+
+        SELECT @ConvertedInquiries = COUNT(DISTINCT cf.ContactId) 
+        FROM dbo.WN_ContactFeedback cf WITH (NOLOCK)
+        WHERE cf.Outcome = N'converted' AND cf.CreatedOn >= @PStart AND (@PEnd IS NULL OR cf.CreatedOn < @PEnd)
+          AND (@LocationIds IS NULL OR EXISTS (
+                SELECT 1 FROM dbo.WN_Contacts ct WITH (NOLOCK) 
+                WHERE ct.Id = cf.ContactId 
+                  AND (ct.LocationId IS NULL OR ct.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+          ));
+    END
+
+    SELECT @NewInquiries AS NewInquiries, @InquiriesInPeriod AS InquiriesInPeriod,
+           @FollowUpsDue AS FollowUpsDue, @ConvertedInquiries AS ConvertedInquiries;
+
+    -- [4] follow-ups due
+    IF OBJECT_ID(N'dbo.WN_ContactFeedback', N'U') IS NOT NULL
+        SELECT TOP 8 ct.Id, ct.Name AS Customer, ct.PhoneNumber AS Phone, f.FollowUpOn AS [Date], f.Reason AS Note
+          FROM (SELECT ContactId, Outcome, FollowUpOn, Reason, ROW_NUMBER() OVER (PARTITION BY ContactId ORDER BY Id DESC) rn
+                  FROM dbo.WN_ContactFeedback WITH (NOLOCK)) f
+          JOIN dbo.WN_Contacts ct WITH (NOLOCK) ON ct.Id = f.ContactId
+         WHERE f.rn = 1 AND f.Outcome = N'future_prospect' AND f.FollowUpOn <= @Today
+           AND (@LocationIds IS NULL OR ct.LocationId IS NULL OR ct.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+         ORDER BY f.FollowUpOn;
+    ELSE
+        SELECT TOP 0 CAST(NULL AS INT) AS Id, CAST(NULL AS NVARCHAR(200)) AS Customer, CAST(NULL AS NVARCHAR(50)) AS Phone,
+               CAST(NULL AS DATE) AS [Date], CAST(NULL AS NVARCHAR(1000)) AS Note;
+
+    -- [5] renewals
+    SELECT TOP 10 b.Id AS BookingId, CONCAT('#', b.Id) AS Reference, b.EndOn AS [Date], b.MonthlyRent AS Amount,
+           sp.Name AS Space, 
+           COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, NULLIF(u.Name, ''), NULLIF(u.UserName, ''), 'Customer') AS Customer
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN @Spaces sp ON sp.Id = b.SpaceId
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+      OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK)
+                    WHERE (b.CustomerCode IS NOT NULL AND c2.Code = b.CustomerCode)
+                       OR (b.UserId IS NOT NULL AND c2.UserId = b.UserId)
+                       OR (u.Email IS NOT NULL AND c2.Email = u.Email)) cu
+     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
+       AND b.EndOn >= @Now AND b.EndOn <= DATEADD(DAY, @RenewalDays, @Now)
+     ORDER BY b.EndOn;
+
+    -- [6] renewals due count
+    SELECT COUNT(*) AS RenewalsDue
+      FROM dbo.WN_Bookings b WITH (NOLOCK) 
+      JOIN @Spaces sp ON sp.Id = b.SpaceId
+     WHERE ISNULL(b.IsDeleted, 0) = 0 AND b.BookingStatusId IN (2, 33)
+       AND b.EndOn >= @Now AND b.EndOn <= DATEADD(DAY, @RenewalDays, @Now);
+
+    -- [7] collections: overdue invoices
+    DECLARE @OpenStatuses TABLE (Id INT PRIMARY KEY);
+    INSERT INTO @OpenStatuses SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@OpenInvoiceStatusIds, ',');
+
+    DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT, UserId INT, DueOn DATE, Balance DECIMAL(18,2), SpaceName NVARCHAR(200), CustomerCode NVARCHAR(50));
+    INSERT INTO @Inv
+    SELECT i.Id, i.InvoiceNumber, i.BookingId, ISNULL(b.UserId, i.UserId), i.DueOn,
+           ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), sp.Name, b.CustomerCode
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+      JOIN @Spaces sp ON sp.Id = b.SpaceId
+     WHERE i.StatusId IN (SELECT Id FROM @OpenStatuses) AND ISNULL(i.StatusId, 0) <> 40;
+
+    SELECT ISNULL(SUM(Balance), 0) AS Outstanding, COUNT(*) AS OutstandingCount,
+           ISNULL(SUM(CASE WHEN DueOn < @Today THEN Balance ELSE 0 END), 0) AS Overdue,
+           SUM(CASE WHEN DueOn < @Today THEN 1 ELSE 0 END) AS OverdueCount
+      FROM @Inv;
+
+    -- [8] top 10 overdue
+    SELECT TOP 10 inv.BookingId, inv.InvoiceNumber AS Reference, inv.DueOn AS [Date], inv.Balance AS Amount,
+           inv.SpaceName AS Space, 
+           COALESCE(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, ' ', cu.LastName))), ''), cu.Email, NULLIF(u.Name, ''), NULLIF(u.UserName, ''), 'Customer') AS Customer
+      FROM @Inv inv
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = inv.UserId
+      OUTER APPLY (SELECT TOP 1 * FROM dbo.WN_Customers c2 WITH (NOLOCK)
+                    WHERE (inv.CustomerCode IS NOT NULL AND c2.Code = inv.CustomerCode)
+                       OR (inv.UserId IS NOT NULL AND c2.UserId = inv.UserId)
+                       OR (u.Email IS NOT NULL AND c2.Email = u.Email)) cu
+     WHERE inv.DueOn < @Today
+     ORDER BY inv.DueOn, inv.Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_RoleDashboard_GetStaff]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 4. dbo.WN_RoleDashboard_GetStaff
+CREATE   PROCEDURE [dbo].[WN_RoleDashboard_GetStaff]
+    @PStart DATETIME2,
+    @PEnd DATETIME2 = NULL,
+    @UtcShift INT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @UL TABLE (UserId INT, LocationId INT, PRIMARY KEY (UserId, LocationId));
+    INSERT INTO @UL SELECT Id, LocationId FROM dbo.WN_Users WITH (NOLOCK) WHERE IsActive = 1 AND RoleId IN (2, 16) AND LocationId IS NOT NULL;
+    IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
+        INSERT INTO @UL SELECT DISTINCT ul.UserId, ul.LocationId FROM dbo.WN_UserLocations ul WITH (NOLOCK)
+          JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId
+         WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
+           AND NOT EXISTS (SELECT 1 FROM @UL x WHERE x.UserId = ul.UserId AND x.LocationId = ul.LocationId);
+
+    -- [0] staff per location
+    SELECT l.Id, l.Name,
+           (SELECT COUNT(*) FROM @UL ul JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId WHERE ul.LocationId = l.Id AND u.RoleId = 2) AS Admins,
+           (SELECT COUNT(*) FROM @UL ul JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ul.UserId WHERE ul.LocationId = l.Id AND u.RoleId = 16) AS SalesExecutives
+      FROM dbo.WN_Locations l WITH (NOLOCK)
+     ORDER BY l.Name;
+
+    -- [1] sales executives and admins
+    ;WITH q_agg AS (
+        SELECT q.CreatedById,
+               COUNT(q.Id) AS Quotations,
+               SUM(CASE WHEN q.Status = 'Converted' THEN 1 ELSE 0 END) AS Converted,
+               ISNULL(SUM(CASE WHEN q.Status = 'Converted' THEN q.TotalAmount ELSE 0 END), 0) AS ConvertedValue
+          FROM dbo.WN_Quotations q WITH (NOLOCK)
+         WHERE ISNULL(q.IsActive, 1) = 1 
+           AND q.CreatedDate >= DATEADD(MINUTE, -@UtcShift, @PStart)
+           AND (@PEnd IS NULL OR q.CreatedDate < DATEADD(MINUTE, -@UtcShift, @PEnd))
+         GROUP BY q.CreatedById
+    )
+    SELECT TOP 25 u.Id, 
+           COALESCE(NULLIF(u.Name, ''), NULLIF(u.UserName, ''), u.Email) AS Name, 
+           u.Email, 
+           u.RoleId,
+           STUFF((SELECT ', ' + l.Name FROM @UL ul JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = ul.LocationId
+                   WHERE ul.UserId = u.Id ORDER BY l.Name FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Location,
+           ISNULL(qa.Quotations, 0) AS Quotations,
+           ISNULL(qa.Converted, 0) AS Converted,
+           ISNULL(qa.ConvertedValue, 0) AS ConvertedValue
+      FROM dbo.WN_Users u WITH (NOLOCK)
+      LEFT JOIN q_agg qa ON qa.CreatedById = u.Id
+     WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
+     ORDER BY ISNULL(qa.Quotations, 0) DESC, COALESCE(NULLIF(u.Name, ''), NULLIF(u.UserName, ''), u.Email);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_RoleDashboard_GetSystem]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 5. dbo.WN_RoleDashboard_GetSystem
+CREATE   PROCEDURE [dbo].[WN_RoleDashboard_GetSystem]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @EmailPending INT = 0, @EmailFailed INT = 0, @LastWhatsApp DATETIME2(0) = NULL;
+    IF OBJECT_ID(N'dbo.WN_InvoiceDeliveryQueue', N'U') IS NOT NULL
+        SELECT @EmailPending = SUM(CASE WHEN Status = 'Pending' THEN 1 ELSE 0 END),
+               @EmailFailed  = SUM(CASE WHEN Status LIKE 'Failed%' THEN 1 ELSE 0 END)
+          FROM dbo.WN_InvoiceDeliveryQueue WITH (NOLOCK);
+
+    IF OBJECT_ID(N'dbo.WN_WhatsApp_Conversations', N'U') IS NOT NULL
+        SELECT @LastWhatsApp = MAX(LastIncomingAt) FROM dbo.WN_WhatsApp_Conversations WITH (NOLOCK);
+
+    SELECT ISNULL(@EmailPending, 0) AS EmailPending, ISNULL(@EmailFailed, 0) AS EmailFailed, @LastWhatsApp AS LastWhatsAppMessage,
+           (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK) WHERE Online = 0) AS MachinesOffline,
+           (SELECT COUNT(*) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS Machines,
+           (SELECT MAX(Last_seen) FROM dbo.WN_HIK_Devices WITH (NOLOCK)) AS LastMachineSeen;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_RoleDashboard_GetTeam]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 2. dbo.WN_RoleDashboard_GetTeam
+CREATE   PROCEDURE [dbo].[WN_RoleDashboard_GetTeam]
+    @LocationIds NVARCHAR(MAX) = NULL,
+    @Today DATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @Spaces TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200), LocationId INT NULL);
+    INSERT INTO @Spaces (Id, Name, LocationId)
+    SELECT s.Id, COALESCE(NULLIF(s.Name, ''), s.Code), s.LocationId
+      FROM dbo.WN_Spaces s WITH (NOLOCK)
+     WHERE s.Status = 1 
+       AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')));
+
+    DECLARE @OpenComplaints INT = 0, @UnreadWhatsApp INT = 0, @KycPending INT = 0, @AccessSuspended INT = 0;
+
+    IF OBJECT_ID(N'dbo.WN_Complaints', N'U') IS NOT NULL
+        SELECT @OpenComplaints = COUNT(*) 
+        FROM dbo.WN_Complaints cmp WITH (NOLOCK) 
+        WHERE cmp.Status IN (N'open', N'in_progress')
+          AND (@LocationIds IS NULL 
+               OR NOT EXISTS (SELECT 1 FROM dbo.WN_Locations lbx WITH (NOLOCK) WHERE LOWER(LTRIM(RTRIM(CAST(lbx.Name AS NVARCHAR(100))))) = LOWER(LTRIM(RTRIM(CAST(ISNULL(cmp.Branch, N'') AS NVARCHAR(100))))))
+               OR EXISTS (
+                    SELECT 1 FROM dbo.WN_Locations lbx WITH (NOLOCK) 
+                    JOIN STRING_SPLIT(@LocationIds, ',') lid ON lbx.Id = TRY_CAST(lid.value AS INT)
+                    WHERE LOWER(LTRIM(RTRIM(CAST(lbx.Name AS NVARCHAR(100))))) = LOWER(LTRIM(RTRIM(CAST(ISNULL(cmp.Branch, N'') AS NVARCHAR(100)))))
+               ));
+
+    IF OBJECT_ID(N'dbo.WN_WhatsApp_Conversations', N'U') IS NOT NULL
+        SELECT @UnreadWhatsApp = COUNT(*) FROM dbo.WN_WhatsApp_Conversations WITH (NOLOCK) WHERE UnreadCount > 0;
+
+    IF OBJECT_ID(N'dbo.WN_CustomerKYCDocuments', N'U') IS NOT NULL
+        SELECT @KycPending = COUNT(DISTINCT d.CustomerId) FROM dbo.WN_CustomerKYCDocuments d WITH (NOLOCK)
+         WHERE d.IsActive = 1 AND d.Status = 0;
+
+    IF OBJECT_ID(N'dbo.WN_HIK_BookingAccessSuspensions', N'U') IS NOT NULL
+        SELECT @AccessSuspended = COUNT(*) FROM dbo.WN_HIK_BookingAccessSuspensions sus WITH (NOLOCK)
+          JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = sus.BookingId
+          JOIN @Spaces sp ON sp.Id = b.SpaceId
+         WHERE sus.ResolvedAt IS NULL AND (sus.OverrideUntil IS NULL OR sus.OverrideUntil < @Today)
+           AND ISNULL(b.IsDeleted, 0) = 0
+           AND b.BookingStatusId NOT IN (3, 4, 6, 86)
+           AND EXISTS (SELECT 1 FROM dbo.WN_BookingDetails d WITH (NOLOCK)
+                        WHERE d.BookingGuid = b.IdGUID AND d.IsDeleted = 0
+                          AND d.EndDateTime >= @Today);
+
+    SELECT @OpenComplaints AS OpenComplaints, 
+           @UnreadWhatsApp AS UnreadWhatsApp,
+           (SELECT COUNT(*) FROM dbo.WN_Contacts ct WITH (NOLOCK) 
+            WHERE ct.StatusId = 1 
+              AND (@LocationIds IS NULL OR ct.LocationId IS NULL OR ct.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+           ) + (
+            SELECT COUNT(*) FROM dbo.WN_BookTour bt WITH (NOLOCK) 
+            WHERE ISNULL(bt.Status, 1) IN (0, 1) 
+              AND NOT EXISTS (SELECT 1 FROM dbo.WN_Contacts cbt WITH (NOLOCK) WHERE cbt.PublicId = bt.IdGUID)
+           ) AS NewInquiries,
+           @KycPending AS KycPending, 
+           @AccessSuspended AS AccessSuspended,
+           (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) 
+            WHERE hd.Online = 0 
+              AND (@LocationIds IS NULL OR hd.LocationId IS NULL OR hd.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+           ) AS MachinesOffline,
+           (SELECT COUNT(*) FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) 
+            WHERE (@LocationIds IS NULL OR hd.LocationId IS NULL OR hd.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+           ) AS Machines;
+
+    SELECT TOP 8 hd.Device_Name AS Name, hd.Last_seen AS LastSeen 
+    FROM dbo.WN_HIK_Devices hd WITH (NOLOCK) 
+    WHERE hd.Online = 0 
+      AND (@LocationIds IS NULL OR hd.LocationId IS NULL OR hd.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, ',')))
+    ORDER BY hd.Device_Name;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Roles_GetAll]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+CREATE   PROCEDURE [dbo].[WN_Roles_GetAll]
 AS
 BEGIN
     SET NOCOUNT ON;
     IF NOT EXISTS (SELECT 1 FROM dbo.WN_Roles WITH (NOLOCK) WHERE Id = 20 OR RoleName = N'network_engineer')
     BEGIN
         INSERT INTO dbo.WN_Roles (Id, RoleName, DisplayName, IsActive, CreatedAt)
-        VALUES (20, N'network_engineer', N'Network Engineer', 1, SYSUTCDATETIME());
+        VALUES (20, N'network_engineer', N'Network Engineer', 1, SYSDATETIME());
     END
     SELECT Id, RoleName, DisplayName, IsActive, CreatedAt
     FROM dbo.WN_Roles
@@ -21146,7 +24403,7 @@ BEGIN
     ORDER BY Id ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Roles_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Roles_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21160,7 +24417,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM dbo.WN_Roles WITH (NOLOCK) WHERE Id = 20 OR RoleName = N'network_engineer')
     BEGIN
         INSERT INTO dbo.WN_Roles (Id, RoleName, DisplayName, IsActive, CreatedAt)
-        VALUES (20, N'network_engineer', N'Network Engineer', 1, SYSUTCDATETIME());
+        VALUES (20, N'network_engineer', N'Network Engineer', 1, SYSDATETIME());
     END
     SELECT Id, RoleName, DisplayName
       FROM dbo.WN_Roles WITH (NOLOCK)
@@ -21168,7 +24425,7 @@ BEGIN
      ORDER BY Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Breakdown]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Breakdown]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21365,7 +24622,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Complaints]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Complaints]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21494,7 +24751,7 @@ BEGIN
      ORDER BY x.CreatedOn, x.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Dashboard]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Dashboard]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21788,7 +25045,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_InquiryRows]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_InquiryRows]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21854,7 +25111,7 @@ BEGIN
          @From = @From, @To = @To, @LocationIds = @LocationIds, @IncludeNoLocation = @IncludeNoLocation;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Bookings]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Bookings]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -21931,7 +25188,7 @@ BEGIN
      ORDER BY r.CreatedOn DESC, r.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Complaints]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Complaints]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22030,7 +25287,7 @@ BEGIN
      ORDER BY r.CreatedOn DESC, r.Id DESC;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Inquiries]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Inquiries]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22087,7 +25344,7 @@ BEGIN
      ORDER BY RowNo;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Leases]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Leases]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22157,7 +25414,7 @@ BEGIN
      ORDER BY r.EndOn, r.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Quotations]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SalesMgr_Records_Quotations]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22220,7 +25477,25 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposit_CustomerDetail]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Schema_CheckColumn]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 19. dbo.WN_Schema_CheckColumn
+CREATE   PROCEDURE [dbo].[WN_Schema_CheckColumn]
+    @TableName NVARCHAR(128),
+    @ColumnName NVARCHAR(128)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT CASE WHEN COL_LENGTH(@TableName, @ColumnName) IS NULL THEN 0 ELSE 1 END AS HasColumn;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposit_CustomerDetail]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22265,7 +25540,7 @@ BEGIN
         sd.Id DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposit_CustomerReport]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposit_CustomerReport]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22311,7 +25586,7 @@ BEGIN
         CustomerName ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_GetByBooking]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_GetByBooking]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22338,7 +25613,7 @@ BEGIN
     WHERE sd.BookingId = @BookingId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22384,7 +25659,7 @@ BEGIN
     SELECT Id, PublicId, CustomerId, RefId, RefNo FROM dbo.WN_SecurityDeposits WHERE Id = SCOPE_IDENTITY();
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_UpdateStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SecurityDeposits_UpdateStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22399,14 +25674,14 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_SecurityDeposits SET
         StatusId      = @StatusId,
-        ReleasedOn    = CASE WHEN @StatusId = 2 THEN SYSUTCDATETIME() ELSE ReleasedOn  END,
-        ForfeitedOn   = CASE WHEN @StatusId IN (3,4) THEN SYSUTCDATETIME() ELSE ForfeitedOn END,
+        ReleasedOn    = CASE WHEN @StatusId = 2 THEN SYSDATETIME() ELSE ReleasedOn  END,
+        ForfeitedOn   = CASE WHEN @StatusId IN (3,4) THEN SYSDATETIME() ELSE ForfeitedOn END,
         ForfeitReason = ISNULL(@ForfeitReason, ForfeitReason),
         UpdatedById   = @UpdatedById
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_ServiceSwitches_GetAll]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_ServiceSwitches_GetAll]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22421,7 +25696,7 @@ BEGIN
      ORDER BY s.ServiceName;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_ServiceSwitches_Set]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_ServiceSwitches_Set]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22439,7 +25714,7 @@ BEGIN
     UPDATE dbo.WN_ServiceSwitches
        SET IsEnabled = @IsEnabled,
            UpdatedBy = @UpdatedBy,
-           UpdatedAt = SYSUTCDATETIME()
+           UpdatedAt = SYSDATETIME()
      WHERE ServiceName = @ServiceName
        AND IsEnabled <> @IsEnabled;
     SELECT s.ServiceName, s.IsEnabled, s.UpdatedBy, s.UpdatedAt
@@ -22447,29 +25722,44 @@ BEGIN
      WHERE s.ServiceName = @ServiceName;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceCategories_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- ============================================================
--- 5. WN_SpaceConfig_Delete (soft)
--- ============================================================
+-- 2. dbo.WN_SpaceCategories_GetList
+CREATE   PROCEDURE [dbo].[WN_SpaceCategories_GetList]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT Id, Code, Label 
+    FROM dbo.WN_SpaceCategories WITH (NOLOCK) 
+    ORDER BY Label;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE   PROCEDURE [dbo].[WN_SpaceConfig_Delete]
     @Id INT
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_SpaceConfig SET Status = 0, UpdatedOn = GETUTCDATE()
+    UPDATE dbo.WN_SpaceConfig SET Status = 0, UpdatedOn = GETDATE()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_DeleteSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_DeleteSpaces]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_SpaceConfig_DeleteSpaces]
+CREATE   PROCEDURE [dbo].[WN_SpaceConfig_DeleteSpaces]
     @ConfigId INT,
     @SpaceGuids NVARCHAR(MAX) = NULL
 AS
@@ -22527,7 +25817,7 @@ BEGIN
         WHERE b.SpaceId = ts.Id 
           AND b.IsDeleted = 0 
           AND b.BookingStatusId IN (1, 2, 5, 33) 
-          AND b.EndOn > SYSUTCDATETIME()
+          AND b.EndOn > SYSDATETIME()
     );
 
     INSERT INTO #Deleted (Code)
@@ -22550,12 +25840,12 @@ BEGIN
     DROP TABLE #Blocked;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GenerateSpaces]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GenerateSpaces]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_SpaceConfig_GenerateSpaces]
+CREATE   PROCEDURE [dbo].[WN_SpaceConfig_GenerateSpaces]
     @ConfigId INT
 AS
 BEGIN
@@ -22663,7 +25953,7 @@ BEGIN
             VALUES
                 (NEWID(), @Name, @Code, @LocationId, @SpaceTypeId, @FloorId,
                  @EffectivePrice, @Amenities, @RentAccountId, @DepositAccountId,
-                 1, 1, GETUTCDATE());
+                 1, 1, GETDATE());
 
             SET @Created = @Created + 1;
         END
@@ -22677,7 +25967,7 @@ BEGIN
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetDepositByCategory]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetDepositByCategory]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22706,7 +25996,7 @@ BEGIN
     ORDER BY sp.EffectiveFrom DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22730,7 +26020,7 @@ BEGIN
     ORDER BY c.LocationId, c.SpaceCategory;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetListV2]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetListV2]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22777,12 +26067,12 @@ BEGIN
     ORDER BY sc.LocationId, sc.SpaceCategory;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetSpaceStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_GetSpaceStatus]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_SpaceConfig_GetSpaceStatus]
+CREATE   PROCEDURE [dbo].[WN_SpaceConfig_GetSpaceStatus]
     @ConfigId INT
 AS
 BEGIN
@@ -22809,8 +26099,8 @@ BEGIN
             WHERE b.SpaceId = s.Id
               AND (b.IsDeleted = 0 OR b.IsDeleted IS NULL)
               AND b.BookingStatusId IN (1, 2, 5, 33)
-              AND b.StartOn <= SYSUTCDATETIME()
-              AND b.EndOn >= SYSUTCDATETIME()
+              AND b.StartOn <= SYSDATETIME()
+              AND b.EndOn >= SYSDATETIME()
         ) THEN 1 ELSE 0 END AS HasBookings
     FROM dbo.WN_Spaces s
     WHERE (s.IsActive IS NULL OR s.IsActive = 1)
@@ -22819,12 +26109,12 @@ BEGIN
     ORDER BY s.Id ASC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_SpaceConfig_Insert]
+CREATE   PROCEDURE [dbo].[WN_SpaceConfig_Insert]
     @SpaceCategory       NVARCHAR(50)   = NULL,
     @TotalSpaces         INT            = 0,
     @CodePrefix          NVARCHAR(20)   = NULL,
@@ -22884,18 +26174,18 @@ BEGIN
          ISNULL(@SecurityDeposit, 0), @FloorId, ISNULL(@PricePerHour, 0), ISNULL(@PricePerDay, 0), ISNULL(@PricePerMonth, 0),
          @Amenities, @LocationId, @SpaceTypeId, 1,
          @RentAccountId, @SecurityReceivedId, @AccountReceivableId, @ServicesIncomeId, @SalesTaxId,
-         @CreatedBy, GETUTCDATE());
+         @CreatedBy, GETDATE());
 
     SELECT SCOPE_IDENTITY() AS NewId;
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceConfig_Update]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_SpaceConfig_Update]
+CREATE   PROCEDURE [dbo].[WN_SpaceConfig_Update]
     @Id                  INT,
     @TotalSpaces         INT            = NULL,
     @CodePrefix          NVARCHAR(20)   = NULL,
@@ -22951,12 +26241,12 @@ BEGIN
         ServicesIncomeId    = ISNULL(@ServicesIncomeId,    ServicesIncomeId),
         SalesTaxId          = ISNULL(@SalesTaxId,          SalesTaxId),
         UpdatedBy           = @UpdatedBy,
-        UpdatedOn           = GETUTCDATE()
+        UpdatedOn           = GETDATE()
     WHERE Id = @Id;
 END;
 
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22968,11 +26258,11 @@ BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_SpaceInventoryConfig SET
         IsActive  = 0,
-        UpdatedOn = SYSUTCDATETIME()
+        UpdatedOn = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_GetList]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -22999,7 +26289,7 @@ BEGIN
     ORDER BY c.LocationId, st.Name;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_Upsert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceInventoryConfig_Upsert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23023,7 +26313,7 @@ BEGIN
             CodePrefix  = @CodePrefix,
             MinCode     = @MinCode,
             TotalSpaces = @TotalSpaces,
-            UpdatedOn   = SYSUTCDATETIME(),
+            UpdatedOn   = SYSDATETIME(),
             UpdatedById = @UpdatedById
         WHERE LocationId = @LocationId AND SpaceTypeId = @SpaceTypeId;
     END
@@ -23038,7 +26328,7 @@ BEGIN
     WHERE LocationId = @LocationId AND SpaceTypeId = @SpaceTypeId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpacePricing_GetActive]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpacePricing_GetActive]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23070,7 +26360,7 @@ BEGIN
     ORDER BY sp.BillingPeriodId;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpacePricing_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpacePricing_Insert]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23126,12 +26416,12 @@ BEGIN
     SELECT Id, PublicId FROM dbo.WN_SpacePricing WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_Delete]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_Spaces_Delete]
+CREATE   PROCEDURE [dbo].[WN_Spaces_Delete]
     @Id INT
 AS
 BEGIN
@@ -23141,7 +26431,7 @@ BEGIN
         WHERE SpaceId = @Id 
           AND IsDeleted = 0 
           AND BookingStatusId IN (1, 2, 5, 33)
-          AND EndOn > SYSUTCDATETIME()
+          AND EndOn > SYSDATETIME()
     )
     BEGIN
         RAISERROR('Cannot delete space with active bookings.', 16, 1);
@@ -23150,7 +26440,7 @@ BEGIN
     UPDATE dbo.WN_Spaces SET IsActive = 0, Status = 0 WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GenerateInventory]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GenerateInventory]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23238,12 +26528,12 @@ BEGIN
     SELECT @Created AS Created, @Skipped AS Skipped, @TotalSpaces AS Configured;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailabilityCounts]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailabilityCounts]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_Spaces_GetAvailabilityCounts]
+CREATE   PROCEDURE [dbo].[WN_Spaces_GetAvailabilityCounts]
     @ShiftType NVARCHAR(20) = '24_7'
 AS
 BEGIN
@@ -23263,8 +26553,8 @@ BEGIN
                 SELECT 1 FROM dbo.WN_Bookings bk
                 WHERE bk.SpaceId = s.Id AND bk.IsDeleted = 0
                   AND bk.BookingStatusId IN (1, 2, 5, 33)
-                  AND SYSUTCDATETIME() < bk.EndOn
-                  AND SYSUTCDATETIME() >= bk.StartOn
+                  AND SYSDATETIME() < bk.EndOn
+                  AND SYSDATETIME() >= bk.StartOn
                   AND (
                       @NormalizedShift = '24_7'
                       OR ISNULL(bk.ShiftType, '24_7') = '24_7'
@@ -23286,136 +26576,182 @@ BEGIN
     ORDER BY sc.Label;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailable]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailable]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE   PROCEDURE [dbo].[WN_Spaces_GetAvailable]
-    @ShiftType       NVARCHAR(20) = '24_7',
-    @IncludeOccupied BIT          = 0   -- QA_03: 1 = every active, priced space with OccupiedNow (customer app space cards)
+(
+	 @ShiftType nvarchar(20) = '24_7'
+	,@IncludeOccupied bit = 0
+)
 AS
 BEGIN
-    -- @IncludeOccupied = 0 (default, website / CMS): spaces not booked right now, as before. "Now" is Pakistan time
-    -- (bookings are stored in Pakistan time; this used to compare them with UTC, 5 hours off).
-    -- @IncludeOccupied = 1 (QA_03, customer app): every active space of an active location that has an active price
-    -- for its booking period (Monthly for PrivateOffice / SharedSpace, Hourly otherwise, as WN_Bookings_InsertSmart
-    -- books), occupied now or not: OccupiedNow = 1 when a booking covers this moment; Amenities = the names of the
-    -- space's amenities (its own list, WN_SpaceAmenities, else its location + space type's WN_SpaceConfig list).
-    SET NOCOUNT ON;
-    DECLARE @NormalizedShift NVARCHAR(20) = CASE
-        WHEN @ShiftType IS NULL OR @ShiftType = '' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
-        WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
-        WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
-        ELSE LOWER(@ShiftType)
-    END;
-    DECLARE @NowPk DATETIME2 = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2);
-    DECLARE @TodayPk DATE = CAST(@NowPk AS DATE);
-    IF ISNULL(@IncludeOccupied, 0) = 0
-    BEGIN
-        SELECT
-            s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
-            s.LocationId AS LocationId, l.Name AS LocationName,
-            s.SpaceTypeId AS SpaceTypeId, st.Description AS SpaceTypeName,
-            sc.Code AS CategoryCode, sc.Label AS CategoryLabel,
-            s.Capacity, s.ImageUrl,
-            vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit, vp.BillingPeriodCode
-        FROM dbo.WN_Spaces          s  WITH (NOLOCK)
-        JOIN dbo.WN_Locations       l  WITH (NOLOCK) ON l.Id  = s.LocationId
-        JOIN dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-        JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-        OUTER APPLY (
-            SELECT TOP 1
-                sp.SeatPrice, sp.SeatPrice * s.Capacity AS RoomPrice,
-                sp.SecurityDeposit, bp.Code AS BillingPeriodCode
-            FROM dbo.WN_SpacePricing   sp WITH (NOLOCK)
-            JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = sp.BillingPeriodId
-            WHERE sp.SpaceId      = s.Id AND sp.IsActive = 1
-              AND sp.EffectiveFrom <= @TodayPk
-              AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > @TodayPk)
-            ORDER BY sp.EffectiveFrom DESC
-        ) vp
-        WHERE s.IsActive = 1
-          AND NOT EXISTS (
-              SELECT 1 FROM dbo.WN_Bookings bk WITH (NOLOCK)
-              WHERE bk.SpaceId = s.Id AND bk.IsDeleted = 0
-                AND bk.BookingStatusId IN (1, 2, 5, 33)
-                AND @NowPk <  bk.EndOn
-                AND @NowPk >= bk.StartOn
-                AND (
-                    @NormalizedShift = '24_7'
-                    OR ISNULL(bk.ShiftType, '24_7') = '24_7'
-                    OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
-                )
-          )
-        ORDER BY s.LocationId, TRY_CAST(s.Code AS INT), s.Code;
-        RETURN;
-    END
-    SELECT
-        s.Id, s.IdGUID AS PublicId, s.Code, s.Name,
-        s.LocationId AS LocationId, l.Name AS LocationName,
-        s.SpaceTypeId AS SpaceTypeId, st.Description AS SpaceTypeName,
-        sc.Code AS CategoryCode, sc.Label AS CategoryLabel,
-        s.Capacity, s.ImageUrl,
-        vp.SeatPrice, vp.RoomPrice, vp.SecurityDeposit, vp.BillingPeriodCode,
-        CAST(CASE WHEN EXISTS (
-            SELECT 1 FROM dbo.WN_Bookings bk WITH (NOLOCK)
-            WHERE bk.SpaceId = s.Id AND bk.IsDeleted = 0
-              AND bk.BookingStatusId IN (1, 2, 5, 33)
-              AND @NowPk <  bk.EndOn
-              AND @NowPk >= bk.StartOn
-              AND (
-                  @NormalizedShift = '24_7'
-                  OR ISNULL(bk.ShiftType, '24_7') = '24_7'
-                  OR @NormalizedShift = ISNULL(bk.ShiftType, '24_7')
-              )
-        ) THEN 1 ELSE 0 END AS BIT) AS OccupiedNow,
-        am.Amenities
-    FROM dbo.WN_Spaces          s  WITH (NOLOCK)
-    JOIN dbo.WN_Locations       l  WITH (NOLOCK) ON l.Id  = s.LocationId
-    JOIN dbo.WN_SpaceTypes      st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-    JOIN dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id = st.CategoryId
-    CROSS APPLY (
-        SELECT CASE WHEN sc.Code IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END AS Code
-    ) bpc
-    CROSS APPLY (
-        SELECT TOP 1
-            sp.SeatPrice, sp.SeatPrice * s.Capacity AS RoomPrice,
-            sp.SecurityDeposit, bp.Code AS BillingPeriodCode
-        FROM dbo.WN_SpacePricing   sp WITH (NOLOCK)
-        JOIN dbo.WN_BillingPeriods bp WITH (NOLOCK) ON bp.Id = sp.BillingPeriodId
-        WHERE sp.SpaceId      = s.Id AND sp.IsActive = 1
-          AND bp.Code         = bpc.Code
-          AND sp.SeatPrice    > 0
-          AND sp.EffectiveFrom <= @TodayPk
-          AND (sp.EffectiveTo IS NULL OR sp.EffectiveTo > @TodayPk)
-        ORDER BY sp.EffectiveFrom DESC
-    ) vp
-    OUTER APPLY (
-        SELECT TOP 1 cfg.Amenities
-        FROM dbo.WN_SpaceConfig cfg WITH (NOLOCK)
-        WHERE cfg.LocationId = s.LocationId AND cfg.SpaceTypeId = s.SpaceTypeId AND cfg.Status = 1
-        ORDER BY cfg.Id DESC
-    ) cfg
-    OUTER APPLY (
-        SELECT STUFF((
-            SELECT N', ' + a.Name
-            FROM dbo.WN_Amenities a WITH (NOLOCK)
-            WHERE ISNULL(a.IsActive, 1) = 1
-              AND (
-                  N',' + REPLACE(COALESCE(NULLIF(LTRIM(RTRIM(s.Amenities)), N''), cfg.Amenities, N''), N' ', N'') + N','
-                      LIKE N'%,' + CAST(a.Id AS NVARCHAR(12)) + N',%'
-                  OR EXISTS (SELECT 1 FROM dbo.WN_SpaceAmenities sa WITH (NOLOCK) WHERE sa.SpaceId = s.Id AND sa.AmenityId = a.Id)
-              )
-            ORDER BY a.Name
-            FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'') AS Amenities
-    ) am
-    WHERE s.IsActive = 1
-      AND ISNULL(l.IsActive, 1) = 1
-    ORDER BY s.LocationId, TRY_CAST(s.Code AS INT), s.Code;
+	SET NOCOUNT ON;
+	DECLARE @NormalizedShift nvarchar(20) = CASE
+		WHEN @ShiftType IS NULL OR @ShiftType='' OR @ShiftType IN ('24_7', '24/7', '24-by-7', '1') THEN '24_7'
+		WHEN LOWER(@ShiftType) IN ('morning', 'morning_shift', 'shift_morning', '2') THEN 'morning'
+		WHEN LOWER(@ShiftType) IN ('evening', 'evening_shift', 'shift_evening', 'night', '3') THEN 'evening'
+		ELSE LOWER(@ShiftType)
+	END;
+	DECLARE @NowPk datetime2 = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS datetime2);
+	DECLARE @TodayPk date = CAST(@NowPk AS date);
+	IF ISNULL(@IncludeOccupied, 0)=0
+	BEGIN
+		SELECT
+			 s.Id
+			,s.IdGUID AS PublicId
+			,s.Code
+			,s.Name
+			,s.LocationId AS LocationId
+			,l.Name AS LocationName
+			,s.SpaceTypeId AS SpaceTypeId
+			,st.Description AS SpaceTypeName
+			,sc.Code AS CategoryCode
+			,sc.Label AS CategoryLabel
+			,s.Capacity
+			,s.ImageUrl
+			,vp.SeatPrice
+			,vp.RoomPrice
+			,vp.SecurityDeposit
+			,vp.BillingPeriodCode
+		FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+			dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+			dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+			dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+			(SELECT CASE WHEN sc.Code IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END AS Code) bpc OUTER APPLY
+			(
+				SELECT TOP 1
+					 pc.PricePerHour
+					,pc.PricePerMonth
+					,pc.SecurityDeposit
+				FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+					dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+				WHERE pc.LocationId=s.LocationId AND pc.Status=1
+					AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+				ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+			) pc CROSS APPLY
+			(
+				SELECT CASE
+					WHEN bpc.Code='Monthly' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+					WHEN bpc.Code='Hourly' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+				END AS SeatPrice
+			) pp CROSS APPLY
+			(
+				SELECT
+					 pp.SeatPrice
+					,CASE WHEN sc.Code='PrivateOffice' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+					,CASE
+						WHEN pc.SecurityDeposit > 0 THEN pc.SecurityDeposit
+						WHEN sc.Code IN ('PrivateOffice', 'Private') AND pp.SeatPrice > 0 THEN pp.SeatPrice * s.Capacity * 2
+						ELSE 0
+					 END AS SecurityDeposit
+					,bpc.Code AS BillingPeriodCode
+			) vp
+		WHERE s.IsActive=1
+			AND NOT EXISTS (
+				SELECT 1
+				FROM dbo.WN_Bookings bk WITH (NOLOCK)
+				WHERE bk.SpaceId=s.Id AND bk.IsDeleted=0
+					AND bk.BookingStatusId IN (1, 2, 5, 33)
+					AND @NowPk < bk.EndOn
+					AND @NowPk >= bk.StartOn
+					AND (@NormalizedShift='24_7'
+						OR ISNULL(bk.ShiftType, '24_7')='24_7'
+						OR @NormalizedShift=ISNULL(bk.ShiftType, '24_7'))
+			)
+		ORDER BY s.LocationId, TRY_CAST(s.Code AS int), s.Code;
+		RETURN;
+	END
+	SELECT
+		 s.Id
+		,s.IdGUID AS PublicId
+		,s.Code
+		,s.Name
+		,s.LocationId AS LocationId
+		,l.Name AS LocationName
+		,s.SpaceTypeId AS SpaceTypeId
+		,st.Description AS SpaceTypeName
+		,sc.Code AS CategoryCode
+		,sc.Label AS CategoryLabel
+		,s.Capacity
+		,s.ImageUrl
+		,vp.SeatPrice
+		,vp.RoomPrice
+		,vp.SecurityDeposit
+		,vp.BillingPeriodCode
+		,CAST(CASE
+			WHEN EXISTS (
+				SELECT 1
+				FROM dbo.WN_Bookings bk WITH (NOLOCK)
+				WHERE bk.SpaceId=s.Id AND bk.IsDeleted=0
+					AND bk.BookingStatusId IN (1, 2, 5, 33)
+					AND @NowPk < bk.EndOn
+					AND @NowPk >= bk.StartOn
+					AND (@NormalizedShift='24_7'
+						OR ISNULL(bk.ShiftType, '24_7')='24_7'
+						OR @NormalizedShift=ISNULL(bk.ShiftType, '24_7'))
+			) THEN 1
+			ELSE 0
+		END AS bit) AS OccupiedNow
+		,am.Amenities
+	FROM dbo.WN_Spaces s WITH (NOLOCK) JOIN
+		dbo.WN_Locations l WITH (NOLOCK) ON l.Id=s.LocationId JOIN
+		dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id=s.SpaceTypeId JOIN
+		dbo.WN_SpaceCategories sc WITH (NOLOCK) ON sc.Id=st.CategoryId CROSS APPLY
+		(SELECT CASE WHEN sc.Code IN ('PrivateOffice', 'SharedSpace') THEN 'Monthly' ELSE 'Hourly' END AS Code) bpc OUTER APPLY
+		(
+			SELECT TOP 1
+				 pc.PricePerHour
+				,pc.PricePerMonth
+				,pc.SecurityDeposit
+			FROM dbo.WN_SpaceConfig pc WITH (NOLOCK) LEFT JOIN
+				dbo.WN_SpaceTypes pst WITH (NOLOCK) ON pst.Id=pc.SpaceTypeId
+			WHERE pc.LocationId=s.LocationId AND pc.Status=1
+				AND (pc.SpaceTypeId=s.SpaceTypeId OR pst.CategoryId=st.CategoryId)
+			ORDER BY CASE WHEN pc.SpaceTypeId=s.SpaceTypeId THEN 0 ELSE 1 END, pc.Id DESC
+		) pc CROSS APPLY
+		(
+			SELECT CASE
+				WHEN bpc.Code='Monthly' AND pc.PricePerMonth > 0 THEN pc.PricePerMonth
+				WHEN bpc.Code='Hourly' AND pc.PricePerHour > 0 THEN pc.PricePerHour
+			END AS SeatPrice
+		) pp CROSS APPLY
+		(
+			SELECT
+				 pp.SeatPrice
+				,CASE WHEN sc.Code='PrivateOffice' THEN pp.SeatPrice * s.Capacity ELSE pp.SeatPrice END AS RoomPrice
+				,CASE
+					WHEN pc.SecurityDeposit > 0 THEN pc.SecurityDeposit
+					WHEN sc.Code IN ('PrivateOffice', 'Private') AND pp.SeatPrice > 0 THEN pp.SeatPrice * s.Capacity * 2
+					ELSE 0
+				 END AS SecurityDeposit
+				,bpc.Code AS BillingPeriodCode
+		) vp OUTER APPLY
+		(
+			SELECT TOP 1 cfg.Amenities
+			FROM dbo.WN_SpaceConfig cfg WITH (NOLOCK)
+			WHERE cfg.LocationId=s.LocationId AND cfg.SpaceTypeId=s.SpaceTypeId AND cfg.Status=1
+			ORDER BY cfg.Id DESC
+		) cfg OUTER APPLY
+		(
+			SELECT STUFF((
+				SELECT N', ' + a.Name
+				FROM dbo.WN_Amenities a WITH (NOLOCK)
+				WHERE ISNULL(a.IsActive, 1)=1
+					AND (N',' + REPLACE(COALESCE(NULLIF(LTRIM(RTRIM(s.Amenities)), N''), cfg.Amenities, N''), N' ', N'') + N',' LIKE N'%,' + CAST(a.Id AS nvarchar(12)) + N',%'
+						OR EXISTS (SELECT 1 FROM dbo.WN_SpaceAmenities sa WITH (NOLOCK) WHERE sa.SpaceId=s.Id AND sa.AmenityId=a.Id))
+				ORDER BY a.Name
+				FOR XML PATH(''), TYPE
+			).value('.', 'NVARCHAR(MAX)'), 1, 2, N'') AS Amenities
+		) am
+	WHERE s.IsActive=1
+		AND ISNULL(l.IsActive, 1)=1
+	ORDER BY s.LocationId, TRY_CAST(s.Code AS int), s.Code;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailableByType]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetAvailableByType]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23475,7 +26811,7 @@ BEGIN
     ORDER BY TRY_CAST(s.Code AS INT), s.Code;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetByGuid]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetByGuid]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23500,7 +26836,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetByPublicId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetByPublicId]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23535,7 +26871,7 @@ BEGIN
     WHERE s.IdGUID = @PublicId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetConfig]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetConfig]    Script Date: 04/11/2026 10:31:37 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23551,12 +26887,12 @@ BEGIN
     ORDER BY Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetList]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-CREATE PROCEDURE [dbo].[WN_Spaces_GetList]
+CREATE   PROCEDURE [dbo].[WN_Spaces_GetList]
     @Page        INT           = 1,
     @Limit       INT           = 20,
     @Search      NVARCHAR(255) = NULL,
@@ -23580,7 +26916,7 @@ BEGIN
                 SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
                 WHERE b.SpaceId = s.Id
                   AND b.BookingStatusId IN (1, 2, 5, 33)
-                  AND b.EndOn >= SYSUTCDATETIME()
+                  AND b.EndOn >= SYSDATETIME()
                   AND (b.IsDeleted IS NULL OR b.IsDeleted = 0)
             ) THEN 'Booked'
             ELSE 'Available'
@@ -23590,7 +26926,7 @@ BEGIN
             FROM dbo.WN_Bookings b WITH (NOLOCK)
             WHERE b.SpaceId = s.Id
               AND b.BookingStatusId IN (1, 2, 5, 33)
-              AND b.EndOn >= SYSUTCDATETIME()
+              AND b.EndOn >= SYSDATETIME()
               AND (b.IsDeleted IS NULL OR b.IsDeleted = 0)
         ) AS BookedTill,
         s.Price, s.BillingPeriodId, bp.Code AS BillingPeriodCode, bp.Label AS BillingPeriodLabel,
@@ -23612,7 +26948,7 @@ BEGIN
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetVacant]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_GetVacant]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23642,7 +26978,7 @@ BEGIN
     ORDER BY TRY_CAST(s.Code AS INT);
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_Insert]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23676,7 +27012,7 @@ BEGIN
     SELECT Id, IdGUID AS PublicId FROM dbo.WN_Spaces WHERE Id = SCOPE_IDENTITY();
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_SetAmenities]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_SetAmenities]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23694,7 +27030,7 @@ BEGIN
     WHERE LTRIM(RTRIM(value)) <> '';
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_Update]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23727,16 +27063,15 @@ BEGIN
         LocationId      = ISNULL(@LocationId,      LocationId),
         Price           = ISNULL(@Price,           ISNULL(@PricePerMonth, ISNULL(@PricePerDay, ISNULL(@PricePerHour, Price)))),
         BillingPeriodId = ISNULL(@BillingPeriodId, BillingPeriodId),
-        UpdatedOn       = SYSUTCDATETIME()
+        UpdatedOn       = SYSDATETIME()
     WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Spaces_UpdateConfig]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Spaces_UpdateConfig]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
--- Update the UpdateConfig SP to support SecurityDeposit
 CREATE   PROCEDURE [dbo].[WN_Spaces_UpdateConfig]
     @SpaceCategory      NVARCHAR(20),
     @TotalSpaces        INT,
@@ -23753,14 +27088,14 @@ BEGIN
         OpeningTime       = ISNULL(@OpeningTime,       OpeningTime),
         ClosingTime       = ISNULL(@ClosingTime,       ClosingTime),
         SecurityDeposit   = ISNULL(@SecurityDeposit,   SecurityDeposit),
-        UpdatedOn         = GETUTCDATE(),
+        UpdatedOn         = GETDATE(),
         UpdatedBy         = @AdminEmail
     WHERE SpaceCategory = @SpaceCategory;
 
     SELECT @@ROWCOUNT AS AffectedRows;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Delete]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23773,7 +27108,7 @@ BEGIN
     UPDATE dbo.WN_SpaceTypes SET IsActive = 0 WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_GetList]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23821,7 +27156,7 @@ BEGIN
     ORDER BY l.Name, sc.Label, st.Name;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Insert]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23842,7 +27177,7 @@ CREATE   PROCEDURE [dbo].[WN_SpaceTypes_Insert]
 AS
 BEGIN
     -- P1 (space types per location): the type is created for @LocationId; one name per location (also inactive types);
-    -- the WN_ChargeTypeAccountMapping copy below now updates only THIS location’s rows (it updated every location’s).
+    -- the WN_ChargeTypeAccountMapping copy below now updates only THIS locationâ€™s rows (it updated every locationâ€™s).
     SET NOCOUNT ON;
     SET @LocationId = ISNULL(@LocationId, 1);
     IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id = @LocationId)
@@ -23862,9 +27197,9 @@ BEGIN
         VALUES
             (@NewIdGUID, @Name, @Description, @CategoryId, ISNULL(@Capacity, 1), @HourlyAllowed, 1,
              @AccountReceivableId, @RentAccountId, @ServicesIncomeId, @SalesTaxId, @SecurityReceivedId,
-             @CreatedById, GETUTCDATE(), @LocationId);
+             @CreatedById, GETDATE(), @LocationId);
         DECLARE @InsertedId INT = SCOPE_IDENTITY();
-        -- Synchronize WN_ChargeTypeAccountMapping (P1: this location’s rows only)
+        -- Synchronize WN_ChargeTypeAccountMapping (P1: this locationâ€™s rows only)
         IF @RentAccountId IS NOT NULL
         BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 1 AND LocationId = @LocationId)
@@ -23908,7 +27243,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_SpaceTypes_Update]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -23930,9 +27265,9 @@ CREATE   PROCEDURE [dbo].[WN_SpaceTypes_Update]
 AS
 BEGIN
     -- P1 (space types per location): optional @LocationId; a type already used by spaces or space configuration at
-    -- another location can’t be moved there; one name per location; the WN_ChargeTypeAccountMapping copy below now
-    -- updates only the type’s location (it updated every location’s rows). Everything else as before (accounts are set
-    -- as given, NULL clears them, and are cascaded to the type’s spaces).
+    -- another location canâ€™t be moved there; one name per location; the WN_ChargeTypeAccountMapping copy below now
+    -- updates only the typeâ€™s location (it updated every locationâ€™s rows). Everything else as before (accounts are set
+    -- as given, NULL clears them, and are cascaded to the typeâ€™s spaces).
     SET NOCOUNT ON;
     DECLARE @TypeLocationId INT, @CurrentName NVARCHAR(200);
     SELECT @TypeLocationId = LocationId, @CurrentName = Name FROM dbo.WN_SpaceTypes WITH (NOLOCK) WHERE Id = @Id;
@@ -23967,7 +27302,7 @@ BEGIN
             SecurityReceivedId  = @SecurityReceivedId,
             LocationId          = @LocationId,
             UpdatedBy           = @UpdatedById,
-            UpdatedOn           = GETUTCDATE()
+            UpdatedOn           = GETDATE()
         WHERE Id = @Id;
         -- Cascade accounts to child spaces of this space type
         UPDATE dbo.WN_Spaces SET
@@ -23978,7 +27313,7 @@ BEGIN
             SecurityReceivedId  = @SecurityReceivedId,
             SecurityRecivedId   = @SecurityReceivedId
         WHERE SpaceTypeId = @Id;
-        -- Synchronize WN_ChargeTypeAccountMapping (P1: the type’s location only)
+        -- Synchronize WN_ChargeTypeAccountMapping (P1: the typeâ€™s location only)
         IF @RentAccountId IS NOT NULL
         BEGIN
             IF EXISTS (SELECT 1 FROM dbo.WN_ChargeTypeAccountMapping WHERE ChargeTypeId = 1 AND LocationId = @LocationId)
@@ -24022,7 +27357,7 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_ToggleAccessStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_ToggleAccessStatus]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24043,13 +27378,13 @@ BEGIN
         BEGIN
             UPDATE [dbo].[WN_AccessStatus]
             SET IsEnabled = @IsEnabled,
-                RevokedAt = CASE WHEN @IsEnabled = 0 THEN SYSUTCDATETIME() ELSE NULL END
+                RevokedAt = CASE WHEN @IsEnabled = 0 THEN SYSDATETIME() ELSE NULL END
             WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId;
         END
         ELSE
         BEGIN
             INSERT INTO [dbo].[WN_AccessStatus] (BookingDetailId, PersonId, CustomerId, IsEnabled, GrantedAt, RevokedAt)
-            VALUES (@BookingDetailId, @PersonId, @CustomerId, @IsEnabled, SYSUTCDATETIME(), CASE WHEN @IsEnabled = 0 THEN SYSUTCDATETIME() ELSE NULL END);
+            VALUES (@BookingDetailId, @PersonId, @CustomerId, @IsEnabled, SYSDATETIME(), CASE WHEN @IsEnabled = 0 THEN SYSDATETIME() ELSE NULL END);
         END
     END
     ELSE
@@ -24057,14 +27392,124 @@ BEGIN
         -- Batch Toggle for all attendants under CustomerId & BookingDetailId
         UPDATE [dbo].[WN_AccessStatus]
         SET IsEnabled = @IsEnabled,
-            RevokedAt = CASE WHEN @IsEnabled = 0 THEN SYSUTCDATETIME() ELSE NULL END
+            RevokedAt = CASE WHEN @IsEnabled = 0 THEN SYSDATETIME() ELSE NULL END
         WHERE BookingDetailId = @BookingDetailId AND CustomerId = @CustomerId;
     END
 
     SELECT @@ROWCOUNT AS RowsUpdated;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SiteLocations_GetAll]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_ClientAliases_Delete]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 10. dbo.WN_UNIFI_ClientAliases_Delete
+CREATE   PROCEDURE [dbo].[WN_UNIFI_ClientAliases_Delete]
+    @Mac NVARCHAR(17)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    DELETE FROM dbo.WN_UNIFI_ClientAliases 
+    WHERE Mac = @Mac;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_ClientAliases_GetList]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 8. dbo.WN_UNIFI_ClientAliases_GetList
+CREATE   PROCEDURE [dbo].[WN_UNIFI_ClientAliases_GetList]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT Mac, Alias 
+    FROM dbo.WN_UNIFI_ClientAliases WITH (NOLOCK);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_ClientAliases_Upsert]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 9. dbo.WN_UNIFI_ClientAliases_Upsert
+CREATE   PROCEDURE [dbo].[WN_UNIFI_ClientAliases_Upsert]
+    @Mac NVARCHAR(17),
+    @Alias NVARCHAR(100),
+    @Email NVARCHAR(200) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    MERGE dbo.WN_UNIFI_ClientAliases WITH (HOLDLOCK) AS t
+    USING (SELECT @Mac AS Mac) s ON t.Mac = s.Mac
+    WHEN MATCHED THEN 
+        UPDATE SET Alias = @Alias, UpdatedAt = SYSUTCDATETIME(), UpdatedByEmail = @Email
+    WHEN NOT MATCHED THEN 
+        INSERT (Mac, Alias, UpdatedAt, UpdatedByEmail) 
+        VALUES (s.Mac, @Alias, SYSUTCDATETIME(), @Email);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_MacFilterLog_GetPaged]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 14. dbo.WN_UNIFI_MacFilterLog_GetPaged
+CREATE   PROCEDURE [dbo].[WN_UNIFI_MacFilterLog_GetPaged]
+    @Top INT,
+    @WlanId NVARCHAR(50) = NULL,
+    @Mac NVARCHAR(17) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT TOP (@Top) l.Id, l.LoggedAt, l.WlanId, l.Ssid, l.Mac, l.Action, l.Policy, l.Reason, l.ByEmail,
+           COALESCE(NULLIF(u.Name, ''), l.ByEmail) AS ByName
+      FROM dbo.WN_UNIFI_MacFilterLog l WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = l.ByUserId
+     WHERE (@WlanId IS NULL OR l.WlanId = @WlanId) AND (@Mac IS NULL OR l.Mac = @Mac)
+     ORDER BY l.Id DESC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_MacFilterLog_Insert]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 11. dbo.WN_UNIFI_MacFilterLog_Insert
+CREATE   PROCEDURE [dbo].[WN_UNIFI_MacFilterLog_Insert]
+    @WlanId NVARCHAR(50),
+    @Ssid NVARCHAR(100),
+    @Mac NVARCHAR(17) = NULL,
+    @Action NVARCHAR(20),
+    @Policy NVARCHAR(10) = NULL,
+    @Reason NVARCHAR(500) = NULL,
+    @ByEmail NVARCHAR(200) = NULL,
+    @ByUserId INT = NULL,
+    @PreviousList NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    INSERT INTO dbo.WN_UNIFI_MacFilterLog (WlanId, Ssid, Mac, Action, Policy, Reason, ByEmail, ByUserId, PreviousList)
+    VALUES (@WlanId, @Ssid, @Mac, @Action, @Policy, @Reason, @ByEmail, @ByUserId, @PreviousList);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SiteLocations_GetAll]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24081,7 +27526,7 @@ BEGIN
      ORDER BY t.SiteId, t.LocationId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SiteLocations_Set]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SiteLocations_Set]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24110,7 +27555,7 @@ BEGIN
      WHERE t.SiteId = @SiteId
        AND NOT EXISTS (SELECT 1 FROM @Wanted w WHERE w.LocationId = t.LocationId);
     INSERT INTO dbo.WN_UNIFI_SiteLocations (SiteId, LocationId, SiteName, UpdatedBy, UpdatedAt)
-    SELECT @SiteId, w.LocationId, @SiteName, @UpdatedBy, SYSUTCDATETIME()
+    SELECT @SiteId, w.LocationId, @SiteName, @UpdatedBy, SYSDATETIME()
       FROM @Wanted w
      WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_UNIFI_SiteLocations t WITH (UPDLOCK, HOLDLOCK)
                         WHERE t.SiteId = @SiteId AND t.LocationId = w.LocationId);
@@ -24121,7 +27566,43 @@ BEGIN
      ORDER BY t.LocationId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_UpdateInvoiceBreakdown]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SsidDevices_Delete]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 13. dbo.WN_UNIFI_SsidDevices_Delete
+CREATE   PROCEDURE [dbo].[WN_UNIFI_SsidDevices_Delete]
+    @WlanId NVARCHAR(50),
+    @Mac NVARCHAR(17)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    DELETE FROM dbo.WN_UNIFI_SsidDevices 
+    WHERE WlanId = @WlanId AND Mac = @Mac;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UNIFI_SsidDevices_GetList]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 12. dbo.WN_UNIFI_SsidDevices_GetList
+CREATE   PROCEDURE [dbo].[WN_UNIFI_SsidDevices_GetList]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_NULLS ON;
+    SET QUOTED_IDENTIFIER ON;
+
+    SELECT WlanId, Mac, Name, RoomNo 
+    FROM dbo.WN_UNIFI_SsidDevices WITH (NOLOCK);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_UpdateInvoiceBreakdown]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24191,11 +27672,11 @@ BEGIN
         AccountsCoaId = COALESCE(@AccountsCoaId, AccountsCoaId, @RentAccountId),
         DueOn = ISNULL(@DueOn, DueOn),
         WHTAmount = ISNULL(@InvWhtAmount, WHTAmount),
-        UpdatedOn = SYSUTCDATETIME()
+        UpdatedOn = SYSDATETIME()
     WHERE Id = @InvoiceId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_GetByUser]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_GetByUser]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24212,7 +27693,7 @@ BEGIN
      ORDER BY p.Permission;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_ListAdmins]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_ListAdmins]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24245,7 +27726,7 @@ BEGIN
      ORDER BY u.Name, u.Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_Set]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_UserPermissions_Set]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24269,7 +27750,7 @@ BEGIN
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM dbo.WN_UserPermissions WITH (UPDLOCK, HOLDLOCK) WHERE UserId = @UserId AND Permission = @Permission)
             INSERT INTO dbo.WN_UserPermissions (UserId, Permission, GrantedById, GrantedAt)
-            VALUES (@UserId, @Permission, @GrantedById, SYSUTCDATETIME());
+            VALUES (@UserId, @Permission, @GrantedById, SYSDATETIME());
     END
     ELSE
         DELETE FROM dbo.WN_UserPermissions WHERE UserId = @UserId AND Permission = @Permission;
@@ -24294,7 +27775,7 @@ BEGIN
        AND u.Id = @UserId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_Delete]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_Delete]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24307,7 +27788,7 @@ BEGIN
     UPDATE dbo.WN_Users SET IsActive = 0 WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetByEmail]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetByEmail]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24328,7 +27809,7 @@ BEGIN
       AND u.IsActive = 1;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetByGuid]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetByGuid]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24357,13 +27838,11 @@ BEGIN
     END CATCH
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetById]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetById]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 10. WN_Users_GetById
 CREATE   PROCEDURE [dbo].[WN_Users_GetById]
     @Id INT
 AS
@@ -24383,13 +27862,11 @@ BEGIN
     WHERE u.Id = @Id;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetByPublicId]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetByPublicId]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 11. WN_Users_GetByPublicId
 CREATE   PROCEDURE [dbo].[WN_Users_GetByPublicId]
     @PublicId UNIQUEIDENTIFIER
 AS
@@ -24409,7 +27886,23 @@ BEGIN
     WHERE u.IdGUID = @PublicId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetHistory]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetFallbackActiveAdminId]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 5. dbo.WN_Users_GetFallbackActiveAdminId
+CREATE   PROCEDURE [dbo].[WN_Users_GetFallbackActiveAdminId]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id 
+    FROM dbo.WN_Users WITH (NOLOCK) 
+    WHERE Status = 1 
+    ORDER BY Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetHistory]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24442,12 +27935,27 @@ BEGIN
     ORDER BY b.CreatedOn DESC;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetIdByEmail]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
-SET QUOTED_IDENTIFIER OFF
+SET QUOTED_IDENTIFIER ON
 GO
-
+-- 10. dbo.WN_Users_GetIdByEmail
+CREATE   PROCEDURE [dbo].[WN_Users_GetIdByEmail]
+    @Email NVARCHAR(256)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP 1 Id 
+    FROM dbo.WN_Users WITH (NOLOCK) 
+    WHERE Email = @Email;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetList]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE   PROCEDURE [dbo].[WN_Users_GetList]
     @Page       INT           = 1,
     @Limit      INT           = 20,
@@ -24494,15 +28002,31 @@ BEGIN
     ORDER BY ISNULL(u.CreatedOn, '1970-01-01') DESC, u.Id DESC
     OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
 END;
-
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_Insert]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_GetSalesExecutivesForLocation]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
--- 3. Update Stored Procedure dbo.WN_Users_Insert
+-- 3. dbo.WN_Users_GetSalesExecutivesForLocation
+CREATE   PROCEDURE [dbo].[WN_Users_GetSalesExecutivesForLocation]
+    @LocationId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Email, Name 
+    FROM dbo.WN_Users WITH (NOLOCK) 
+    WHERE (RoleId = 16 OR RoleId = 1) 
+      AND IsActive = 1 
+      AND LocationId = @LocationId 
+      AND Email IS NOT NULL AND LTRIM(RTRIM(Email)) <> '';
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_Users_Insert]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
 CREATE   PROCEDURE [dbo].[WN_Users_Insert]
     @Email          NVARCHAR(256),
     @PasswordHash   NVARCHAR(500) = NULL,
@@ -24527,7 +28051,7 @@ BEGIN
     ) VALUES (
         NEWID(), @Email, @PasswordHash, @Name, @PhoneNumber,
         @RoleId, @CompanyId, @CityId, @Address, @CnicOrPassport,
-        @AvatarUrl, @Notes, 1, GETUTCDATE(), @CreatedById, @LocationId
+        @AvatarUrl, @Notes, 1, GETDATE(), @CreatedById, @LocationId
     );
 
     DECLARE @NewUserId INT = CAST(SCOPE_IDENTITY() AS INT);
@@ -24549,7 +28073,7 @@ BEGIN
     WHERE u.Id = @NewUserId;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_SetPassword]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_SetPassword]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24568,7 +28092,7 @@ BEGIN
     SELECT @@ROWCOUNT AS AffectedRows;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_SetRole]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_SetRole]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24582,7 +28106,7 @@ BEGIN
     UPDATE dbo.WN_Users SET RoleId = @RoleId WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_SetStatus]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_SetStatus]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24596,7 +28120,7 @@ BEGIN
     UPDATE dbo.WN_Users SET IsActive = @IsActive WHERE Id = @Id;
 END
 GO
-/****** Object:  StoredProcedure [dbo].[WN_Users_Update]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_Users_Update]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
@@ -24631,7 +28155,259 @@ BEGIN
     SELECT @@ROWCOUNT AS AffectedRows;
 END;
 GO
-/****** Object:  StoredProcedure [dbo].[WN_WHTaxRate_GetList]    Script Date: 28/10/2026 11:43:10 am ******/
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_AddMessage]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 10. dbo.WN_WhatsApp_AddMessage
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_AddMessage]
+    @ConversationId INT,
+    @WaId NVARCHAR(200) = NULL,
+    @Direction NVARCHAR(50),
+    @Type NVARCHAR(50),
+    @Text NVARCHAR(MAX) = NULL,
+    @UserId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRAN;
+
+    INSERT INTO dbo.WN_WhatsApp_Messages (ConversationId, WhatsAppMessageId, Direction, MessageType, MessageText, SentByUserId)
+    VALUES (@ConversationId, @WaId, @Direction, @Type, @Text, @UserId);
+
+    UPDATE dbo.WN_WhatsApp_Conversations
+    SET LastMessageAt = SYSDATETIME(),
+        LastMessageText = LEFT(@Text, 500),
+        LastIncomingAt = CASE WHEN @Direction = N'incoming' THEN SYSDATETIME() ELSE LastIncomingAt END,
+        UnreadCount = CASE WHEN @Direction = N'incoming' THEN UnreadCount + 1 ELSE UnreadCount END,
+        Status = CASE WHEN @Direction = N'incoming' THEN N'open' ELSE Status END,
+        UpdatedOn = SYSDATETIME()
+    WHERE Id = @ConversationId;
+
+    COMMIT;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_EnsureConversation]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- =========================================================================================
+-- SECTION 2: WhatsApp (dbo.WN_WhatsApp_*)
+-- =========================================================================================
+
+-- 9. dbo.WN_WhatsApp_EnsureConversation
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_EnsureConversation]
+    @Phone NVARCHAR(50),
+    @Name NVARCHAR(200) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRAN;
+
+    DECLARE @ContactId INT = (SELECT Id FROM dbo.WN_WhatsApp_Contacts WITH (UPDLOCK, HOLDLOCK) WHERE PhoneNumber = @Phone);
+    IF @ContactId IS NULL
+    BEGIN
+        INSERT INTO dbo.WN_WhatsApp_Contacts (PhoneNumber, Name) VALUES (@Phone, @Name);
+        SET @ContactId = SCOPE_IDENTITY();
+    END
+    ELSE IF @Name IS NOT NULL
+        UPDATE dbo.WN_WhatsApp_Contacts SET Name = @Name, UpdatedOn = SYSDATETIME()
+        WHERE Id = @ContactId AND ISNULL(Name, N'') <> @Name;
+
+    DECLARE @ConversationId INT = (SELECT Id FROM dbo.WN_WhatsApp_Conversations WITH (UPDLOCK, HOLDLOCK) WHERE ContactId = @ContactId);
+    IF @ConversationId IS NULL
+    BEGIN
+        INSERT INTO dbo.WN_WhatsApp_Conversations (ContactId) VALUES (@ContactId);
+        SET @ConversationId = SCOPE_IDENTITY();
+    END
+
+    COMMIT;
+    SELECT @ContactId AS ContactId, @ConversationId AS ConversationId;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_GetBotState]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 11. dbo.WN_WhatsApp_GetBotState
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_GetBotState]
+    @Phone NVARCHAR(50)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT State, Data, DATEDIFF(MINUTE, UpdatedOn, SYSDATETIME()) AS MinutesSinceUpdate
+    FROM dbo.WN_WhatsApp_BotState WITH (NOLOCK) 
+    WHERE PhoneNumber = @Phone;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_GetBroadcastTargets]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 18. dbo.WN_WhatsApp_GetBroadcastTargets
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_GetBroadcastTargets]
+    @Tag NVARCHAR(200) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT cv.Id, cv.ContactId, ct.PhoneNumber, ct.Name, ct.Tags, ct.AdminNotes, cv.Status, cv.LastMessageAt, cv.LastMessageText,
+           cv.LastIncomingAt, cv.UnreadCount,
+           CAST(CASE WHEN cv.LastIncomingAt IS NOT NULL AND DATEDIFF(SECOND, cv.LastIncomingAt, SYSDATETIME()) <= 86400 THEN 1 ELSE 0 END AS BIT) AS InReplyWindow
+    FROM dbo.WN_WhatsApp_Conversations cv WITH (NOLOCK)
+    JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
+    WHERE @Tag IS NULL OR (N',' + REPLACE(LOWER(ISNULL(ct.Tags, N'')), N' ', N'') + N',') LIKE N'%,' + REPLACE(LOWER(@Tag), N' ', N'') + N',%'
+    ORDER BY cv.Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_GetConversations]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 13. dbo.WN_WhatsApp_GetConversations
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_GetConversations]
+    @Search NVARCHAR(200) = NULL,
+    @Offset INT = 0,
+    @Limit INT = 50
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT cv.Id, cv.ContactId, ct.PhoneNumber, ct.Name, ct.Tags, ct.AdminNotes, cv.Status, cv.LastMessageAt, cv.LastMessageText,
+           cv.LastIncomingAt, cv.UnreadCount,
+           CAST(CASE WHEN cv.LastIncomingAt IS NOT NULL AND DATEDIFF(SECOND, cv.LastIncomingAt, SYSDATETIME()) <= 86400 THEN 1 ELSE 0 END AS BIT) AS InReplyWindow,
+           COUNT(*) OVER () AS TotalCount
+    FROM dbo.WN_WhatsApp_Conversations cv WITH (NOLOCK)
+    JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
+    WHERE (@Search IS NULL OR ct.PhoneNumber LIKE '%' + @Search + '%' 
+                           OR ct.Name LIKE '%' + @Search + '%' 
+                           OR ct.Tags LIKE '%' + @Search + '%' 
+                           OR cv.LastMessageText LIKE '%' + @Search + '%')
+    ORDER BY CASE WHEN cv.UnreadCount > 0 THEN 0 ELSE 1 END, cv.LastMessageAt DESC, cv.Id DESC
+    OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_GetMessages]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 15. dbo.WN_WhatsApp_GetMessages
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_GetMessages]
+    @ConversationId INT,
+    @BeforeId BIGINT = NULL,
+    @Limit INT = 50
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT TOP (@Limit) Id, ConversationId, Direction, MessageType, MessageText, SentByUserId, CreatedOn
+    FROM dbo.WN_WhatsApp_Messages WITH (NOLOCK)
+    WHERE ConversationId = @ConversationId AND (@BeforeId IS NULL OR Id < @BeforeId)
+    ORDER BY Id DESC;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_GetOneConversation]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 14. dbo.WN_WhatsApp_GetOneConversation
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_GetOneConversation]
+    @ById INT = NULL,
+    @ByPhone NVARCHAR(50) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT cv.Id, cv.ContactId, ct.PhoneNumber, ct.Name, ct.Tags, ct.AdminNotes, cv.Status, cv.LastMessageAt, cv.LastMessageText,
+           cv.LastIncomingAt, cv.UnreadCount,
+           CAST(CASE WHEN cv.LastIncomingAt IS NOT NULL AND DATEDIFF(SECOND, cv.LastIncomingAt, SYSDATETIME()) <= 86400 THEN 1 ELSE 0 END AS BIT) AS InReplyWindow
+    FROM dbo.WN_WhatsApp_Conversations cv WITH (NOLOCK)
+    JOIN dbo.WN_WhatsApp_Contacts ct WITH (NOLOCK) ON ct.Id = cv.ContactId
+    WHERE (@ById IS NOT NULL AND cv.Id = @ById)
+       OR (@ByPhone IS NOT NULL AND ct.PhoneNumber = @ByPhone);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_GetUnreadConversations]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 19. dbo.WN_WhatsApp_GetUnreadConversations
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_GetUnreadConversations]
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, ISNULL(LastMessageAt, CreatedOn) AS LastMessageAt
+    FROM dbo.WN_WhatsApp_Conversations WITH (NOLOCK) 
+    WHERE UnreadCount > 0;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_MarkRead]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 16. dbo.WN_WhatsApp_MarkRead
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_MarkRead]
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_WhatsApp_Conversations 
+    SET UnreadCount = 0 
+    WHERE Id = @Id AND UnreadCount <> 0;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_SaveBotState]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 12. dbo.WN_WhatsApp_SaveBotState
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_SaveBotState]
+    @Phone NVARCHAR(50),
+    @State NVARCHAR(50),
+    @Data NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_WhatsApp_BotState 
+    SET State = @State, Data = @Data, UpdatedOn = SYSDATETIME() 
+    WHERE PhoneNumber = @Phone;
+
+    IF @@ROWCOUNT = 0
+        INSERT INTO dbo.WN_WhatsApp_BotState (PhoneNumber, State, Data) 
+        VALUES (@Phone, @State, @Data);
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WhatsApp_UpdateContactMeta]    Script Date: 04/11/2026 10:31:38 am ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+-- 17. dbo.WN_WhatsApp_UpdateContactMeta
+CREATE   PROCEDURE [dbo].[WN_WhatsApp_UpdateContactMeta]
+    @Id INT,
+    @Name NVARCHAR(200) = NULL,
+    @Tags NVARCHAR(MAX) = NULL,
+    @Notes NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_WhatsApp_Contacts
+    SET Name = COALESCE(NULLIF(@Name, N''), Name), 
+        Tags = @Tags, 
+        AdminNotes = @Notes, 
+        UpdatedOn = SYSDATETIME()
+    WHERE Id = @Id;
+END;
+GO
+/****** Object:  StoredProcedure [dbo].[WN_WHTaxRate_GetList]    Script Date: 04/11/2026 10:31:38 am ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
