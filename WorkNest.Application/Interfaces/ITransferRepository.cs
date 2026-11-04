@@ -12,6 +12,6 @@ namespace WorkNest.Application.Interfaces
         Task<ActiveBookingSummaryDto?> GetBookingSummaryAsync(int bookingId);
         Task<TargetSpaceSummaryDto?> GetTargetSpaceSummaryAsync(int spaceId);
         Task<List<TargetSpaceSummaryDto>> GetAvailableTargetSpacesAsync(int locationId, DateTime effectiveDate, DateTime endDate, int excludeBookingId);
+        Task<List<ActiveBookingSummaryDto>> GetActiveBookingsAsync(int? locationId, string? search);
     }
 }
-

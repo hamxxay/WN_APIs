@@ -35,6 +35,19 @@ namespace WorkNest.API.Controllers
             return userRow?.TryGetValue("Id", out var id) == true && id != null ? Convert.ToInt32(id) : null;
         }
 
+
+        /// <summary>
+        /// Lists active bookings eligible for transfer, optionally filtered by location and search.
+        /// </summary>
+        [HttpGet("active-bookings")]
+        public async Task<IActionResult> ActiveBookings(
+            [FromQuery] int? locationId,
+            [FromQuery] string? search)
+        {
+            var allowedLocations = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
+            var result = await _transferService.GetActiveBookingsAsync(locationId, search, allowedLocations);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
         /// <summary>
         /// Previews space transfer settlement, discount cap check, and blocking invoices.
         /// </summary>

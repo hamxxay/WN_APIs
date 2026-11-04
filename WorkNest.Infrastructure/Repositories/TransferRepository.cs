@@ -352,6 +352,76 @@ namespace WorkNest.Infrastructure.Repositories
 
             return list;
         }
+    
+        public async Task<List<ActiveBookingSummaryDto>> GetActiveBookingsAsync(int? locationId, string? search)
+        {
+            var list = new List<ActiveBookingSummaryDto>();
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+
+            const string sql = @"
+                SELECT 
+                    b.Id AS BookingId,
+                    b.IdGUID AS BookingPublicId,
+                    COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(c.FirstName, N' ', c.LastName))), N''), u.Name, u.Email) AS CustomerName,
+                    COALESCE(c.Email, u.Email) AS CustomerEmail,
+                    b.CustomerCode,
+                    b.SpaceId,
+                    s.Name AS SpaceName,
+                    s.Code AS SpaceCode,
+                    ISNULL(s.LocationId, 0) AS LocationId,
+                    l.Name AS LocationName,
+                    b.StartOn,
+                    b.EndOn,
+                    COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), 0.00) AS MonthlyRent,
+                    ISNULL(b.DiscountPercentage, 0.00) AS DiscountPercentage,
+                    b.OfferingType,
+                    ISNULL(b.SecurityDepositPaid, 0.00) AS SecurityDepositPaid
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
+                LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = b.CustomerCode OR c.UserId = b.UserId
+                LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
+                WHERE ISNULL(b.IsDeleted, 0) = 0
+                  AND b.BookingStatusId IN (1, 2, 5, 33)
+                  AND (@LocationId IS NULL OR s.LocationId = @LocationId)
+                  AND (@Search IS NULL OR 
+                       b.CustomerCode LIKE '%' + @Search + '%' OR 
+                       c.FirstName LIKE '%' + @Search + '%' OR 
+                       c.LastName LIKE '%' + @Search + '%' OR 
+                       s.Name LIKE '%' + @Search + '%' OR 
+                       CAST(b.Id AS NVARCHAR(20)) LIKE '%' + @Search + '%')
+                ORDER BY b.Id DESC;";
+
+            await using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Search", string.IsNullOrWhiteSpace(search) ? DBNull.Value : search.Trim());
+
+            await using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                list.Add(new ActiveBookingSummaryDto
+                {
+                    BookingId = reader.GetInt32(reader.GetOrdinal("BookingId")),
+                    BookingPublicId = reader.GetGuid(reader.GetOrdinal("BookingPublicId")),
+                    CustomerName = reader.IsDBNull(reader.GetOrdinal("CustomerName")) ? null : reader.GetString(reader.GetOrdinal("CustomerName")),
+                    CustomerEmail = reader.IsDBNull(reader.GetOrdinal("CustomerEmail")) ? null : reader.GetString(reader.GetOrdinal("CustomerEmail")),
+                    CustomerCode = reader.IsDBNull(reader.GetOrdinal("CustomerCode")) ? null : reader.GetString(reader.GetOrdinal("CustomerCode")),
+                    SpaceId = reader.GetInt32(reader.GetOrdinal("SpaceId")),
+                    SpaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? null : reader.GetString(reader.GetOrdinal("SpaceName")),
+                    SpaceCode = reader.IsDBNull(reader.GetOrdinal("SpaceCode")) ? null : reader.GetString(reader.GetOrdinal("SpaceCode")),
+                    LocationId = reader.GetInt32(reader.GetOrdinal("LocationId")),
+                    LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString(reader.GetOrdinal("LocationName")),
+                    StartOn = reader.GetDateTime(reader.GetOrdinal("StartOn")),
+                    EndOn = reader.GetDateTime(reader.GetOrdinal("EndOn")),
+                    MonthlyRent = reader.GetDecimal(reader.GetOrdinal("MonthlyRent")),
+                    DiscountPercentage = reader.GetDecimal(reader.GetOrdinal("DiscountPercentage")),
+                    OfferingType = reader.IsDBNull(reader.GetOrdinal("OfferingType")) ? null : reader.GetString(reader.GetOrdinal("OfferingType")),
+                    SecurityDeposit = reader.GetDecimal(reader.GetOrdinal("SecurityDepositPaid"))
+                });
+            }
+
+            return list;
+        }
     }
 }
-

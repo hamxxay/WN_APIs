@@ -204,5 +204,30 @@ namespace WorkNest.Application.Services
 
             return _pdfService.GenerateAddendumPdf(oldBooking, newSpace, settlement, newBookingId, note);
         }
+    
+        public async Task<ApiResponse> GetActiveBookingsAsync(
+            int? locationId, string? search, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            if (allowedLocationIds != null && allowedLocationIds.Count > 0)
+            {
+                if (locationId.HasValue && !allowedLocationIds.Contains(locationId.Value))
+                {
+                    return ApiResponse.Fail("You are not authorized to view bookings for this location.");
+                }
+                if (!locationId.HasValue && allowedLocationIds.Count == 1)
+                {
+                    locationId = allowedLocationIds.First();
+                }
+            }
+
+            var bookings = await _transferRepo.GetActiveBookingsAsync(locationId, search);
+
+            if (allowedLocationIds != null && allowedLocationIds.Count > 0)
+            {
+                bookings = bookings.Where(b => allowedLocationIds.Contains(b.LocationId)).ToList();
+            }
+
+            return ApiResponse.Ok(bookings);
+        }
     }
 }
