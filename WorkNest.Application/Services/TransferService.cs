@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -229,5 +229,213 @@ namespace WorkNest.Application.Services
 
             return ApiResponse.Ok(bookings);
         }
+    
+        // =========================================================================================
+        // Phase 2: Branch Transfers & Pending Payments
+        // =========================================================================================
+
+        public async Task<ApiResponse> CreateBranchTransferRequestAsync(
+            BranchTransferCreateRequestDto request, string? userEmail, int? actorId, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            var booking = await _transferRepo.GetBookingSummaryAsync(request.BookingId);
+            if (booking == null)
+                return ApiResponse.Fail($"Booking #{request.BookingId} not found.");
+
+            if (allowedLocationIds != null && allowedLocationIds.Count > 0 && !allowedLocationIds.Contains(booking.LocationId))
+                return ApiResponse.Fail("You are not authorized to initiate transfers for this booking's location.");
+
+            try
+            {
+                var requestId = await _transferRepo.CreateBranchTransferRequestAsync(
+                    request, actorId ?? 0, userEmail ?? "system@worknest.com");
+                return ApiResponse.Ok(new { RequestId = requestId, Message = "Branch transfer request submitted successfully." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating branch transfer request for booking {BookingId}", request.BookingId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> CancelBranchTransferRequestAsync(
+            int requestId, BranchTransferCancelRequestDto request, string? userEmail, int? actorId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                await _transferRepo.CancelBranchTransferRequestAsync(
+                    requestId, request.Reason, actorId ?? 0, userEmail ?? "system@worknest.com");
+                return ApiResponse.Ok(new { Success = true, Message = "Transfer request cancelled successfully." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error cancelling transfer request {RequestId}", requestId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> DeclineBranchTransferRequestAsync(
+            int requestId, BranchTransferDeclineRequestDto request, string? userEmail, int? actorId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                await _transferRepo.DeclineBranchTransferRequestAsync(
+                    requestId, request.Reason, actorId ?? 0, userEmail ?? "system@worknest.com");
+                return ApiResponse.Ok(new { Success = true, Message = "Transfer request declined." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error declining transfer request {RequestId}", requestId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> ListSendingRequestsAsync(
+            int? companyId, int? locationId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var list = await _transferRepo.ListSendingRequestsAsync(companyId, locationId, userRole);
+                if (allowedLocationIds != null && allowedLocationIds.Count > 0 && userRole != "super_admin")
+                {
+                    list = list.Where(r => allowedLocationIds.Contains(r.FromLocationId)).ToList();
+                }
+                return ApiResponse.Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error listing sending transfer requests");
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> GetIncomingAvailableSpacesAsync(
+            int requestId, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var spaces = await _transferRepo.GetIncomingAvailableSpacesAsync(requestId);
+                return ApiResponse.Ok(spaces);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting available spaces for incoming request {RequestId}", requestId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> ListIncomingRequestsAsync(
+            int? companyId, int? locationId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var list = await _transferRepo.ListIncomingRequestsAsync(companyId, locationId, userRole);
+                if (allowedLocationIds != null && allowedLocationIds.Count > 0 && userRole != "super_admin")
+                {
+                    list = list.Where(r => allowedLocationIds.Contains(r.ToLocationId)).ToList();
+                }
+                return ApiResponse.Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error listing incoming transfer requests");
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> GetMatchResolutionAsync(
+            int requestId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var details = await _transferRepo.GetMatchResolutionAsync(requestId);
+                if (details == null)
+                    return ApiResponse.Fail($"Transfer request #{requestId} not found.");
+
+                return ApiResponse.Ok(details);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting match resolution for request {RequestId}", requestId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> AcceptWithSpaceAsync(
+            int requestId, BranchTransferAcceptWithSpaceRequestDto request, string? userEmail, int? actorId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var result = await _transferRepo.AcceptWithSpaceAsync(
+                    requestId, request.SpaceId, actorId ?? 0, userEmail ?? "system@worknest.com");
+                return ApiResponse.Ok(new
+                {
+                    Status = result.Status,
+                    Message = result.Message,
+                    NewBookingId = result.NewBookingId
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error accepting transfer request {RequestId}", requestId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> ResolveMatchAsync(
+            int requestId, BranchTransferResolveMatchRequestDto request, string? userEmail, int? actorId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var result = await _transferRepo.ResolveMatchAsync(
+                    requestId, request.ResolutionType, request.SelectedCustomerId, request.Note, actorId ?? 0, userEmail ?? "system@worknest.com");
+                return ApiResponse.Ok(new
+                {
+                    Status = result.Status,
+                    Message = result.Message,
+                    NewBookingId = result.NewBookingId
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error resolving match for request {RequestId}", requestId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> ListPendingPaymentsAsync(
+            int? companyId, int? locationId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var list = await _transferRepo.ListPendingPaymentsAsync(companyId, locationId, userRole);
+                if (allowedLocationIds != null && allowedLocationIds.Count > 0 && userRole != "super_admin")
+                {
+                    list = list.Where(p => allowedLocationIds.Contains(p.FromLocationId) || allowedLocationIds.Contains(p.ToLocationId)).ToList();
+                }
+                return ApiResponse.Ok(list);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error listing pending transfer payments");
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
+
+        public async Task<ApiResponse> ConfirmPendingPaymentAsync(
+            int paymentId, PendingPaymentConfirmRequestDto request, string? userEmail, int? actorId, string? userRole, IReadOnlyCollection<int>? allowedLocationIds)
+        {
+            try
+            {
+                var success = await _transferRepo.ConfirmPendingPaymentAsync(
+                    paymentId, request.BankAccount, request.PaymentReference, request.PaymentDate, actorId ?? 0, userEmail ?? "system@worknest.com");
+                return ApiResponse.Ok(new { Success = success, Message = "Transfer payment confirmed successfully." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error confirming pending payment {PaymentId}", paymentId);
+                return ApiResponse.Fail(ex.Message);
+            }
+        }
     }
 }
+
