@@ -107,7 +107,7 @@ namespace WorkNest.Application.Services
                 "WhatsApp:FollowUpEnabled", true, c => NotFalse(c["WhatsApp:FollowUpEnabled"])),
             // NetworkAlertService; seed row in Database/Network/NET_ALERT_01_network_alerts (on).
             new BackgroundServiceInfo(NetworkAlerts, "Network Alerts",
-                "Every minute: e-mails a location's alert recipients when an access machine, an internet line or a network device has been down for 5 minutes (one e-mail per location, a reminder every 6 hours, one when it is back).",
+                "Every minute: e-mails a location's alert recipients when an access machine has been offline for 30 minutes, or an internet line or a network device has been down for 5 minutes (one e-mail per location, a reminder every 6 hours, one when it is back).",
                 "NetworkAlerts:Enabled", true, c => NotFalse(c["NetworkAlerts:Enabled"])),
         };
 

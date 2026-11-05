@@ -14,7 +14,11 @@ namespace WorkNest.Application.Services
         /// <summary>Detail of an internet line that is down while another line carries the traffic (failover).</summary>
         public const string FailoverDetail = "Traffic is on the backup line";
 
-        public sealed record NetworkAlertSettings(TimeSpan DownFor, TimeSpan ReminderEvery);
+        public sealed record NetworkAlertSettings(TimeSpan DownFor, TimeSpan ReminderEvery, TimeSpan? MachineDownFor = null)
+        {
+            /// <summary>How long an item stays down before the first e-mail: access machines wait longer (they drop off briefly).</summary>
+            public TimeSpan WaitFor(string kind) => kind == NetworkAlertKinds.Hik ? MachineDownFor ?? DownFor : DownFor;
+        }
 
         /// <summary>An item in an e-mail; Since = DownSince; Duration = how long it was down (recovered items).</summary>
         public sealed record Entry(NetworkAlertState State, TimeSpan? Duration = null);
@@ -62,7 +66,7 @@ namespace WorkNest.Application.Services
                     : new NetworkAlertState(item.Kind, item.Key, item.Name, item.Detail, now, null, null, null);
                 if (state.FirstAlertAt == null)
                 {
-                    if (now - state.DownSince >= settings.DownFor)
+                    if (now - state.DownSince >= settings.WaitFor(state.Kind))
                     {
                         var marked = state with { FirstAlertAt = now };
                         message.NewlyDown.Add(new Entry(marked));

@@ -44,6 +44,11 @@ namespace WorkNest.Application.Interfaces
     /// </summary>
     public interface INetworkAlertRepository
     {
+        /// <summary>Minutes an access machine stays offline before its alert; null before NET_ALERT_02 has run.</summary>
+        Task<int?> GetMachineDownMinutesAsync(CancellationToken ct = default);
+        /// <summary>Saves it. Throws <see cref="NetworkAlertsMissingException"/> before NET_ALERT_02 has run.</summary>
+        Task SetMachineDownMinutesAsync(int minutes, string? updatedBy, CancellationToken ct = default);
+
         Task<IReadOnlyList<NetworkAlertRecipient>> GetRecipientsAsync(int? locationId = null, CancellationToken ct = default);
         /// <summary>Adds an active recipient. Throws <see cref="NetworkAlertRecipientException"/> for an unknown location or a duplicate.</summary>
         Task<NetworkAlertRecipient> AddRecipientAsync(int locationId, string email, string? createdBy, CancellationToken ct = default);

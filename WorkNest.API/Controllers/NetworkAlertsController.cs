@@ -31,6 +31,27 @@ namespace WorkNest.API.Controllers
         public sealed class AddRecipientRequest { public int LocationId { get; set; } public string? Email { get; set; } }
         public sealed class UpdateRecipientRequest { public bool IsActive { get; set; } }
         public sealed class TestRequest { public int LocationId { get; set; } }
+        public sealed class SettingsRequest { public int MachineDownMinutes { get; set; } }
+
+        public const int MaxMachineDownMinutes = 1440;
+
+        /// <summary>{ machineDownMinutes }: how long an access machine stays offline before its alert e-mail.</summary>
+        [HttpGet("settings")]
+        public Task<IActionResult> GetSettings(CancellationToken ct) => Run(async () =>
+        {
+            var settings = await _processor.CurrentSettingsAsync(ct);
+            return Ok(ApiResponse.Ok(new { machineDownMinutes = (int)settings.WaitFor(NetworkAlertKinds.Hik).TotalMinutes }));
+        });
+
+        /// <summary>Saves it (1 to 1440 minutes); the next check, within a minute, uses it. 503 before NET_ALERT_02.</summary>
+        [HttpPut("settings")]
+        public Task<IActionResult> SaveSettings([FromBody] SettingsRequest request, CancellationToken ct) => Run(async () =>
+        {
+            var minutes = request?.MachineDownMinutes ?? 0;
+            if (minutes is < 1 or > MaxMachineDownMinutes) return BadRequest(ApiResponse.Fail($"Enter 1 to {MaxMachineDownMinutes} minutes."));
+            await _repo.SetMachineDownMinutesAsync(minutes, User.GetEmail(), ct);
+            return Ok(ApiResponse.Ok(new { machineDownMinutes = minutes }, "Alert time saved."));
+        });
 
         /// <summary>?locationId= (none = every location): the recipients, location by location.</summary>
         [HttpGet("recipients")]

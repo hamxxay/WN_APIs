@@ -1,0 +1,57 @@
+-- ============================================================================================
+-- NET_ALERT_02: how long an access machine stays offline before its alert e-mail, set from
+-- CMS Administration > Network Alerts (default 30 minutes, 1 to 1440).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live one.
+-- One transaction: if anything fails, nothing is changed. Safe to run again; a saved value is kept.
+-- Needs NET_ALERT_01.
+--
+--   dbo.WN_NetworkAlertSettings (new)      one row: MachineDownMinutes.
+--   dbo.WN_NetworkAlert_Settings_Get / _Settings_Set
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_NetworkAlertRecipients', N'U') IS NULL
+        THROW 50001, N'dbo.WN_NetworkAlertRecipients is missing: run NET_ALERT_01_network_alerts first.', 1;
+
+    BEGIN TRANSACTION;
+
+    IF OBJECT_ID(N'dbo.WN_NetworkAlertSettings', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_NetworkAlertSettings (
+            Id                 TINYINT       NOT NULL CONSTRAINT PK_WN_NetworkAlertSettings PRIMARY KEY
+                                             CONSTRAINT CK_WN_NetworkAlertSettings_OneRow CHECK (Id = 1),
+            MachineDownMinutes INT           NOT NULL CONSTRAINT CK_WN_NetworkAlertSettings_Minutes CHECK (MachineDownMinutes BETWEEN 1 AND 1440),
+            UpdatedAt          DATETIME2(0)  NOT NULL CONSTRAINT DF_WN_NetworkAlertSettings_UpdatedAt DEFAULT SYSUTCDATETIME(),
+            UpdatedBy          NVARCHAR(256) NULL
+        )');
+
+    EXEC(N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_NetworkAlertSettings)
+        INSERT INTO dbo.WN_NetworkAlertSettings (Id, MachineDownMinutes) VALUES (1, 30)');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Settings_Get
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        SELECT MachineDownMinutes FROM dbo.WN_NetworkAlertSettings WITH (NOLOCK) WHERE Id = 1;
+    END');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_NetworkAlert_Settings_Set
+        @MachineDownMinutes INT, @UpdatedBy NVARCHAR(256) = NULL
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        UPDATE dbo.WN_NetworkAlertSettings
+        SET MachineDownMinutes = @MachineDownMinutes, UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+        WHERE Id = 1;
+    END');
+
+    COMMIT TRANSACTION;
+
+    SELECT N'OK: access machine alert time installed (NET_ALERT_02).' AS Result,
+           (SELECT MachineDownMinutes FROM dbo.WN_NetworkAlertSettings WHERE Id = 1) AS MachineDownMinutes;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

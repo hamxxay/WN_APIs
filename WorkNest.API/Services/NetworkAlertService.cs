@@ -10,7 +10,7 @@ namespace WorkNest.API.Services
     /// <summary>
     /// Network outage e-mail alerts (NET_ALERT_01): every NetworkAlerts:TickSeconds (default 60) runs
     /// <see cref="NetworkAlertProcessor"/>: a location's recipients get one e-mail when an access machine, an internet line
-    /// or a network device has been down for NetworkAlerts:DownMinutes (5), a reminder every NetworkAlerts:ReminderHours
+    /// or a network device has been down for NetworkAlerts:DownMinutes (5; access machines NetworkAlerts:MachineDownMinutes, 30), a reminder every NetworkAlerts:ReminderHours
     /// (6) while it stays down, and one "back online" e-mail. On / off with the NetworkAlerts service switch (Services
     /// page) and "NetworkAlerts:Enabled": false. Before NET_ALERT_01 it logs once and idles (checks again each tick).
     /// </summary>

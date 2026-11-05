@@ -13,12 +13,12 @@ namespace WorkNest.Application.Services
         public const string MachinesUrl = CmsBaseUrl + "/admin/network/access-machines";
         public const string NetworkUrl = CmsBaseUrl + "/admin/network";
 
-        /// <summary>"WorkNest I-8: 2 access machines offline, internet down" (a reminder / recovery says so).</summary>
-        public static string Subject(string locationName, NetworkAlertMessage m)
+        /// <summary>"WorkNest I-8: 2 access machines offline for more than 30 minutes, internet down" (a reminder / recovery says so).</summary>
+        public static string Subject(string locationName, NetworkAlertMessage m, TimeSpan machineWait)
         {
             var down = m.Down.Select(e => e.State).ToList();
             var parts = new List<string>();
-            AddCount(parts, down, NetworkAlertKinds.Hik, "access machine", "access machines", "offline");
+            AddCount(parts, down, NetworkAlertKinds.Hik, "access machine", "access machines", MachineOffline(machineWait));
             var wan = down.Where(s => s.Kind == NetworkAlertKinds.Wan).ToList();
             if (wan.Count > 0) parts.Add(wan.All(IsFailover) ? "internet on backup line" : "internet down");
             AddCount(parts, down, NetworkAlertKinds.Unifi, "network device", "network devices", "offline");
@@ -56,12 +56,21 @@ namespace WorkNest.Application.Services
             return string.Join("; ", sb);
         }
 
-        public static string Html(string locationName, NetworkAlertMessage m, DateTime nowUtc, Func<DateTime, DateTime> toLocal)
+        /// <summary>"offline for more than 30 minutes".</summary>
+        private static string MachineOffline(TimeSpan wait)
+        {
+            var minutes = (int)wait.TotalMinutes;
+            return $"offline for more than {minutes} {(minutes == 1 ? "minute" : "minutes")}";
+        }
+
+        public static string Html(string locationName, NetworkAlertMessage m, DateTime nowUtc, Func<DateTime, DateTime> toLocal, TimeSpan machineWait)
         {
             var sb = new StringBuilder();
             sb.Append("<div style=\"font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1f2937;max-width:640px\">");
             sb.Append($"<h2 style=\"margin:0 0 4px;font-size:18px\">WorkNest {E(locationName)}: network alert</h2>");
             sb.Append($"<p style=\"margin:0 0 16px;color:#6b7280\">Checked {E(Time(toLocal(nowUtc)))} (Pakistan time)</p>");
+            if (m.Down.Any(e => e.State.Kind == NetworkAlertKinds.Hik))
+                sb.Append($"<p style=\"margin:0 0 12px\"><strong>Access machines listed below have been {E(MachineOffline(machineWait))}.</strong></p>");
             Section(sb, "Down", "#b91c1c", m.NewlyDown, toLocal, nowUtc, false);
             Section(sb, "Still down (reminder)", "#b45309", m.StillDown, toLocal, nowUtc, false);
             Section(sb, "Back online", "#15803d", m.Recovered, toLocal, nowUtc, true);

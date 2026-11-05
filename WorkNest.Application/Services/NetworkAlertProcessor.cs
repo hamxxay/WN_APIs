@@ -19,6 +19,7 @@ namespace WorkNest.Application.Services
     public class NetworkAlertProcessor
     {
         public const int DefaultDownMinutes = 5;
+        public const int DefaultMachineDownMinutes = 30;
         public const int DefaultReminderHours = 6;
         public const int DefaultTickSeconds = 60;
         private const int LeaseSeconds = 300;
@@ -41,11 +42,18 @@ namespace WorkNest.Application.Services
             _logger = logger;
             Settings = new NetworkAlertSettings(
                 TimeSpan.FromMinutes(PositiveInt(configuration["NetworkAlerts:DownMinutes"], DefaultDownMinutes)),
-                TimeSpan.FromHours(PositiveInt(configuration["NetworkAlerts:ReminderHours"], DefaultReminderHours)));
+                TimeSpan.FromHours(PositiveInt(configuration["NetworkAlerts:ReminderHours"], DefaultReminderHours)),
+                TimeSpan.FromMinutes(PositiveInt(configuration["NetworkAlerts:MachineDownMinutes"], DefaultMachineDownMinutes)));
             TickSeconds = PositiveInt(configuration["NetworkAlerts:TickSeconds"], DefaultTickSeconds);
         }
 
         public NetworkAlertSettings Settings { get; }
+
+        /// <summary>The configured settings with the access machines' time saved in the CMS, when there is one.</summary>
+        public async Task<NetworkAlertSettings> CurrentSettingsAsync(CancellationToken ct = default) =>
+            await _repo.GetMachineDownMinutesAsync(ct) is int minutes and > 0
+                ? Settings with { MachineDownFor = TimeSpan.FromMinutes(minutes) }
+                : Settings;
         public int TickSeconds { get; }
 
         /// <summary>What one check did (for the log and the tests).</summary>
@@ -54,6 +62,7 @@ namespace WorkNest.Application.Services
         public async Task<TickResult> RunOnceAsync(CancellationToken ct = default)
         {
             int locations = 0, emails = 0, skipped = 0;
+            var settings = await CurrentSettingsAsync(ct);
             foreach (var location in await _repo.GetActiveLocationsAsync(ct))
             {
                 if (ct.IsCancellationRequested) break;
@@ -62,7 +71,7 @@ namespace WorkNest.Application.Services
                 locations++;
                 try
                 {
-                    if (await CheckLocationAsync(location, claim.DbNow, ct)) emails++;
+                    if (await CheckLocationAsync(location, claim.DbNow, settings, ct)) emails++;
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch (NetworkAlertsMissingException) { throw; }
@@ -80,18 +89,19 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>True when an e-mail went out for this location.</summary>
-        private async Task<bool> CheckLocationAsync(NetworkAlertLocation location, DateTime now, CancellationToken ct)
+        private async Task<bool> CheckLocationAsync(NetworkAlertLocation location, DateTime now, NetworkAlertSettings settings, CancellationToken ct)
         {
             var (items, kinds) = await ObserveAsync(location.LocationId, ct);
             if (kinds.Count == 0) return false;
             var saved = await _repo.GetStatesAsync(location.LocationId, ct);
-            var plan = Plan(now, items, kinds, FullKinds, saved, Settings);
+            var plan = Plan(now, items, kinds, FullKinds, saved, settings);
 
             foreach (var s in plan.Immediate) await _repo.SaveStateAsync(location.LocationId, s, ct);
             if (plan.Message == null) return false;
 
-            var subject = NetworkAlertEmail.Subject(location.Name, plan.Message);
-            var html = NetworkAlertEmail.Html(location.Name, plan.Message, now, _clock.FromUtc);
+            var machineWait = settings.WaitFor(NetworkAlertKinds.Hik);
+            var subject = NetworkAlertEmail.Subject(location.Name, plan.Message, machineWait);
+            var html = NetworkAlertEmail.Html(location.Name, plan.Message, now, _clock.FromUtc, machineWait);
             var result = await SendAsync(location.Emails, subject, html);
             if (result.Delivered == 0)
             {

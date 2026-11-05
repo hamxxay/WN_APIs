@@ -76,7 +76,7 @@ Registered in `Program.cs` (`WorkNest.API/Services`). Several can also be switch
 | `WeeklyReportService` | Emails the weekly report to super admins (`Reports:Weekly`, default Monday 09:00 Pakistan time) |
 | `EmailOutboxService` | Sends pending emails once Email Sending is switched on |
 | `WhatsAppFollowUpService` | WhatsApp follow-up messages (`WhatsAppFollowUp` switch, `WhatsApp:FollowUp*` settings) |
-| `NetworkAlertService` | Raises and reminds on network-down alerts (`NetworkAlerts` switch; `DownMinutes`, `ReminderHours`, `TickSeconds`) |
+| `NetworkAlertService` | Raises and reminds on network-down alerts (`NetworkAlerts` switch; `DownMinutes`, `MachineDownMinutes`, `ReminderHours`, `TickSeconds`) |
 | `OneBillSyncService` | One Bill (EzPay / 1-Link) sync (`OneBill:Enabled`, off by default) |
 | `MonthlyFeeReceiptService` | Monthly fee receipts (`FeeReceipts:MonthlyEnabled`, on by default) |
 | `UnifiPollingService` | Keeps UniFi dashboard data fresh (`Unifi:Enabled`, `Unifi:RefreshSeconds`) |

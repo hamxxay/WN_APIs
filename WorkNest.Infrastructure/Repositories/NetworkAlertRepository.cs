@@ -50,6 +50,19 @@ namespace WorkNest.Infrastructure.Repositories
         private static NetworkAlertRecipient Recipient(IDataRecord r) =>
             new((int)r["Id"], (int)r["LocationId"], Str(r, "LocationName"), (string)r["Email"], (bool)r["IsActive"], (DateTime)r["CreatedOn"], Str(r, "CreatedBy"));
 
+        public async Task<int?> GetMachineDownMinutesAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                return await Run("dbo.WN_NetworkAlert_Settings_Get", async (c, t) => await c.ExecuteScalarAsync(t) is int minutes ? minutes : (int?)null, ct);
+            }
+            catch (NetworkAlertsMissingException) { return null; }
+        }
+
+        public Task SetMachineDownMinutesAsync(int minutes, string? updatedBy, CancellationToken ct = default) =>
+            Run("dbo.WN_NetworkAlert_Settings_Set", async (c, t) => await c.ExecuteNonQueryAsync(t), ct,
+                ("@MachineDownMinutes", SqlDbType.Int, minutes), ("@UpdatedBy", SqlDbType.NVarChar, updatedBy));
+
         public async Task<IReadOnlyList<NetworkAlertRecipient>> GetRecipientsAsync(int? locationId = null, CancellationToken ct = default) =>
             await Run("dbo.WN_NetworkAlert_Recipients_Get", (c, t) => Rows(c, Recipient, t), ct, ("@LocationId", SqlDbType.Int, locationId));
 
