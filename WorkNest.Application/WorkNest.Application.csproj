@@ -10,7 +10,7 @@
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="11.9.0" />
     <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.0" />
-    <PackageReference Include="HtmlSanitizer" Version="9.0.886" />
+    <PackageReference Include="HtmlSanitizer" Version="9.1.982" />
   </ItemGroup>
 
   <ItemGroup>

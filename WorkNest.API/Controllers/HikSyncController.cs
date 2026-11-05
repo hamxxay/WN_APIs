@@ -37,8 +37,10 @@ namespace WorkNest.API.Controllers
         /// </summary>
         /// <summary>"Test" button: connects to the machine now and saves whether it is online.</summary>
         [HttpPost("api/hik/devices/{id:int}/test")]
-        public async Task<IActionResult> TestDevice(int id)
+        public async Task<IActionResult> TestDevice(int id, [FromServices] IHikDeviceService devices)
         {
+            if (User.IsLocationBoundRole() && !(await devices.GetDevicesAsync(null, User.GetLocationIds())).Any(d => d.Id == id))
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail("This machine belongs to a location you aren't assigned to."));
             var result = await _sync.TestDeviceAsync(id);
             if (result == null) return NotFound(ApiResponse.Fail("Machine not found."));
             return Ok(ApiResponse.Ok(result, result.Online ? $"{result.Name} is online." : $"{result.Name} is offline: {result.Error}"));
@@ -58,6 +60,7 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpPost("api/hik/sync/run/{job}")]
+        [Authorize(Roles = "super_admin,SuperAdmin")] // jobs run across every location
         public async Task<IActionResult> Run(string job)
         {
             if (!_sync.JobNames.Contains((job ?? string.Empty).Trim().ToLowerInvariant()))

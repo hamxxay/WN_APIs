@@ -118,6 +118,8 @@ namespace WorkNest.API.Controllers
         [HttpGet("api/hik/devices/{id:int}/users")]
         public async Task<IActionResult> GetDeviceUsers(int id)
         {
+            if (User.IsLocationBoundRole() && !(await _deviceService.GetDevicesAsync(null, User.GetLocationIds())).Any(d => d.Id == id))
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail("This machine belongs to a location you aren't assigned to."));
             var result = await _deviceService.GetDeviceUsersAsync(id, User.CanSeeMachineAdmins());
             return Ok(result);
         }

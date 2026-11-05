@@ -58,6 +58,9 @@ namespace WorkNest.API.Controllers
                 return (null, Unauthorized(new { isSuccessful = false, message = "Sign in required." }));
             if (bookingId is > 0 && !User.IsStaff() && !await _db.IsBookingOwnedByDbAsync(bookingId.Value, email))
                 return (null, NotFound(new { isSuccessful = false, message = "Booking not found." }));
+            // The booking id is in the body, where RecordScope can't see it: staff stay within their locations.
+            if (bookingId is > 0 && User.IsStaff() && !await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Booking, bookingId.Value.ToString()))
+                return (null, NotFound(new { isSuccessful = false, message = "Booking not found." }));
             return (email, null);
         }
 

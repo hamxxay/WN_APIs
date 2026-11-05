@@ -18,17 +18,27 @@ namespace WorkNest.Application.Services
         public const string NoEmailMessage = "This customer has no email.";
 
         private readonly ICustomerLoginRepository _repo;
+        private readonly IRecordScopeRepository _scope;
         private readonly IEmailService _email;
         private readonly ILogger<CustomerLoginService> _logger;
 
-        public CustomerLoginService(ICustomerLoginRepository repo, IEmailService email, ILogger<CustomerLoginService> logger)
+        public CustomerLoginService(ICustomerLoginRepository repo, IRecordScopeRepository scope, IEmailService email, ILogger<CustomerLoginService> logger)
         {
             _repo = repo;
+            _scope = scope;
             _email = email;
             _logger = logger;
         }
 
         private sealed record Outcome(TempPasswordIssued? Issued, int Status, string? Error);
+
+        public async Task<bool> HasLoginWithoutLocationAsync(int customerId, CancellationToken ct = default)
+        {
+            var locations = await _scope.GetLocationIdsAsync(RecordKind.Customer, customerId.ToString());
+            if (locations is { Count: > 0 }) return false; // has a location: RecordScope already decided
+            var info = (await _repo.GetStatusAsync(new[] { customerId }, ct)).FirstOrDefault();
+            return info != null && info.Status != CustomerLoginInfo.None;
+        }
 
         public async Task<(int StatusCode, ApiResponse Response)> IssueAsync(int customerId, CancellationToken ct = default)
         {

@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
 using WorkNest.Application.Interfaces;
+using WorkNest.Common.Responses;
 
 namespace WorkNest.API.Controllers
 {
@@ -25,6 +27,10 @@ namespace WorkNest.API.Controllers
         [RecordScope(RecordKind.Customer, "customerId")]
         public async Task<IActionResult> Issue(int customerId)
         {
+            // A customer with no booking has no location, so RecordScope lets every location through: location-bound
+            // staff may create their first login, but resetting an existing one (a takeover) needs a super admin.
+            if (User.IsLocationBoundRole() && await _logins.HasLoginWithoutLocationAsync(customerId, HttpContext.RequestAborted))
+                return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail("This customer has no booking at your location. Ask a super admin to reset the password."));
             var (status, response) = await _logins.IssueAsync(customerId, HttpContext.RequestAborted);
             return StatusCode(status, response);
         }

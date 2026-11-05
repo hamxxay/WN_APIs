@@ -10,6 +10,9 @@ namespace WorkNest.Application.Interfaces
         /// Gives the customer a new temporary password (creates the login user when missing) and e-mails it. Status code:
         /// 200, 400 (no email / not a customer account / turned off), 404, 503 (AUTH_TEMP_01 not run).
         /// </summary>
+        /// <summary>True when the customer has a login (temporary or active) but belongs to no location yet.</summary>
+        Task<bool> HasLoginWithoutLocationAsync(int customerId, CancellationToken ct = default);
+
         Task<(int StatusCode, ApiResponse Response)> IssueAsync(int customerId, CancellationToken ct = default);
 
         /// <summary>Same for every customer with an email whose login is not active. Never touches an active login.</summary>
