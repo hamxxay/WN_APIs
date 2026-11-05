@@ -4,8 +4,8 @@ ASP.NET Core Web API (.NET 10) for [WorkNest](https://worknestpk.com), coworking
 
 | Client | Repo | Uses the API for |
 |---|---|---|
-| Staff CMS and customer web portal | `WorkNest_FE` | Everything below |
-| Mobile app (React Native) | `WorkNest-Mobile` | Sign-in, customer features, announcements and push tokens, door unlock |
+| Staff CMS and customer web portal | `WN_CMS` | Everything below |
+| Mobile app (React Native) | `WN_MobileApp` | Sign-in, customer features, announcements and push tokens, door unlock |
 | Public website | `WorkNest-MainWeb` | `GET /api/gallery`, `GET /api/location/all`, `POST /api/book-tour` |
 
 Production base URL: `https://aeo.eaccounting360.com.pk/WorkNest/api`. Swagger UI is served at `/swagger`.
@@ -190,6 +190,6 @@ Forms/, Tasks/          reference documents (agreement and KYC forms, invoice pr
 
 ## Related repos
 
-- `WorkNest_FE`: staff and customer web portal
-- `WorkNest-Mobile`: React Native mobile app
+- `WN_CMS`: staff and customer web portal
+- `WN_MobileApp`: React Native mobile app
 - `WorkNest-MainWeb`: public website
