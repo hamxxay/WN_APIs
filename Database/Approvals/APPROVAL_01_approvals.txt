@@ -24,7 +24,7 @@
 --   dbo.WN_Approval_Requests_ExpireDue     moves Pending requests past their expiry to Expired.
 --   dbo.WN_Approval_Request_ExpireNow      Pending -> Expired for one request (the email to the approver could not be sent).
 --   dbo.WN_Approval_Staff_Get              active staff for the people picker (super admin, admin, sales executive, access officer, network engineer).
---   dbo.WN_Approval_Locations_Get          id and name of the locations (@LocationIds NULL = all).
+--   dbo.WN_Approval_Locations_Get          id and name of the active locations (@LocationIds NULL = all).
 -- Seed: categories Networking, CCTV, Access Control. The approver email starts empty.
 -- ============================================================================================
 SET XACT_ABORT ON;
@@ -60,10 +60,11 @@ BEGIN TRY
             CreatedBy  NVARCHAR(256)  NULL,
             CONSTRAINT UQ_WN_ApprovalCategories_Name UNIQUE (Name)
         );');
-    EXEC(N'INSERT INTO dbo.WN_ApprovalCategories (Name, CreatedBy)
-        SELECT v.Name, N''APPROVAL_01''
-          FROM (VALUES (N''Networking''), (N''CCTV''), (N''Access Control'')) v(Name)
-         WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_ApprovalCategories c WHERE c.Name = v.Name);');
+    -- Seeded only into an empty table, so a rerun never brings back a renamed or switched-off category.
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_ApprovalCategories)
+        EXEC(N'INSERT INTO dbo.WN_ApprovalCategories (Name, CreatedBy)
+            SELECT v.Name, N''APPROVAL_01''
+              FROM (VALUES (N''Networking''), (N''CCTV''), (N''Access Control'')) v(Name);');
 
     -- 3. The people for a location + category.
     IF OBJECT_ID(N'dbo.WN_ApprovalAssignees', N'U') IS NULL
@@ -309,7 +310,7 @@ END');
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_ApprovalRequests SET Status = ''Expired'' WHERE Id = @Id AND Status = ''Pending'';
+    UPDATE dbo.WN_ApprovalRequests SET Status = ''Expired'', TokenExpiresAt = SYSUTCDATETIME() WHERE Id = @Id AND Status = ''Pending'';
     SELECT @@ROWCOUNT AS Updated;
 END');
 
@@ -333,7 +334,8 @@ BEGIN
     SET NOCOUNT ON;
     SELECT l.Id, l.Name
       FROM dbo.WN_Locations l
-     WHERE @LocationIds IS NULL OR l.Id IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N'',''))
+     WHERE ISNULL(l.IsActive, 1) = 1
+       AND (@LocationIds IS NULL OR l.Id IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N'','')))
      ORDER BY l.Name, l.Id;
 END');
 
@@ -366,10 +368,12 @@ END');
 AS
 BEGIN
     SET NOCOUNT ON;
+    DECLARE @Done TABLE (Id INT);
     UPDATE dbo.WN_ApprovalRequests
        SET Status = ''Expired''
-    OUTPUT inserted.Id
+    OUTPUT inserted.Id INTO @Done (Id)
      WHERE Status = ''Pending'' AND TokenExpiresAt <= SYSUTCDATETIME();
+    SELECT Id FROM @Done;
 END');
 
     COMMIT TRANSACTION;

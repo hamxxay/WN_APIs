@@ -13,7 +13,7 @@ namespace WorkNest.API.Controllers
     /// <summary>
     /// Approvals for signed-in staff (CMS Approvals tab, app "Requests"): raise a request, list, open one, send an expired one
     /// again and mark an approved one Done (script APPROVAL_01_approvals; before it every call answers 503).
-    /// Sales executives, admins and super admins raise; everyone sees what their locations hold plus what was sent to them.
+    /// Sales executives, admins and super admins raise; sales executives and admins see what their locations hold, super admins everything, and everyone (network engineers and access officers only this) what was sent to them.
     /// Network engineers and access officers are refused everywhere else, so this carries their allow attributes; the CEO and
     /// Sales Manager are refused by their own filters (no allow attribute here). Customers are not in the Authorize roles.
     /// </summary>

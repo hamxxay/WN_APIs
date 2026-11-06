@@ -21,7 +21,7 @@ namespace WorkNest.API.Controllers
 
         public ApprovalSettingsController(IApprovalRepository repo) => _repo = repo;
 
-        public sealed class SettingsRequest { public string? ApproverEmail { get; set; } }
+        public sealed class ApprovalSettingsRequest { public string? ApproverEmail { get; set; } }
         public sealed class CategoryRequest { public string? Name { get; set; } public bool IsActive { get; set; } = true; }
         public sealed class PersonRequest { public int LocationId { get; set; } public int CategoryId { get; set; } public int UserId { get; set; } }
 
@@ -35,7 +35,7 @@ namespace WorkNest.API.Controllers
 
         /// <summary>Saves the approver e-mail (blank clears it: new requests are then blocked).</summary>
         [HttpPut]
-        public Task<IActionResult> SaveSettings([FromBody] SettingsRequest? request, CancellationToken ct = default) => Run(async () =>
+        public Task<IActionResult> SaveSettings([FromBody] ApprovalSettingsRequest? request, CancellationToken ct = default) => Run(async () =>
         {
             var email = request?.ApproverEmail?.Trim() ?? "";
             if (email.Length > 0 && !ApprovalRules.ValidEmail(email)) return BadRequest(ApiResponse.Fail("Enter a valid e-mail address."));

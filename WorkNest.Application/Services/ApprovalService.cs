@@ -89,7 +89,10 @@ namespace WorkNest.Application.Services
 
                 var id = await _repo.CreateRequestAsync(new ApprovalNewRequest(input.LocationId, input.CategoryId, input.Title!.Trim(), input.Details!.Trim(),
                     ApprovalRules.TrimOrNull(input.Reason), userId, link.Approver!, link.Hash!, link.ExpiresAt), ct);
-                var detail = await _repo.GetRequestAsync(id, ct);
+                // The request is saved: from here a cancelled call or a failed read must not leave it Pending with no e-mail.
+                ApprovalRequestDetail? detail = null;
+                try { detail = await _repo.GetRequestAsync(id, CancellationToken.None); }
+                catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: could not read the new request to e-mail the approver.", id); }
                 return await SendLinkAsync(id, detail, link, "approver link");
             }
             catch (ApprovalsMissingException) { return Missing<ApprovalCreated>(); }
@@ -209,7 +212,10 @@ namespace WorkNest.Application.Services
                 if (d.Status != ApprovalStatuses.Approved || !await _repo.MarkDoneAsync(id, userId, ApprovalRules.TrimOrNull(note), ct))
                     return ApprovalResult<int>.Fail(ApprovalOutcome.Conflict, "Only an approved request can be marked Done.");
 
-                var done = await _repo.GetRequestAsync(id, ct) ?? d;
+                // Marked Done: a failed re-read must not turn the saved change into an error.
+                var done = d;
+                try { done = await _repo.GetRequestAsync(id, CancellationToken.None) ?? d; }
+                catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: marked Done but the request could not be read again.", id); }
                 await SendAsync(d.RequestedByEmail, ApprovalEmail.Done(BaseUrl, ToMail(d), done.DoneByName, done.DoneNote), "done", id);
                 return ApprovalResult<int>.Ok(id);
             }
@@ -241,7 +247,7 @@ namespace WorkNest.Application.Services
             {
                 try
                 {
-                    var d = await _repo.GetRequestAsync(id, ct);
+                    var d = await _repo.GetRequestAsync(id, CancellationToken.None);
                     if (d != null) await SendAsync(d.RequestedByEmail, ApprovalEmail.Expired(BaseUrl, ToMail(d)), "expired", id);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogError(ex, "Approval {Id}: could not send the expired e-mail.", id); }
@@ -264,7 +270,7 @@ namespace WorkNest.Application.Services
             catch (ApprovalsMissingException) { return Missing<ApprovalDetailView>(); }
         }
 
-        /// <summary>The list: every location for a super admin, else the caller's locations plus what was sent to them. Paging stays sane past the last page.</summary>
+        /// <summary>The list: every location for a super admin, else the caller's locations (only when they can raise requests) plus what was sent to them. Paging stays sane past the last page.</summary>
         public async Task<ApprovalResult<ApprovalListView>> ListAsync(ApprovalCaller caller, string? status, int? categoryId, int page, int pageSize, CancellationToken ct = default)
         {
             try
