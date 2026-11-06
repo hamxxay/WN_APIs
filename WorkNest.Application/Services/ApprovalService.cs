@@ -26,6 +26,9 @@ namespace WorkNest.Application.Services
 
     public sealed record ApprovalListView(IReadOnlyList<ApprovalRequestRow> Items, int TotalCount, int Page, int PageSize);
 
+    /// <summary>What the New request form needs: the active categories, whether an approver e-mail is set, whether the caller may raise requests, and where.</summary>
+    public sealed record ApprovalMetaView(IReadOnlyList<ApprovalCategory> Categories, bool ApproverEmailSet, bool CanCreate, IReadOnlyList<ApprovalLocation> Locations);
+
     /// <summary>The public page's request (the contract's PublicRequest): no ids, no e-mail addresses.</summary>
     public sealed record ApprovalPublicView(string? LocationName, string CategoryName, string Title, string Details, string? Reason, string Status,
         string? RequestedByName, DateTime RequestedAt, DateTime? DecidedAt, string? DecisionNote, bool CanDecide);
@@ -261,6 +264,19 @@ namespace WorkNest.Application.Services
                 return ApprovalResult<ApprovalListView>.Ok(new ApprovalListView(result.Items, total, page, pageSize));
             }
             catch (ApprovalsMissingException) { return Missing<ApprovalListView>(); }
+        }
+
+        /// <summary>Active categories, whether an approver e-mail is set, whether the caller may raise requests, and their locations (all for a super admin).</summary>
+        public async Task<ApprovalResult<ApprovalMetaView>> MetaAsync(ApprovalCaller caller, CancellationToken ct = default)
+        {
+            try
+            {
+                var categories = await _repo.GetCategoriesAsync(true, ct);
+                var settings = await _repo.GetSettingsAsync(ct);
+                var locations = (await _repo.GetLocationsAsync(ct)).Where(l => caller.IsSuperAdmin || caller.LocationIds.Contains(l.Id)).ToList();
+                return ApprovalResult<ApprovalMetaView>.Ok(new ApprovalMetaView(categories, ApprovalRules.ValidEmail(settings?.ApproverEmail), caller.CanRaise, locations));
+            }
+            catch (ApprovalsMissingException) { return Missing<ApprovalMetaView>(); }
         }
 
         /// <summary>The caller's locations include the request, or it was sent to them. A super admin sees all.</summary>
