@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Security.Claims;
 using FluentValidation;
 using FluentValidation.AspNetCore;
@@ -338,6 +338,10 @@ try
     // Notice Period & Settlement
     builder.Services.AddScoped<INoticePeriodRepository, WorkNest.Infrastructure.Repositories.NoticePeriodRepository>();
     builder.Services.AddScoped<INoticePeriodService, NoticePeriodService>();
+
+    // One-Time Discounts (OTD_01_one_time_discounts)
+    builder.Services.AddScoped<IOneTimeDiscountRepository, WorkNest.Infrastructure.Repositories.OneTimeDiscountRepository>();
+    builder.Services.AddScoped<IOneTimeDiscountService, OneTimeDiscountService>();
 
 
     // â”€â”€ Background Hosted Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

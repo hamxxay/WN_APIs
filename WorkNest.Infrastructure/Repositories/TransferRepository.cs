@@ -82,7 +82,7 @@ namespace WorkNest.Infrastructure.Repositories
                     SpaceCode = reader.IsDBNull(reader.GetOrdinal("TargetSpaceCode")) ? null : reader.GetString(reader.GetOrdinal("TargetSpaceCode")),
                     LocationId = response.CurrentBooking.LocationId,
                     LocationName = response.CurrentBooking.LocationName,
-                    Capacity = reader.GetInt32(reader.GetOrdinal("TargetCapacity")),
+                    Capacity = Convert.ToInt32(reader["TargetCapacity"]),
                     MonthlyRate = reader.GetDecimal(reader.GetOrdinal("TargetMonthlyRate")),
                     MaxDiscountPercent = reader.GetDecimal(reader.GetOrdinal("TargetMaxDiscountPct")),
                     OfferingType = response.CurrentBooking.OfferingType,
@@ -199,32 +199,10 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = CreateConnection();
             await conn.OpenAsync();
 
-            const string sql = @"
-                SELECT 
-                    b.Id AS BookingId,
-                    b.IdGUID AS BookingPublicId,
-                    COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(c.FirstName, N' ', c.LastName))), N''), u.Name, u.Email) AS CustomerName,
-                    COALESCE(c.Email, u.Email) AS CustomerEmail,
-                    b.CustomerCode,
-                    b.SpaceId,
-                    s.Name AS SpaceName,
-                    s.Code AS SpaceCode,
-                    ISNULL(s.LocationId, 0) AS LocationId,
-                    l.Name AS LocationName,
-                    b.StartOn,
-                    b.EndOn,
-                    COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), 0.00) AS MonthlyRent,
-                    ISNULL(b.DiscountPercentage, 0.00) AS DiscountPercentage,
-                    b.OfferingType,
-                    ISNULL(b.SecurityDepositPaid, 0.00) AS SecurityDepositPaid
-                FROM dbo.WN_Bookings b WITH (NOLOCK)
-                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-                LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
-                LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = b.CustomerCode OR c.UserId = b.UserId
-                LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
-                WHERE b.Id = @BookingId AND ISNULL(b.IsDeleted, 0) = 0;";
-
-            await using var cmd = new SqlCommand(sql, conn);
+            await using var cmd = new SqlCommand("dbo.WN_Booking_GetTransferBookingSummary", conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
             cmd.Parameters.AddWithValue("@BookingId", bookingId);
 
             await using var reader = await cmd.ExecuteReaderAsync();
@@ -259,21 +237,10 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = CreateConnection();
             await conn.OpenAsync();
 
-            const string sql = @"
-                SELECT 
-                    s.Id AS SpaceId,
-                    s.Name AS SpaceName,
-                    s.Code AS SpaceCode,
-                    ISNULL(s.LocationId, 0) AS LocationId,
-                    l.Name AS LocationName,
-                    ISNULL(s.Capacity, 1) AS Capacity,
-                    ISNULL(s.Price, 0.00) AS MonthlyRate,
-                    ISNULL(s.MaxDiscountPercent, 10.00) AS MaxDiscountPercent
-                FROM dbo.WN_Spaces s WITH (NOLOCK)
-                LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
-                WHERE s.Id = @SpaceId;";
-
-            await using var cmd = new SqlCommand(sql, conn);
+            await using var cmd = new SqlCommand("dbo.WN_Booking_GetTargetSpaceSummary", conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
             cmd.Parameters.AddWithValue("@SpaceId", spaceId);
 
             await using var reader = await cmd.ExecuteReaderAsync();
@@ -286,7 +253,7 @@ namespace WorkNest.Infrastructure.Repositories
                     SpaceCode = reader.IsDBNull(reader.GetOrdinal("SpaceCode")) ? null : reader.GetString(reader.GetOrdinal("SpaceCode")),
                     LocationId = reader.GetInt32(reader.GetOrdinal("LocationId")),
                     LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString(reader.GetOrdinal("LocationName")),
-                    Capacity = reader.GetInt32(reader.GetOrdinal("Capacity")),
+                    Capacity = Convert.ToInt32(reader["Capacity"]),
                     MonthlyRate = reader.GetDecimal(reader.GetOrdinal("MonthlyRate")),
                     MaxDiscountPercent = reader.GetDecimal(reader.GetOrdinal("MaxDiscountPercent"))
                 };
@@ -303,32 +270,10 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = CreateConnection();
             await conn.OpenAsync();
 
-            const string sql = @"
-                SELECT 
-                    s.Id AS SpaceId,
-                    s.Name AS SpaceName,
-                    s.Code AS SpaceCode,
-                    s.LocationId,
-                    l.Name AS LocationName,
-                    ISNULL(s.Capacity, 1) AS Capacity,
-                    ISNULL(s.Price, 0.00) AS MonthlyRate,
-                    ISNULL(s.MaxDiscountPercent, 10.00) AS MaxDiscountPercent
-                FROM dbo.WN_Spaces s WITH (NOLOCK)
-                JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
-                WHERE s.LocationId = @LocationId
-                  AND ISNULL(s.IsActive, 1) = 1
-                  AND NOT EXISTS (
-                      SELECT 1 FROM dbo.WN_Bookings bk WITH (NOLOCK)
-                      WHERE bk.SpaceId = s.Id
-                        AND ISNULL(bk.IsDeleted, 0) = 0
-                        AND bk.BookingStatusId IN (1, 2, 5, 33)
-                        AND bk.Id <> @ExcludeBookingId
-                        AND CAST(@EffectiveDate AS DATETIME2) < bk.EndOn
-                        AND CAST(@EndDate AS DATETIME2) > bk.StartOn
-                  )
-                ORDER BY s.Name ASC;";
-
-            await using var cmd = new SqlCommand(sql, conn);
+            await using var cmd = new SqlCommand("dbo.WN_Booking_GetAvailableTargetSpaces", conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
             cmd.Parameters.AddWithValue("@LocationId", locationId);
             cmd.Parameters.AddWithValue("@EffectiveDate", effectiveDate.Date);
             cmd.Parameters.AddWithValue("@EndDate", endDate.Date);
@@ -344,7 +289,7 @@ namespace WorkNest.Infrastructure.Repositories
                     SpaceCode = reader.IsDBNull(reader.GetOrdinal("SpaceCode")) ? null : reader.GetString(reader.GetOrdinal("SpaceCode")),
                     LocationId = reader.GetInt32(reader.GetOrdinal("LocationId")),
                     LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString(reader.GetOrdinal("LocationName")),
-                    Capacity = reader.GetInt32(reader.GetOrdinal("Capacity")),
+                    Capacity = Convert.ToInt32(reader["Capacity"]),
                     MonthlyRate = reader.GetDecimal(reader.GetOrdinal("MonthlyRate")),
                     MaxDiscountPercent = reader.GetDecimal(reader.GetOrdinal("MaxDiscountPercent"))
                 });
@@ -359,41 +304,10 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = CreateConnection();
             await conn.OpenAsync();
 
-            const string sql = @"
-                SELECT 
-                    b.Id AS BookingId,
-                    b.IdGUID AS BookingPublicId,
-                    COALESCE(NULLIF(LTRIM(RTRIM(CONCAT(c.FirstName, N' ', c.LastName))), N''), u.Name, u.Email) AS CustomerName,
-                    COALESCE(c.Email, u.Email) AS CustomerEmail,
-                    b.CustomerCode,
-                    b.SpaceId,
-                    s.Name AS SpaceName,
-                    s.Code AS SpaceCode,
-                    ISNULL(s.LocationId, 0) AS LocationId,
-                    l.Name AS LocationName,
-                    b.StartOn,
-                    b.EndOn,
-                    COALESCE(NULLIF(b.MonthlyRent, 0), NULLIF(b.MonthlyBasePrice, 0), 0.00) AS MonthlyRent,
-                    ISNULL(b.DiscountPercentage, 0.00) AS DiscountPercentage,
-                    b.OfferingType,
-                    ISNULL(b.SecurityDepositPaid, 0.00) AS SecurityDepositPaid
-                FROM dbo.WN_Bookings b WITH (NOLOCK)
-                JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
-                JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
-                LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = b.CustomerCode OR c.UserId = b.UserId
-                LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = b.UserId
-                WHERE ISNULL(b.IsDeleted, 0) = 0
-                  AND b.BookingStatusId IN (1, 2, 5, 33)
-                  AND (@LocationId IS NULL OR s.LocationId = @LocationId)
-                  AND (@Search IS NULL OR 
-                       b.CustomerCode LIKE '%' + @Search + '%' OR 
-                       c.FirstName LIKE '%' + @Search + '%' OR 
-                       c.LastName LIKE '%' + @Search + '%' OR 
-                       s.Name LIKE '%' + @Search + '%' OR 
-                       CAST(b.Id AS NVARCHAR(20)) LIKE '%' + @Search + '%')
-                ORDER BY b.Id DESC;";
-
-            await using var cmd = new SqlCommand(sql, conn);
+            await using var cmd = new SqlCommand("dbo.WN_Booking_GetActiveForTransfer", conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
             cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@Search", string.IsNullOrWhiteSpace(search) ? DBNull.Value : search.Trim());
 
@@ -558,48 +472,10 @@ namespace WorkNest.Infrastructure.Repositories
             await using var conn = new SqlConnection(_connectionString);
             await conn.OpenAsync();
 
-            const string sql = @"
-            DECLARE @ToLocationId INT, @RequestedCapacity INT, @EffectiveDate DATE, @OldBookingId INT;
-            SELECT 
-                @ToLocationId = ToLocationId, 
-                @RequestedCapacity = RequestedCapacity, 
-                @EffectiveDate = EffectiveDate, 
-                @OldBookingId = OldBookingId
-            FROM dbo.WN_TransferRequests WITH (NOLOCK)
-            WHERE Id = @RequestId;
-
-            DECLARE @OldEndOn DATETIME2;
-            SELECT @OldEndOn = EndOn FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @OldBookingId;
-
-            SELECT 
-                s.Id AS SpaceId,
-                s.Code AS SpaceCode,
-                s.Name AS SpaceName,
-                s.LocationId,
-                l.Name AS LocationName,
-                ISNULL(s.Capacity, 1) AS Capacity,
-                ISNULL(s.Price, 0.00) AS MonthlyRate,
-                ISNULL(s.MaxDiscountPercent, 10.00) AS MaxDiscountPercent,
-                ot.OfferingTypeName AS OfferingType,
-                ISNULL(ot.MaxDiscountPercentage, 10.00) AS OfferingTypeDiscountCap
-            FROM dbo.WN_Spaces s WITH (NOLOCK)
-            LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = s.LocationId
-            LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
-            LEFT JOIN dbo.WN_OfferingTypes ot WITH (NOLOCK) ON ot.Id = st.OfferingTypeId
-            WHERE s.LocationId = @ToLocationId
-              AND ISNULL(s.IsActive, 1) = 1
-              AND ISNULL(s.Capacity, 1) >= @RequestedCapacity
-              AND NOT EXISTS (
-                  SELECT 1 FROM dbo.WN_Bookings b WITH (NOLOCK)
-                  WHERE b.SpaceId = s.Id
-                    AND ISNULL(b.IsDeleted, 0) = 0
-                    AND b.BookingStatusId IN (1, 2, 5, 33)
-                    AND b.StartOn <= @OldEndOn
-                    AND b.EndOn >= CAST(@EffectiveDate AS DATETIME2)
-              )
-            ORDER BY s.Capacity ASC, s.Price ASC;";
-
-            await using var cmd = new SqlCommand(sql, conn);
+            await using var cmd = new SqlCommand("dbo.WN_TransferRequest_GetIncomingAvailableSpaces", conn)
+            {
+                CommandType = CommandType.StoredProcedure
+            };
             cmd.Parameters.AddWithValue("@RequestId", requestId);
 
             await using var reader = await cmd.ExecuteReaderAsync();
@@ -612,7 +488,7 @@ namespace WorkNest.Infrastructure.Repositories
                     SpaceName = reader.IsDBNull(reader.GetOrdinal("SpaceName")) ? null : reader.GetString(reader.GetOrdinal("SpaceName")),
                     LocationId = reader.GetInt32(reader.GetOrdinal("LocationId")),
                     LocationName = reader.IsDBNull(reader.GetOrdinal("LocationName")) ? null : reader.GetString(reader.GetOrdinal("LocationName")),
-                    Capacity = Convert.ToInt32(reader.GetInt16(reader.GetOrdinal("Capacity"))),
+                    Capacity = Convert.ToInt32(reader["Capacity"]),
                     MonthlyRate = reader.GetDecimal(reader.GetOrdinal("MonthlyRate")),
                     MaxDiscountPercent = reader.GetDecimal(reader.GetOrdinal("MaxDiscountPercent")),
                     OfferingType = reader.IsDBNull(reader.GetOrdinal("OfferingType")) ? null : reader.GetString(reader.GetOrdinal("OfferingType")),

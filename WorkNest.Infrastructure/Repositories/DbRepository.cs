@@ -1791,11 +1791,18 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                        i.IssuedOn, i.DueOn,
                        COALESCE(i.BillingPeriodStart, b.StartOn) AS PeriodStart,
                        COALESCE(i.BillingPeriodEnd, b.EndOn) AS PeriodEnd,
+                       ISNULL(i.SubTotal, 0) AS SubTotal,
+                       ISNULL(i.DiscountTotal, 0) AS DiscountTotal,
+                       ISNULL(i.RoomRentExclTax, 0) AS RoomRentExclTax,
+                       ISNULL(i.ServiceCharges, 0) AS ServiceCharges,
+                       ISNULL(i.TaxTotal, 0) AS TaxTotal,
                        ISNULL(i.GrandTotal, 0) AS GrandTotal, ISNULL(i.WHTAmount, 0) AS WHTAmount, ISNULL(i.PaidTotal, 0) AS PaidTotal,
                        ISNULL(i.CurrencyCode, 'PKR') AS CurrencyCode,
                        CAST(ISNULL(i.StatusId, 0) AS INT) AS StatusId, LTRIM(RTRIM(os.Description)) AS StatusDescription,
                        CAST(b.BookingStatusId AS INT) AS BookingStatusId, bs.Code AS BookingStatusCode, bs.Label AS BookingStatusLabel,
-                       COALESCE(NULLIF(s.Name, ''), s.Code) AS SpaceName, s.Code AS SpaceCode, l.Name AS LocationName
+                       COALESCE(NULLIF(s.Name, ''), s.Code) AS SpaceName, s.Code AS SpaceCode, l.Name AS LocationName,
+                       otd.AppliedDiscountAmount AS OneTimeDiscountAmount,
+                       otdLine.Description AS OneTimeDiscountDescription
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                   JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = ISNULL(i.UserId, b.UserId)
@@ -1803,6 +1810,18 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   LEFT JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
                   LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
                   LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = COALESCE(i.LocationId, s.LocationId)
+                  OUTER APPLY (
+                      SELECT TOP 1 x.AppliedDiscountAmount
+                      FROM dbo.WN_OneTimeDiscounts x WITH (NOLOCK)
+                      WHERE x.AppliedInvoiceId = i.Id AND x.Status = 'Applied'
+                      ORDER BY x.Id DESC
+                  ) otd
+                  OUTER APPLY (
+                      SELECT TOP 1 il.Description
+                      FROM dbo.WN_InvoiceLines il WITH (NOLOCK)
+                      WHERE il.InvoiceId = i.Id AND il.UnitPrice < 0
+                      ORDER BY il.Id DESC
+                  ) otdLine
                  WHERE u.Email = @Email
                    AND (b.Id IS NULL OR ISNULL(b.IsDeleted, 0) = 0)
                    AND ISNULL(i.StatusId, 0) <> 40

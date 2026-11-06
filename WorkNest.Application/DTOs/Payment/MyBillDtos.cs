@@ -34,6 +34,20 @@ namespace WorkNest.Application.DTOs.Payment
         public string CurrencyCode { get; set; } = "PKR";
         /// <summary>Invoice grand total / challan total payable.</summary>
         public decimal Total { get; set; }
+        /// <summary>Gross subtotal before discounts (for invoices).</summary>
+        public decimal? SubTotal { get; set; }
+        /// <summary>Total discount applied on the invoice (booking discount + any one-time discount).</summary>
+        public decimal? DiscountTotal { get; set; }
+        /// <summary>Discounted room rent excluding tax and support charges.</summary>
+        public decimal? RoomRentExclTax { get; set; }
+        /// <summary>Support service charges.</summary>
+        public decimal? ServiceCharges { get; set; }
+        /// <summary>Sales tax on support service charges.</summary>
+        public decimal? TaxTotal { get; set; }
+        /// <summary>One-time discount amount applied to this invoice, if any.</summary>
+        public decimal? OneTimeDiscountAmount { get; set; }
+        /// <summary>Separate discount line description when a one-time discount was applied.</summary>
+        public string? OneTimeDiscountDescription { get; set; }
         /// <summary>Withholding tax the customer deducts (WHT invoices); not paid to WorkNest.</summary>
         public decimal TaxWithheld { get; set; }
         public decimal Paid { get; set; }

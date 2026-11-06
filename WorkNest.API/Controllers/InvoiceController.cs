@@ -483,9 +483,18 @@ namespace WorkNest.API.Controllers
 
                         decimal qty = HasColumn(reader, "Quantity") && !reader.IsDBNull(reader.GetOrdinal("Quantity")) ? Convert.ToDecimal(reader.GetValue(reader.GetOrdinal("Quantity"))) : 1m;
                         decimal unitPrice = HasColumn(reader, "UnitPrice") && !reader.IsDBNull(reader.GetOrdinal("UnitPrice")) ? Convert.ToDecimal(reader.GetValue(reader.GetOrdinal("UnitPrice"))) : 0m;
-                        
-                        decimal priceExcl = reader.IsDBNull(reader.GetOrdinal("PriceExclVat")) ? 0m : reader.GetDecimal(reader.GetOrdinal("PriceExclVat"));
+                        decimal discAmt = HasColumn(reader, "DiscountAmount") && !reader.IsDBNull(reader.GetOrdinal("DiscountAmount")) ? Convert.ToDecimal(reader.GetValue(reader.GetOrdinal("DiscountAmount"))) : 0m;
+
+                        decimal priceExcl = HasColumn(reader, "PriceExclVat") && !reader.IsDBNull(reader.GetOrdinal("PriceExclVat"))
+                            ? reader.GetDecimal(reader.GetOrdinal("PriceExclVat"))
+                            : (qty * unitPrice) - discAmt;
                         if (unitPrice == 0 && qty > 0) unitPrice = priceExcl / qty;
+
+                        decimal vatAmt = HasColumn(reader, "VatAmount") && !reader.IsDBNull(reader.GetOrdinal("VatAmount"))
+                            ? reader.GetDecimal(reader.GetOrdinal("VatAmount"))
+                            : (HasColumn(reader, "TaxAmount") && !reader.IsDBNull(reader.GetOrdinal("TaxAmount"))
+                                ? reader.GetDecimal(reader.GetOrdinal("TaxAmount"))
+                                : 0m);
 
                         items.Add(new StatementInvoiceLineItemDto
                         {
@@ -495,7 +504,7 @@ namespace WorkNest.API.Controllers
                             Quantity = qty,
                             UnitPrice = unitPrice,
                             PriceExclVat = priceExcl,
-                            VatAmount = reader.IsDBNull(reader.GetOrdinal("VatAmount")) ? 0m : reader.GetDecimal(reader.GetOrdinal("VatAmount")),
+                            VatAmount = vatAmt,
                             Category = HasColumn(reader, "CategoryName") && !reader.IsDBNull(reader.GetOrdinal("CategoryName")) ? reader.GetString(reader.GetOrdinal("CategoryName")) : "Recurring",
                             IsDeposit = isDeposit
                         });
@@ -622,11 +631,26 @@ namespace WorkNest.API.Controllers
         }
 
         [HttpGet("api/invoice/{id:int}")]
-        [Authorize(Roles = StaffRoles)]
+        [Authorize]
         public async Task<IActionResult> GetDetails(int id)
         {
             try
             {
+                bool isStaff = User.IsStaff();
+                if (!isStaff)
+                {
+                    var email = ResolveUserEmail();
+                    if (string.IsNullOrWhiteSpace(email) || !await _db.IsInvoiceOwnedByDbAsync(id, email))
+                        return NotFound(new { isSuccessful = false, message = "Invoice not found" });
+
+                    using var chkConn = await OpenConnectionAsync();
+                    using var chkCmd = new SqlCommand("dbo.WN_Invoices_GetApprovalStatus", chkConn) { CommandType = CommandType.StoredProcedure };
+                    chkCmd.Parameters.AddWithValue("@Id", id);
+                    var appStatus = (await chkCmd.ExecuteScalarAsync())?.ToString();
+                    if (string.Equals(appStatus, "PendingApproval", StringComparison.OrdinalIgnoreCase))
+                        return NotFound(new { isSuccessful = false, message = "Invoice not found" });
+                }
+
                 using var conn = await OpenConnectionAsync();
 
                 using var cmd = new SqlCommand("dbo.WN_GetInvoiceDetailsById", conn);
@@ -1864,19 +1888,83 @@ namespace WorkNest.API.Controllers
                     // Invoice date is always today; due 7 days later.
                     var invoiceDate = _clock.Today;
 
+                    decimal pendingOneTimeDiscount = 0m;
+                    string? pendingOneTimeDiscountReason = null;
+                    try
+                    {
+                        const string otdPreviewCheckSql = @"
+                            SELECT TOP 1 AppliesTo, TargetInvoiceId, TargetMonth, DiscountType, DiscountValue, Reason
+                            FROM dbo.WN_OneTimeDiscounts WITH (NOLOCK)
+                            WHERE BookingId = @BookingId
+                              AND Status = 'Pending'
+                              AND (
+                                  (AppliesTo = 'Invoice' AND (TargetInvoiceId IS NULL OR TargetInvoiceId = 1))
+                                  OR
+                                  (AppliesTo = 'Month' AND TargetMonth <= @PeriodEnd AND EOMONTH(TargetMonth) >= @PeriodStart)
+                              )
+                            ORDER BY CASE WHEN AppliesTo = 'Invoice' THEN 0 ELSE 1 END, Id ASC;";
+
+                        using var otdChkCmd = new SqlCommand(otdPreviewCheckSql, conn);
+                        otdChkCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                        otdChkCmd.Parameters.AddWithValue("@PeriodStart", periodStart.Date);
+                        otdChkCmd.Parameters.AddWithValue("@PeriodEnd", periodEnd.Date);
+                        string? otdAppliesTo = null, otdDiscType = null;
+                        int? otdTargetInvId = null;
+                        DateTime? otdTargetMonth = null;
+                        decimal otdDiscVal = 0m;
+
+                        using (var otdR = await otdChkCmd.ExecuteReaderAsync())
+                        {
+                            if (await otdR.ReadAsync())
+                            {
+                                otdAppliesTo = otdR.GetString(0);
+                                otdTargetInvId = otdR.IsDBNull(1) ? null : otdR.GetInt32(1);
+                                otdTargetMonth = otdR.IsDBNull(2) ? null : otdR.GetDateTime(2);
+                                otdDiscType = otdR.GetString(3);
+                                otdDiscVal = otdR.GetDecimal(4);
+                                pendingOneTimeDiscountReason = otdR.GetString(5);
+                            }
+                        }
+
+                        if (otdAppliesTo != null && otdDiscVal > 0m)
+                        {
+                            using var otdPrevCmd = new SqlCommand("dbo.WN_OneTimeDiscounts_Preview", conn) { CommandType = CommandType.StoredProcedure };
+                            otdPrevCmd.Parameters.AddWithValue("@BookingId", bookingId);
+                            otdPrevCmd.Parameters.AddWithValue("@AppliesTo", otdAppliesTo);
+                            otdPrevCmd.Parameters.AddWithValue("@TargetInvoiceId", (object?)otdTargetInvId ?? DBNull.Value);
+                            otdPrevCmd.Parameters.AddWithValue("@TargetMonth", (object?)otdTargetMonth ?? DBNull.Value);
+                            otdPrevCmd.Parameters.AddWithValue("@DiscountType", otdDiscType!);
+                            otdPrevCmd.Parameters.AddWithValue("@DiscountValue", otdDiscVal);
+                            otdPrevCmd.Parameters.AddWithValue("@BillingPeriodStart", periodStart.Date);
+                            otdPrevCmd.Parameters.AddWithValue("@BillingPeriodEnd", periodEnd.Date);
+                            using var otdPrevR = await otdPrevCmd.ExecuteReaderAsync();
+                            if (await otdPrevR.ReadAsync())
+                            {
+                                pendingOneTimeDiscount = otdPrevR.GetDecimal(otdPrevR.GetOrdinal("OneTimeDiscountAmount"));
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore if WN_OneTimeDiscounts is not yet present
+                    }
+
+                    decimal effectiveRoomRentExclusive = Math.Max(0m, roomRentExclusive - pendingOneTimeDiscount);
+                    decimal effectiveExpectedGrandTotal = Math.Max(0m, expectedGrandTotal - pendingOneTimeDiscount);
+
                     // WHT: the booking's current choice (preselects the preview's dropdowns), and the choice previewed.
                     var (bookingSendsWht, bookingWhTaxId) = await _db.GetBookingWhtAsync(bookingId);
                     decimal? previewWhTaxId = invoiceType is null ? bookingWhTaxId : chosenWhTaxId;
-                    decimal whtRatePercent = 0m, whtAmount = 0m, whtGrossUp = 0m, previewGrandTotal = expectedGrandTotal;
+                    decimal whtRatePercent = 0m, whtAmount = 0m, whtGrossUp = 0m, previewGrandTotal = effectiveExpectedGrandTotal;
                     if (previewWhTaxId is > 0)
                     {
                         whtRatePercent = await _db.ResolveWhtRatePercentAsync(previewWhTaxId);
                         if (whtRatePercent > 0m && whtRatePercent < 100m)
                         {
                             // Same inputs WN_Invoices_Insert grosses up (step 11 rounding absorbed into the rent first).
-                            decimal rentForWht = roomRentExclusive > 0
-                                ? expectedGrandTotal - supportCharge - taxTotal - securityDeposit
-                                : roomRentExclusive;
+                            decimal rentForWht = effectiveRoomRentExclusive > 0
+                                ? effectiveExpectedGrandTotal - supportCharge - taxTotal - securityDeposit
+                                : effectiveRoomRentExclusive;
                             var wht = WorkNest.Application.Services.WhtCalculator.Calculate(rentForWht, supportCharge, taxTotal, whtRatePercent);
                             whtAmount = wht.WhtAmount;
                             whtGrossUp = wht.RentLine - rentForWht;
@@ -1910,8 +1998,12 @@ namespace WorkNest.API.Controllers
                             isProrated = calc.IsProrated,
                             proratedDays = calc.ProratedDays,
                             rent = grossAdvanceRent,
-                            discount = appliedDiscount,
-                            discountPercentage = grossAdvanceRent > 0 ? Math.Round(appliedDiscount * 100m / grossAdvanceRent, 2) : 0m,
+                            discount = appliedDiscount + pendingOneTimeDiscount,
+                            bookingDiscount = appliedDiscount,
+                            oneTimeDiscount = pendingOneTimeDiscount,
+                            oneTimeDiscountReason = pendingOneTimeDiscountReason,
+                            roomRentExclTax = effectiveRoomRentExclusive,
+                            discountPercentage = grossAdvanceRent > 0 ? Math.Round((appliedDiscount + pendingOneTimeDiscount) * 100m / grossAdvanceRent, 2) : 0m,
                             tax = taxTotal,
                             serviceCharge = supportCharge,
                             securityDeposit,

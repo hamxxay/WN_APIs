@@ -149,6 +149,15 @@ namespace WorkNest.Application.Services
                     PeriodEnd = RowDate(r, "PeriodEnd"),
                     CurrencyCode = RowText(r, "CurrencyCode") ?? "PKR",
                     Total = total,
+                    SubTotal = Math.Round(RowDecimal(r, "SubTotal"), 2),
+                    DiscountTotal = Math.Round(RowDecimal(r, "DiscountTotal"), 2),
+                    RoomRentExclTax = Math.Round(RowDecimal(r, "RoomRentExclTax"), 2),
+                    ServiceCharges = Math.Round(RowDecimal(r, "ServiceCharges"), 2),
+                    TaxTotal = Math.Round(RowDecimal(r, "TaxTotal"), 2),
+                    OneTimeDiscountAmount = r.TryGetValue("OneTimeDiscountAmount", out var otdVal) && otdVal is not null && otdVal is not DBNull
+                        ? Math.Round(Convert.ToDecimal(otdVal), 2)
+                        : null,
+                    OneTimeDiscountDescription = RowText(r, "OneTimeDiscountDescription"),
                     TaxWithheld = withheld,
                     // Marked paid in the database (bank / fee receipt) counts as paid in full.
                     Paid = state.Status == CustomerBills.Paid ? Math.Max(paid, total - withheld) : paid,
