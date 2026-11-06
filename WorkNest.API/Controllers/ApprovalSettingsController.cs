@@ -81,7 +81,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("people")]
         public Task<IActionResult> AddPerson([FromBody] PersonRequest? request, CancellationToken ct = default) => Run(async () =>
         {
-            if (request == null || request.LocationId <= 0 || !(await _repo.GetLocationsAsync(ct)).Any(l => l.Id == request.LocationId))
+            if (request == null || request.LocationId <= 0 || !(await _repo.GetLocationsAsync(new[] { request.LocationId }, ct)).Any(l => l.Id == request.LocationId))
                 return BadRequest(ApiResponse.Fail("Choose a location."));
             if (!(await _repo.GetCategoriesAsync(false, ct)).Any(c => c.Id == request.CategoryId)) return BadRequest(ApiResponse.Fail("Choose a category."));
             if (!(await _repo.GetStaffAsync(ct)).Any(s => s.Id == request.UserId)) return BadRequest(ApiResponse.Fail("Choose a staff member."));

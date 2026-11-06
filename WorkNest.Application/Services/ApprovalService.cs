@@ -42,7 +42,9 @@ namespace WorkNest.Application.Services
     {
         public const string LinkUsedMessage = "This link has already been used or has expired.";
         public const string NoApproverMessage = "No approver e-mail is set yet. Ask a super admin to set it in Approval Settings.";
+        public const string EmailFailedMessage = "Saved, but the email to the approver failed. Use Send again.";
         public const int DefaultPageSize = 25;
+        public const int MaxPage = 10000;
         public const int MaxPageSize = 100;
 
         private readonly IApprovalRepository _repo;
@@ -67,7 +69,7 @@ namespace WorkNest.Application.Services
 
         // ---- raise -------------------------------------------------------------------------------------------------
 
-        /// <summary>Stores a Pending request and e-mails the approver the link. Returns the new id.</summary>
+        /// <summary>Stores a Pending request and e-mails the approver the link. Returns the new id. When that e-mail fails the request is Expired (so it can be sent again) and the result is a 409 with <see cref="EmailFailedMessage"/>.</summary>
         public async Task<ApprovalResult<int>> CreateAsync(ApprovalCreateInput input, int userId, CancellationToken ct = default)
         {
             try
@@ -76,27 +78,42 @@ namespace WorkNest.Application.Services
                 if (invalid != null) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, invalid);
                 if (!(await _repo.GetCategoriesAsync(true, ct)).Any(c => c.Id == input.CategoryId))
                     return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, "Choose a category.");
-                if (!(await _repo.GetLocationsAsync(ct)).Any(l => l.Id == input.LocationId))
+                if (!(await _repo.GetLocationsAsync(new[] { input.LocationId }, ct)).Any(l => l.Id == input.LocationId))
                     return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, "Choose a location.");
 
-                var settings = await _repo.GetSettingsAsync(ct);
-                var approver = settings?.ApproverEmail?.Trim();
-                if (!ApprovalRules.ValidEmail(approver)) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, NoApproverMessage);
+                var link = await NewLinkAsync(ct);
+                if (link.Failure != null) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, link.Failure);
 
-                var token = ApprovalRules.NewToken();
-                var expires = _utcNow().AddDays(ExpiryDays(settings));
                 var id = await _repo.CreateRequestAsync(new ApprovalNewRequest(input.LocationId, input.CategoryId, input.Title!.Trim(), input.Details!.Trim(),
-                    ApprovalRules.TrimOrNull(input.Reason), userId, approver!, ApprovalRules.HashToken(token)!, expires), ct);
-
+                    ApprovalRules.TrimOrNull(input.Reason), userId, link.Approver!, link.Hash!, link.ExpiresAt), ct);
                 var detail = await _repo.GetRequestAsync(id, ct);
-                if (detail != null)
-                {
-                    var mail = ApprovalEmail.ToApprover(BaseUrl, token, ToMail(detail), expires);
-                    await SendAsync(approver, mail, "approver link", id);
-                }
-                return ApprovalResult<int>.Ok(id);
+                return await SendLinkAsync(id, detail, link, "approver link");
             }
             catch (ApprovalsMissingException) { return Missing<int>(); }
+        }
+
+        /// <summary>A new one-time link for the approver: token, its hash, expiry and the approver address (or why there is none).</summary>
+        private sealed record NewLink(string? Token, byte[]? Hash, DateTime ExpiresAt, string? Approver, string? Failure);
+
+        private async Task<NewLink> NewLinkAsync(CancellationToken ct)
+        {
+            var settings = await _repo.GetSettingsAsync(ct);
+            var approver = settings?.ApproverEmail?.Trim();
+            if (!ApprovalRules.ValidEmail(approver)) return new NewLink(null, null, default, null, NoApproverMessage);
+            var token = ApprovalRules.NewToken();
+            return new NewLink(token, ApprovalRules.HashToken(token), _utcNow().AddDays(ExpiryDays(settings)), approver, null);
+        }
+
+        /// <summary>E-mails the approver the link. A real send failure expires the request again so it never sits Pending with a link nobody got; an e-mail held by Email Sending off is not a failure.</summary>
+        private async Task<ApprovalResult<int>> SendLinkAsync(int id, ApprovalRequestDetail? detail, NewLink link, string what)
+        {
+            var sent = detail == null
+                ? SendResult.Failed
+                : await SendAsync(link.Approver, ApprovalEmail.ToApprover(BaseUrl, link.Token!, ToMail(detail), link.ExpiresAt), what, id);
+            if (sent != SendResult.Failed) return ApprovalResult<int>.Ok(id);
+            try { await _repo.ExpireNowAsync(id, CancellationToken.None); }
+            catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: could not expire the request after its approver e-mail failed.", id); }
+            return ApprovalResult<int>.Fail(ApprovalOutcome.Conflict, EmailFailedMessage);
         }
 
         // ---- the approver's page -----------------------------------------------------------------------------------
@@ -135,34 +152,41 @@ namespace WorkNest.Application.Services
                         ? NotFoundLink<ApprovalPublicView>()
                         : ApprovalResult<ApprovalPublicView>.Fail(ApprovalOutcome.Conflict, LinkUsedMessage);
 
-                await NotifyDecisionAsync(decided.Id, decision, ct);
-                var fresh = await _repo.GetRequestByTokenAsync(hash, ct);
-                return fresh == null ? NotFoundLink<ApprovalPublicView>() : ApprovalResult<ApprovalPublicView>.Ok(ToPublic(fresh));
+                // The decision is saved: from here on nothing may fail it (no cancellation, no 500 from a failed re-read or e-mail).
+                await NotifyDecisionAsync(decided.Id, decision);
+                try
+                {
+                    var fresh = await _repo.GetRequestByTokenAsync(hash, CancellationToken.None);
+                    if (fresh != null) return ApprovalResult<ApprovalPublicView>.Ok(ToPublic(fresh));
+                }
+                catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: the decision was saved but the request could not be read again.", decided.Id); }
+                return ApprovalResult<ApprovalPublicView>.Ok(new ApprovalPublicView(null, "", "", "", null, decision, null, _utcNow(), _utcNow(), ApprovalRules.TrimOrNull(note), false));
             }
             catch (ApprovalsMissingException) { return Missing<ApprovalPublicView>(); }
         }
 
-        private async Task NotifyDecisionAsync(int id, string decision, CancellationToken ct)
+        private async Task NotifyDecisionAsync(int id, string decision)
         {
-            ApprovalRequestDetail? d;
-            try { d = await _repo.GetRequestAsync(id, ct); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogError(ex, "Approval {Id}: could not read the request to send its e-mails.", id); return; }
-            if (d == null) return;
-            var r = ToMail(d);
-            await SendAsync(d.RequestedByEmail, ApprovalEmail.Decision(BaseUrl, r, decision, d.DecisionNote), "decision", id);
-            if (decision != ApprovalStatuses.Approved) return;
-
-            if (d.Assignees.Count == 0)
+            try
             {
-                IReadOnlyList<string> admins;
-                try { admins = await _reports.GetSuperAdminEmailsAsync(); }
-                catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogError(ex, "Approval {Id}: could not read the super admin e-mails.", id); return; }
-                foreach (var to in admins.Distinct(StringComparer.OrdinalIgnoreCase))
-                    await SendAsync(to, ApprovalEmail.NobodyAssigned(BaseUrl, r), "nobody assigned", id);
-                return;
+                var d = await _repo.GetRequestAsync(id, CancellationToken.None);
+                if (d == null) return;
+                var r = ToMail(d);
+                var people = decision == ApprovalStatuses.Approved ? d.Assignees.Where(a => ApprovalRules.ValidEmail(a.Email)).ToList() : new List<ApprovalRequestAssignee>();
+                await SendAsync(d.RequestedByEmail, ApprovalEmail.Decision(BaseUrl, r, decision, d.DecisionNote, people.Count > 0), "decision", id);
+                if (decision != ApprovalStatuses.Approved) return;
+
+                if (people.Count == 0)
+                {
+                    // Nobody is assigned, or nobody assigned has an address: the super admins hear about it.
+                    foreach (var to in (await _reports.GetSuperAdminEmailsAsync()).Distinct(StringComparer.OrdinalIgnoreCase))
+                        await SendAsync(to, ApprovalEmail.NobodyAssigned(BaseUrl, r), "nobody assigned", id);
+                    return;
+                }
+                foreach (var p in people)
+                    await SendAsync(p.Email, ApprovalEmail.Assigned(BaseUrl, r, d.DecisionNote), "assigned person", id);
             }
-            foreach (var p in d.Assignees)
-                await SendAsync(p.Email, ApprovalEmail.Assigned(BaseUrl, r, d.DecisionNote), "assigned person", id);
+            catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: the decision e-mails could not be prepared.", id); }
         }
 
         // ---- after approval ----------------------------------------------------------------------------------------
@@ -196,16 +220,11 @@ namespace WorkNest.Application.Services
                 var d = await _repo.GetRequestAsync(id, ct);
                 if (d == null) return ApprovalResult<int>.Fail(ApprovalOutcome.NotFound, "Request not found.");
                 if (d.Status != ApprovalStatuses.Expired) return ApprovalResult<int>.Fail(ApprovalOutcome.Conflict, "Only an expired request can be sent again.");
-                var settings = await _repo.GetSettingsAsync(ct);
-                var approver = settings?.ApproverEmail?.Trim();
-                if (!ApprovalRules.ValidEmail(approver)) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, NoApproverMessage);
-
-                var token = ApprovalRules.NewToken();
-                var expires = _utcNow().AddDays(ExpiryDays(settings));
-                if (!await _repo.ResendRequestAsync(id, approver!, ApprovalRules.HashToken(token)!, expires, ct))
+                var link = await NewLinkAsync(ct);
+                if (link.Failure != null) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, link.Failure);
+                if (!await _repo.ResendRequestAsync(id, link.Approver!, link.Hash!, link.ExpiresAt, ct))
                     return ApprovalResult<int>.Fail(ApprovalOutcome.Conflict, "Only an expired request can be sent again.");
-                await SendAsync(approver, ApprovalEmail.ToApprover(BaseUrl, token, ToMail(d), expires), "approver link (resend)", id);
-                return ApprovalResult<int>.Ok(id);
+                return await SendLinkAsync(id, d, link, "approver link (resend)");
             }
             catch (ApprovalsMissingException) { return Missing<int>(); }
         }
@@ -253,9 +272,9 @@ namespace WorkNest.Application.Services
                         .FirstOrDefault(x => string.Equals(x, status.Trim(), StringComparison.OrdinalIgnoreCase));
                     if (s == null) return ApprovalResult<ApprovalListView>.Fail(ApprovalOutcome.Invalid, "Unknown status.");
                 }
-                if (page < 1) page = 1;
+                page = Math.Clamp(page, 1, MaxPage);
                 pageSize = pageSize < 1 ? DefaultPageSize : Math.Min(pageSize, MaxPageSize);
-                var scope = caller.IsSuperAdmin ? null : caller.LocationIds;
+                var scope = caller.IsSuperAdmin ? null : ScopeOf(caller);
                 var result = await _repo.GetRequestsAsync(scope, caller.UserId, s, categoryId, page, pageSize, ct);
                 var total = result.TotalCount;
                 // TotalCount rides on the rows, so past the last page it would read 0: take it from the first page.
@@ -273,15 +292,18 @@ namespace WorkNest.Application.Services
             {
                 var categories = await _repo.GetCategoriesAsync(true, ct);
                 var settings = await _repo.GetSettingsAsync(ct);
-                var locations = (await _repo.GetLocationsAsync(ct)).Where(l => caller.IsSuperAdmin || caller.LocationIds.Contains(l.Id)).ToList();
+                var locations = await _repo.GetLocationsAsync(caller.IsSuperAdmin ? null : ScopeOf(caller), ct);
                 return ApprovalResult<ApprovalMetaView>.Ok(new ApprovalMetaView(categories, ApprovalRules.ValidEmail(settings?.ApproverEmail), caller.CanRaise, locations));
             }
             catch (ApprovalsMissingException) { return Missing<ApprovalMetaView>(); }
         }
 
-        /// <summary>The caller's locations include the request, or it was sent to them. A super admin sees all.</summary>
+        /// <summary>The locations whose requests the caller sees: their own when they can raise requests (sales executive, admin); network engineers and access officers see only what was sent to them.</summary>
+        private static IReadOnlyCollection<int> ScopeOf(ApprovalCaller caller) => caller.CanRaise ? caller.LocationIds : Array.Empty<int>();
+
+        /// <summary>A super admin sees all; a caller who can raise sees their locations; anyone sees what was sent to them.</summary>
         public static bool MaySee(ApprovalRequestDetail d, ApprovalCaller caller) =>
-            caller.IsSuperAdmin || caller.LocationIds.Contains(d.LocationId) || d.Assignees.Any(a => a.UserId == caller.UserId);
+            caller.IsSuperAdmin || (caller.CanRaise && caller.LocationIds.Contains(d.LocationId)) || d.Assignees.Any(a => a.UserId == caller.UserId);
 
         public static bool CanMarkDone(ApprovalRequestDetail d, ApprovalCaller caller) =>
             d.Status == ApprovalStatuses.Approved && ApprovalRules.MayMarkDone(caller.IsSuperAdmin, caller.UserId, d.Assignees.Select(a => a.UserId));
@@ -303,14 +325,26 @@ namespace WorkNest.Application.Services
         private static ApprovalEmailRequest ToMail(ApprovalRequestDetail d) =>
             new(d.Id, d.LocationName, d.CategoryName, d.Title, d.Details, d.Reason, d.RequestedByName, d.RequestedAt);
 
-        /// <summary>Sends one e-mail; a blank or invalid address is skipped and a failure is logged (never the link), never thrown.</summary>
-        private async Task SendAsync(string? to, (string Subject, string Html) mail, string what, int requestId)
+        private enum SendResult { Sent, Held, Skipped, Failed }
+
+        /// <summary>
+        /// Sends one e-mail and never throws. Held (Email Sending off, kept in Pending emails) is not a failure; a blank or invalid
+        /// address is skipped; anything else, an <see cref="EmailSendingOffException"/> included (nothing was kept), is Failed.
+        /// The link is never logged.
+        /// </summary>
+        private async Task<SendResult> SendAsync(string? to, (string Subject, string Html) mail, string what, int requestId)
         {
-            if (!ApprovalRules.ValidEmail(to)) { _logger.LogWarning("Approval {Id}: no e-mail address for the {What} e-mail; skipped.", requestId, what); return; }
-            try { await _email.SendHtmlReportAsync(to!.Trim(), mail.Subject, mail.Html); }
+            if (!ApprovalRules.ValidEmail(to)) { _logger.LogWarning("Approval {Id}: no e-mail address for the {What} e-mail; skipped.", requestId, what); return SendResult.Skipped; }
+            try { await _email.SendHtmlReportAsync(to!.Trim(), mail.Subject, mail.Html); return SendResult.Sent; }
+            catch (EmailHeldException)
+            {
+                _logger.LogInformation("Approval {Id}: the {What} e-mail is held in Pending emails (Email Sending is off).", requestId, what);
+                return SendResult.Held;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _logger.LogError(ex, "Approval {Id}: the {What} e-mail could not be sent.", requestId, what);
+                return SendResult.Failed;
             }
         }
     }

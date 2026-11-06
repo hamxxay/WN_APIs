@@ -29,6 +29,8 @@ namespace WorkNest.API.Configurations
         public const string GoogleLoginPolicy = "google-login";
         public const string PublicFormsPolicy = "public-forms";
         public const string PdfPolicy = "pdf";
+        /// <summary>The approver's e-mailed link (api/approvals/public/*): its own partition, so the contact forms' limit is not shared.</summary>
+        public const string ApprovalLinkPolicy = "approval-link";
 
         public static IServiceCollection AddRateLimitingConfiguration(this IServiceCollection services, IConfiguration configuration)
         {
@@ -44,6 +46,8 @@ namespace WorkNest.API.Configurations
             int formsLimit = Positive(section.GetValue<int?>("PublicForms:PermitLimit"), 5);
             int formsWindow = Positive(section.GetValue<int?>("PublicForms:WindowSeconds"), 600);
             int formsStaffLimit = Positive(section.GetValue<int?>("PublicForms:StaffPermitLimit"), 60);
+            int approvalLinkLimit = Positive(section.GetValue<int?>("ApprovalLink:PermitLimit"), 30);
+            int approvalLinkWindow = Positive(section.GetValue<int?>("ApprovalLink:WindowSeconds"), 600);
             int pdfConcurrent = Positive(section.GetValue<int?>("Pdf:ConcurrentLimit"), 4);
             int pdfQueue = Math.Max(0, section.GetValue<int?>("Pdf:QueueLimit") ?? 10);
             int pdfPerMinute = Positive(section.GetValue<int?>("Pdf:PerMinute"), 30);
@@ -92,6 +96,10 @@ namespace WorkNest.API.Configurations
                     var (key, limit) = PublicFormsPartition(ctx, formsLimit, formsStaffLimit);
                     return RateLimitPartition.GetFixedWindowLimiter(key, _ => Fixed(limit, formsWindow));
                 });
+
+                // Approver link (approve / reject by e-mail) — per IP, own partition: 30 per 10 minutes.
+                options.AddPolicy(ApprovalLinkPolicy, ctx =>
+                    RateLimitPartition.GetFixedWindowLimiter("approval-ip:" + IpKey(ctx), _ => Fixed(approvalLinkLimit, approvalLinkWindow)));
 
                 // PDF / Excel generation — per user (or IP when anonymous); concurrency is gated globally above.
                 options.AddPolicy(PdfPolicy, ctx =>

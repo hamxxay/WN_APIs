@@ -29,6 +29,9 @@ namespace WorkNest.Application.Services
         /// <summary>The Approvals list of the CMS.</summary>
         public static string RequestsLink(string baseUrl) => baseUrl + "/admin/approvals";
 
+        /// <summary>One request in the CMS list: /admin/approvals?id=&lt;id&gt;.</summary>
+        public static string RequestLink(string baseUrl, int id) => RequestsLink(baseUrl) + "?id=" + id.ToString(CultureInfo.InvariantCulture);
+
         /// <summary>1. To the approver: the request and a Review request button.</summary>
         public static (string Subject, string Html) ToApprover(string baseUrl, string token, ApprovalEmailRequest r, DateTime expiresAtUtc)
         {
@@ -39,12 +42,12 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>2. To the person who made the request: the decision and note.</summary>
-        public static (string Subject, string Html) Decision(string baseUrl, ApprovalEmailRequest r, string decision, string? note)
+        public static (string Subject, string Html) Decision(string baseUrl, ApprovalEmailRequest r, string decision, string? note, bool peopleTold = false)
         {
             var approved = decision == "Approved";
             var body = $"<p>Your request was <strong>{(approved ? "approved" : "rejected")}</strong>.</p>" + Card(r, null) +
                        (string.IsNullOrWhiteSpace(note) ? "" : $"<p><strong>Note from the approver:</strong><br>{Multi(note)}</p>") +
-                       (approved ? Muted("The people set for this location and category have been told.") : "") +
+                       (approved && peopleTold ? Muted("The people set for this location and category have been told.") : "") +
                        Link(RequestsLink(baseUrl), "Open Approvals");
             return ($"{Subject(r.LocationName)}: request {(approved ? "approved" : "rejected")} - {Clean(r.Title)}", Wrap(approved ? "Request approved" : "Request rejected", body));
         }
@@ -54,14 +57,14 @@ namespace WorkNest.Application.Services
         {
             var body = "<p>This request was approved and is waiting for you. Mark it Done in the CMS when the work is finished.</p>" + Card(r, null) +
                        (string.IsNullOrWhiteSpace(decisionNote) ? "" : $"<p><strong>Note from the approver:</strong><br>{Multi(decisionNote)}</p>") +
-                       Button(RequestsLink(baseUrl), "Open request");
+                       Button(RequestLink(baseUrl, r.Id), "Open request");
             return ($"{Subject(r.LocationName)}: approved request to do - {Clean(r.Title)}", Wrap("Approved request", body));
         }
 
         /// <summary>5. To the super admins: approved, but nobody is assigned for that location and category.</summary>
         public static (string Subject, string Html) NobodyAssigned(string baseUrl, ApprovalEmailRequest r)
         {
-            var body = $"<p>This request was approved, but <strong>nobody is set</strong> for {E(r.LocationName)} and {E(r.CategoryName)}. Add people in Approval Settings, then someone can mark it Done.</p>" +
+            var body = $"<p>This request was approved, but <strong>nobody could be told</strong>: no one with an e-mail address is set for {E(r.LocationName)} and {E(r.CategoryName)}. Only a super admin can mark this one Done.</p>" +
                        Card(r, null) + Button(RequestsLink(baseUrl), "Open Approvals");
             return ($"{Subject(r.LocationName)}: approved request has nobody assigned - {Clean(r.Title)}", Wrap("Nobody assigned", body));
         }
@@ -80,7 +83,7 @@ namespace WorkNest.Application.Services
         public static (string Subject, string Html) Expired(string baseUrl, ApprovalEmailRequest r)
         {
             var body = "<p>Nobody decided this request in time, so it <strong>expired</strong>. You can send it again from Approvals; a new link goes to the approver.</p>" +
-                       Card(r, null) + Button(RequestsLink(baseUrl), "Send it again");
+                       Card(r, null) + Button(RequestLink(baseUrl, r.Id), "Send it again");
             return ($"{Subject(r.LocationName)}: request expired - {Clean(r.Title)}", Wrap("Request expired", body));
         }
 

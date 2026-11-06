@@ -36,21 +36,6 @@ namespace WorkNest.Infrastructure.Repositories
             catch (SqlException ex) when (ex.Number is 208 or 2812) { throw new ApprovalsMissingException(ex); }
         }
 
-        /// <summary>A fixed read-only query (no user text in it).</summary>
-        private async Task<T> RunText<T>(string sql, Func<SqlCommand, CancellationToken, Task<T>> read, CancellationToken ct,
-            params (string Name, SqlDbType Type, object? Value)[] ps)
-        {
-            try
-            {
-                await using var c = new SqlConnection(_connectionString);
-                await c.OpenAsync(ct);
-                await using var cmd = new SqlCommand(sql, c) { CommandType = CommandType.Text, CommandTimeout = CommandTimeoutSeconds };
-                foreach (var (name, type, value) in ps) cmd.Parameters.Add(name, type).Value = value ?? DBNull.Value;
-                return await read(cmd, ct);
-            }
-            catch (SqlException ex) when (ex.Number is 208 or 2812) { throw new ApprovalsMissingException(ex); }
-        }
-
         private static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
         private static DateTime? Utc(IDataRecord r, string col) => r[col] is DateTime d ? Utc(d) : null;
         private static string? Str(IDataRecord r, string col) => r[col] is string s ? s : null;
@@ -137,7 +122,7 @@ namespace WorkNest.Infrastructure.Repositories
                 (c, t) => Rows(c, r => new ApprovalRequestRow((int)r["Id"], (int)r["LocationId"], Str(r, "LocationName"), (int)r["CategoryId"], (string)r["CategoryName"],
                     (string)r["Title"], (string)r["Status"], (int)r["RequestedByUserId"], Str(r, "RequestedByName"), Utc((DateTime)r["RequestedAt"]),
                     Utc(r, "DecidedAt"), Utc(r, "DoneAt"), (int)r["TotalCount"]), t),
-                ct, ("@LocationIds", SqlDbType.NVarChar, locationIds == null ? null : string.Join(',', locationIds)), ("@AssigneeUserId", SqlDbType.Int, assigneeUserId),
+                ct, ("@LocationIds", SqlDbType.NVarChar, locationIds == null ? null : locationIds.Count == 0 ? "0" : string.Join(',', locationIds)), ("@AssigneeUserId", SqlDbType.Int, assigneeUserId),
                 ("@Status", SqlDbType.VarChar, status), ("@CategoryId", SqlDbType.Int, categoryId), ("@Page", SqlDbType.Int, page), ("@PageSize", SqlDbType.Int, pageSize));
             return new ApprovalRequestPage(rows, rows.Count > 0 ? rows[0].TotalCount : 0);
         }
@@ -166,14 +151,15 @@ namespace WorkNest.Infrastructure.Repositories
             await Run("dbo.WN_Approval_Requests_ExpireDue", (c, t) => Rows(c, r => (int)r["Id"], t), ct);
 
         public async Task<IReadOnlyList<ApprovalStaff>> GetStaffAsync(CancellationToken ct = default) =>
-            await RunText(@"SELECT Id, Name, Email, RoleId FROM dbo.WN_Users WITH (NOLOCK)
-                             WHERE IsActive = 1 AND RoleId IS NOT NULL AND RoleId NOT IN (@General, @Ceo, @SalesManager)
-                             ORDER BY Name, Id",
-                (c, t) => Rows(c, r => new ApprovalStaff((int)r["Id"], Str(r, "Name"), Str(r, "Email"), Roles.MapRole(Int(r, "RoleId"))), t), ct,
-                ("@General", SqlDbType.Int, Roles.GeneralId), ("@Ceo", SqlDbType.Int, Roles.CeoId), ("@SalesManager", SqlDbType.Int, Roles.SalesManagerId));
+            await Run("dbo.WN_Approval_Staff_Get",
+                (c, t) => Rows(c, r => new ApprovalStaff((int)r["Id"], Str(r, "Name"), Str(r, "Email"), Roles.MapRole(Int(r, "RoleId"))), t), ct);
 
-        public async Task<IReadOnlyList<ApprovalLocation>> GetLocationsAsync(CancellationToken ct = default) =>
-            await RunText("SELECT Id, Name FROM dbo.WN_Locations WITH (NOLOCK) ORDER BY Name, Id",
-                (c, t) => Rows(c, r => new ApprovalLocation((int)r["Id"], Str(r, "Name") ?? ""), t), ct);
+        public async Task<IReadOnlyList<ApprovalLocation>> GetLocationsAsync(IReadOnlyCollection<int>? locationIds, CancellationToken ct = default) =>
+            await Run("dbo.WN_Approval_Locations_Get",
+                (c, t) => Rows(c, r => new ApprovalLocation((int)r["Id"], Str(r, "Name") ?? ""), t), ct,
+                ("@LocationIds", SqlDbType.NVarChar, locationIds == null ? null : locationIds.Count == 0 ? "0" : string.Join(',', locationIds)));
+
+        public async Task<bool> ExpireNowAsync(int id, CancellationToken ct = default) =>
+            await Run("dbo.WN_Approval_Request_ExpireNow", async (c, t) => Convert.ToInt32(await c.ExecuteScalarAsync(t)) > 0, ct, ("@Id", SqlDbType.Int, id));
     }
 }

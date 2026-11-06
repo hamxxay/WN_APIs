@@ -25,16 +25,22 @@ namespace WorkNest.API.Controllers
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public class ApprovalsController : ControllerBase
     {
-        /// <summary>Any staff account that may receive a request. CEO, Sales Manager and customers (general) are not in it.</summary>
+        /// <summary>The staff roles of the contract. CEO, Sales Manager and customers (general) are not in it.</summary>
         public const string StaffRoles =
-            "super_admin,SuperAdmin,admin,Admin,sales_executive,SalesExecutive,receptionist,Receptionist,network_engineer,NetworkEngineer,access_officer,AccessOfficer";
+            "super_admin,SuperAdmin,admin,Admin,sales_executive,SalesExecutive,network_engineer,NetworkEngineer,access_officer,AccessOfficer";
 
         public const string OtherLocationMessage = "Pick one of your own locations for this request.";
         public const string CannotRaiseMessage = "Only sales executives, admins and super admins can raise a request.";
 
         private readonly ApprovalService _service;
+        private readonly ICustomInvoiceAccessService _users;
 
-        public ApprovalsController(ApprovalService service) => _service = service;
+        /// <param name="users">Only for <c>ResolveUserIdAsync</c>: the token carries the public id (a GUID) and the e-mail, so the WN_Users.Id is looked up by e-mail (cached).</param>
+        public ApprovalsController(ApprovalService service, ICustomInvoiceAccessService users)
+        {
+            _service = service;
+            _users = users;
+        }
 
         public sealed class CreateRequest
         {
@@ -51,7 +57,7 @@ namespace WorkNest.API.Controllers
         [HttpGet]
         public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] int? categoryId, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
         {
-            var caller = Caller();
+            var caller = await CallerAsync();
             if (caller == null) return SignInAgain();
             return ApprovalReply.From(this, await _service.ListAsync(caller, status, categoryId, page, pageSize, ct), v => new
             {
@@ -66,7 +72,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("meta")]
         public async Task<IActionResult> Meta(CancellationToken ct = default)
         {
-            var caller = Caller();
+            var caller = await CallerAsync();
             if (caller == null) return SignInAgain();
             return ApprovalReply.From(this, await _service.MetaAsync(caller, ct), v => new
             {
@@ -81,7 +87,7 @@ namespace WorkNest.API.Controllers
         [HttpGet("{id:int}")]
         public async Task<IActionResult> Get(int id, CancellationToken ct = default)
         {
-            var caller = Caller();
+            var caller = await CallerAsync();
             if (caller == null) return SignInAgain();
             return ApprovalReply.From(this, await _service.GetAsync(id, caller, ct), v => Detail(v));
         }
@@ -90,7 +96,7 @@ namespace WorkNest.API.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateRequest? request, CancellationToken ct = default)
         {
-            var caller = Caller();
+            var caller = await CallerAsync();
             if (caller == null) return SignInAgain();
             if (!caller.CanRaise) return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(CannotRaiseMessage));
             if (request == null) return BadRequest(ApiResponse.Fail("Fill in the request."));
@@ -104,7 +110,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("{id:int}/resend")]
         public async Task<IActionResult> Resend(int id, CancellationToken ct = default)
         {
-            var caller = Caller();
+            var caller = await CallerAsync();
             if (caller == null) return SignInAgain();
             var seen = await _service.GetAsync(id, caller, ct);
             if (!seen.IsOk) return ApprovalReply.From(this, seen, _ => new { });
@@ -117,7 +123,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("{id:int}/done")]
         public async Task<IActionResult> Done(int id, [FromBody] DoneRequest? body, CancellationToken ct = default)
         {
-            var caller = Caller();
+            var caller = await CallerAsync();
             if (caller == null) return SignInAgain();
             return ApprovalReply.From(this, await _service.MarkDoneAsync(id, caller.UserId, caller.IsSuperAdmin, body?.Note, ct), rid => new { id = rid }, "Marked Done.");
         }
@@ -151,13 +157,19 @@ namespace WorkNest.API.Controllers
 
         private IActionResult SignInAgain() => StatusCode(StatusCodes.Status401Unauthorized, ApiResponse.Fail("Please sign in again."));
 
-        private ApprovalCaller? Caller()
+        /// <summary>The numeric user id comes from the e-mail (real tokens carry a GUID as the name id); older tokens carried the number itself.</summary>
+        private async Task<ApprovalCaller?> CallerAsync()
         {
-            var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("id")?.Value ?? User.FindFirst("sub")?.Value;
-            if (!int.TryParse(sub, out var userId)) return null;
+            int? userId = await _users.ResolveUserIdAsync(User.GetEmail());
+            if (userId is not > 0)
+            {
+                var sub = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? User.FindFirst("id")?.Value;
+                userId = int.TryParse(sub, out var n) && n > 0 ? n : null;
+            }
+            if (userId is null) return null;
             var super = User.IsSuperAdmin() || User.IsInRole("SuperAdmin");
             var salesExecutive = User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive") || User.GetRole() == "sales_executive";
-            return new ApprovalCaller(userId, super, super || User.IsAdminOrSuperAdmin() || salesExecutive, User.GetLocationIds());
+            return new ApprovalCaller(userId.Value, super, super || User.IsAdminOrSuperAdmin() || salesExecutive, User.GetLocationIds());
         }
     }
 }
