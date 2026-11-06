@@ -340,6 +340,15 @@ namespace WorkNest.Application.Services
 
         private static FeeReceiptDto MapToReceiptDto(IDictionary<string, object?> r)
         {
+            var firstName = GetStringOrNull(r, "CustomerFirstName") ?? GetStringOrNull(r, "FirstName");
+            var lastName = GetStringOrNull(r, "CustomerLastName") ?? GetStringOrNull(r, "LastName");
+            var fullName = $"{firstName} {lastName}".Trim();
+            var customerCompany = GetStringOrNull(r, "CustomerCompany") ?? GetStringOrNull(r, "Company");
+            var customerName = GetStringOrNull(r, "CustomerName")
+                ?? (fullName.Length > 0 ? fullName : null)
+                ?? GetStringOrNull(r, "CustomerDisplayName")
+                ?? customerCompany;
+
             return new FeeReceiptDto
             {
                 Id = GetInt(r, "Id"),
@@ -378,11 +387,11 @@ namespace WorkNest.Application.Services
                 InvoiceIssuedOn = GetDateTimeOrNull(r, "InvoiceIssuedOn"),
                 InvoiceDueOn = GetDateTimeOrNull(r, "InvoiceDueOn"),
                 InvoiceGrandTotal = GetDecimalOrNull(r, "InvoiceGrandTotal"),
-                CustomerName = GetStringOrNull(r, "CustomerName"),
+                CustomerName = customerName,
                 CustomerCode = GetStringOrNull(r, "CustomerCode"),
                 CustomerEmail = GetStringOrNull(r, "CustomerEmail"),
                 CustomerPhone = GetStringOrNull(r, "CustomerPhone") ?? GetStringOrNull(r, "PhoneNumber"),
-                CustomerCompany = GetStringOrNull(r, "CustomerCompany") ?? GetStringOrNull(r, "Company"),
+                CustomerCompany = customerCompany,
                 CustomerAddress = GetStringOrNull(r, "CustomerAddress"),
                 LocationId = GetIntOrNull(r, "LocationId"),
                 LocationName = GetStringOrNull(r, "LocationName"),
