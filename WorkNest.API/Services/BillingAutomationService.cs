@@ -213,6 +213,22 @@ namespace WorkNest.API.Services
                         continue;
                     }
 
+                    // Check if an Issued notice exists with ExitDate on or before nextPeriodStart
+                    using (var noticeCmd = new SqlCommand("SELECT TOP 1 ExitDate FROM dbo.WN_NoticePeriods WITH (NOLOCK) WHERE BookingId = @BookingId AND Status = 'Issued' ORDER BY Id DESC", conn))
+                    {
+                        noticeCmd.Parameters.AddWithValue("@BookingId", b.BookingId);
+                        var exitDateObj = await noticeCmd.ExecuteScalarAsync(stoppingToken);
+                        if (exitDateObj != null && exitDateObj != DBNull.Value)
+                        {
+                            var exitDate = Convert.ToDateTime(exitDateObj).Date;
+                            if (nextPeriodStart.Date > exitDate)
+                            {
+                                _logger.LogInformation("Booking {BookingId} has an issued notice with ExitDate {ExitDate:yyyy-MM-dd}. Skipping billing period starting {Start:yyyy-MM-dd}.", b.BookingId, exitDate, nextPeriodStart);
+                                continue;
+                            }
+                        }
+                    }
+
                     // All subsequent recurring cycles after initial advance rent are billed monthly (1 month at a time).
                     const int recurringBillingMonths = 1;
                     DateTime rawPeriodEnd = WorkNest.Application.Services.BillingPeriods.PeriodEnd(b.ContractStart, nextPeriodStart, recurringBillingMonths);

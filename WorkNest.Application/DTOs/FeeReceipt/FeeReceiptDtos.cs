@@ -84,11 +84,11 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         /// <summary>Unpaid | Partial | Paid.</summary>
         public string PaymentStatus { get; set; } = "Unpaid";
         /// <summary>
-        /// False for withholding-tax invoices and custom invoices (InvoiceTypeId 7), which are paid in full only, and before
-        /// the database update FR_01.
+        /// False for withholding-tax invoices (paid in full only) and before the database update FR_01. Standard and custom invoices allow partial payments.
+
         /// </summary>
         public bool AllowPartial { get; set; }
-        /// <summary>A custom invoice (InvoiceTypeId 7, script CI_01): paid in full only, in one receipt.</summary>
+        /// <summary>A custom invoice (InvoiceTypeId 7, script CI_01).</summary>
         public bool IsCustom { get; set; }
     }
 

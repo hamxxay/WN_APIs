@@ -99,11 +99,11 @@ namespace WorkNest.Application.Services
             if (amountError != null)
                 return BadRequest(amountError);
 
-            // A custom invoice (InvoiceTypeId 7) is paid in full, in one receipt, like a WHT invoice. Full mode already
+            // Withholding-tax invoices must be paid in full in one receipt. Full mode already
             // takes the whole balance (worked out by the database when saving); a part payment must be exactly the balance.
             if (amount.HasValue && await _db.GetFeeReceiptInvoiceBalanceDbAsync(invoiceGuid) is { } invoice
-                && invoice.InvoiceTypeId == CustomInvoiceTypeId && Math.Round(amount.Value, 2) != Math.Round(invoice.Balance, 2))
-                return BadRequest(CustomInvoiceFullPaymentMessage(invoice.Balance));
+                && invoice.InvoiceTypeId == 6 && Math.Round(amount.Value, 2) != Math.Round(invoice.Balance, 2))
+                return BadRequest("Withholding-tax invoices can only be paid in full, in one receipt.");
 
             string? allowedCsv = isSuperAdmin ? null : ToCsv(allowedLocationIds);
 
@@ -263,7 +263,7 @@ namespace WorkNest.Application.Services
             var invoiceTypeId = GetInt(r, "InvoiceTypeId");
             var isCustom = invoiceTypeId == CustomInvoiceTypeId;
             var isWht = invoiceTypeId == 6 || GetDecimal(r, "WHTAmount") > 0;
-            var allowPartial = (Value(r, "AllowPartial") != null ? GetBool(r, "AllowPartial") : !isWht) && !isCustom && !isWht;
+            var allowPartial = (Value(r, "AllowPartial") != null ? GetBool(r, "AllowPartial") : !isWht) && !isWht;
             var dueOn = GetDateTime(r, "DueOn");
             var amountPaid = Math.Round(GetDecimal(r, "AmountPaid", GetDecimal(r, "PaidTotal")), 2);
             var statusLabel = GetString(r, "StatusLabel", "Unpaid");
@@ -320,7 +320,7 @@ namespace WorkNest.Application.Services
                     ? GetDecimal(r, "BalanceAmount")
                     : Math.Max(0, Math.Round(GetDecimal(r, "NetReceivableAmount") - GetDecimal(r, "PaidTotal"), 2)),
                 PaymentStatus = paymentStatus,
-                // Custom invoices are paid in full only, whatever the procedure says (LIVE answers 1 for type 7).
+                // AllowPartial: standard and custom invoices allow part payments; WHT invoices must be paid in full.
                 AllowPartial = allowPartial
             };
         }

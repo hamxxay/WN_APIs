@@ -14,7 +14,7 @@ namespace WorkNest.Application.Services
     /// </summary>
     public sealed class CustomInvoiceService : ICustomInvoiceService
     {
-        /// <summary>WN_Invoices.InvoiceTypeId of a custom invoice (paid in full only, like a WHT invoice).</summary>
+        /// <summary>WN_Invoices.InvoiceTypeId of a custom invoice.</summary>
         public const int InvoiceTypeId = 7;
         public const int MinLines = 2;
         public const int MaxLines = 5;

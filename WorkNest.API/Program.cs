@@ -328,6 +328,10 @@ try
     builder.Services.AddScoped<ICustomInvoiceAccessService, CustomInvoiceAccessService>();
     builder.Services.AddScoped<ICustomInvoiceService, CustomInvoiceService>();
 
+    // Notice Period & Settlement
+    builder.Services.AddScoped<INoticePeriodRepository, WorkNest.Infrastructure.Repositories.NoticePeriodRepository>();
+    builder.Services.AddScoped<INoticePeriodService, NoticePeriodService>();
+
 
     // ── Background Hosted Services ────────────────────────────────────────────
     builder.Services.AddHostedService<BillingAutomationService>();

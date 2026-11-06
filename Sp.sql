@@ -14122,7 +14122,7 @@ BEGIN
             WHEN i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 'Overdue'
             ELSE 'Unpaid'
         END AS PaymentStatus,
-        CAST(CASE WHEN i.InvoiceTypeId IN (6, 7) OR ISNULL(i.IsCustom, 0) = 1 OR ISNULL(i.WHTAmount, 0) > 0 THEN 0 ELSE 1 END AS BIT) AS AllowPartial,
+        CAST(CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN 0 ELSE 1 END AS BIT) AS AllowPartial,
         c.FirstName,
         c.LastName,
         c.PhoneNumber,
