@@ -22,6 +22,8 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal InvoicedPrevPeriod { get; set; }
         /// <summary>Invoiced in the selected period and now Paid.</summary>
         public decimal PaidThisPeriod { get; set; }
+        /// <summary>Bookings made in the selected period (not rejected, cancelled or no show); null before DASH_NB_01.</summary>
+        public int? NewBookings { get; set; }
         public int LeasesEndingSoon { get; set; }
         public int EndingSoonDays { get; set; }
         public List<DashboardMonthDto> Months { get; set; } = new();

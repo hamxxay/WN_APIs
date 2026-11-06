@@ -289,6 +289,9 @@ namespace WorkNest.Application.Interfaces
 
         // --- Dashboard ---
         Task<IEnumerable<IEnumerable<IDictionary<string, object?>>>> GetDashboardSummaryAsync();
+        /// <summary>Bookings made between two days (inclusive), as the CEO dashboard counts them; null before DASH_NB_01.</summary>
+        Task<int?> GetDashboardNewBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime from, DateTime to);
+
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null,
             DateTime? customFrom = null, DateTime? customTo = null);

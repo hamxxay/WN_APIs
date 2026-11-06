@@ -7737,6 +7737,21 @@ SELECT ISNULL(@TaxPercentage, 0.00) AS TaxPercentage, ISNULL(@TaxApplicable, 1) 
         }
 
         /// <summary>Runs one DASH_02 procedure and reads every result set; null when it is missing (SQL error 2812: DASH_02 not run).</summary>
+        public async Task<int?> GetDashboardNewBookingsDbAsync(IReadOnlyCollection<int>? locationIds, DateTime from, DateTime to)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Dashboard_NewBookings", c);
+                cmd.Parameters.Add("@From", SqlDbType.Date).Value = from.Date;
+                cmd.Parameters.Add("@To", SqlDbType.Date).Value = to.Date;
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value =
+                    locationIds == null ? DBNull.Value : string.Join(",", locationIds);
+                return await cmd.ExecuteScalarAsync() is int n ? n : 0;
+            }
+            catch (SqlException ex) when (ex.Number == 2812) { return null; } // procedure missing: DASH_NB_01 not run
+        }
+
         private async Task<List<List<IDictionary<string, object?>>>?> RunOverviewDetailAsync(string procedure, Action<SqlParameterCollection> bind)
         {
             try

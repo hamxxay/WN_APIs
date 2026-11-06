@@ -1,0 +1,29 @@
+-- ============================================================================================
+-- DASH_NB_01: new bookings of the selected period on the main dashboard's Occupancy card.
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database and on the live one.
+-- Read only, adds one procedure. Safe to run again. Until it runs, the card simply leaves the line out.
+--
+--   dbo.WN_Dashboard_NewBookings   bookings made from @From to @To (Pakistan days, inclusive), counted as
+--                                  dbo.WN_Ceo_Dashboard counts NewBookings: not deleted, not rejected,
+--                                  cancelled or no show (3, 4, 6, 86), on active spaces in scope.
+-- ============================================================================================
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Dashboard_NewBookings
+    @From DATE, @To DATE, @LocationIds NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    -- CreatedOn is UTC; the days are Pakistan days (UTC+5).
+    DECLARE @UStart DATETIME = DATEADD(HOUR, -5, CAST(@From AS DATETIME));
+    DECLARE @UEnd DATETIME = DATEADD(HOUR, -5, DATEADD(DAY, 1, CAST(@To AS DATETIME)));
+    SELECT COUNT(*) AS NewBookings
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+      JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+     WHERE ISNULL(b.IsDeleted, 0) = 0
+       AND b.BookingStatusId NOT IN (3, 4, 6, 86)
+       AND s.Status = 1
+       AND b.CreatedOn >= @UStart AND b.CreatedOn < @UEnd
+       AND (@LocationIds IS NULL OR s.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N'','')));
+END');
+SELECT N'OK: new bookings on the dashboard installed (DASH_NB_01).' AS Result;

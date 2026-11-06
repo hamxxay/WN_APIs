@@ -130,6 +130,7 @@ namespace WorkNest.Application.Services
                 InvoicedThisPeriod = Math.Round(Dec(k, "InvoicedThisMonth"), 2),
                 InvoicedPrevPeriod = Math.Round(Dec(k, "InvoicedLastMonth"), 2),
                 PaidThisPeriod = Math.Round(Dec(k, "PaidThisPeriod"), 2),
+                NewBookings = await _db.GetDashboardNewBookingsDbAsync(locationIds, range.Start, range.To ?? _clock.Today),
                 LeasesEndingSoon = Int(k, "LeasesEndingSoon"),
                 EndingSoonDays = EndingSoonDays,
                 GeneratedAt = _clock.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
