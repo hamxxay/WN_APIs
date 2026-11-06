@@ -705,7 +705,10 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             }
         }
 
-        public async Task SendHtmlReportAsync(string toEmail, string subject, string html)
+        public Task SendHtmlReportAsync(string toEmail, string subject, string html) =>
+            SendHtmlReportAsync(toEmail, subject, html, "WorkNest Reports");
+
+        public async Task SendHtmlReportAsync(string toEmail, string subject, string html, string fromName)
         {
             var (fromEmail, password, host, port) = GetEmailSettings();
 
@@ -722,7 +725,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             try
             {
                 using var mail = new MailMessage();
-                mail.From = new MailAddress(fromEmail, "WorkNest Reports");
+                mail.From = new MailAddress(fromEmail, fromName);
                 mail.To.Add(new MailAddress(toEmail));
                 mail.Subject = subject;
                 mail.IsBodyHtml = true;

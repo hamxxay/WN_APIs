@@ -346,7 +346,7 @@ namespace WorkNest.Application.Services
         private async Task<SendResult> SendAsync(string? to, (string Subject, string Html) mail, string what, int requestId)
         {
             if (!ApprovalRules.ValidEmail(to)) { _logger.LogWarning("Approval {Id}: no e-mail address for the {What} e-mail; skipped.", requestId, what); return SendResult.Skipped; }
-            try { await _email.SendHtmlReportAsync(to!.Trim(), mail.Subject, mail.Html); return SendResult.Sent; }
+            try { await _email.SendHtmlReportAsync(to!.Trim(), mail.Subject, mail.Html, ApprovalEmail.SenderName); return SendResult.Sent; }
             catch (EmailHeldException)
             {
                 _logger.LogInformation("Approval {Id}: the {What} e-mail is held in Pending emails (Email Sending is off).", requestId, what);

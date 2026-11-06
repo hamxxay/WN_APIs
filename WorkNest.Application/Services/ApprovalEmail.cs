@@ -14,6 +14,9 @@ namespace WorkNest.Application.Services
     /// </summary>
     public static class ApprovalEmail
     {
+        /// <summary>The sender name on every Approvals e-mail.</summary>
+        public const string SenderName = "WorkNest Approvals";
+
         public const string DefaultCmsBaseUrl = "https://cms.worknestpk.com";
 
         /// <summary>The configured CMS address without a trailing slash; the default when blank.</summary>
