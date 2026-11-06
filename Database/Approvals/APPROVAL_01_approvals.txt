@@ -298,6 +298,10 @@ BEGIN
           JOIN dbo.WN_Users u ON u.Id = a.UserId
          WHERE u.IsActive = 1;
 
+    COMMIT TRANSACTION;
+    SELECT Id, @Decision AS Status FROM @Done;
+END');
+
     -- Pending -> Expired for one request: used when the approver email could not be sent, so the request can be sent again.
     -- Returns { Updated }: 1 when it was Pending, 0 otherwise.
     EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_ExpireNow
@@ -331,10 +335,6 @@ BEGIN
       FROM dbo.WN_Locations l
      WHERE @LocationIds IS NULL OR l.Id IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N'',''))
      ORDER BY l.Name, l.Id;
-END');
-
-    COMMIT TRANSACTION;
-    SELECT Id, @Decision AS Status FROM @Done;
 END');
 
     -- Returns { Updated }: 1 when an approved request was closed, 0 otherwise. The API checks who may call it.
