@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Security.Claims;
 using FluentValidation;
 using FluentValidation.AspNetCore;
@@ -25,7 +25,7 @@ using WorkNest.Infrastructure.Repositories;
 using WorkNest.Infrastructure.Security.Encryption;
 using WorkNest.Infrastructure.Security.JWT;
 
-// ── Serilog bootstrap ─────────────────────────────────────────────────────────
+// â”€â”€ Serilog bootstrap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
     .CreateBootstrapLogger();
@@ -34,11 +34,11 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
     
-    // ── Serilog full configuration ────────────────────────────────────────────
+    // â”€â”€ Serilog full configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Host.UseSerilog((ctx, lc) =>
         lc.ReadFrom.Configuration(ctx.Configuration));
 
-    // ── Controllers + JSON camelCase ──────────────────────────────────────────
+    // â”€â”€ Controllers + JSON camelCase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // FriendlyErrorResultFilter: SQL Server / .NET error text in a failed response is logged and replaced by a friendly message.
     // CeoAccessFilter: a CEO account gets 403 on every endpoint not marked [CeoAllowed] (it only views the CEO dashboard).
     // SalesManagerAccessFilter: likewise a Sales Manager gets 403 on every endpoint not marked [SalesManagerAllowed].
@@ -61,24 +61,24 @@ try
             o.JsonSerializerOptions.Converters.Add(new FlexibleNullableDateTimeJsonConverter());
         });
 
-    // ── FluentValidation ──────────────────────────────────────────────────────
+    // â”€â”€ FluentValidation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.AddFluentValidationAutoValidation();
     builder.Services.AddValidatorsFromAssemblyContaining<UserSyncRequestValidator>();
 
-    // ── CORS ──────────────────────────────────────────────────────────────────
+    // â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.AddCorsConfiguration(builder.Configuration);
 
-    // ── Rate limiting (built-in; "RateLimiting" config section) ──────────────
+    // â”€â”€ Rate limiting (built-in; "RateLimiting" config section) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.AddRateLimitingConfiguration(builder.Configuration);
 
-    // ── Reverse proxy: X-Forwarded-For only from "ReverseProxy:TrustedProxies" (default: worknestpk.com relay) ─
+    // â”€â”€ Reverse proxy: X-Forwarded-For only from "ReverseProxy:TrustedProxies" (default: worknestpk.com relay) â”€
     builder.Services.AddReverseProxyConfiguration(builder.Configuration);
 
-    // ── Swagger ───────────────────────────────────────────────────────────────
+    // â”€â”€ Swagger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.AddSwaggerConfiguration();
     builder.Services.AddEndpointsApiExplorer();
 
-    // ── Settings ──────────────────────────────────────────────────────────────
+    // â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.Configure<JwtSettings>(
         builder.Configuration.GetSection("JwtSettings"));
     builder.Services.Configure<FileStorageSettings>(
@@ -86,7 +86,7 @@ try
     builder.Services.Configure<KycStorageSettings>(
         builder.Configuration.GetSection("KycStorage"));
 
-    // ── JWT Authentication ────────────────────────────────────────────────────
+    // â”€â”€ JWT Authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     var jwtSection = builder.Configuration.GetSection("JwtSettings");
     var secretKey  = jwtSection["SecretKey"] ?? throw new Exception("JwtSettings:SecretKey missing");
 
@@ -175,7 +175,7 @@ try
     });
     builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, CustomInvoiceAccessHandler>();
 
-    // ── Infrastructure Services ───────────────────────────────────────────────
+    // â”€â”€ Infrastructure Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.AddHttpContextAccessor();
     // One business clock (Pakistan time) for every business date; "Business:TimeZone" defaults to Asia/Karachi.
     builder.Services.AddSingleton<IBusinessClock>(new BusinessClock(builder.Configuration["Business:TimeZone"]).UseAsDefault());
@@ -203,7 +203,7 @@ try
     // Singleton, so the EzPay token is reused between invoices.
     builder.Services.AddSingleton<IOneBillService, WorkNest.Infrastructure.ExternalServices.OneBill.OneBillService>();
 
-    // ── Application Services ──────────────────────────────────────────────────
+    // â”€â”€ Application Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.AddScoped<IAuthService, AuthService>();
     // Customer temporary passwords (script AUTH_TEMP_01_customer_temp_passwords); 503 on the staff endpoints before it.
     builder.Services.AddScoped<ICustomerLoginRepository, WorkNest.Infrastructure.Repositories.CustomerLoginRepository>();
@@ -331,13 +331,16 @@ try
     builder.Services.AddScoped<ICustomInvoiceRepository, WorkNest.Infrastructure.Repositories.CustomInvoiceRepository>();
     builder.Services.AddScoped<ICustomInvoiceAccessService, CustomInvoiceAccessService>();
     builder.Services.AddScoped<ICustomInvoiceService, CustomInvoiceService>();
+    builder.Services.AddScoped<ITransferRepository, TransferRepository>();
+    builder.Services.AddScoped<ITransferService, TransferService>();
+    builder.Services.AddScoped<ITransferAddendumPdfService, TransferAddendumPdfService>();
 
     // Notice Period & Settlement
     builder.Services.AddScoped<INoticePeriodRepository, WorkNest.Infrastructure.Repositories.NoticePeriodRepository>();
     builder.Services.AddScoped<INoticePeriodService, NoticePeriodService>();
 
 
-    // ── Background Hosted Services ────────────────────────────────────────────
+    // â”€â”€ Background Hosted Services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     builder.Services.AddHostedService<BillingAutomationService>();
     builder.Services.AddHostedService<InvoiceDeliveryRetryService>();
     builder.Services.AddHostedService<AccessCardRestrictionService>();
@@ -357,12 +360,13 @@ try
     builder.Services.AddHostedService<NetworkAlertService>();   // NetworkAlerts switch; NetworkAlerts:DownMinutes (5) / ReminderHours (6) / TickSeconds (60)
     builder.Services.AddHostedService<ApprovalExpiryService>();   // hourly: expires approvals whose link ran out (APPROVAL_01); quiet before the script
     builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
-    builder.Services.AddHostedService<MonthlyFeeReceiptService>();   // FeeReceipts:MonthlyEnabled (on by default)
+    builder.Services.AddHostedService<MonthlyFeeReceiptService>();
+    builder.Services.AddHostedService<TransferExpiryBackgroundService>();   // FeeReceipts:MonthlyEnabled (on by default)
 
-    // ── Build ─────────────────────────────────────────────────────────────────
+    // â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     var app = builder.Build();
 
-    // ── JWT signing key check (logged, never stops the site) ──────────────────
+    // â”€â”€ JWT signing key check (logged, never stops the site) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (app.Environment.IsProduction())
     {
         var devKey = JwtKeyCheck.DevelopmentKeyFrom(Path.Combine(app.Environment.ContentRootPath, "appsettings.Development.json"));
@@ -376,17 +380,17 @@ try
         }
     }
 
-    // ── Forwarded Headers: first, so everything after (rate limits, logs, e-signature IP) sees the real client ─
+    // â”€â”€ Forwarded Headers: first, so everything after (rate limits, logs, e-signature IP) sees the real client â”€
     app.UseForwardedHeadersWithConfig();
 
-    // ── Path base for IIS sub-application (configurable via appsettings/env) ─
+    // â”€â”€ Path base for IIS sub-application (configurable via appsettings/env) â”€
     var pathBase = builder.Configuration["PathBase"];
     if (!string.IsNullOrWhiteSpace(pathBase))
     {
         app.UsePathBase(pathBase);
     }
 
-    // ── Middleware pipeline ───────────────────────────────────────────────────
+    // â”€â”€ Middleware pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     app.UseStaticFiles();
     app.UseCorsWithConfig();
     
@@ -426,9 +430,9 @@ finally
 }
 
 /// <summary>
-/// Writes DateTimes for the API. Only real UTC values (DateTimeKind.Utc — e.g. UTC audit columns marked by
-/// DbDateTimeKinds, DateTime.UtcNow) get a "Z". Unspecified / Local values — business wall-clock times in
-/// Pakistan time, which is what SQL returns for StartOn, DueOn, IssuedOn … — are written without an offset,
+/// Writes DateTimes for the API. Only real UTC values (DateTimeKind.Utc â€” e.g. UTC audit columns marked by
+/// DbDateTimeKinds, DateTime.UtcNow) get a "Z". Unspecified / Local values â€” business wall-clock times in
+/// Pakistan time, which is what SQL returns for StartOn, DueOn, IssuedOn â€¦ â€” are written without an offset,
 /// so the browser treats them as local wall-clock time instead of shifting them by +5h.
 /// </summary>
 public static class FlexibleDateTimeJsonWriter
@@ -499,4 +503,5 @@ public class FlexibleNullableDateTimeJsonConverter : System.Text.Json.Serializat
             writer.WriteNullValue();
     }
 }
+
 

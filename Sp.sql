@@ -11473,7 +11473,8 @@ CREATE   PROCEDURE [dbo].[WN_Customers_Insert]
     @SecpRegistrationNo           NVARCHAR(100)  = NULL,
     @CustomerTypeId               NVARCHAR(225)  = NULL,
     @CountryId                    INT            = NULL,
-    @IdentificationDocumentTypeId NVARCHAR(225) = NULL
+    @IdentificationDocumentTypeId NVARCHAR(225)  = NULL,
+    @Code                         NVARCHAR(50)   = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -11504,8 +11505,27 @@ BEGIN
     IF LTRIM(RTRIM(@NTN)) = '' SET @NTN = NULL;
     IF LTRIM(RTRIM(@SecpRegistrationNo)) = '' SET @SecpRegistrationNo = NULL;
 
+    -- Procedure-driven Customer Code Allotment (Approach 3)
+    IF @Code IS NULL OR LTRIM(RTRIM(@Code)) = ''
+    BEGIN
+        DECLARE @Prefix VARCHAR(10) = 'WN';
+        DECLARE @NextSeq INT;
+
+        SELECT @NextSeq = ISNULL(MAX(TRY_CAST(SUBSTRING(c.Code, LEN(@Prefix) + 1, 20) AS INT)), 0) + 1
+          FROM dbo.WN_Customers c WITH (UPDLOCK, HOLDLOCK)
+         WHERE c.Code LIKE @Prefix + '%';
+
+        SET @Code = @Prefix + RIGHT('00000' + CAST(@NextSeq AS VARCHAR(10)), 
+            CASE WHEN @NextSeq > 99999 THEN LEN(CAST(@NextSeq AS VARCHAR(10))) ELSE 5 END);
+    END
+    ELSE
+    BEGIN
+        SET @Code = LTRIM(RTRIM(@Code));
+    END
+
     INSERT INTO dbo.WN_Customers
     (
+        Code,
         FirstName,
         LastName,
         Company,
@@ -11525,25 +11545,31 @@ BEGIN
     )
     VALUES
     (
+        @Code,
         @FirstName, 
         @LastName,
         @Company,
-        @Email,
+        @Email, 
         @PhoneNumber,
         @CnicOrPassport, 
         @Address, 
         @CityId, 
         @Notes, 
         @CreatedBy,
-        @UserId,
-        @NTN,
+        @UserId, 
+        @NTN, 
         @SecpRegistrationNo,
         TRY_CAST(@CustomerTypeId AS INT),
         @CountryId,
         TRY_CAST(@IdentificationDocumentTypeId AS INT)
     ); 
 
-    SELECT SCOPE_IDENTITY() AS ID;
+    DECLARE @NewId INT = SCOPE_IDENTITY();
+
+    SELECT 
+        @NewId AS ID, 
+        @NewId AS Id, 
+        @Code  AS Code;
 END;
 
 GO
@@ -11714,62 +11740,92 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE PROCEDURE [dbo].[WN_CustomersTemp_Insert]
-@FirstName          NVARCHAR(100),
-    @LastName           NVARCHAR(100)  = NULL,
-    @Email              NVARCHAR(255),
-    @PhoneNumber        NVARCHAR(50)   = NULL,
-    @CnicOrPassport     NVARCHAR(50)   = NULL,
-    @Address            NVARCHAR(500)  = NULL,
-    @CityId             INT            = NULL,
-    @Notes              NVARCHAR(1000) = NULL,
-    @CreatedBy          NVARCHAR(255)  = NULL,
-    @UserId             INT            = NULL,
-    @Company            NVARCHAR(255)  = NULL,
-    @NTN                NVARCHAR(100)  = NULL,
-    @SecpRegistrationNo NVARCHAR(100)  = NULL,
-	@CustomerTypeId     nvarchar(225)  = NULL,
-	@CountryId           INT           = NULL,
-	@IdentificationDocumentTypeId    nvarchar(225) = NULL
+    @FirstName                    NVARCHAR(100),
+    @LastName                     NVARCHAR(100)  = NULL,
+    @Email                        NVARCHAR(255),
+    @PhoneNumber                  NVARCHAR(50)   = NULL,
+    @CnicOrPassport               NVARCHAR(50)   = NULL,
+    @Address                      NVARCHAR(500)  = NULL,
+    @CityId                       INT            = NULL,
+    @Notes                        NVARCHAR(1000) = NULL,
+    @CreatedBy                    NVARCHAR(255)  = NULL,
+    @UserId                       INT            = NULL,
+    @Company                      NVARCHAR(255)  = NULL,
+    @NTN                          NVARCHAR(100)  = NULL,
+    @SecpRegistrationNo           NVARCHAR(100)  = NULL,
+    @CustomerTypeId               NVARCHAR(225)  = NULL,
+    @CountryId                    INT            = NULL,
+    @IdentificationDocumentTypeId NVARCHAR(225)  = NULL,
+    @Code                         NVARCHAR(50)   = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
     SET QUOTED_IDENTIFIER ON;
+
+    IF @Code IS NULL OR LTRIM(RTRIM(@Code)) = ''
+    BEGIN
+        DECLARE @Prefix VARCHAR(10) = 'WN';
+        DECLARE @NextSeq INT;
+
+        SELECT @NextSeq = ISNULL(MAX(TRY_CAST(SUBSTRING(c.Code, LEN(@Prefix) + 1, 20) AS INT)), 0) + 1
+          FROM dbo.WN_Customers c WITH (UPDLOCK, HOLDLOCK)
+         WHERE c.Code LIKE @Prefix + '%';
+
+        SET @Code = @Prefix + RIGHT('00000' + CAST(@NextSeq AS VARCHAR(10)), 
+            CASE WHEN @NextSeq > 99999 THEN LEN(CAST(@NextSeq AS VARCHAR(10))) ELSE 5 END);
+    END
+    ELSE
+    BEGIN
+        SET @Code = LTRIM(RTRIM(@Code));
+    END
+
     INSERT INTO dbo.WN_Customers
-     (FirstName,
-	  LastName,
-	  Company,
-	  Email, 
-	  PhoneNumber,
-	  CnicOrPassport,
-	  Address, 
-	  CityId, 
-	  Notes, 
-	  CreatedBy, 
-	  UserId, 
-	  NTN, 
-	  SecpRegistrationNo,
-	  CustomerTypeId,
-	  CountryId,
-	  IdentificationDocumentTypeId
-	   )
+    (
+        Code,
+        FirstName,
+        LastName,
+        Company,
+        Email, 
+        PhoneNumber,
+        CnicOrPassport,
+        Address, 
+        CityId, 
+        Notes, 
+        CreatedBy, 
+        UserId, 
+        NTN, 
+        SecpRegistrationNo,
+        CustomerTypeId,
+        CountryId,
+        IdentificationDocumentTypeId
+    )
     VALUES
-      (@FirstName, 
-	  @LastName,
-	  @Company,
-	  @Email,
-	  @PhoneNumber,
-	  @CnicOrPassport, 
-	  @Address, 
-	  @CityId, 
-	  @Notes, 
-	  @CreatedBy,
-	  @UserId,
-	  @NTN,
-	  @SecpRegistrationNo,
-	  @CustomerTypeId,
-	  @CountryId,
-	  @IdentificationDocumentTypeId); 
-	  SELECT SCOPE_IDENTITY() ID
+    (
+        @Code,
+        @FirstName, 
+        @LastName,
+        @Company,
+        @Email, 
+        @PhoneNumber,
+        @CnicOrPassport, 
+        @Address, 
+        @CityId, 
+        @Notes, 
+        @CreatedBy,
+        @UserId, 
+        @NTN, 
+        @SecpRegistrationNo,
+        TRY_CAST(@CustomerTypeId AS INT),
+        @CountryId,
+        TRY_CAST(@IdentificationDocumentTypeId AS INT)
+    ); 
+
+    DECLARE @NewId INT = SCOPE_IDENTITY();
+
+    SELECT 
+        @NewId AS ID, 
+        @NewId AS Id, 
+        @Code  AS Code;
 END;
 GO
 /****** Object:  StoredProcedure [dbo].[WN_CustomersVendors_SyncOnInvoice]    Script Date: 04/11/2026 10:31:37 am ******/
