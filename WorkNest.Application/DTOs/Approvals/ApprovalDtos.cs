@@ -18,7 +18,7 @@ namespace WorkNest.Application.DTOs.Approvals
 
     public sealed record ApprovalRequestPage(IReadOnlyList<ApprovalRequestRow> Items, int TotalCount);
 
-    /// <summary>One request with its names and the people it was sent to (UTC times).</summary>
+    /// <summary>One request with its names and the people it was sent to (Pakistan time).</summary>
     public sealed record ApprovalRequestDetail(int Id, int LocationId, string? LocationName, int CategoryId, string CategoryName,
         string Title, string Details, string? Reason, string Status, int RequestedByUserId, string? RequestedByName, string? RequestedByEmail,
         DateTime RequestedAt, DateTime TokenExpiresAt, DateTime? DecidedAt, string? DecisionNote, int? DoneByUserId, string? DoneByName,
@@ -33,7 +33,7 @@ namespace WorkNest.Application.DTOs.Approvals
 
     /// <summary>A new request as the repository stores it. TokenHash is the SHA-256 of the e-mailed link token.</summary>
     public sealed record ApprovalNewRequest(int LocationId, int CategoryId, string Title, string Details, string? Reason,
-        int RequestedByUserId, string ApproverEmail, byte[] TokenHash, DateTime TokenExpiresAtUtc);
+        int RequestedByUserId, string ApproverEmail, byte[] TokenHash, DateTime TokenExpiresAt);
 
     /// <summary>A staff member the super admin may pick as an assigned person.</summary>
     public sealed record ApprovalStaff(int Id, string? Name, string? Email, string Role);

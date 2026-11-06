@@ -2,7 +2,8 @@
 -- APPROVAL_01: Approvals (CMS Approvals tab and Administration > Approval Settings).
 -- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database first, then on the live one.
 -- One transaction: if anything fails, nothing is changed. Safe to run again. Only adds new objects: no existing
--- table is changed and no data is touched. Times are UTC.
+-- table of other features is changed and no data is touched. Times are Pakistan time (UTC+5): DATEADD(HOUR, 5, SYSUTCDATETIME()),
+-- never GETDATE / SYSDATETIME, because the server's own time zone is not guaranteed.
 --
 -- A sales executive or admin raises a request, the approver email set by the super admin gets a one-time link, the
 -- approver approves or rejects with an optional note. Approved requests go to the people set for that location and
@@ -42,7 +43,7 @@ BEGIN TRY
             Id              INT            NOT NULL CONSTRAINT PK_WN_ApprovalSettings PRIMARY KEY,
             ApproverEmail   NVARCHAR(256)  NULL,
             LinkExpiryDays  INT            NOT NULL CONSTRAINT DF_WN_ApprovalSettings_LinkExpiryDays DEFAULT (7),
-            UpdatedOn       DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalSettings_UpdatedOn DEFAULT (SYSUTCDATETIME()),
+            UpdatedOn       DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalSettings_UpdatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
             UpdatedBy       NVARCHAR(256)  NULL,
             CONSTRAINT CK_WN_ApprovalSettings_OneRow CHECK (Id = 1),
             CONSTRAINT CK_WN_ApprovalSettings_Days CHECK (LinkExpiryDays BETWEEN 1 AND 60)
@@ -56,7 +57,7 @@ BEGIN TRY
             Id         INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_ApprovalCategories PRIMARY KEY,
             Name       NVARCHAR(100)  NOT NULL,
             IsActive   BIT            NOT NULL CONSTRAINT DF_WN_ApprovalCategories_IsActive DEFAULT (1),
-            CreatedOn  DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalCategories_CreatedOn DEFAULT (SYSUTCDATETIME()),
+            CreatedOn  DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalCategories_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
             CreatedBy  NVARCHAR(256)  NULL,
             CONSTRAINT UQ_WN_ApprovalCategories_Name UNIQUE (Name)
         );');
@@ -73,7 +74,7 @@ BEGIN TRY
             LocationId  INT            NOT NULL,
             CategoryId  INT            NOT NULL,
             UserId      INT            NOT NULL,
-            CreatedOn   DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalAssignees_CreatedOn DEFAULT (SYSUTCDATETIME()),
+            CreatedOn   DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalAssignees_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
             CreatedBy   NVARCHAR(256)  NULL,
             CONSTRAINT FK_WN_ApprovalAssignees_Category FOREIGN KEY (CategoryId) REFERENCES dbo.WN_ApprovalCategories (Id),
             CONSTRAINT UQ_WN_ApprovalAssignees UNIQUE (LocationId, CategoryId, UserId)
@@ -90,7 +91,7 @@ BEGIN TRY
             Reason             NVARCHAR(1000)  NULL,
             Status             VARCHAR(20)     NOT NULL CONSTRAINT DF_WN_ApprovalRequests_Status DEFAULT (''Pending''),
             RequestedByUserId  INT             NOT NULL,
-            RequestedAt        DATETIME2(0)    NOT NULL CONSTRAINT DF_WN_ApprovalRequests_RequestedAt DEFAULT (SYSUTCDATETIME()),
+            RequestedAt        DATETIME2(0)    NOT NULL CONSTRAINT DF_WN_ApprovalRequests_RequestedAt DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
             ApproverEmail      NVARCHAR(256)   NOT NULL,
             TokenHash          BINARY(32)      NOT NULL,
             TokenExpiresAt     DATETIME2(0)    NOT NULL,
@@ -119,6 +120,21 @@ BEGIN TRY
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_ApprovalRequestAssignees') AND name = N'IX_WN_ApprovalRequestAssignees_User')
         EXEC(N'CREATE INDEX IX_WN_ApprovalRequestAssignees_User ON dbo.WN_ApprovalRequestAssignees (UserId);');
 
+    -- Times are Pakistan time. Tables made by an earlier run have the old UTC defaults and CREATE TABLE is skipped above,
+    -- so the four time defaults are dropped and made again, with the same names. Safe to rerun; existing rows are left as they are.
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalSettings_UpdatedOn' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalSettings'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalSettings DROP CONSTRAINT DF_WN_ApprovalSettings_UpdatedOn;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalSettings ADD CONSTRAINT DF_WN_ApprovalSettings_UpdatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR UpdatedOn;');
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalCategories_CreatedOn' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalCategories'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalCategories DROP CONSTRAINT DF_WN_ApprovalCategories_CreatedOn;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalCategories ADD CONSTRAINT DF_WN_ApprovalCategories_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR CreatedOn;');
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalAssignees_CreatedOn' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalAssignees'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalAssignees DROP CONSTRAINT DF_WN_ApprovalAssignees_CreatedOn;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalAssignees ADD CONSTRAINT DF_WN_ApprovalAssignees_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR CreatedOn;');
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalRequests_RequestedAt' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalRequests'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalRequests DROP CONSTRAINT DF_WN_ApprovalRequests_RequestedAt;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalRequests ADD CONSTRAINT DF_WN_ApprovalRequests_RequestedAt DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR RequestedAt;');
+
     -- 6. Settings.
     EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Settings_Get
 AS
@@ -133,7 +149,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_ApprovalSettings
-       SET ApproverEmail = NULLIF(LTRIM(RTRIM(@ApproverEmail)), N''''), UpdatedOn = SYSUTCDATETIME(), UpdatedBy = @UpdatedBy
+       SET ApproverEmail = NULLIF(LTRIM(RTRIM(@ApproverEmail)), N''''), UpdatedOn = DATEADD(HOUR, 5, SYSUTCDATETIME()), UpdatedBy = @UpdatedBy
      WHERE Id = 1;
 END');
 
@@ -287,9 +303,9 @@ BEGIN
     BEGIN TRANSACTION;
 
     UPDATE dbo.WN_ApprovalRequests
-       SET Status = @Decision, DecidedAt = SYSUTCDATETIME(), DecisionNote = NULLIF(LTRIM(RTRIM(@Note)), N'''')
+       SET Status = @Decision, DecidedAt = DATEADD(HOUR, 5, SYSUTCDATETIME()), DecisionNote = NULLIF(LTRIM(RTRIM(@Note)), N'''')
     OUTPUT inserted.Id, inserted.LocationId, inserted.CategoryId INTO @Done (Id, LocationId, CategoryId)
-     WHERE TokenHash = @TokenHash AND Status = ''Pending'' AND TokenExpiresAt > SYSUTCDATETIME();
+     WHERE TokenHash = @TokenHash AND Status = ''Pending'' AND TokenExpiresAt > DATEADD(HOUR, 5, SYSUTCDATETIME());
 
     IF @Decision = ''Approved''
         INSERT INTO dbo.WN_ApprovalRequestAssignees (RequestId, UserId)
@@ -310,7 +326,7 @@ END');
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_ApprovalRequests SET Status = ''Expired'', TokenExpiresAt = SYSUTCDATETIME() WHERE Id = @Id AND Status = ''Pending'';
+    UPDATE dbo.WN_ApprovalRequests SET Status = ''Expired'', TokenExpiresAt = DATEADD(HOUR, 5, SYSUTCDATETIME()) WHERE Id = @Id AND Status = ''Pending'';
     SELECT @@ROWCOUNT AS Updated;
 END');
 
@@ -346,7 +362,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
     UPDATE dbo.WN_ApprovalRequests
-       SET Status = ''Done'', DoneByUserId = @DoneByUserId, DoneAt = SYSUTCDATETIME(), DoneNote = NULLIF(LTRIM(RTRIM(@Note)), N'''')
+       SET Status = ''Done'', DoneByUserId = @DoneByUserId, DoneAt = DATEADD(HOUR, 5, SYSUTCDATETIME()), DoneNote = NULLIF(LTRIM(RTRIM(@Note)), N'''')
      WHERE Id = @Id AND Status = ''Approved'';
     SELECT @@ROWCOUNT AS Updated;
 END');
@@ -372,7 +388,7 @@ BEGIN
     UPDATE dbo.WN_ApprovalRequests
        SET Status = ''Expired''
     OUTPUT inserted.Id INTO @Done (Id)
-     WHERE Status = ''Pending'' AND TokenExpiresAt <= SYSUTCDATETIME();
+     WHERE Status = ''Pending'' AND TokenExpiresAt <= DATEADD(HOUR, 5, SYSUTCDATETIME());
     SELECT Id FROM @Done;
 END');
 

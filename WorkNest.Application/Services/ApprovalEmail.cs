@@ -6,7 +6,7 @@ namespace WorkNest.Application.Services
 {
     /// <summary>What an approvals e-mail says about a request. Everything typed by staff is HTML-escaped by the builders.</summary>
     public sealed record ApprovalEmailRequest(int Id, string? LocationName, string CategoryName, string Title, string Details, string? Reason,
-        string? RequestedByName, DateTime RequestedAtUtc);
+        string? RequestedByName, DateTime RequestedAt);
 
     /// <summary>
     /// The six approvals e-mails (spec "Emails"), each as (subject, html). Links use the CMS address from
@@ -33,11 +33,11 @@ namespace WorkNest.Application.Services
         public static string RequestLink(string baseUrl, int id) => RequestsLink(baseUrl) + "?id=" + id.ToString(CultureInfo.InvariantCulture);
 
         /// <summary>1. To the approver: the request and a Review request button.</summary>
-        public static (string Subject, string Html) ToApprover(string baseUrl, string token, ApprovalEmailRequest r, DateTime expiresAtUtc)
+        public static (string Subject, string Html) ToApprover(string baseUrl, string token, ApprovalEmailRequest r, DateTime expiresAt)
         {
             var body = Card(r, null) +
                        Button(ApprovalLink(baseUrl, token), "Review request") +
-                       Muted($"Opening the link changes nothing: you choose Approve or Reject on the page. The link works until {E(Time(expiresAtUtc))} (Pakistan time) and once.");
+                       Muted($"Opening the link changes nothing: you choose Approve or Reject on the page. The link works until {E(Time(expiresAt))} (Pakistan time) and once.");
             return ($"{Subject(r.LocationName)}: approval needed - {Clean(r.Title)}", Wrap("Approval needed", body));
         }
 
@@ -109,7 +109,7 @@ namespace WorkNest.Application.Services
             Row(sb, "Details", r.Details, true);
             if (!string.IsNullOrWhiteSpace(r.Reason)) Row(sb, "Reason", r.Reason, true);
             Row(sb, "Requested by", r.RequestedByName);
-            Row(sb, "Requested", Time(r.RequestedAtUtc) + " (Pakistan time)");
+            Row(sb, "Requested", Time(r.RequestedAt) + " (Pakistan time)");
             sb.Append(extra).Append("</table>");
             return sb.ToString();
         }
@@ -133,8 +133,8 @@ namespace WorkNest.Application.Services
         /// <summary>Escaped, with line breaks kept.</summary>
         private static string Multi(string? s) => E(s).Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "<br>");
 
-        /// <summary>Pakistan time (UTC+5, no daylight saving).</summary>
-        private static string Time(DateTime utc) => utc.AddHours(5).ToString("dd MMM yyyy, HH:mm", CultureInfo.InvariantCulture);
+        /// <summary>The stored time as it is: the database holds Pakistan time already.</summary>
+        private static string Time(DateTime pakistanTime) => pakistanTime.ToString("dd MMM yyyy, HH:mm", CultureInfo.InvariantCulture);
 
         private static string E(string? s) => WebUtility.HtmlEncode(s ?? "");
     }

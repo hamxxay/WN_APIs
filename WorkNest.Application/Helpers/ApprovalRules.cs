@@ -69,9 +69,9 @@ namespace WorkNest.Application.Helpers
             catch (FormatException) { return false; }
         }
 
-        /// <summary>The link still works: Pending and strictly before its expiry second.</summary>
-        public static bool IsOpen(string status, DateTime expiresAtUtc, DateTime nowUtc) =>
-            status == ApprovalStatuses.Pending && nowUtc < expiresAtUtc;
+        /// <summary>The link still works: Pending and strictly before its expiry second (both times Pakistan time).</summary>
+        public static bool IsOpen(string status, DateTime expiresAt, DateTime now) =>
+            status == ApprovalStatuses.Pending && now < expiresAt;
 
         /// <summary>The super admin, or a person the request was sent to.</summary>
         public static bool MayMarkDone(bool isSuperAdmin, int userId, IEnumerable<int> assigneeIds) =>

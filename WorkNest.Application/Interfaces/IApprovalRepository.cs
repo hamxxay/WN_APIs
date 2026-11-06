@@ -34,7 +34,7 @@ namespace WorkNest.Application.Interfaces
         /// <summary>False when the request is not Approved.</summary>
         Task<bool> MarkDoneAsync(int id, int doneByUserId, string? note, CancellationToken ct = default);
         /// <summary>Makes an Expired request Pending with a new link. False when it is not Expired.</summary>
-        Task<bool> ResendRequestAsync(int id, string approverEmail, byte[] tokenHash, DateTime tokenExpiresAtUtc, CancellationToken ct = default);
+        Task<bool> ResendRequestAsync(int id, string approverEmail, byte[] tokenHash, DateTime tokenExpiresAt, CancellationToken ct = default);
         /// <summary>Expires the Pending requests past their link expiry and returns their ids.</summary>
         Task<IReadOnlyList<int>> ExpireDueAsync(CancellationToken ct = default);
 

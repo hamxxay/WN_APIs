@@ -36,8 +36,9 @@ namespace WorkNest.Infrastructure.Repositories
             catch (SqlException ex) when (ex.Number is 208 or 2812) { throw new ApprovalsMissingException(ex); }
         }
 
-        private static DateTime Utc(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Utc);
-        private static DateTime? Utc(IDataRecord r, string col) => r[col] is DateTime d ? Utc(d) : null;
+        // The columns hold Pakistan time (script APPROVAL_01). Kind stays Unspecified, so the API writes them with no Z and no offset.
+        private static DateTime Local(DateTime d) => DateTime.SpecifyKind(d, DateTimeKind.Unspecified);
+        private static DateTime? Local(IDataRecord r, string col) => r[col] is DateTime d ? Local(d) : null;
         private static string? Str(IDataRecord r, string col) => r[col] is string s ? s : null;
         private static int? Int(IDataRecord r, string col) => r[col] is int i ? i : null;
 
@@ -51,7 +52,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<ApprovalSettings?> GetSettingsAsync(CancellationToken ct = default) =>
             (await Run("dbo.WN_Approval_Settings_Get",
-                (c, t) => Rows(c, r => new ApprovalSettings(Str(r, "ApproverEmail"), (int)r["LinkExpiryDays"], Utc((DateTime)r["UpdatedOn"]), Str(r, "UpdatedBy")), t), ct))
+                (c, t) => Rows(c, r => new ApprovalSettings(Str(r, "ApproverEmail"), (int)r["LinkExpiryDays"], Local((DateTime)r["UpdatedOn"]), Str(r, "UpdatedBy")), t), ct))
             .FirstOrDefault();
 
         public Task SaveSettingsAsync(string? approverEmail, string? updatedBy, CancellationToken ct = default) =>
@@ -91,7 +92,7 @@ namespace WorkNest.Infrastructure.Repositories
                 ("@LocationId", SqlDbType.Int, q.LocationId), ("@CategoryId", SqlDbType.Int, q.CategoryId), ("@Title", SqlDbType.NVarChar, q.Title),
                 ("@Details", SqlDbType.NVarChar, q.Details), ("@Reason", SqlDbType.NVarChar, q.Reason), ("@RequestedByUserId", SqlDbType.Int, q.RequestedByUserId),
                 ("@ApproverEmail", SqlDbType.NVarChar, q.ApproverEmail), ("@TokenHash", SqlDbType.Binary, q.TokenHash),
-                ("@TokenExpiresAt", SqlDbType.DateTime2, q.TokenExpiresAtUtc))).First();
+                ("@TokenExpiresAt", SqlDbType.DateTime2, q.TokenExpiresAt))).First();
 
         public Task<ApprovalRequestDetail?> GetRequestAsync(int id, CancellationToken ct = default) =>
             Run("dbo.WN_Approval_Request_Get", async (c, t) =>
@@ -103,9 +104,9 @@ namespace WorkNest.Infrastructure.Repositories
                     Id = (int)r["Id"], LocationId = (int)r["LocationId"], LocationName = Str(r, "LocationName"), CategoryId = (int)r["CategoryId"],
                     CategoryName = (string)r["CategoryName"], Title = (string)r["Title"], Details = (string)r["Details"], Reason = Str(r, "Reason"),
                     Status = (string)r["Status"], RequestedByUserId = (int)r["RequestedByUserId"], RequestedByName = Str(r, "RequestedByName"),
-                    RequestedByEmail = Str(r, "RequestedByEmail"), RequestedAt = Utc((DateTime)r["RequestedAt"]), TokenExpiresAt = Utc((DateTime)r["TokenExpiresAt"]),
-                    DecidedAt = Utc(r, "DecidedAt"), DecisionNote = Str(r, "DecisionNote"), DoneByUserId = Int(r, "DoneByUserId"), DoneByName = Str(r, "DoneByName"),
-                    DoneAt = Utc(r, "DoneAt"), DoneNote = Str(r, "DoneNote")
+                    RequestedByEmail = Str(r, "RequestedByEmail"), RequestedAt = Local((DateTime)r["RequestedAt"]), TokenExpiresAt = Local((DateTime)r["TokenExpiresAt"]),
+                    DecidedAt = Local(r, "DecidedAt"), DecisionNote = Str(r, "DecisionNote"), DoneByUserId = Int(r, "DoneByUserId"), DoneByName = Str(r, "DoneByName"),
+                    DoneAt = Local(r, "DoneAt"), DoneNote = Str(r, "DoneNote")
                 };
                 var people = new List<ApprovalRequestAssignee>();
                 if (await r.NextResultAsync(t))
@@ -120,8 +121,8 @@ namespace WorkNest.Infrastructure.Repositories
         {
             var rows = await Run("dbo.WN_Approval_Requests_Get",
                 (c, t) => Rows(c, r => new ApprovalRequestRow((int)r["Id"], (int)r["LocationId"], Str(r, "LocationName"), (int)r["CategoryId"], (string)r["CategoryName"],
-                    (string)r["Title"], (string)r["Status"], (int)r["RequestedByUserId"], Str(r, "RequestedByName"), Utc((DateTime)r["RequestedAt"]),
-                    Utc(r, "DecidedAt"), Utc(r, "DoneAt"), (int)r["TotalCount"]), t),
+                    (string)r["Title"], (string)r["Status"], (int)r["RequestedByUserId"], Str(r, "RequestedByName"), Local((DateTime)r["RequestedAt"]),
+                    Local(r, "DecidedAt"), Local(r, "DoneAt"), (int)r["TotalCount"]), t),
                 ct, ("@LocationIds", SqlDbType.NVarChar, locationIds == null ? null : locationIds.Count == 0 ? "0" : string.Join(',', locationIds)), ("@AssigneeUserId", SqlDbType.Int, assigneeUserId),
                 ("@Status", SqlDbType.VarChar, status), ("@CategoryId", SqlDbType.Int, categoryId), ("@Page", SqlDbType.Int, page), ("@PageSize", SqlDbType.Int, pageSize));
             return new ApprovalRequestPage(rows, rows.Count > 0 ? rows[0].TotalCount : 0);
@@ -130,8 +131,8 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<ApprovalPublicRequest?> GetRequestByTokenAsync(byte[] tokenHash, CancellationToken ct = default) =>
             (await Run("dbo.WN_Approval_Request_GetByToken",
                 (c, t) => Rows(c, r => new ApprovalPublicRequest((int)r["Id"], Str(r, "LocationName"), (string)r["CategoryName"], (string)r["Title"], (string)r["Details"],
-                    Str(r, "Reason"), (string)r["Status"], Str(r, "RequestedByName"), Utc((DateTime)r["RequestedAt"]), Utc((DateTime)r["TokenExpiresAt"]),
-                    Utc(r, "DecidedAt"), Str(r, "DecisionNote")), t),
+                    Str(r, "Reason"), (string)r["Status"], Str(r, "RequestedByName"), Local((DateTime)r["RequestedAt"]), Local((DateTime)r["TokenExpiresAt"]),
+                    Local(r, "DecidedAt"), Str(r, "DecisionNote")), t),
                 ct, ("@TokenHash", SqlDbType.Binary, tokenHash))).FirstOrDefault();
 
         public async Task<ApprovalDecided?> DecideAsync(byte[] tokenHash, string decision, string? note, CancellationToken ct = default) =>
@@ -142,10 +143,10 @@ namespace WorkNest.Infrastructure.Repositories
             await Run("dbo.WN_Approval_Request_MarkDone", async (c, t) => Convert.ToInt32(await c.ExecuteScalarAsync(t)) > 0, ct,
                 ("@Id", SqlDbType.Int, id), ("@DoneByUserId", SqlDbType.Int, doneByUserId), ("@Note", SqlDbType.NVarChar, note));
 
-        public async Task<bool> ResendRequestAsync(int id, string approverEmail, byte[] tokenHash, DateTime tokenExpiresAtUtc, CancellationToken ct = default) =>
+        public async Task<bool> ResendRequestAsync(int id, string approverEmail, byte[] tokenHash, DateTime tokenExpiresAt, CancellationToken ct = default) =>
             await Run("dbo.WN_Approval_Request_Resend", async (c, t) => Convert.ToInt32(await c.ExecuteScalarAsync(t)) > 0, ct,
                 ("@Id", SqlDbType.Int, id), ("@ApproverEmail", SqlDbType.NVarChar, approverEmail), ("@TokenHash", SqlDbType.Binary, tokenHash),
-                ("@TokenExpiresAt", SqlDbType.DateTime2, tokenExpiresAtUtc));
+                ("@TokenExpiresAt", SqlDbType.DateTime2, tokenExpiresAt));
 
         public async Task<IReadOnlyList<int>> ExpireDueAsync(CancellationToken ct = default) =>
             await Run("dbo.WN_Approval_Requests_ExpireDue", (c, t) => Rows(c, r => (int)r["Id"], t), ct);

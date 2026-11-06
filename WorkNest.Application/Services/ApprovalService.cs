@@ -55,15 +55,16 @@ namespace WorkNest.Application.Services
         private readonly IEmailService _email;
         private readonly IConfiguration _config;
         private readonly ILogger<ApprovalService> _logger;
-        private readonly Func<DateTime> _utcNow;
+        /// <summary>Pakistan time (<c>IBusinessClock.Now</c>): token expiry, "is the link still open" and everything stored are in it.</summary>
+        private readonly Func<DateTime> _now;
 
-        public ApprovalService(IApprovalRepository repo, IReportRepository reports, IEmailService email, IConfiguration config, ILogger<ApprovalService> logger)
-            : this(repo, reports, email, config, logger, () => DateTime.UtcNow) { }
+        public ApprovalService(IApprovalRepository repo, IReportRepository reports, IEmailService email, IConfiguration config, ILogger<ApprovalService> logger, IBusinessClock clock)
+            : this(repo, reports, email, config, logger, () => clock.Now) { }
 
-        /// <summary>For tests: a chosen clock.</summary>
-        public ApprovalService(IApprovalRepository repo, IReportRepository reports, IEmailService email, IConfiguration config, ILogger<ApprovalService> logger, Func<DateTime> utcNow)
+        /// <summary>For tests: a chosen clock. All times are Pakistan time, like the database columns of APPROVAL_01.</summary>
+        public ApprovalService(IApprovalRepository repo, IReportRepository reports, IEmailService email, IConfiguration config, ILogger<ApprovalService> logger, Func<DateTime> now)
         {
-            _repo = repo; _reports = reports; _email = email; _config = config; _logger = logger; _utcNow = utcNow;
+            _repo = repo; _reports = reports; _email = email; _config = config; _logger = logger; _now = now;
         }
 
         private string BaseUrl => ApprovalEmail.BaseUrl(_config["Approvals:CmsBaseUrl"]);
@@ -107,7 +108,7 @@ namespace WorkNest.Application.Services
             var approver = settings?.ApproverEmail?.Trim();
             if (!ApprovalRules.ValidEmail(approver)) return new NewLink(null, null, default, null, NoApproverMessage);
             var token = ApprovalRules.NewToken();
-            return new NewLink(token, ApprovalRules.HashToken(token), _utcNow().AddDays(ExpiryDays(settings)), approver, null);
+            return new NewLink(token, ApprovalRules.HashToken(token), _now().AddDays(ExpiryDays(settings)), approver, null);
         }
 
         /// <summary>E-mails the approver the link. A real send failure expires the request again so it never sits Pending with a link nobody got; an e-mail held by Email Sending off is not a failure.</summary>
@@ -167,7 +168,7 @@ namespace WorkNest.Application.Services
                     if (fresh != null) return ApprovalResult<ApprovalPublicView>.Ok(ToPublic(fresh));
                 }
                 catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: the decision was saved but the request could not be read again.", decided.Id); }
-                return ApprovalResult<ApprovalPublicView>.Ok(new ApprovalPublicView(null, "", "", "", null, decision, null, _utcNow(), _utcNow(), ApprovalRules.TrimOrNull(note), false));
+                return ApprovalResult<ApprovalPublicView>.Ok(new ApprovalPublicView(null, "", "", "", null, decision, null, _now(), _now(), ApprovalRules.TrimOrNull(note), false));
             }
             catch (ApprovalsMissingException) { return Missing<ApprovalPublicView>(); }
         }
@@ -330,7 +331,7 @@ namespace WorkNest.Application.Services
 
         private ApprovalPublicView ToPublic(ApprovalPublicRequest p) =>
             new(p.LocationName, p.CategoryName, p.Title, p.Details, p.Reason, p.Status, p.RequestedByName, p.RequestedAt, p.DecidedAt, p.DecisionNote,
-                ApprovalRules.IsOpen(p.Status, p.TokenExpiresAt, _utcNow()));
+                ApprovalRules.IsOpen(p.Status, p.TokenExpiresAt, _now()));
 
         private static ApprovalEmailRequest ToMail(ApprovalRequestDetail d) =>
             new(d.Id, d.LocationName, d.CategoryName, d.Title, d.Details, d.Reason, d.RequestedByName, d.RequestedAt);
