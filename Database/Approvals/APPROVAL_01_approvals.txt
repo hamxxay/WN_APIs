@@ -1,0 +1,407 @@
+-- ============================================================================================
+-- APPROVAL_01: Approvals (CMS Approvals tab and Administration > Approval Settings).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database first, then on the live one.
+-- One transaction: if anything fails, nothing is changed. Safe to run again. Only adds new objects: no existing
+-- table of other features is changed and no data is touched. Times are Pakistan time (UTC+5): DATEADD(HOUR, 5, SYSUTCDATETIME()),
+-- never GETDATE / SYSDATETIME, because the server's own time zone is not guaranteed.
+--
+-- A sales executive or admin raises a request, the approver email set by the super admin gets a one-time link, the
+-- approver approves or rejects with an optional note. Approved requests go to the people set for that location and
+-- category, who mark them Done. Status: Pending -> Approved -> Done, or Rejected, or Expired.
+--
+--   dbo.WN_ApprovalSettings (new)          one row: the approver email and the link expiry in days (7).
+--   dbo.WN_ApprovalCategories (new)        categories the super admin manages. Turned off, never deleted.
+--   dbo.WN_ApprovalAssignees (new)         the people for a location + category.
+--   dbo.WN_ApprovalRequests (new)          the requests. Only the SHA-256 of the email link is stored (TokenHash).
+--   dbo.WN_ApprovalRequestAssignees (new)  who received a request when it was approved, kept even if the people change.
+--   dbo.WN_Approval_Settings_Get / _Settings_Save                the Approval Settings page.
+--   dbo.WN_Approval_Categories_Get / _Category_Save              categories.
+--   dbo.WN_Approval_Assignees_Get / _Assignee_Add / _Assignee_Delete   the people.
+--   dbo.WN_Approval_Request_Create / _Request_Get / _Requests_Get      new request, one request, the list.
+--   dbo.WN_Approval_Request_GetByToken     the public approval page; changes nothing.
+--   dbo.WN_Approval_Request_Decide         approves or rejects in one UPDATE, so a link never works twice.
+--   dbo.WN_Approval_Request_MarkDone       assigned people close the request.
+--   dbo.WN_Approval_Request_Resend         sends an expired request again with a new link.
+--   dbo.WN_Approval_Requests_ExpireDue     moves Pending requests past their expiry to Expired.
+--   dbo.WN_Approval_Request_ExpireNow      Pending -> Expired for one request (the email to the approver could not be sent).
+--   dbo.WN_Approval_Staff_Get              active staff for the people picker (super admin, admin, sales executive, access officer, network engineer).
+--   dbo.WN_Approval_Locations_Get          id and name of the active locations (@LocationIds NULL = all).
+--   dbo.WN_ServiceSwitches                 + row ApprovalEmails (on): Approvals e-mails follow this switch, not Email Sending.
+-- Seed: categories Networking, CCTV, Access Control. The approver email starts empty.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_Users', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_Locations', N'U') IS NULL
+        THROW 50001, N'dbo.WN_Users or dbo.WN_Locations is missing: wrong database? Nothing changed.', 1;
+
+    BEGIN TRANSACTION;
+
+    -- 1. Settings (always one row).
+    IF OBJECT_ID(N'dbo.WN_ApprovalSettings', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_ApprovalSettings (
+            Id              INT            NOT NULL CONSTRAINT PK_WN_ApprovalSettings PRIMARY KEY,
+            ApproverEmail   NVARCHAR(256)  NULL,
+            LinkExpiryDays  INT            NOT NULL CONSTRAINT DF_WN_ApprovalSettings_LinkExpiryDays DEFAULT (7),
+            UpdatedOn       DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalSettings_UpdatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
+            UpdatedBy       NVARCHAR(256)  NULL,
+            CONSTRAINT CK_WN_ApprovalSettings_OneRow CHECK (Id = 1),
+            CONSTRAINT CK_WN_ApprovalSettings_Days CHECK (LinkExpiryDays BETWEEN 1 AND 60)
+        );');
+    EXEC(N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_ApprovalSettings WHERE Id = 1)
+        INSERT INTO dbo.WN_ApprovalSettings (Id) VALUES (1);');
+
+    -- 2. Categories.
+    IF OBJECT_ID(N'dbo.WN_ApprovalCategories', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_ApprovalCategories (
+            Id         INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_ApprovalCategories PRIMARY KEY,
+            Name       NVARCHAR(100)  NOT NULL,
+            IsActive   BIT            NOT NULL CONSTRAINT DF_WN_ApprovalCategories_IsActive DEFAULT (1),
+            CreatedOn  DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalCategories_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
+            CreatedBy  NVARCHAR(256)  NULL,
+            CONSTRAINT UQ_WN_ApprovalCategories_Name UNIQUE (Name)
+        );');
+    -- Seeded only into an empty table, so a rerun never brings back a renamed or switched-off category.
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_ApprovalCategories)
+        EXEC(N'INSERT INTO dbo.WN_ApprovalCategories (Name, CreatedBy)
+            SELECT v.Name, N''APPROVAL_01''
+              FROM (VALUES (N''Networking''), (N''CCTV''), (N''Access Control'')) v(Name);');
+
+    -- 3. The people for a location + category.
+    IF OBJECT_ID(N'dbo.WN_ApprovalAssignees', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_ApprovalAssignees (
+            Id          INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_ApprovalAssignees PRIMARY KEY,
+            LocationId  INT            NOT NULL,
+            CategoryId  INT            NOT NULL,
+            UserId      INT            NOT NULL,
+            CreatedOn   DATETIME2(0)   NOT NULL CONSTRAINT DF_WN_ApprovalAssignees_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
+            CreatedBy   NVARCHAR(256)  NULL,
+            CONSTRAINT FK_WN_ApprovalAssignees_Category FOREIGN KEY (CategoryId) REFERENCES dbo.WN_ApprovalCategories (Id),
+            CONSTRAINT UQ_WN_ApprovalAssignees UNIQUE (LocationId, CategoryId, UserId)
+        );');
+
+    -- 4. Requests.
+    IF OBJECT_ID(N'dbo.WN_ApprovalRequests', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_ApprovalRequests (
+            Id                 INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_ApprovalRequests PRIMARY KEY,
+            LocationId         INT             NOT NULL,
+            CategoryId         INT             NOT NULL,
+            Title              NVARCHAR(200)   NOT NULL,
+            Details            NVARCHAR(4000)  NOT NULL,
+            Reason             NVARCHAR(1000)  NULL,
+            Status             VARCHAR(20)     NOT NULL CONSTRAINT DF_WN_ApprovalRequests_Status DEFAULT (''Pending''),
+            RequestedByUserId  INT             NOT NULL,
+            RequestedAt        DATETIME2(0)    NOT NULL CONSTRAINT DF_WN_ApprovalRequests_RequestedAt DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
+            ApproverEmail      NVARCHAR(256)   NOT NULL,
+            TokenHash          BINARY(32)      NOT NULL,
+            TokenExpiresAt     DATETIME2(0)    NOT NULL,
+            DecidedAt          DATETIME2(0)    NULL,
+            DecisionNote       NVARCHAR(1000)  NULL,
+            DoneByUserId       INT             NULL,
+            DoneAt             DATETIME2(0)    NULL,
+            DoneNote           NVARCHAR(1000)  NULL,
+            CONSTRAINT FK_WN_ApprovalRequests_Category FOREIGN KEY (CategoryId) REFERENCES dbo.WN_ApprovalCategories (Id),
+            CONSTRAINT UQ_WN_ApprovalRequests_TokenHash UNIQUE (TokenHash),
+            CONSTRAINT CK_WN_ApprovalRequests_Status CHECK (Status IN (''Pending'', ''Approved'', ''Rejected'', ''Done'', ''Expired''))
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_ApprovalRequests') AND name = N'IX_WN_ApprovalRequests_Status')
+        EXEC(N'CREATE INDEX IX_WN_ApprovalRequests_Status ON dbo.WN_ApprovalRequests (Status, TokenExpiresAt);');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_ApprovalRequests') AND name = N'IX_WN_ApprovalRequests_Location')
+        EXEC(N'CREATE INDEX IX_WN_ApprovalRequests_Location ON dbo.WN_ApprovalRequests (LocationId, RequestedAt DESC);');
+
+    -- 5. Who received each approved request.
+    IF OBJECT_ID(N'dbo.WN_ApprovalRequestAssignees', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_ApprovalRequestAssignees (
+            RequestId  INT NOT NULL,
+            UserId     INT NOT NULL,
+            CONSTRAINT PK_WN_ApprovalRequestAssignees PRIMARY KEY (RequestId, UserId),
+            CONSTRAINT FK_WN_ApprovalRequestAssignees_Request FOREIGN KEY (RequestId) REFERENCES dbo.WN_ApprovalRequests (Id)
+        );');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_ApprovalRequestAssignees') AND name = N'IX_WN_ApprovalRequestAssignees_User')
+        EXEC(N'CREATE INDEX IX_WN_ApprovalRequestAssignees_User ON dbo.WN_ApprovalRequestAssignees (UserId);');
+
+    -- Times are Pakistan time. Tables made by an earlier run have the old UTC defaults and CREATE TABLE is skipped above,
+    -- so the four time defaults are dropped and made again, with the same names. Safe to rerun; existing rows are left as they are.
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalSettings_UpdatedOn' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalSettings'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalSettings DROP CONSTRAINT DF_WN_ApprovalSettings_UpdatedOn;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalSettings ADD CONSTRAINT DF_WN_ApprovalSettings_UpdatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR UpdatedOn;');
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalCategories_CreatedOn' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalCategories'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalCategories DROP CONSTRAINT DF_WN_ApprovalCategories_CreatedOn;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalCategories ADD CONSTRAINT DF_WN_ApprovalCategories_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR CreatedOn;');
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalAssignees_CreatedOn' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalAssignees'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalAssignees DROP CONSTRAINT DF_WN_ApprovalAssignees_CreatedOn;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalAssignees ADD CONSTRAINT DF_WN_ApprovalAssignees_CreatedOn DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR CreatedOn;');
+    IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalRequests_RequestedAt' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalRequests'))
+        EXEC(N'ALTER TABLE dbo.WN_ApprovalRequests DROP CONSTRAINT DF_WN_ApprovalRequests_RequestedAt;');
+    EXEC(N'ALTER TABLE dbo.WN_ApprovalRequests ADD CONSTRAINT DF_WN_ApprovalRequests_RequestedAt DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR RequestedAt;');
+
+    -- The Approval Emails switch (on). Without SS_01 the API treats it as on.
+    IF OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NOT NULL
+        EXEC(N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_ServiceSwitches WHERE ServiceName = N''ApprovalEmails'')
+            INSERT INTO dbo.WN_ServiceSwitches (ServiceName, IsEnabled) VALUES (N''ApprovalEmails'', 1);');
+
+    -- 6. Settings.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Settings_Get
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT ApproverEmail, LinkExpiryDays, UpdatedOn, UpdatedBy FROM dbo.WN_ApprovalSettings WHERE Id = 1;
+END');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Settings_Save
+    @ApproverEmail NVARCHAR(256), @UpdatedBy NVARCHAR(256) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_ApprovalSettings
+       SET ApproverEmail = NULLIF(LTRIM(RTRIM(@ApproverEmail)), N''''), UpdatedOn = DATEADD(HOUR, 5, SYSUTCDATETIME()), UpdatedBy = @UpdatedBy
+     WHERE Id = 1;
+END');
+
+    -- 7. Categories. _Category_Save adds when @Id is NULL, otherwise renames or turns on / off. Returns { Id }.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Categories_Get
+    @ActiveOnly BIT = 0
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT Id, Name, IsActive
+      FROM dbo.WN_ApprovalCategories
+     WHERE @ActiveOnly = 0 OR IsActive = 1
+     ORDER BY Name;
+END');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Category_Save
+    @Id INT = NULL, @Name NVARCHAR(100), @IsActive BIT = 1, @By NVARCHAR(256) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF @Id IS NULL
+    BEGIN
+        INSERT INTO dbo.WN_ApprovalCategories (Name, IsActive, CreatedBy) VALUES (LTRIM(RTRIM(@Name)), @IsActive, @By);
+        SET @Id = SCOPE_IDENTITY();
+    END
+    ELSE
+        UPDATE dbo.WN_ApprovalCategories SET Name = LTRIM(RTRIM(@Name)), IsActive = @IsActive WHERE Id = @Id;
+    SELECT @Id AS Id;
+END');
+
+    -- 8. The people.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Assignees_Get
+    @LocationId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT a.Id, a.LocationId, l.Name AS LocationName, a.CategoryId, c.Name AS CategoryName,
+           a.UserId, u.Name AS UserName, u.Email, u.IsActive AS UserIsActive
+      FROM dbo.WN_ApprovalAssignees a
+      JOIN dbo.WN_ApprovalCategories c ON c.Id = a.CategoryId
+      LEFT JOIN dbo.WN_Locations l ON l.Id = a.LocationId
+      LEFT JOIN dbo.WN_Users u ON u.Id = a.UserId
+     WHERE @LocationId IS NULL OR a.LocationId = @LocationId
+     ORDER BY l.Name, c.Name, u.Name;
+END');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Assignee_Add
+    @LocationId INT, @CategoryId INT, @UserId INT, @By NVARCHAR(256) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_ApprovalAssignees WHERE LocationId = @LocationId AND CategoryId = @CategoryId AND UserId = @UserId)
+        INSERT INTO dbo.WN_ApprovalAssignees (LocationId, CategoryId, UserId, CreatedBy) VALUES (@LocationId, @CategoryId, @UserId, @By);
+END');
+
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Assignee_Delete
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DELETE FROM dbo.WN_ApprovalAssignees WHERE Id = @Id;
+END');
+
+    -- 9. Requests.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_Create
+    @LocationId INT, @CategoryId INT, @Title NVARCHAR(200), @Details NVARCHAR(4000), @Reason NVARCHAR(1000) = NULL,
+    @RequestedByUserId INT, @ApproverEmail NVARCHAR(256), @TokenHash BINARY(32), @TokenExpiresAt DATETIME2(0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    INSERT INTO dbo.WN_ApprovalRequests
+        (LocationId, CategoryId, Title, Details, Reason, RequestedByUserId, ApproverEmail, TokenHash, TokenExpiresAt)
+    VALUES
+        (@LocationId, @CategoryId, @Title, @Details, @Reason, @RequestedByUserId, @ApproverEmail, @TokenHash, @TokenExpiresAt);
+    SELECT CAST(SCOPE_IDENTITY() AS INT) AS Id;
+END');
+
+    -- One request with its names, then the people who received it.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_Get
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT r.Id, r.LocationId, l.Name AS LocationName, r.CategoryId, c.Name AS CategoryName, r.Title, r.Details, r.Reason,
+           r.Status, r.RequestedByUserId, ru.Name AS RequestedByName, ru.Email AS RequestedByEmail, r.RequestedAt,
+           r.TokenExpiresAt, r.DecidedAt, r.DecisionNote, r.DoneByUserId, du.Name AS DoneByName, r.DoneAt, r.DoneNote
+      FROM dbo.WN_ApprovalRequests r
+      JOIN dbo.WN_ApprovalCategories c ON c.Id = r.CategoryId
+      LEFT JOIN dbo.WN_Locations l ON l.Id = r.LocationId
+      LEFT JOIN dbo.WN_Users ru ON ru.Id = r.RequestedByUserId
+      LEFT JOIN dbo.WN_Users du ON du.Id = r.DoneByUserId
+     WHERE r.Id = @Id;
+
+    SELECT a.UserId, u.Name, u.Email
+      FROM dbo.WN_ApprovalRequestAssignees a
+      LEFT JOIN dbo.WN_Users u ON u.Id = a.UserId
+     WHERE a.RequestId = @Id;
+END');
+
+    -- @LocationIds NULL = all locations. @AssigneeUserId also shows the requests sent to that person.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Requests_Get
+    @LocationIds NVARCHAR(MAX) = NULL, @AssigneeUserId INT = NULL, @Status VARCHAR(20) = NULL, @CategoryId INT = NULL,
+    @Page INT = 1, @PageSize INT = 25
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF @PageSize < 1 OR @PageSize > 100 SET @PageSize = 25;
+    IF @Page < 1 SET @Page = 1;
+
+    SELECT r.Id, r.LocationId, l.Name AS LocationName, r.CategoryId, c.Name AS CategoryName, r.Title, r.Status,
+           r.RequestedByUserId, ru.Name AS RequestedByName, r.RequestedAt, r.DecidedAt, r.DoneAt,
+           COUNT(*) OVER () AS TotalCount
+      FROM dbo.WN_ApprovalRequests r
+      JOIN dbo.WN_ApprovalCategories c ON c.Id = r.CategoryId
+      LEFT JOIN dbo.WN_Locations l ON l.Id = r.LocationId
+      LEFT JOIN dbo.WN_Users ru ON ru.Id = r.RequestedByUserId
+     WHERE (@Status IS NULL OR r.Status = @Status)
+       AND (@CategoryId IS NULL OR r.CategoryId = @CategoryId)
+       AND (   @LocationIds IS NULL
+            OR r.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N'',''))
+            OR EXISTS (SELECT 1 FROM dbo.WN_ApprovalRequestAssignees a WHERE a.RequestId = r.Id AND a.UserId = @AssigneeUserId))
+     ORDER BY r.RequestedAt DESC, r.Id DESC
+    OFFSET (@Page - 1) * @PageSize ROWS FETCH NEXT @PageSize ROWS ONLY;
+END');
+
+    -- The public page. The API decides from Status and TokenExpiresAt whether to show the buttons. No row = unknown link.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_GetByToken
+    @TokenHash BINARY(32)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT r.Id, l.Name AS LocationName, c.Name AS CategoryName, r.Title, r.Details, r.Reason, r.Status,
+           ru.Name AS RequestedByName, r.RequestedAt, r.TokenExpiresAt, r.DecidedAt, r.DecisionNote
+      FROM dbo.WN_ApprovalRequests r
+      JOIN dbo.WN_ApprovalCategories c ON c.Id = r.CategoryId
+      LEFT JOIN dbo.WN_Locations l ON l.Id = r.LocationId
+      LEFT JOIN dbo.WN_Users ru ON ru.Id = r.RequestedByUserId
+     WHERE r.TokenHash = @TokenHash;
+END');
+
+    -- @Decision is Approved or Rejected. Returns { Id, Status }, or no row when the link is unknown, used or expired.
+    -- On approval, the active people with a login for that location + category are kept in WN_ApprovalRequestAssignees.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_Decide
+    @TokenHash BINARY(32), @Decision VARCHAR(20), @Note NVARCHAR(1000) = NULL
+AS
+BEGIN
+    SET NOCOUNT, XACT_ABORT ON;
+    IF @Decision NOT IN (''Approved'', ''Rejected'') THROW 50002, N''Decision must be Approved or Rejected.'', 1;
+
+    DECLARE @Done TABLE (Id INT, LocationId INT, CategoryId INT);
+    BEGIN TRANSACTION;
+
+    UPDATE dbo.WN_ApprovalRequests
+       SET Status = @Decision, DecidedAt = DATEADD(HOUR, 5, SYSUTCDATETIME()), DecisionNote = NULLIF(LTRIM(RTRIM(@Note)), N'''')
+    OUTPUT inserted.Id, inserted.LocationId, inserted.CategoryId INTO @Done (Id, LocationId, CategoryId)
+     WHERE TokenHash = @TokenHash AND Status = ''Pending'' AND TokenExpiresAt > DATEADD(HOUR, 5, SYSUTCDATETIME());
+
+    IF @Decision = ''Approved''
+        INSERT INTO dbo.WN_ApprovalRequestAssignees (RequestId, UserId)
+        SELECT d.Id, a.UserId
+          FROM @Done d
+          JOIN dbo.WN_ApprovalAssignees a ON a.LocationId = d.LocationId AND a.CategoryId = d.CategoryId
+          JOIN dbo.WN_Users u ON u.Id = a.UserId
+         WHERE u.IsActive = 1;
+
+    COMMIT TRANSACTION;
+    SELECT Id, @Decision AS Status FROM @Done;
+END');
+
+    -- Pending -> Expired for one request: used when the approver email could not be sent, so the request can be sent again.
+    -- Returns { Updated }: 1 when it was Pending, 0 otherwise.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_ExpireNow
+    @Id INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_ApprovalRequests SET Status = ''Expired'', TokenExpiresAt = DATEADD(HOUR, 5, SYSUTCDATETIME()) WHERE Id = @Id AND Status = ''Pending'';
+    SELECT @@ROWCOUNT AS Updated;
+END');
+
+    -- 10. Pickers. Staff: active users with an allow-listed role (1 super admin, 2 admin, 16 sales executive, 19 access
+    -- officer, 20 network engineer). Customers, CEO and Sales Manager are never listed.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Staff_Get
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT u.Id, u.Name, u.Email, u.RoleId
+      FROM dbo.WN_Users u
+     WHERE u.IsActive = 1 AND u.RoleId IN (1, 2, 16, 19, 20)
+     ORDER BY u.Name, u.Id;
+END');
+
+    -- @LocationIds NULL = all locations, else a comma list.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Locations_Get
+    @LocationIds NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SELECT l.Id, l.Name
+      FROM dbo.WN_Locations l
+     WHERE ISNULL(l.IsActive, 1) = 1
+       AND (@LocationIds IS NULL OR l.Id IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N'','')))
+     ORDER BY l.Name, l.Id;
+END');
+
+    -- Returns { Updated }: 1 when an approved request was closed, 0 otherwise. The API checks who may call it.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_MarkDone
+    @Id INT, @DoneByUserId INT, @Note NVARCHAR(1000) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_ApprovalRequests
+       SET Status = ''Done'', DoneByUserId = @DoneByUserId, DoneAt = DATEADD(HOUR, 5, SYSUTCDATETIME()), DoneNote = NULLIF(LTRIM(RTRIM(@Note)), N'''')
+     WHERE Id = @Id AND Status = ''Approved'';
+    SELECT @@ROWCOUNT AS Updated;
+END');
+
+    -- Returns { Updated }: 1 when an expired request is Pending again with a new link, 0 otherwise.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Request_Resend
+    @Id INT, @ApproverEmail NVARCHAR(256), @TokenHash BINARY(32), @TokenExpiresAt DATETIME2(0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE dbo.WN_ApprovalRequests
+       SET Status = ''Pending'', ApproverEmail = @ApproverEmail, TokenHash = @TokenHash, TokenExpiresAt = @TokenExpiresAt
+     WHERE Id = @Id AND Status = ''Expired'';
+    SELECT @@ROWCOUNT AS Updated;
+END');
+
+    -- Returns the requests that just expired, so the API can tell the people who made them.
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Requests_ExpireDue
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Done TABLE (Id INT);
+    UPDATE dbo.WN_ApprovalRequests
+       SET Status = ''Expired''
+    OUTPUT inserted.Id INTO @Done (Id)
+     WHERE Status = ''Pending'' AND TokenExpiresAt <= DATEADD(HOUR, 5, SYSUTCDATETIME());
+    SELECT Id FROM @Done;
+END');
+
+    COMMIT TRANSACTION;
+    SELECT N'OK: approvals installed (APPROVAL_01).' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;

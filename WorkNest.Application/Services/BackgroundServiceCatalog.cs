@@ -56,6 +56,7 @@ namespace WorkNest.Application.Services
         public const string GwnPolling = "GwnPolling";
         public const string WhatsAppFollowUp = "WhatsAppFollowUp";
         public const string NetworkAlerts = "NetworkAlerts";
+        public const string ApprovalEmails = "ApprovalEmails";
 
         /// <summary>The services in the order the CMS lists them.</summary>
         public static readonly IReadOnlyList<BackgroundServiceInfo> All = new[]
@@ -109,6 +110,10 @@ namespace WorkNest.Application.Services
             new BackgroundServiceInfo(NetworkAlerts, "Network Alerts",
                 "Every minute: e-mails a location's alert recipients when an access machine has been offline for 30 minutes, or an internet line or a network device has been down for 5 minutes (one e-mail per location, a reminder every 6 hours, one when it is back).",
                 "NetworkAlerts:Enabled", true, c => NotFalse(c["NetworkAlerts:Enabled"])),
+            // Not a loop of its own: EmailService asks it before every Approvals e-mail, in place of Email Sending.
+            new BackgroundServiceInfo(ApprovalEmails, "Approval Emails",
+                "Every Approvals e-mail, separate from Email Sending: they still go out while Email Sending is off. Off: none are sent or kept, and a new request shows Send again.",
+                null, true, _ => true),
         };
 
         /// <summary>The service with this name (case ignored); null when there is none.</summary>

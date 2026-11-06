@@ -235,6 +235,10 @@ try
     builder.Services.AddScoped<WhatsAppFollowUpProcessor>();   // Simple Inquiries follow-up (INQ_01), run by WhatsAppFollowUpService
     builder.Services.AddSingleton<INetworkAlertRepository, WorkNest.Infrastructure.Repositories.NetworkAlertRepository>();   // network outage alerts (NET_ALERT_01)
     builder.Services.AddScoped<NetworkAlertProcessor>();   // run by NetworkAlertService
+    // Approvals (api/approvals, api/approvals/public, api/admin/approval-settings): dbo.WN_Approval_* (script APPROVAL_01_approvals).
+    // The CMS address in the e-mail links comes from Approvals:CmsBaseUrl (default https://cms.worknestpk.com).
+    builder.Services.AddScoped<IApprovalRepository, WorkNest.Infrastructure.Repositories.ApprovalRepository>();
+    builder.Services.AddScoped<ApprovalService>();
     // The bot's branch list (active WN_Locations), shared by all requests: re-read every 10 minutes, 3 s time limit.
     builder.Services.AddSingleton<WhatsAppBranchCache>();
     builder.Services.AddScoped<IGalleryService, GalleryService>();
@@ -351,6 +355,7 @@ try
     builder.Services.AddHostedService<GwnPollingService>();   // GwnPolling switch; Gwn:Enabled
     builder.Services.AddHostedService<WhatsAppFollowUpService>();   // WhatsAppFollowUp switch; WhatsApp:FollowUpQuietSeconds (120) / FollowUpTickSeconds (30)
     builder.Services.AddHostedService<NetworkAlertService>();   // NetworkAlerts switch; NetworkAlerts:DownMinutes (5) / ReminderHours (6) / TickSeconds (60)
+    builder.Services.AddHostedService<ApprovalExpiryService>();   // hourly: expires approvals whose link ran out (APPROVAL_01); quiet before the script
     builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
     builder.Services.AddHostedService<MonthlyFeeReceiptService>();   // FeeReceipts:MonthlyEnabled (on by default)
 
