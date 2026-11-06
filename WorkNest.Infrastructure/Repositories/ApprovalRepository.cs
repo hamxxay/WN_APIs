@@ -3,6 +3,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.DTOs.Approvals;
 using WorkNest.Application.Interfaces;
+using WorkNest.Common.Constants;
 
 namespace WorkNest.Infrastructure.Repositories
 {
@@ -29,6 +30,21 @@ namespace WorkNest.Infrastructure.Repositories
                 await using var c = new SqlConnection(_connectionString);
                 await c.OpenAsync(ct);
                 await using var cmd = new SqlCommand(procedure, c) { CommandType = CommandType.StoredProcedure, CommandTimeout = CommandTimeoutSeconds };
+                foreach (var (name, type, value) in ps) cmd.Parameters.Add(name, type).Value = value ?? DBNull.Value;
+                return await read(cmd, ct);
+            }
+            catch (SqlException ex) when (ex.Number is 208 or 2812) { throw new ApprovalsMissingException(ex); }
+        }
+
+        /// <summary>A fixed read-only query (no user text in it).</summary>
+        private async Task<T> RunText<T>(string sql, Func<SqlCommand, CancellationToken, Task<T>> read, CancellationToken ct,
+            params (string Name, SqlDbType Type, object? Value)[] ps)
+        {
+            try
+            {
+                await using var c = new SqlConnection(_connectionString);
+                await c.OpenAsync(ct);
+                await using var cmd = new SqlCommand(sql, c) { CommandType = CommandType.Text, CommandTimeout = CommandTimeoutSeconds };
                 foreach (var (name, type, value) in ps) cmd.Parameters.Add(name, type).Value = value ?? DBNull.Value;
                 return await read(cmd, ct);
             }
@@ -148,5 +164,16 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<IReadOnlyList<int>> ExpireDueAsync(CancellationToken ct = default) =>
             await Run("dbo.WN_Approval_Requests_ExpireDue", (c, t) => Rows(c, r => (int)r["Id"], t), ct);
+
+        public async Task<IReadOnlyList<ApprovalStaff>> GetStaffAsync(CancellationToken ct = default) =>
+            await RunText(@"SELECT Id, Name, Email, RoleId FROM dbo.WN_Users WITH (NOLOCK)
+                             WHERE IsActive = 1 AND RoleId IS NOT NULL AND RoleId NOT IN (@General, @Ceo, @SalesManager)
+                             ORDER BY Name, Id",
+                (c, t) => Rows(c, r => new ApprovalStaff((int)r["Id"], Str(r, "Name"), Str(r, "Email"), Roles.MapRole(Int(r, "RoleId"))), t), ct,
+                ("@General", SqlDbType.Int, Roles.GeneralId), ("@Ceo", SqlDbType.Int, Roles.CeoId), ("@SalesManager", SqlDbType.Int, Roles.SalesManagerId));
+
+        public async Task<IReadOnlyList<ApprovalLocation>> GetLocationsAsync(CancellationToken ct = default) =>
+            await RunText("SELECT Id, Name FROM dbo.WN_Locations WITH (NOLOCK) ORDER BY Name, Id",
+                (c, t) => Rows(c, r => new ApprovalLocation((int)r["Id"], Str(r, "Name") ?? ""), t), ct);
     }
 }

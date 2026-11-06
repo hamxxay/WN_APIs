@@ -37,6 +37,11 @@ namespace WorkNest.Application.Interfaces
         Task<bool> ResendRequestAsync(int id, string approverEmail, byte[] tokenHash, DateTime tokenExpiresAtUtc, CancellationToken ct = default);
         /// <summary>Expires the Pending requests past their link expiry and returns their ids.</summary>
         Task<IReadOnlyList<int>> ExpireDueAsync(CancellationToken ct = default);
+
+        /// <summary>Active staff for the people picker: customers, CEO and Sales Manager accounts left out.</summary>
+        Task<IReadOnlyList<ApprovalStaff>> GetStaffAsync(CancellationToken ct = default);
+        /// <summary>Id and name of every location.</summary>
+        Task<IReadOnlyList<ApprovalLocation>> GetLocationsAsync(CancellationToken ct = default);
     }
 
     /// <summary>The database update APPROVAL_01_approvals has not run (SQL errors 208 / 2812).</summary>

@@ -34,4 +34,9 @@ namespace WorkNest.Application.DTOs.Approvals
     /// <summary>A new request as the repository stores it. TokenHash is the SHA-256 of the e-mailed link token.</summary>
     public sealed record ApprovalNewRequest(int LocationId, int CategoryId, string Title, string Details, string? Reason,
         int RequestedByUserId, string ApproverEmail, byte[] TokenHash, DateTime TokenExpiresAtUtc);
+
+    /// <summary>A staff member the super admin may pick as an assigned person.</summary>
+    public sealed record ApprovalStaff(int Id, string? Name, string? Email, string Role);
+
+    public sealed record ApprovalLocation(int Id, string Name);
 }

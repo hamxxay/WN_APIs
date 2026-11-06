@@ -46,6 +46,21 @@ namespace WorkNest.Application.Helpers
         public static string? ValidateNote(string? note) =>
             note != null && note.Trim().Length > MaxNote ? $"Note must be at most {MaxNote} characters." : null;
 
+        /// <summary>Null when the category name is acceptable (not blank, at most <see cref="MaxCategoryName"/> characters once trimmed).</summary>
+        public static string? ValidateCategoryName(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "Category name is required.";
+            if (name.Trim().Length > MaxCategoryName) return $"Category name must be at most {MaxCategoryName} characters.";
+            return null;
+        }
+
+        /// <summary>Trimmed text; null when blank.</summary>
+        public static string? TrimOrNull(string? text)
+        {
+            var t = text?.Trim();
+            return string.IsNullOrEmpty(t) ? null : t;
+        }
+
         public static bool ValidEmail(string? email)
         {
             var e = email?.Trim();
