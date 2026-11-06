@@ -16,6 +16,9 @@ namespace WorkNest.Application.Services
         public static ApprovalResult<T> Fail(ApprovalOutcome outcome, string message) => new(outcome, default, message);
     }
 
+    /// <summary>A saved request. <paramref name="EmailSent"/> is false when the e-mail to the approver failed (the request is then Expired, to send again).</summary>
+    public sealed record ApprovalCreated(int Id, bool EmailSent);
+
     public sealed record ApprovalCreateInput(int LocationId, int CategoryId, string? Title, string? Details, string? Reason);
 
     /// <summary>The signed-in caller as the service needs to know them. <paramref name="CanRaise"/>: sales executive, admin or super admin.</summary>
@@ -69,27 +72,27 @@ namespace WorkNest.Application.Services
 
         // ---- raise -------------------------------------------------------------------------------------------------
 
-        /// <summary>Stores a Pending request and e-mails the approver the link. Returns the new id. When that e-mail fails the request is Expired (so it can be sent again) and the result is a 409 with <see cref="EmailFailedMessage"/>.</summary>
-        public async Task<ApprovalResult<int>> CreateAsync(ApprovalCreateInput input, int userId, CancellationToken ct = default)
+        /// <summary>Stores a Pending request and e-mails the approver the link. Returns the new id. When that e-mail fails the request is Expired (so it can be sent again) and the result is a success whose message is <see cref="EmailFailedMessage"/> and EmailSent false.</summary>
+        public async Task<ApprovalResult<ApprovalCreated>> CreateAsync(ApprovalCreateInput input, int userId, CancellationToken ct = default)
         {
             try
             {
                 var invalid = ApprovalRules.ValidateRequest(input.Title, input.Details, input.Reason);
-                if (invalid != null) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, invalid);
+                if (invalid != null) return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.Invalid, invalid);
                 if (!(await _repo.GetCategoriesAsync(true, ct)).Any(c => c.Id == input.CategoryId))
-                    return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, "Choose a category.");
+                    return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.Invalid, "Choose a category.");
                 if (!(await _repo.GetLocationsAsync(new[] { input.LocationId }, ct)).Any(l => l.Id == input.LocationId))
-                    return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, "Choose a location.");
+                    return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.Invalid, "Choose a location.");
 
                 var link = await NewLinkAsync(ct);
-                if (link.Failure != null) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, link.Failure);
+                if (link.Failure != null) return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.Invalid, link.Failure);
 
                 var id = await _repo.CreateRequestAsync(new ApprovalNewRequest(input.LocationId, input.CategoryId, input.Title!.Trim(), input.Details!.Trim(),
                     ApprovalRules.TrimOrNull(input.Reason), userId, link.Approver!, link.Hash!, link.ExpiresAt), ct);
                 var detail = await _repo.GetRequestAsync(id, ct);
                 return await SendLinkAsync(id, detail, link, "approver link");
             }
-            catch (ApprovalsMissingException) { return Missing<int>(); }
+            catch (ApprovalsMissingException) { return Missing<ApprovalCreated>(); }
         }
 
         /// <summary>A new one-time link for the approver: token, its hash, expiry and the approver address (or why there is none).</summary>
@@ -105,15 +108,16 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>E-mails the approver the link. A real send failure expires the request again so it never sits Pending with a link nobody got; an e-mail held by Email Sending off is not a failure.</summary>
-        private async Task<ApprovalResult<int>> SendLinkAsync(int id, ApprovalRequestDetail? detail, NewLink link, string what)
+        private async Task<ApprovalResult<ApprovalCreated>> SendLinkAsync(int id, ApprovalRequestDetail? detail, NewLink link, string what)
         {
             var sent = detail == null
                 ? SendResult.Failed
                 : await SendAsync(link.Approver, ApprovalEmail.ToApprover(BaseUrl, link.Token!, ToMail(detail), link.ExpiresAt), what, id);
-            if (sent != SendResult.Failed) return ApprovalResult<int>.Ok(id);
+            if (sent != SendResult.Failed) return ApprovalResult<ApprovalCreated>.Ok(new ApprovalCreated(id, true));
             try { await _repo.ExpireNowAsync(id, CancellationToken.None); }
             catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: could not expire the request after its approver e-mail failed.", id); }
-            return ApprovalResult<int>.Fail(ApprovalOutcome.Conflict, EmailFailedMessage);
+            // The request is saved, so this is a success (200) that says the e-mail did not go.
+            return new ApprovalResult<ApprovalCreated>(ApprovalOutcome.Ok, new ApprovalCreated(id, false), EmailFailedMessage);
         }
 
         // ---- the approver's page -----------------------------------------------------------------------------------
@@ -213,20 +217,20 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>Makes an Expired request Pending again with a new link, e-mailed to the approver. The caller's scope is checked by the controller.</summary>
-        public async Task<ApprovalResult<int>> ResendAsync(int id, CancellationToken ct = default)
+        public async Task<ApprovalResult<ApprovalCreated>> ResendAsync(int id, CancellationToken ct = default)
         {
             try
             {
                 var d = await _repo.GetRequestAsync(id, ct);
-                if (d == null) return ApprovalResult<int>.Fail(ApprovalOutcome.NotFound, "Request not found.");
-                if (d.Status != ApprovalStatuses.Expired) return ApprovalResult<int>.Fail(ApprovalOutcome.Conflict, "Only an expired request can be sent again.");
+                if (d == null) return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.NotFound, "Request not found.");
+                if (d.Status != ApprovalStatuses.Expired) return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.Conflict, "Only an expired request can be sent again.");
                 var link = await NewLinkAsync(ct);
-                if (link.Failure != null) return ApprovalResult<int>.Fail(ApprovalOutcome.Invalid, link.Failure);
+                if (link.Failure != null) return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.Invalid, link.Failure);
                 if (!await _repo.ResendRequestAsync(id, link.Approver!, link.Hash!, link.ExpiresAt, ct))
-                    return ApprovalResult<int>.Fail(ApprovalOutcome.Conflict, "Only an expired request can be sent again.");
+                    return ApprovalResult<ApprovalCreated>.Fail(ApprovalOutcome.Conflict, "Only an expired request can be sent again.");
                 return await SendLinkAsync(id, d, link, "approver link (resend)");
             }
-            catch (ApprovalsMissingException) { return Missing<int>(); }
+            catch (ApprovalsMissingException) { return Missing<ApprovalCreated>(); }
         }
 
         /// <summary>Expires the requests past their link and e-mails each person who made one. Returns how many expired. Throws <see cref="ApprovalsMissingException"/> before the script.</summary>

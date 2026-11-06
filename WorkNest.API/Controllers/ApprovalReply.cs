@@ -12,7 +12,7 @@ namespace WorkNest.API.Controllers
             var message = r.Message ?? "";
             return r.Outcome switch
             {
-                ApprovalOutcome.Ok => c.Ok(okMessage == null ? ApiResponse.Ok(map(r.Data!)) : ApiResponse.Ok(map(r.Data!), okMessage)),
+                ApprovalOutcome.Ok => c.Ok(Success(map(r.Data!), r.Message ?? okMessage)),
                 ApprovalOutcome.Invalid => c.BadRequest(ApiResponse.Fail(message)),
                 ApprovalOutcome.Forbidden => c.StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(message)),
                 ApprovalOutcome.NotFound => c.NotFound(ApiResponse.Fail(message)),
@@ -20,5 +20,7 @@ namespace WorkNest.API.Controllers
                 _ => c.StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(message))
             };
         }
+
+        private static ApiResponse Success(object? data, string? message) => message == null ? ApiResponse.Ok(data) : ApiResponse.Ok(data, message);
     }
 }

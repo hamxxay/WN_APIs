@@ -103,7 +103,7 @@ namespace WorkNest.API.Controllers
             if (!caller.IsSuperAdmin && !caller.LocationIds.Contains(request.LocationId))
                 return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail(OtherLocationMessage));
             var result = await _service.CreateAsync(new ApprovalCreateInput(request.LocationId, request.CategoryId, request.Title, request.Details, request.Reason), caller.UserId, ct);
-            return ApprovalReply.From(this, result, id => new { id }, "Request sent for approval.");
+            return ApprovalReply.From(this, result, v => new { id = v.Id, emailSent = v.EmailSent }, "Request sent for approval.");
         }
 
         /// <summary>Sends an expired request again with a new link. The caller must be able to raise at its location.</summary>
@@ -116,7 +116,7 @@ namespace WorkNest.API.Controllers
             if (!seen.IsOk) return ApprovalReply.From(this, seen, _ => new { });
             if (seen.Data!.Request.Status == "Expired" && !seen.Data.CanResend)
                 return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail("You can't send this request again."));
-            return ApprovalReply.From(this, await _service.ResendAsync(id, ct), rid => new { id = rid }, "Request sent again.");
+            return ApprovalReply.From(this, await _service.ResendAsync(id, ct), v => new { id = v.Id, emailSent = v.EmailSent }, "Request sent again.");
         }
 
         /// <summary>Marks an approved request Done. Only the super admin, or a person the request was sent to.</summary>
