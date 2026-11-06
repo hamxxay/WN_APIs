@@ -14,8 +14,9 @@ namespace WorkNest.Application.Interfaces
         Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type);
         /// <summary>Sends a ready-made HTML report (e.g. the weekly super admin report). Throws when the email could not be sent.</summary>
         Task SendHtmlReportAsync(string toEmail, string subject, string html);
-        /// <summary>Same, with its own sender name (e.g. "WorkNest Approvals"). Throws when the email could not be sent.</summary>
-        Task SendHtmlReportAsync(string toEmail, string subject, string html, string fromName) => SendHtmlReportAsync(toEmail, subject, html);
+        /// <summary>An Approvals e-mail: sent under <paramref name="fromName"/> and governed by the Approval Emails switch only, not
+        /// Email Sending. Switch off: <see cref="EmailSendingOffException"/>, nothing kept. Throws when it could not be sent.</summary>
+        Task SendApprovalEmailAsync(string toEmail, string subject, string html, string fromName) => SendHtmlReportAsync(toEmail, subject, html);
         /// <summary>Sends an e-mail held in Pending emails (its MessageJson) as it was asked for. Throws when it fails.</summary>
         Task SendHeldAsync(string messageJson);
     }

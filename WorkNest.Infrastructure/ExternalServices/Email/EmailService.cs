@@ -706,9 +706,20 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         }
 
         public Task SendHtmlReportAsync(string toEmail, string subject, string html) =>
-            SendHtmlReportAsync(toEmail, subject, html, "WorkNest Reports");
+            SendHtmlAsync(toEmail, subject, html, "WorkNest Reports", approval: false);
 
-        public async Task SendHtmlReportAsync(string toEmail, string subject, string html, string fromName)
+        /// <summary>Approvals follow their own switch: Email Sending does not hold them, and the outbox never sends them.</summary>
+        public Task SendApprovalEmailAsync(string toEmail, string subject, string html, string fromName) =>
+            SendHtmlAsync(toEmail, subject, html, fromName, approval: true);
+
+        private async Task<bool> ApprovalEmailsOnAsync()
+        {
+            if (_serviceSwitch == null) return true;
+            try { return await _serviceSwitch.IsEnabledAsync(BackgroundServiceCatalog.ApprovalEmails); }
+            catch (Exception) { return true; }
+        }
+
+        private async Task SendHtmlAsync(string toEmail, string subject, string html, string fromName, bool approval)
         {
             var (fromEmail, password, host, port) = GetEmailSettings();
 
@@ -720,6 +731,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             {
                 _logger.LogWarning("[EMAIL] Missing email credentials or recipient email. Report email '{Subject}' not sent.", subject);
                 throw new InvalidOperationException("Email credentials or recipient email missing; report not sent.");
+            }
+
+            if (approval && !await ApprovalEmailsOnAsync())
+            {
+                _logger.LogWarning("[EMAIL] Approval e-mail '{Subject}' not sent: the Approval Emails switch is off.", subject);
+                throw new EmailSendingOffException("The Approval Emails switch is off.");
             }
 
             try
@@ -734,7 +751,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 mail.Body = html;
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mail, "Report e-mail");   // Email Sending off: held in Pending emails
+                if (approval) await smtp.SendMailAsync(mail);
+                else await DeliverAsync(smtp, mail, "Report e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Report '{Subject}' sent to {ToEmail} via {Host}:{Port}.", subject, toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)

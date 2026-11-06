@@ -26,6 +26,7 @@
 --   dbo.WN_Approval_Request_ExpireNow      Pending -> Expired for one request (the email to the approver could not be sent).
 --   dbo.WN_Approval_Staff_Get              active staff for the people picker (super admin, admin, sales executive, access officer, network engineer).
 --   dbo.WN_Approval_Locations_Get          id and name of the active locations (@LocationIds NULL = all).
+--   dbo.WN_ServiceSwitches                 + row ApprovalEmails (on): Approvals e-mails follow this switch, not Email Sending.
 -- Seed: categories Networking, CCTV, Access Control. The approver email starts empty.
 -- ============================================================================================
 SET XACT_ABORT ON;
@@ -134,6 +135,11 @@ BEGIN TRY
     IF EXISTS (SELECT 1 FROM sys.default_constraints WHERE name = N'DF_WN_ApprovalRequests_RequestedAt' AND parent_object_id = OBJECT_ID(N'dbo.WN_ApprovalRequests'))
         EXEC(N'ALTER TABLE dbo.WN_ApprovalRequests DROP CONSTRAINT DF_WN_ApprovalRequests_RequestedAt;');
     EXEC(N'ALTER TABLE dbo.WN_ApprovalRequests ADD CONSTRAINT DF_WN_ApprovalRequests_RequestedAt DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())) FOR RequestedAt;');
+
+    -- The Approval Emails switch (on). Without SS_01 the API treats it as on.
+    IF OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NOT NULL
+        EXEC(N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_ServiceSwitches WHERE ServiceName = N''ApprovalEmails'')
+            INSERT INTO dbo.WN_ServiceSwitches (ServiceName, IsEnabled) VALUES (N''ApprovalEmails'', 1);');
 
     -- 6. Settings.
     EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Approval_Settings_Get
