@@ -184,6 +184,11 @@ namespace WorkNest.API.Controllers
                 _logger.LogWarning("Sales Manager dashboard called before the database update {Update}: {Error}", ex.Update, ex.Detail);
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
             }
+            catch (CeoDatabaseUpdateMissingException ex)
+            {
+                _logger.LogWarning("Sales Manager CEO widget called before the database update {Update}: {Error}", ex.Update, ex.InnerException?.Message);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
+            }
         }
         /// <summary>Pakistan wall-clock time (UTC+5), when no business clock is given.</summary>
         private static DateTime PakistanNow() => DateTime.SpecifyKind(DateTime.UtcNow.AddHours(5), DateTimeKind.Unspecified);

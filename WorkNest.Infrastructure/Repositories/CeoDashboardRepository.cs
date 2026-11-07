@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.Interfaces;
@@ -27,6 +28,44 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         private static string Csv(IEnumerable<int> ids) => string.Join(",", ids.Distinct());
+
+        /// <summary>
+        /// Normalizes <paramref name="locationId"/> and <paramref name="locationIds"/>: when a single location is targeted
+        /// (either explicitly via <paramref name="locationId"/> or a 1-element <paramref name="locationIds"/>), uses
+        /// <c>@LocationId</c> and clears <paramref name="locationIds"/> so procedures without <c>@LocationIds</c> work
+        /// without extra parameters.
+        /// </summary>
+        private static void NormalizeLocationScope(ref int? locationId, ref string? locationIds, out List<int> multiLocations)
+        {
+            var ids = (locationIds ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(s => int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0 ? id : 0)
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList();
+
+            if (locationId is > 0)
+            {
+                locationIds = null;
+                multiLocations = new List<int>();
+                return;
+            }
+            if (ids.Count == 1)
+            {
+                locationId = ids[0];
+                locationIds = null;
+                multiLocations = new List<int>();
+                return;
+            }
+            if (ids.Count > 1)
+            {
+                locationIds = string.Join(",", ids);
+                multiLocations = ids;
+                return;
+            }
+            locationIds = null;
+            multiLocations = new List<int>();
+        }
 
         private static void AddStatuses(SqlParameterCollection p, CeoInvoiceStatusIds st)
         {
@@ -115,18 +154,41 @@ namespace WorkNest.Infrastructure.Repositories
         // QA_07 marks: the sales funnel's InqByLocation, the breakdown head's InqByLocation, the inquiry records' ByLocation
         // and the dashboard's result set [13] (all leases expiring).
 
-        public Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
-            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null, string? locationIds = null) =>
-            RunWithInquiryLocationAsync("dbo.WN_Ceo_Dashboard", p =>
+        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(int? locationId, int periodMonths, DateTime businessNow,
+            CeoInvoiceStatusIds statuses, int expiringDays, DateTime? from = null, DateTime? to = null, string? locationIds = null)
+        {
+            NormalizeLocationScope(ref locationId, ref locationIds, out var multiLocations);
+            var idsCsv = locationIds;
+            var loc = locationId;
+
+            Task<List<List<IDictionary<string, object?>>>> CallOnce(int? lid, string? csv) =>
+                RunWithInquiryLocationAsync("dbo.WN_Ceo_Dashboard", p =>
+                {
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(lid);
+                    p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
+                    p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
+                    AddStatuses(p, statuses);
+                    p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
+                    if (!string.IsNullOrWhiteSpace(csv))
+                        p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = csv;
+                }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true, from, to);
+
+            if (multiLocations.Count <= 1)
+                return await CallOnce(loc, null);
+
+            try
             {
-                p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
-                p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
-                p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                AddStatuses(p, statuses);
-                p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
-                if (!string.IsNullOrWhiteSpace(locationIds))
-                    p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = locationIds;
-            }, p => p.Add("@InquiriesByLocation", SqlDbType.Bit).Value = true, from, to);
+                return await CallOnce(loc, idsCsv);
+            }
+            catch (Exception ex) when (IsMissingParameterException(ex))
+            {
+                // Procedure does not have @LocationIds yet: query each assigned location via @LocationId and merge.
+                var perLocation = new List<List<List<IDictionary<string, object?>>>>(multiLocations.Count);
+                foreach (var lid in multiLocations)
+                    perLocation.Add(await CallOnce(lid, null));
+                return MergeDashboardSets(perLocation, multiLocations);
+            }
+        }
 
         public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, DateTime? monthStart, string? bucket,
             int? spaceTypeId, int? locationId, string? inquiryType, int? userId, DateTime businessNow, CeoInvoiceStatusIds statuses,
@@ -313,16 +375,35 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<List<List<IDictionary<string, object?>>>> GetRoomReportAsync(int? locationId, int periodMonths, DateTime businessNow,
             DateTime? from = null, DateTime? to = null, string? locationIds = null)
         {
-            try
-            {
-                return await RunWithRangeAsync("dbo.WN_Ceo_RoomReport", p =>
+            NormalizeLocationScope(ref locationId, ref locationIds, out var multiLocations);
+            var idsCsv = locationIds;
+            var loc = locationId;
+
+            Task<List<List<IDictionary<string, object?>>>> CallOnce(int? lid, string? csv) =>
+                RunWithRangeAsync("dbo.WN_Ceo_RoomReport", p =>
                 {
-                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(lid);
                     p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
-                    if (!string.IsNullOrWhiteSpace(locationIds))
-                        p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = locationIds;
+                    if (!string.IsNullOrWhiteSpace(csv))
+                        p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = csv;
                 }, from, to);
+
+            try
+            {
+                if (multiLocations.Count <= 1)
+                    return await CallOnce(loc, null);
+
+                try
+                {
+                    return await CallOnce(loc, idsCsv);
+                }
+                catch (Exception ex) when (IsMissingParameterException(ex))
+                {
+                    // Procedure does not have @LocationIds yet: fetch all and filter rooms/sales to multiLocations.
+                    var all = await CallOnce(null, null);
+                    return FilterRoomReportSets(all, multiLocations);
+                }
             }
             catch (CeoDatabaseUpdateMissingException ex) when (ex.Update == "CEO_01") // this procedure comes with CEO_02, not CEO_01
             {
@@ -336,18 +417,38 @@ namespace WorkNest.Infrastructure.Repositories
         public async Task<List<List<IDictionary<string, object?>>>?> GetReceivedAsync(int? locationId, int periodMonths, DateTime businessNow,
             DateTime? from = null, DateTime? to = null, string? locationIds = null)
         {
-            try
-            {
-                return await RunAsync("dbo.WN_Ceo_Received", p =>
+            NormalizeLocationScope(ref locationId, ref locationIds, out var multiLocations);
+            var idsCsv = locationIds;
+            var loc = locationId;
+
+            Task<List<List<IDictionary<string, object?>>>> CallOnce(int? lid, string? csv) =>
+                RunAsync("dbo.WN_Ceo_Received", p =>
                 {
-                    p.Add("@LocationId", SqlDbType.Int).Value = Db(locationId);
+                    p.Add("@LocationId", SqlDbType.Int).Value = Db(lid);
                     p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                     p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                     p.Add("@From", SqlDbType.Date).Value = Db(from?.Date);
                     p.Add("@To", SqlDbType.Date).Value = Db(to?.Date);
-                    if (!string.IsNullOrWhiteSpace(locationIds))
-                        p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = locationIds;
+                    if (!string.IsNullOrWhiteSpace(csv))
+                        p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = csv;
                 });
+
+            try
+            {
+                if (multiLocations.Count <= 1)
+                    return await CallOnce(loc, null);
+
+                try
+                {
+                    return await CallOnce(loc, idsCsv);
+                }
+                catch (SqlException ex) when (ex.Number is 8144 or 8145)
+                {
+                    var perLocation = new List<List<List<IDictionary<string, object?>>>>(multiLocations.Count);
+                    foreach (var lid in multiLocations)
+                        perLocation.Add(await CallOnce(lid, null));
+                    return MergeReceivedSets(perLocation);
+                }
             }
             catch (CeoDatabaseUpdateMissingException)
             {
@@ -380,6 +481,211 @@ namespace WorkNest.Infrastructure.Repositories
             catch (SqlException ex) when (ex.Number == 208) // a table it reads (WN_FeeReceipts) is not on this database
             {
                 return null;
+            }
+        }
+
+        private static bool IsMissingParameterException(Exception ex) =>
+            ex is SqlException { Number: 8144 or 8145 }
+            || ex is CeoDatabaseUpdateMissingException { Update: "CS_01", InnerException: SqlException { Number: 8144 or 8145 } };
+
+        private static List<List<IDictionary<string, object?>>> FilterRoomReportSets(
+            List<List<IDictionary<string, object?>>> sets, IReadOnlyCollection<int> allowedLocations)
+        {
+            if (sets.Count == 0) return sets;
+            var allowed = new HashSet<int>(allowedLocations);
+            var keptSpaceIds = new HashSet<int>();
+            var rooms = new List<IDictionary<string, object?>>();
+            foreach (var r in sets[0])
+            {
+                if (r.TryGetValue("LocationId", out var lv) && lv != null && allowed.Contains(Convert.ToInt32(lv, CultureInfo.InvariantCulture)))
+                {
+                    rooms.Add(r);
+                    if (r.TryGetValue("SpaceId", out var sv) && sv != null)
+                        keptSpaceIds.Add(Convert.ToInt32(sv, CultureInfo.InvariantCulture));
+                }
+            }
+            var sales = new List<IDictionary<string, object?>>();
+            if (sets.Count > 1)
+            {
+                foreach (var r in sets[1])
+                {
+                    if (r.TryGetValue("SpaceId", out var sv) && sv != null && keptSpaceIds.Contains(Convert.ToInt32(sv, CultureInfo.InvariantCulture)))
+                        sales.Add(r);
+                }
+            }
+            var result = new List<List<IDictionary<string, object?>>> { rooms, sales };
+            for (var i = 2; i < sets.Count; i++) result.Add(sets[i]);
+            return result;
+        }
+
+        private static List<List<IDictionary<string, object?>>> MergeReceivedSets(
+            IReadOnlyList<List<List<IDictionary<string, object?>>>> perLocation)
+        {
+            if (perLocation.Count == 0) return new();
+            if (perLocation.Count == 1) return perLocation[0];
+
+            var totals = SumSingleRowSet(perLocation.Select(s => s.Count > 0 ? s[0] : new()));
+            var months = SumGroupedRows(perLocation.Select(s => s.Count > 1 ? s[1] : new()), "Month");
+            return new List<List<IDictionary<string, object?>>> { totals, months };
+        }
+
+        private static List<List<IDictionary<string, object?>>> MergeDashboardSets(
+            IReadOnlyList<List<List<IDictionary<string, object?>>>> perLocation, IReadOnlyCollection<int> allowedLocations)
+        {
+            if (perLocation.Count == 0) return new();
+            if (perLocation.Count == 1) return perLocation[0];
+
+            var allowed = new HashSet<int>(allowedLocations);
+            var maxSets = perLocation.Max(s => s.Count);
+            var merged = new List<List<IDictionary<string, object?>>>(maxSets);
+
+            List<IDictionary<string, object?>> SetAt(List<List<IDictionary<string, object?>>> s, int idx) =>
+                idx < s.Count ? s[idx] : new();
+
+            for (var idx = 0; idx < maxSets; idx++)
+            {
+                var slices = perLocation.Select(s => SetAt(s, idx)).ToList();
+                switch (idx)
+                {
+                    case 0: // Locations
+                        merged.Add(DistinctByKey(slices, "LocationId")
+                            .Where(r => r.TryGetValue("LocationId", out var v) && v != null && allowed.Contains(Convert.ToInt32(v, CultureInfo.InvariantCulture)))
+                            .ToList());
+                        break;
+                    case 1: // Money summary row
+                    case 5: // Occupancy summary row
+                    case 9: // Sales summary row
+                    case 13: // Lease totals row
+                        merged.Add(SumSingleRowSet(slices));
+                        break;
+                    case 2: // Months
+                        merged.Add(SumGroupedRows(slices, "Month"));
+                        break;
+                    case 3: // Aging buckets
+                        merged.Add(SumGroupedRows(slices, "BucketKey"));
+                        break;
+                    case 4: // TopCustomers
+                        merged.Add(SumGroupedRows(slices, "CustomerId", "Name")
+                            .OrderByDescending(r => r.TryGetValue("Amount", out var a) && a != null ? Convert.ToDecimal(a, CultureInfo.InvariantCulture) : 0m)
+                            .Take(5)
+                            .ToList());
+                        break;
+                    case 6: // Occupancy by category / space type
+                        merged.Add(SumGroupedRows(slices, "CategoryCode", "SpaceTypeId", "Name"));
+                        break;
+                    case 7: // Occupancy by location
+                    case 11: // Team per location
+                        merged.Add(DistinctByKey(slices, "LocationId")
+                            .Where(r => r.TryGetValue("LocationId", out var v) && v != null && allowed.Contains(Convert.ToInt32(v, CultureInfo.InvariantCulture)))
+                            .ToList());
+                        break;
+                    case 8: // LeasesExpiring
+                        merged.Add(DistinctByKey(slices, "BookingId")
+                            .OrderBy(r => r.TryGetValue("EndOn", out var d) && d is DateTime dt ? dt : DateTime.MaxValue)
+                            .Take(50)
+                            .ToList());
+                        break;
+                    case 10: // Inquiries by type
+                        merged.Add(SumGroupedRows(slices, "InquiryType"));
+                        break;
+                    case 12: // Team people
+                        merged.Add(SumGroupedRows(slices, "UserId", "RoleId", "Name", "Locations"));
+                        break;
+                    default:
+                        merged.Add(slices.FirstOrDefault() ?? new());
+                        break;
+                }
+            }
+
+            return merged;
+        }
+
+        private static List<IDictionary<string, object?>> DistinctByKey(
+            IEnumerable<List<IDictionary<string, object?>>> slices, string keyColumn)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var list = new List<IDictionary<string, object?>>();
+            foreach (var rows in slices)
+            {
+                foreach (var r in rows)
+                {
+                    var key = r.TryGetValue(keyColumn, out var v) && v != null ? Convert.ToString(v, CultureInfo.InvariantCulture) ?? "" : "";
+                    if (seen.Add(key))
+                        list.Add(new Dictionary<string, object?>(r, StringComparer.OrdinalIgnoreCase));
+                }
+            }
+            return list;
+        }
+
+        private static List<IDictionary<string, object?>> SumSingleRowSet(
+            IEnumerable<List<IDictionary<string, object?>>> slices)
+        {
+            IDictionary<string, object?>? acc = null;
+            foreach (var rows in slices)
+            {
+                var row = rows.FirstOrDefault();
+                if (row == null) continue;
+                if (acc == null)
+                {
+                    acc = new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    AccumulateRow(acc, row, Array.Empty<string>());
+                }
+            }
+            return acc == null ? new() : new List<IDictionary<string, object?>> { acc };
+        }
+
+        private static List<IDictionary<string, object?>> SumGroupedRows(
+            IEnumerable<List<IDictionary<string, object?>>> slices, params string[] keyColumns)
+        {
+            var keySet = new HashSet<string>(keyColumns, StringComparer.OrdinalIgnoreCase);
+            var map = new Dictionary<string, IDictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+            var order = new List<string>();
+
+            foreach (var rows in slices)
+            {
+                foreach (var row in rows)
+                {
+                    var key = string.Join("|", keyColumns.Select(k =>
+                        row.TryGetValue(k, out var v) && v != null ? Convert.ToString(v, CultureInfo.InvariantCulture) ?? "" : ""));
+                    if (!map.TryGetValue(key, out var acc))
+                    {
+                        acc = new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase);
+                        map[key] = acc;
+                        order.Add(key);
+                    }
+                    else
+                    {
+                        AccumulateRow(acc, row, keySet);
+                    }
+                }
+            }
+
+            return order.Select(k => map[k]).ToList();
+        }
+
+        private static void AccumulateRow(IDictionary<string, object?> acc, IDictionary<string, object?> row, ICollection<string> skipColumns)
+        {
+            foreach (var (col, val) in row)
+            {
+                if (skipColumns.Contains(col) || col.EndsWith("Id", StringComparison.OrdinalIgnoreCase) || col.Equals("SortOrder", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (val == null) continue;
+                if (!acc.TryGetValue(col, out var cur) || cur == null)
+                {
+                    acc[col] = val;
+                    continue;
+                }
+                if (cur is decimal or double or float || val is decimal or double or float)
+                {
+                    acc[col] = Convert.ToDecimal(cur, CultureInfo.InvariantCulture) + Convert.ToDecimal(val, CultureInfo.InvariantCulture);
+                }
+                else if (cur is int or long or short or byte || val is int or long or short or byte)
+                {
+                    acc[col] = Convert.ToInt32(cur, CultureInfo.InvariantCulture) + Convert.ToInt32(val, CultureInfo.InvariantCulture);
+                }
             }
         }
     }
