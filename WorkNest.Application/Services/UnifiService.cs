@@ -238,6 +238,9 @@ namespace WorkNest.Application.Services
                     var w = entry.Value;
                     var port = Find(ports, p => Str(P(p, "type")) == key);
                     var label = WanLabel(key);
+                    // Only the issues still going on or ended in the last 15 minutes count; each says when it happened.
+                    var now = DateTime.UtcNow;
+                    var activeIssues = UnifiWanIssues.Windows(Arr(P(w, "wanIssues")), now).Where(x => x.Active).ToList();
                     wans.Add((new JsonObject
                     {
                         ["key"] = key,
@@ -248,7 +251,8 @@ namespace WorkNest.Application.Services
                         ["up"] = !IsFalse(P(w, "portUp")) && !IsFalse(P(port, "plugged")),
                         ["uptime"] = R(P(w, "wanUptime")),
                         ["priority"] = R(P(w, "failoverPriority")),
-                        ["issues"] = Arr(P(w, "wanIssues")).Count(),
+                        ["issues"] = activeIssues.Count,
+                        ["activeIssues"] = new JsonArray(activeIssues.Select(x => (JsonNode?)UnifiWanIssues.Describe(x, now)).ToArray()),
                         ["port"] = R(P(port, "port")),
                         ["speed"] = S(P(port, "speedType")),
                         ["enabled"] = !IsFalse(P(port, "enabled")),
@@ -415,9 +419,9 @@ namespace WorkNest.Application.Services
                 {
                     var wanIsp = ToStr(w!["isp"]);
                     var label = $"{ToStr(w["label"])} ({(wanIsp == "" ? "ISP" : wanIsp)})";
-                    var issues = ToNum(w["issues"]) ?? 0;
                     if (!ToBool(w["up"])) Add("critical", $"{label} is down", name);
-                    else if (issues > 0) Add("serious", $"{label} reports {issues} issue(s)", name);
+                    else if (w["activeIssues"] is JsonArray active)
+                        foreach (var issue in active) Add("serious", $"{label}: {ToStr(issue)}", name);
                 }
                 var critical = ToNum(s["criticalNotifications"]) ?? 0;
                 if (critical > 0) Add("critical", $"{critical} critical notification(s)", name);
