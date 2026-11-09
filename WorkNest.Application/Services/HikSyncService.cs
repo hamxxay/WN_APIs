@@ -182,14 +182,45 @@ namespace WorkNest.Application.Services
             return status;
         }
 
-        /// <summary>The 5-minute bundle (HIK startScheduler): each step independent, one failure doesn't stop the rest.</summary>
+        /// <summary>
+        /// The 5-minute bundle (HIK startScheduler): each step independent, one failure doesn't stop the rest. Each step
+        /// records its own run under its job name (the dashboards show it), and takes that job's gate: a step whose job is
+        /// already running on its own (the start-up credential copy, a manual run) is skipped, never run twice at once.
+        /// </summary>
         private async Task<string> RunMaintenanceAsync()
         {
             var parts = new List<string>();
             async Task Step(string name, Func<Task<string>> step)
             {
-                try { parts.Add($"{name}: {await step()}"); }
-                catch (Exception ex) { parts.Add($"{name}: failed ({ex.Message})"); _logger.LogError(ex, "HIK maintenance step {Step} failed", name); }
+                var gate = _jobGates.GetOrAdd(name, _ => new SemaphoreSlim(1, 1));
+                if (!await gate.WaitAsync(0))
+                {
+                    parts.Add($"{name}: already running");
+                    return;
+                }
+                var status = _status[name];
+                status.Running = true;
+                status.LastStartedAt = _clock.Now;
+                try
+                {
+                    var result = await step();
+                    status.LastOk = true;
+                    status.LastResult = result;
+                    parts.Add($"{name}: {result}");
+                }
+                catch (Exception ex)
+                {
+                    status.LastOk = false;
+                    status.LastResult = ex.Message;
+                    parts.Add($"{name}: failed ({ex.Message})");
+                    _logger.LogError(ex, "HIK maintenance step {Step} failed", name);
+                }
+                finally
+                {
+                    status.Running = false;
+                    status.LastFinishedAt = _clock.Now;
+                    gate.Release();
+                }
             }
             await Step(JobEvents, ArchiveEventsAsync);
             await Step(JobFaceVault, SweepFaceVaultAsync);

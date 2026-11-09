@@ -40,19 +40,31 @@ namespace WorkNest.API.Services
             _logger.LogInformation("HIK sync started: watcher every 90s, maintenance every 5 min, online check every 2 min, clock sync daily 04:00.");
 
             try { await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken); } catch (OperationCanceledException) { return; }
-            if (await _gate.IsOnAsync(stoppingToken))
+
+            // The start-up runs go beside the timers, not before them: the first credential copy can take a long time
+            // across every machine, and the online check, the access watch and Maintenance (event copy...) must not
+            // wait for it after each restart. A timer that fires while the same job is still running skips that run.
+            await Task.WhenAll(
+                StartupAsync(stoppingToken),
+                Every(TimeSpan.FromMinutes(2), HikSyncService.JobOnline, stoppingToken),
+                Every(TimeSpan.FromMinutes(5), HikSyncService.JobMaintenance, stoppingToken),
+                Every(TimeSpan.FromSeconds(90), HikSyncService.JobWatch, stoppingToken),
+                DailyClockSync(stoppingToken));
+        }
+
+        /// <summary>Once after start: online check, clock sync, the credential copy, then the access watch.</summary>
+        private async Task StartupAsync(CancellationToken ct)
+        {
+            try
             {
+                if (!await _gate.IsOnAsync(ct)) return;
                 await _sync.RunJobAsync(HikSyncService.JobOnline);
                 await _sync.RunJobAsync(HikSyncService.JobClock);
                 await _sync.RunJobAsync(HikSyncService.JobCredentials);
                 await _sync.RunJobAsync(HikSyncService.JobWatch);
             }
-
-            await Task.WhenAll(
-                Every(TimeSpan.FromMinutes(2), HikSyncService.JobOnline, stoppingToken),
-                Every(TimeSpan.FromMinutes(5), HikSyncService.JobMaintenance, stoppingToken),
-                Every(TimeSpan.FromSeconds(90), HikSyncService.JobWatch, stoppingToken),
-                DailyClockSync(stoppingToken));
+            catch (OperationCanceledException) { /* shutting down */ }
+            catch (Exception ex) { _logger.LogError(ex, "HIK sync start-up runs crashed"); }
         }
 
         private async Task Every(TimeSpan interval, string job, CancellationToken ct)
