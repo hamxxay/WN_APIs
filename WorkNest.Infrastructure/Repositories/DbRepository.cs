@@ -4636,9 +4636,12 @@ END";
                     (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))) AS ActiveAttendantsCount
                 FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
                 JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
-                LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = bd.CustomerCode OR c.Email = bd.CustomerEmail
-                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
-                WHERE (c.Id = @CustomerId OR bd.CustomerCode = (SELECT Code FROM dbo.WN_Customers WHERE Id = @CustomerId))
+                CROSS JOIN (SELECT Code, Email FROM dbo.WN_Customers WITH (NOLOCK) WHERE Id = @CustomerId) cust
+                -- The booking's own space (two spaces can share a name, e.g. Office 312 at I-8 and at F-7): one row, its capacity.
+                OUTER APPLY (SELECT TOP 1 sp.Capacity, sp.Price FROM dbo.WN_Spaces sp WITH (NOLOCK)
+                              WHERE sp.Id = b.SpaceId OR (b.SpaceId IS NULL AND sp.Code = bd.SpaceCode)
+                              ORDER BY CASE WHEN sp.Id = b.SpaceId THEN 0 ELSE 1 END, sp.Id) s
+                WHERE (bd.CustomerCode = cust.Code OR (cust.Email IS NOT NULL AND bd.CustomerEmail = cust.Email))
                   AND bd.IsDeleted = 0
                   -- current bookings only (same rule as the door-access overview / suspensions):
                   AND ISNULL(b.IsDeleted, 0) = 0
@@ -4667,7 +4670,11 @@ END";
                     ISNULL(s.Capacity, 1) AS Capacity,
                     (SELECT COUNT(1) FROM dbo.WN_BookingAttendants ba WHERE ba.BookingDetailId = bd.Id AND (ba.AssignedTo IS NULL OR ba.AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE))) AS CurrentActiveAttendants
                 FROM dbo.WN_BookingDetails bd WITH (NOLOCK)
-                LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Code = bd.SpaceCode OR s.Name = bd.SpaceName
+                LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.IdGUID = bd.BookingGuid
+                -- The booking's own space (two spaces can share a name, e.g. Office 312 at I-8 and at F-7): one row, its capacity.
+                OUTER APPLY (SELECT TOP 1 sp.Capacity, sp.Price FROM dbo.WN_Spaces sp WITH (NOLOCK)
+                              WHERE sp.Id = b.SpaceId OR (b.SpaceId IS NULL AND sp.Code = bd.SpaceCode)
+                              ORDER BY CASE WHEN sp.Id = b.SpaceId THEN 0 ELSE 1 END, sp.Id) s
                 WHERE bd.Id = @BookingDetailId;";
             await using var cmd = new SqlCommand(sql, c);
             cmd.Parameters.AddWithValue("@BookingDetailId", bookingDetailId);
