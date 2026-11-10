@@ -40,5 +40,10 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         /// <param name="locationIds">Locations to list; null = all locations.</param>
         Task<ApiResponse> GetOverviewDetailsAsync(string kind, IReadOnlyCollection<int>? locationIds, DashboardOverviewDetailsQuery query);
+
+        /// <summary>
+        /// Customer balances widget: summary metrics and customer-level remaining invoice balances.
+        /// </summary>
+        Task<ApiResponse> GetCustomerBalancesAsync(IReadOnlyCollection<int>? locationIds, int? locationId, string? search, bool onlyWithBalance, int top);
     }
 }

@@ -1,6 +1,7 @@
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
+using WorkNest.Application.DTOs.Dashboard;
 
 namespace WorkNest.Application.Interfaces
 {
@@ -310,6 +311,8 @@ namespace WorkNest.Application.Interfaces
         Task<Dictionary<string, HashSet<string>>> GetNavBadgeReadsDbAsync(string userEmail);
         /// <summary>False when the WN_NAV_BadgeReads table has not been created yet.</summary>
         Task<bool> SaveNavBadgeReadsDbAsync(string userEmail, IDictionary<string, List<string>> itemsByRoute);
+        Task<(CustomerBalanceSummaryDto Summary, List<CustomerBalanceItemDto> Customers)> GetCustomerBalancesDbAsync(
+            int? locationId, string? allowedLocationIds, string? search, bool onlyWithBalance, int top);
 
         // --- AccountCOA ---
         Task<IEnumerable<IDictionary<string, object?>>> GetAllAccountsCoaAsync();

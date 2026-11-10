@@ -1,5 +1,6 @@
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.DTOs.Contact;
+using WorkNest.Application.DTOs.Dashboard;
 
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -3622,6 +3623,55 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             var results = new List<List<IDictionary<string, object?>>>();
             do { results.Add(await ReadAll(r)); } while (await r.NextResultAsync());
             return results;
+        }
+
+        public async Task<(CustomerBalanceSummaryDto Summary, List<CustomerBalanceItemDto> Customers)> GetCustomerBalancesDbAsync(
+            int? locationId, string? allowedLocationIds, string? search, bool onlyWithBalance, int top)
+        {
+            var summary = new CustomerBalanceSummaryDto();
+            var customers = new List<CustomerBalanceItemDto>();
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_Dashboard_GetCustomerBalances", c);
+            cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@Search", string.IsNullOrWhiteSpace(search) ? DBNull.Value : (object)search.Trim());
+            cmd.Parameters.AddWithValue("@OnlyWithBalance", onlyWithBalance);
+            cmd.Parameters.AddWithValue("@Top", top);
+
+            await using var r = await cmd.ExecuteReaderAsync();
+            if (await r.ReadAsync())
+            {
+                summary.TotalCustomersWithBalance = r["TotalCustomersWithBalance"] != DBNull.Value ? Convert.ToInt32(r["TotalCustomersWithBalance"]) : 0;
+                summary.TotalBalanceRemaining = r["TotalBalanceRemaining"] != DBNull.Value ? Convert.ToDecimal(r["TotalBalanceRemaining"]) : 0m;
+                summary.TotalOverdueBalance = r["TotalOverdueBalance"] != DBNull.Value ? Convert.ToDecimal(r["TotalOverdueBalance"]) : 0m;
+                summary.TotalOpenInvoices = r["TotalOpenInvoices"] != DBNull.Value ? Convert.ToInt32(r["TotalOpenInvoices"]) : 0;
+                summary.TotalCustomers = r["TotalCustomers"] != DBNull.Value ? Convert.ToInt32(r["TotalCustomers"]) : 0;
+            }
+
+            if (await r.NextResultAsync())
+            {
+                while (await r.ReadAsync())
+                {
+                    customers.Add(new CustomerBalanceItemDto
+                    {
+                        CustomerId = Convert.ToInt32(r["CustomerId"]),
+                        CustomerCode = r["CustomerCode"] != DBNull.Value ? Convert.ToString(r["CustomerCode"]) ?? "" : "",
+                        CustomerName = r["CustomerName"] != DBNull.Value ? Convert.ToString(r["CustomerName"]) ?? "" : "",
+                        CompanyName = r["CompanyName"] != DBNull.Value ? Convert.ToString(r["CompanyName"]) ?? "" : "",
+                        Email = r["Email"] != DBNull.Value ? Convert.ToString(r["Email"]) : null,
+                        PhoneNumber = r["PhoneNumber"] != DBNull.Value ? Convert.ToString(r["PhoneNumber"]) : null,
+                        TotalInvoices = r["TotalInvoices"] != DBNull.Value ? Convert.ToInt32(r["TotalInvoices"]) : 0,
+                        OpenInvoicesCount = r["OpenInvoicesCount"] != DBNull.Value ? Convert.ToInt32(r["OpenInvoicesCount"]) : 0,
+                        OverdueInvoicesCount = r["OverdueInvoicesCount"] != DBNull.Value ? Convert.ToInt32(r["OverdueInvoicesCount"]) : 0,
+                        TotalInvoiced = r["TotalInvoiced"] != DBNull.Value ? Convert.ToDecimal(r["TotalInvoiced"]) : 0m,
+                        TotalPaid = r["TotalPaid"] != DBNull.Value ? Convert.ToDecimal(r["TotalPaid"]) : 0m,
+                        BalanceRemaining = r["BalanceRemaining"] != DBNull.Value ? Convert.ToDecimal(r["BalanceRemaining"]) : 0m,
+                        OverdueBalance = r["OverdueBalance"] != DBNull.Value ? Convert.ToDecimal(r["OverdueBalance"]) : 0m,
+                        LatestInvoiceDate = r["LatestInvoiceDate"] != DBNull.Value ? Convert.ToDateTime(r["LatestInvoiceDate"]).ToString("yyyy-MM-dd") : null
+                    });
+                }
+            }
+            return (summary, customers);
         }
 
         // --- AccountCOA ---

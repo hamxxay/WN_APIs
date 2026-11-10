@@ -266,5 +266,23 @@ namespace WorkNest.API.Controllers
                 ? StatusCode(StatusCodes.Status503ServiceUnavailable, result)
                 : BadRequest(result);
         }
+
+        /// <summary>
+        /// Customer balances widget: summary metrics and customer-level remaining invoice balances.
+        /// Drill down shows customer details and their invoices.
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive,receptionist,Receptionist")]
+        [HttpGet("api/dashboard/customer-balances")]
+        public async Task<IActionResult> CustomerBalances(
+            [FromQuery] int? locationId,
+            [FromQuery] string? locationIds,
+            [FromQuery] string? search,
+            [FromQuery] bool onlyWithBalance = true,
+            [FromQuery] int top = 200)
+        {
+            var scope = Scope(locationId, locationIds);
+            var result = await _dashboard.GetCustomerBalancesAsync(scope, locationId, search, onlyWithBalance, top);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
     }
 }

@@ -466,5 +466,16 @@ namespace WorkNest.Application.Services
             if (ok) month = new DateTime(month.Year, month.Month, 1);
             return ok;
         }
+
+        public async Task<ApiResponse> GetCustomerBalancesAsync(IReadOnlyCollection<int>? locationIds, int? locationId, string? search, bool onlyWithBalance, int top)
+        {
+            string? allowedLocs = locationIds != null && locationIds.Count > 0 ? string.Join(",", locationIds) : null;
+            var (summary, customers) = await _db.GetCustomerBalancesDbAsync(locationId, allowedLocs, search, onlyWithBalance, Math.Clamp(top, 1, 1000));
+            return ApiResponse.Ok(new CustomerBalancesResponseDto
+            {
+                Summary = summary,
+                Customers = customers
+            });
+        }
     }
 }
