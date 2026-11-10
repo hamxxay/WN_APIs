@@ -3257,6 +3257,9 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS InvoicedThisMonth,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < @PrevEnd) AS InvoicedLastMonth,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
+                    -- of the period's invoices, what is still owed (same rule as Outstanding: Owed, net of WHT and part payments)
+                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1 AND IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS OutstandingThisPeriod,
+                    (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS OutstandingThisPeriodCount,
                     (SELECT COUNT(*) FROM @Live WHERE StatusCode = N'Confirmed' AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
 
                 -- [1] last 12 months (occupancy measured at month end, or now for the current month); a custom range:

@@ -22,6 +22,9 @@ namespace WorkNest.Application.DTOs.Dashboard
         public decimal InvoicedPrevPeriod { get; set; }
         /// <summary>Invoiced in the selected period and now Paid.</summary>
         public decimal PaidThisPeriod { get; set; }
+        /// <summary>Of the invoices issued in the selected period, what is still owed (as Outstanding: net of WHT and part payments) and how many.</summary>
+        public decimal OutstandingThisPeriod { get; set; }
+        public int OutstandingThisPeriodCount { get; set; }
         /// <summary>Bookings made in the selected period (not rejected, cancelled or no show); null before DASH_NB_01.</summary>
         public int? NewBookings { get; set; }
         public int LeasesEndingSoon { get; set; }
