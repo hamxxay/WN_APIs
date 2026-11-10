@@ -1,0 +1,209 @@
+-- =====================================================================================================================
+-- CUSTBAL_01: dbo.WN_Dashboard_GetCustomerBalances, for the admin dashboard's Customer balances widget
+-- (GET api/dashboard/customer-balances, Hamza, 10 Nov 2026). Read-only: it only reads WN_Bookings, WN_Customers,
+-- WN_Invoices, WN_Spaces and WN_Users and changes no data.
+--
+-- Taken from the test database (SAC400), where it was created on 10 Nov 2026. Do NOT run Sp.sql at the repo root on
+-- live: that is a dump of the whole test database (it starts with USE [SAC400]).
+-- Safe to run more than once (CREATE OR ALTER). Run on live.
+-- =====================================================================================================================
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE dbo.WN_Dashboard_GetCustomerBalances
+    @LocationId INT = NULL,
+    @AllowedLocationIds NVARCHAR(MAX) = NULL,
+    @Search NVARCHAR(200) = NULL,
+    @OnlyWithBalance BIT = 1,
+    @Top INT = 200
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF @Top IS NULL OR @Top < 1 SET @Top = 200;
+    IF @Top > 1000 SET @Top = 1000;
+
+    DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, ',')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    -- Base customer invoices calculation
+    ;WITH RawInvoices AS (
+        SELECT 
+            i.Id AS InvoiceId,
+            i.InvoiceNumber,
+            i.IssuedOn,
+            i.DueOn,
+            ISNULL(i.GrandTotal, 0) AS GrandTotal,
+            ISNULL(i.PaidTotal, 0) AS PaidTotal,
+            ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) AS BalanceRemaining,
+            CASE 
+                WHEN ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) > 0.005 THEN 1 
+                ELSE 0 
+            END AS IsOpen,
+            CASE 
+                WHEN ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) > 0.005 AND i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 1 
+                ELSE 0 
+            END AS IsOverdue,
+            cu.Id AS CustomerId,
+            cu.Code AS CustomerCode,
+            cu.FirstName,
+            cu.LastName,
+            cu.Company,
+            cu.Email,
+            cu.PhoneNumber,
+            COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId
+        FROM dbo.WN_Invoices i WITH (NOLOCK)
+        LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+        OUTER APPLY (
+            SELECT TOP 1 c.Id, c.Code, c.FirstName, c.LastName, c.Company, c.Email, c.PhoneNumber
+            FROM dbo.WN_Customers c WITH (NOLOCK)
+            WHERE (b.CustomerCode IS NOT NULL AND LEN(b.CustomerCode) > 0 AND c.Code = b.CustomerCode)
+               OR (c.UserId IS NOT NULL AND c.UserId = i.UserId)
+               OR (c.Email IS NOT NULL AND LEN(c.Email) > 0 AND c.Email = u.Email)
+            ORDER BY CASE 
+                WHEN b.CustomerCode IS NOT NULL AND c.Code = b.CustomerCode THEN 1
+                WHEN c.UserId IS NOT NULL AND c.UserId = i.UserId THEN 2
+                ELSE 3
+            END, c.Id
+        ) cu
+        WHERE ISNULL(i.StatusId, 0) <> 40
+          AND ISNULL(i.StatusId, 0) NOT IN (5, 64)
+          AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')
+          AND cu.Id IS NOT NULL
+          AND (@LocationId IS NULL OR COALESCE(i.LocationId, s.LocationId, u.LocationId) = @LocationId)
+          AND (@AllowedLocationIds IS NULL OR COALESCE(i.LocationId, s.LocationId, u.LocationId) IN (SELECT LocId FROM @AllowedLocs))
+    ),
+    CustomerAggregates AS (
+        SELECT 
+            ri.CustomerId,
+            ri.CustomerCode,
+            COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(ri.FirstName, '') + ' ' + ISNULL(ri.LastName, ''))), ''), ri.Company, 'Customer') AS CustomerName,
+            ISNULL(ri.Company, '') AS CompanyName,
+            ri.Email,
+            ri.PhoneNumber,
+            COUNT(ri.InvoiceId) AS TotalInvoices,
+            SUM(ri.IsOpen) AS OpenInvoicesCount,
+            SUM(ri.IsOverdue) AS OverdueInvoicesCount,
+            ROUND(SUM(ri.GrandTotal), 2) AS TotalInvoiced,
+            ROUND(SUM(ri.PaidTotal), 2) AS TotalPaid,
+            ROUND(SUM(ri.BalanceRemaining), 2) AS BalanceRemaining,
+            ROUND(SUM(CASE WHEN ri.IsOverdue = 1 THEN ri.BalanceRemaining ELSE 0 END), 2) AS OverdueBalance,
+            MAX(ri.IssuedOn) AS LatestInvoiceDate
+        FROM RawInvoices ri
+        GROUP BY ri.CustomerId, ri.CustomerCode, ri.FirstName, ri.LastName, ri.Company, ri.Email, ri.PhoneNumber
+    )
+    -- [0] Summary set
+    SELECT 
+        COUNT(CASE WHEN ca.BalanceRemaining > 0.005 THEN 1 END) AS TotalCustomersWithBalance,
+        ISNULL(SUM(CASE WHEN ca.BalanceRemaining > 0.005 THEN ca.BalanceRemaining ELSE 0 END), 0) AS TotalBalanceRemaining,
+        ISNULL(SUM(ca.OverdueBalance), 0) AS TotalOverdueBalance,
+        ISNULL(SUM(ca.OpenInvoicesCount), 0) AS TotalOpenInvoices,
+        COUNT(ca.CustomerId) AS TotalCustomers
+    FROM CustomerAggregates ca;
+
+    -- [1] Customers set
+    ;WITH RawInvoices AS (
+        SELECT 
+            i.Id AS InvoiceId,
+            i.InvoiceNumber,
+            i.IssuedOn,
+            i.DueOn,
+            ISNULL(i.GrandTotal, 0) AS GrandTotal,
+            ISNULL(i.PaidTotal, 0) AS PaidTotal,
+            ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) AS BalanceRemaining,
+            CASE 
+                WHEN ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) > 0.005 THEN 1 
+                ELSE 0 
+            END AS IsOpen,
+            CASE 
+                WHEN ISNULL(i.GrandTotal - ISNULL(i.WHTAmount, 0) - i.PaidTotal, 0) > 0.005 AND i.DueOn IS NOT NULL AND CAST(i.DueOn AS DATE) < @Today THEN 1 
+                ELSE 0 
+            END AS IsOverdue,
+            cu.Id AS CustomerId,
+            cu.Code AS CustomerCode,
+            cu.FirstName,
+            cu.LastName,
+            cu.Company,
+            cu.Email,
+            cu.PhoneNumber,
+            COALESCE(i.LocationId, s.LocationId, u.LocationId) AS LocationId
+        FROM dbo.WN_Invoices i WITH (NOLOCK)
+        LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = i.UserId
+        OUTER APPLY (
+            SELECT TOP 1 c.Id, c.Code, c.FirstName, c.LastName, c.Company, c.Email, c.PhoneNumber
+            FROM dbo.WN_Customers c WITH (NOLOCK)
+            WHERE (b.CustomerCode IS NOT NULL AND LEN(b.CustomerCode) > 0 AND c.Code = b.CustomerCode)
+               OR (c.UserId IS NOT NULL AND c.UserId = i.UserId)
+               OR (c.Email IS NOT NULL AND LEN(c.Email) > 0 AND c.Email = u.Email)
+            ORDER BY CASE 
+                WHEN b.CustomerCode IS NOT NULL AND c.Code = b.CustomerCode THEN 1
+                WHEN c.UserId IS NOT NULL AND c.UserId = i.UserId THEN 2
+                ELSE 3
+            END, c.Id
+        ) cu
+        WHERE ISNULL(i.StatusId, 0) <> 40
+          AND ISNULL(i.StatusId, 0) NOT IN (5, 64)
+          AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')
+          AND cu.Id IS NOT NULL
+          AND (@LocationId IS NULL OR COALESCE(i.LocationId, s.LocationId, u.LocationId) = @LocationId)
+          AND (@AllowedLocationIds IS NULL OR COALESCE(i.LocationId, s.LocationId, u.LocationId) IN (SELECT LocId FROM @AllowedLocs))
+    ),
+    CustomerAggregates AS (
+        SELECT 
+            ri.CustomerId,
+            ri.CustomerCode,
+            COALESCE(NULLIF(LTRIM(RTRIM(ISNULL(ri.FirstName, '') + ' ' + ISNULL(ri.LastName, ''))), ''), ri.Company, 'Customer') AS CustomerName,
+            ISNULL(ri.Company, '') AS CompanyName,
+            ri.Email,
+            ri.PhoneNumber,
+            COUNT(ri.InvoiceId) AS TotalInvoices,
+            SUM(ri.IsOpen) AS OpenInvoicesCount,
+            SUM(ri.IsOverdue) AS OverdueInvoicesCount,
+            ROUND(SUM(ri.GrandTotal), 2) AS TotalInvoiced,
+            ROUND(SUM(ri.PaidTotal), 2) AS TotalPaid,
+            ROUND(SUM(ri.BalanceRemaining), 2) AS BalanceRemaining,
+            ROUND(SUM(CASE WHEN ri.IsOverdue = 1 THEN ri.BalanceRemaining ELSE 0 END), 2) AS OverdueBalance,
+            MAX(ri.IssuedOn) AS LatestInvoiceDate
+        FROM RawInvoices ri
+        GROUP BY ri.CustomerId, ri.CustomerCode, ri.FirstName, ri.LastName, ri.Company, ri.Email, ri.PhoneNumber
+    )
+    SELECT TOP (@Top)
+        ca.CustomerId,
+        ca.CustomerCode,
+        ca.CustomerName,
+        ca.CompanyName,
+        ca.Email,
+        ca.PhoneNumber,
+        ca.TotalInvoices,
+        ca.OpenInvoicesCount,
+        ca.OverdueInvoicesCount,
+        ca.TotalInvoiced,
+        ca.TotalPaid,
+        ca.BalanceRemaining,
+        ca.OverdueBalance,
+        ca.LatestInvoiceDate
+    FROM CustomerAggregates ca
+    WHERE (@OnlyWithBalance = 0 OR ca.BalanceRemaining > 0.005)
+      AND (
+          @Search IS NULL OR @Search = ''
+          OR ca.CustomerName LIKE '%' + @Search + '%'
+          OR ca.CompanyName LIKE '%' + @Search + '%'
+          OR ca.CustomerCode LIKE '%' + @Search + '%'
+          OR ca.Email LIKE '%' + @Search + '%'
+          OR ca.PhoneNumber LIKE '%' + @Search + '%'
+      )
+    ORDER BY ca.BalanceRemaining DESC, ca.CustomerName ASC;
+END;
+GO
