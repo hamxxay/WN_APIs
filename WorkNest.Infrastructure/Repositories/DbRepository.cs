@@ -3228,13 +3228,14 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND bs.Code IN (N'Pending', N'Confirmed');
 
-                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4), Owed BIT);
+                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4), Owed BIT, PeriodStart DATETIME NULL);
                 -- Owed = still owed, as the Invoices list works it out from the amounts: not Paid (nothing left after WHT, and
                 -- something paid or a Paid status). A Paid status with nothing paid is still owed.
                 INSERT INTO @Inv
                 SELECT i.Id, i.InvoiceNumber, i.BookingId, i.UserId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), i.StatusId, ISNULL(i.WHTAmount, 0),
                        CASE WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005
-                                 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN ({paid})) THEN 0 ELSE 1 END
+                                 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN ({paid})) THEN 0 ELSE 1 END,
+                       COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn)   -- rent period the invoice is for (Invoiced / Paid / Owed cards of the period)
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                   LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
@@ -3242,7 +3243,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     AND ISNULL(i.StatusId, 0) <> 40
                    AND {invLocFilter};
 
-                -- [0] headline numbers
+                -- [0] headline numbers (Invoiced / Paid / Owed of the period: invoices whose rent period starts in it, not by issue date)
                 SELECT
                     (SELECT COUNT(*) FROM @Spaces) AS TotalSpaces,
                     (SELECT COUNT(DISTINCT SpaceId) FROM @Live WHERE StartOn <= @Now AND EndOn >= @Now) AS OccupiedSpaces,
@@ -3254,12 +3255,12 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     (SELECT COUNT(*) FROM @Inv WHERE Owed = 1) AS OutstandingCount,
                     (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1 AND DueOn < @Today) AS OverdueAmount,
                     (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND DueOn < @Today) AS OverdueCount,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS InvoicedThisMonth,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < @PrevEnd) AS InvoicedLastMonth,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS InvoicedThisMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE PeriodStart >= @PrevMonthStart AND PeriodStart < @PrevEnd) AS InvoicedLastMonth,
+                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
                     -- of the period's invoices, what is still owed (same rule as Outstanding: Owed, net of WHT and part payments)
-                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1 AND IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS OutstandingThisPeriod,
-                    (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS OutstandingThisPeriodCount,
+                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS OutstandingThisPeriod,
+                    (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS OutstandingThisPeriodCount,
                     (SELECT COUNT(*) FROM @Live WHERE StatusCode = N'Confirmed' AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
 
                 -- [1] last 12 months (occupancy measured at month end, or now for the current month); a custom range:
