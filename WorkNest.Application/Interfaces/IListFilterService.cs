@@ -23,6 +23,9 @@ namespace WorkNest.Application.Interfaces
         /// read only when dbo.WN_GetInvoicesListFiltered is not on the database yet (the filters are then applied in the API).
         /// </summary>
         Task<(List<IDictionary<string, object?>> Rows, int Total)> GetInvoicesUnfilteredAsync(int page, int limit, string? search, int? typeId, int? locationId);
+
+        /// <summary>LST_02 has run: dbo.WN_GetInvoicesListFiltered accepts the status "Outstanding".</summary>
+        Task<bool> InvoiceListKnowsOutstandingAsync();
     }
 
     /// <summary>

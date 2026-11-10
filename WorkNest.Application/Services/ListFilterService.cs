@@ -58,6 +58,17 @@ namespace WorkNest.Application.Services
             var status = ListFilterRules.TextStatus(filter.Status);
             var issueDate = Dates(filter, "IssuedOn");
             var today = _clock.Today;
+            if (string.Equals(status, ListFilterRules.Outstanding, StringComparison.OrdinalIgnoreCase))
+            {
+                status = ListFilterRules.Outstanding;
+                // Before LST_02 the procedure would match no invoice for "Outstanding": filter here with the same rules.
+                if (!await _repo.InvoiceListKnowsOutstandingAsync())
+                {
+                    var owed = await ReadAllInvoicesUnfilteredAsync(search, typeId, locationId)
+                               ?? throw new ListFilterException("Too many invoices to show Outstanding: run the database update LST_02_invoices_outstanding.");
+                    return ListFilterRules.PageInvoices(owed, status, issueDate, today, page, limit);
+                }
+            }
             try
             {
                 var (rows, total) = await _repo.GetInvoicesAsync(page, limit, search, typeId, locationId, status, today, issueDate);
@@ -101,7 +112,11 @@ namespace WorkNest.Application.Services
             return (rows.Cast<object>(), total);
         }
 
-        public async Task<IReadOnlyList<ListStatusOption>> GetStatusOptionsAsync(string list) =>
-            await _repo.GetStatusOptionsAsync(list, _clock.Today);
+        public async Task<IReadOnlyList<ListStatusOption>> GetStatusOptionsAsync(string list)
+        {
+            var options = await _repo.GetStatusOptionsAsync(list, _clock.Today);
+            // Invoices: "Outstanding" (Unpaid, Partial or Overdue) first, the dashboards' Outstanding card opens it.
+            return list == ListFilterRules.Invoices ? ListFilterRules.WithOutstanding(options) : options;
+        }
     }
 }

@@ -83,6 +83,34 @@ namespace WorkNest.Application.Helpers
         private static readonly string[] InvoiceStatuses = { "Unpaid", "Paid", "Partial", "Overdue", "Cancelled" };
 
         /// <summary>
+        /// LST_02: the Invoices list status "Outstanding" = every invoice still owed (Unpaid, Partial or Overdue), as the
+        /// dashboards' Outstanding card counts them.
+        /// </summary>
+        public const string Outstanding = "Outstanding";
+
+        private static readonly string[] OutstandingStatuses = { "Unpaid", "Partial", "Overdue" };
+
+        /// <summary>Is an invoice with this list status shown for the status asked for (null = any; Outstanding = still owed)?</summary>
+        public static bool InvoiceStatusMatches(string? asked, string listStatus)
+        {
+            var a = asked?.Trim();
+            if (string.IsNullOrEmpty(a)) return true;
+            if (string.Equals(a, Outstanding, StringComparison.OrdinalIgnoreCase))
+                return OutstandingStatuses.Contains(listStatus, StringComparer.OrdinalIgnoreCase);
+            return string.Equals(listStatus, a, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>The Invoices Status choices with "Outstanding" first, when any invoice is still owed (never twice).</summary>
+        public static List<ListStatusOption> WithOutstanding(IReadOnlyList<ListStatusOption> options)
+        {
+            var list = options.ToList();
+            var owed = list.Any(o => OutstandingStatuses.Contains(o.Value, StringComparer.OrdinalIgnoreCase));
+            if (owed && !list.Any(o => string.Equals(o.Value, Outstanding, StringComparison.OrdinalIgnoreCase)))
+                list.Insert(0, new ListStatusOption { Value = Outstanding, Label = Outstanding });
+            return list;
+        }
+
+        /// <summary>
         /// The status the invoices list shows, as dbo.WN_GetInvoicesListFiltered computes ListStatus: the StatusLabel when
         /// it is Unpaid / Paid / Partial / Overdue / Cancelled, otherwise from the amounts (paid in full = Paid, part paid =
         /// Partial, else Unpaid); Unpaid or Partial past the due date (business today) = Overdue.
@@ -119,7 +147,7 @@ namespace WorkNest.Application.Helpers
                 if (issueDate.End.HasValue && (issued == null || issued.Value >= issueDate.End.Value)) continue;
                 var listStatus = InvoiceListStatus(Convert.ToString(Field(row, "StatusLabel")),
                     DecimalValue(Field(row, "GrandTotal")), DecimalValue(Field(row, "PaidTotal")), DateValue(Field(row, "DueOn")), today);
-                if (status != null && !string.Equals(listStatus, status.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+                if (!InvoiceStatusMatches(status, listStatus)) continue;
                 matching.Add((row, listStatus));
             }
             var pageRows = matching

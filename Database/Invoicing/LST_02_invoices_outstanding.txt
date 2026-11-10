@@ -1,0 +1,72 @@
+-- =====================================================================================================================
+-- LST_02: the Invoices list can show "Outstanding" (every invoice still owed: Unpaid, Partial or Overdue), which is
+-- what the dashboards' Outstanding card counts. Until now the list's Status filter took one status only, so the card
+-- opened the list on "All statuses".
+--
+-- This script does NOT replace dbo.WN_GetInvoicesListFiltered (from LST_01). It reads the procedure from THIS database
+-- and changes one line, the status filter:
+--     AND (@Status IS NULL OR ls.ListStatus = @Status)
+-- becomes
+--     AND (@Status IS NULL OR ls.ListStatus = @Status OR (@Status = N'Outstanding' AND ls.ListStatus IN (N'Unpaid', N'Partial', N'Overdue')))
+-- Every other status works exactly as before. The "Outstanding" choice in the Status dropdown comes from the API.
+--
+-- Safe to run: if the line is not found exactly once, the script stops with an error and changes nothing. Safe to run
+-- more than once: a procedure that already knows "Outstanding" is left alone.
+-- The first result grid shows the procedure as it was: save it as your backup.
+-- Run on the test database (SAC400) and on live.
+-- =====================================================================================================================
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Name SYSNAME = N'WN_GetInvoicesListFiltered';
+DECLARE @OldText NVARCHAR(200) = N'AND (@Status IS NULL OR ls.ListStatus = @Status)';
+DECLARE @NewText NVARCHAR(400) =
+    N'AND (@Status IS NULL OR ls.ListStatus = @Status OR (@Status = N''Outstanding'' AND ls.ListStatus IN (N''Unpaid'', N''Partial'', N''Overdue'')))';
+DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name)); -- SOURCE
+DECLARE @Sql NVARCHAR(MAX), @Pos INT, @Found INT, @Msg NVARCHAR(600);
+
+-- Backup: save this result before going on
+SELECT @Name AS [Procedure], @Old AS CurrentDefinition;
+
+IF @Old IS NULL
+BEGIN
+    SET @Msg = N'dbo.' + @Name + N' is not on this database (LST_01 has not run). Nothing was changed.';
+    THROW 50010, @Msg, 1;
+END
+
+IF CHARINDEX(N'N''Outstanding''', @Old) > 0
+BEGIN
+    PRINT N'dbo.' + @Name + N' already knows Outstanding: left alone.';
+END
+ELSE
+BEGIN
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Old);
+    IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Old, @Pos, 80)) = 0
+    BEGIN
+        SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+        THROW 50011, @Msg, 1;
+    END
+
+    SET @Found = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @OldText, N''))) / DATALENGTH(@OldText);
+    IF @Found <> 1
+    BEGIN
+        SET @Msg = CONCAT(@Name, N': expected the status filter line once but found it ', @Found, N' times. Nothing was changed.');
+        THROW 50012, @Msg, 1;
+    END
+
+    SET @Sql = N'CREATE OR ALTER ' + SUBSTRING(REPLACE(@Old, @OldText, @NewText), @Pos, LEN(@Old) + 400);
+
+    -- APPLY START
+    BEGIN TRANSACTION;
+    EXEC sys.sp_executesql @Sql;
+    COMMIT TRANSACTION;
+    PRINT N'dbo.' + @Name + N': updated, the Status filter now accepts Outstanding.';
+    -- APPLY END
+END
+
+-- Result: Knows_Outstanding should be 1
+SELECT @Name AS [Procedure],
+       CASE WHEN CHARINDEX(N'N''Outstanding''', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) > 0 THEN 1 ELSE 0 END AS Knows_Outstanding;

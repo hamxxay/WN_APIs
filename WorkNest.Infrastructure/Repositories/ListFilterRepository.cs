@@ -95,6 +95,21 @@ namespace WorkNest.Infrastructure.Repositories
                 .ToList();
         }
 
+        /// <summary>Once LST_02 is seen it stays (a procedure is not taken back), so the check runs until then only.</summary>
+        private static volatile bool _invoiceListKnowsOutstanding;
+
+        public async Task<bool> InvoiceListKnowsOutstandingAsync()
+        {
+            if (_invoiceListKnowsOutstanding) return true;
+            await using var c = new SqlConnection(_connectionString);
+            await c.OpenAsync();
+            await using var cmd = new SqlCommand(
+                "SELECT CASE WHEN CHARINDEX(N'N''Outstanding''', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_GetInvoicesListFiltered'))) > 0 THEN 1 ELSE 0 END", c);
+            var known = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+            if (known) _invoiceListKnowsOutstanding = true;
+            return known;
+        }
+
         /// <summary>The old invoices list (dbo.WN_GetInvoicesList: a TotalCount result set, then the rows), read as GET api/invoice reads it.</summary>
         public async Task<(List<IDictionary<string, object?>> Rows, int Total)> GetInvoicesUnfilteredAsync(int page, int limit, string? search, int? typeId, int? locationId)
         {
