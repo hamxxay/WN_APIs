@@ -3151,6 +3151,18 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         /// just before it (occupancy and active bookings: that many days ago), the trend shows every month it touches
         /// (inside the range) and lease expiries look 3 months ahead, as for a month. Without it nothing changes.
         /// </summary>
+        /// <summary>WN_Invoices has its own LocationId (custom invoices); read once, it does not go away.</summary>
+        private static bool? _invoicesHaveLocation;
+
+        private static async Task<bool> InvoicesHaveLocationColumnAsync(SqlConnection c)
+        {
+            if (_invoicesHaveLocation is bool known) return known;
+            await using var cmd = new SqlCommand("SELECT CASE WHEN COL_LENGTH(N'dbo.WN_Invoices', N'LocationId') IS NULL THEN 0 ELSE 1 END", c);
+            var has = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+            _invoicesHaveLocation = has;
+            return has;
+        }
+
         public async Task<List<List<IDictionary<string, object?>>>> GetDashboardOverviewDbAsync(IReadOnlyCollection<int>? locationIds, int endingSoonDays,
             IEnumerable<int> openInvoiceStatusIds, IEnumerable<int> paidStatusIds, IEnumerable<int> voidStatusIds, string period = "month", DateTime? businessNow = null,
             DateTime? customFrom = null, DateTime? customTo = null)
@@ -3169,11 +3181,17 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             }
             // Status IDs are ints from code (OrderStatus lookups), never user input.
             static string List(IEnumerable<int> ids) { var l = ids.Distinct().ToList(); return l.Count == 0 ? "-1" : string.Join(",", l); }
-            var open = List(openInvoiceStatusIds); var paid = List(paidStatusIds); var voids = List(voidStatusIds);
+            // Still owed is worked out from the amounts (Owed below, as the Invoices list), so openInvoiceStatusIds is not used.
+            var paid = List(paidStatusIds); var voids = List(voidStatusIds);
             // Location filter: null = all locations; otherwise only spaces in those locations (ints, never user text).
             var spaceLocFilter = locationIds is null ? "1 = 1" : $"s.LocationId IN ({List(locationIds)})";
-            var invLocFilter = locationIds is null ? "1 = 1" : "b.SpaceId IN (SELECT Id FROM @Spaces)";
             await using var c = await Open();
+            // An invoice belongs to its own location (custom invoices), else its booking's room location; the customer's
+            // profile location never counts. Same rule as the Invoices list (LST_02), so the cards and the list agree.
+            var invLocFilter = locationIds is null ? "1 = 1"
+                : await InvoicesHaveLocationColumnAsync(c)
+                    ? $"COALESCE(i.LocationId, s.LocationId) IN ({List(locationIds)})"
+                    : $"s.LocationId IN ({List(locationIds)})";
             var sql = $@"
                 DECLARE @Now DATETIME2(0) = @BizNow;   -- business (Pakistan) wall-clock time from the app clock
                 -- same point, one period ago (a custom range: as many days ago as the range is long)
@@ -3210,11 +3228,16 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                   JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND bs.Code IN (N'Pending', N'Confirmed');
 
-                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4));
+                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4), Owed BIT);
+                -- Owed = still owed, as the Invoices list works it out from the amounts: not Paid (nothing left after WHT, and
+                -- something paid or a Paid status). A Paid status with nothing paid is still owed.
                 INSERT INTO @Inv
-                SELECT i.Id, i.InvoiceNumber, i.BookingId, i.UserId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), i.StatusId, ISNULL(i.WHTAmount, 0)
+                SELECT i.Id, i.InvoiceNumber, i.BookingId, i.UserId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), i.StatusId, ISNULL(i.WHTAmount, 0),
+                       CASE WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005
+                                 AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN ({paid})) THEN 0 ELSE 1 END
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                  LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
                  WHERE i.StatusId NOT IN ({voids})
                     AND ISNULL(i.StatusId, 0) <> 40
                    AND {invLocFilter};
@@ -3227,10 +3250,10 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                     (SELECT COUNT(*) FROM @Live WHERE StartOn <= @Now AND EndOn >= @Now) AS ActiveBookings,
                     (SELECT COUNT(*) FROM @Live WHERE StartOn <= @MonthAgo AND EndOn >= @MonthAgo) AS ActiveBookingsLastMonth,
                     (SELECT COUNT(*) FROM @Live WHERE StatusCode = N'Pending' AND EndOn >= @Now) AS PendingConfirmations,
-                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open})) AS Outstanding, -- WHT is withheld by the customer, not owed
-                    (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open})) AS OutstandingCount,
-                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueAmount,
-                    (SELECT COUNT(*) FROM @Inv WHERE StatusId IN ({open}) AND DueOn < @Today) AS OverdueCount,
+                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1) AS Outstanding, -- WHT is withheld by the customer, not owed
+                    (SELECT COUNT(*) FROM @Inv WHERE Owed = 1) AS OutstandingCount,
+                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1 AND DueOn < @Today) AS OverdueAmount,
+                    (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND DueOn < @Today) AS OverdueCount,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd)) AS InvoicedThisMonth,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PrevMonthStart AND IssuedOn < @PrevEnd) AS InvoicedLastMonth,
                     (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= @PStart AND (@PEnd IS NULL OR IssuedOn < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
@@ -3273,7 +3296,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                WHERE (b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode)
                                   OR (ISNULL(b.UserId, i.UserId) IS NOT NULL AND cu.UserId = ISNULL(b.UserId, i.UserId))
                                   OR (u.Email IS NOT NULL AND cu.Email = u.Email)) cust
-                 WHERE i.StatusId IN ({open}) AND i.DueOn < @Today
+                 WHERE i.Owed = 1 AND i.DueOn < @Today
                  ORDER BY i.DueOn, i.Id;
 
                 -- [3] leases ending soon
@@ -3316,7 +3339,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                                     WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 60 THEN 2
                                     WHEN DATEDIFF(DAY, i.DueOn, @Today) <= 90 THEN 3
                                     ELSE 4 END AS SortOrder
-                          FROM @Inv i WHERE i.StatusId IN ({open})
+                          FROM @Inv i WHERE i.Owed = 1
                   ) x ON x.SortOrder = b.SortOrder
                  GROUP BY b.Bucket, b.SortOrder
                  ORDER BY b.SortOrder;

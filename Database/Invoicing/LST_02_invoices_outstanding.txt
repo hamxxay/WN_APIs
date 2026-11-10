@@ -1,17 +1,26 @@
 -- =====================================================================================================================
--- LST_02: the Invoices list can show "Outstanding" (every invoice still owed: Unpaid, Partial or Overdue), which is
--- what the dashboards' Outstanding card counts. Until now the list's Status filter took one status only, so the card
--- opened the list on "All statuses".
+-- LST_02: the Invoices list agrees with the dashboards' Outstanding and Overdue cards.
+--
+-- 1. Status "Outstanding" = every invoice still owed (Unpaid, Partial or Overdue), what the Outstanding card counts.
+--    Until now the list's Status filter took one status only, so the card opened the list on "All statuses".
+-- 2. Location: an invoice belongs to its own location (custom invoices), else its booking's room location. Until now a
+--    location also matched on the customer's profile location, so nearly every invoice showed under I-8, even ones for
+--    F-7 rooms. The dashboards use the same rule (API).
 --
 -- This script does NOT replace dbo.WN_GetInvoicesListFiltered (from LST_01). It reads the procedure from THIS database
--- and changes one line, the status filter:
+-- and changes these two lines only:
 --     AND (@Status IS NULL OR ls.ListStatus = @Status)
--- becomes
+--   becomes
 --     AND (@Status IS NULL OR ls.ListStatus = @Status OR (@Status = N'Outstanding' AND ls.ListStatus IN (N'Unpaid', N'Partial', N'Overdue')))
--- Every other status works exactly as before. The "Outstanding" choice in the Status dropdown comes from the API.
+--   and
+--     WHERE (@LocationId IS NULL OR i.LocationId = @LocationId OR s.LocationId = @LocationId OR u.LocationId = @LocationId)
+--   becomes
+--     WHERE (@LocationId IS NULL OR COALESCE(i.LocationId, s.LocationId) = @LocationId)
+-- Every other status, and the list with no location chosen, work exactly as before. The "Outstanding" choice in the
+-- Status dropdown comes from the API.
 --
--- Safe to run: if the line is not found exactly once, the script stops with an error and changes nothing. Safe to run
--- more than once: a procedure that already knows "Outstanding" is left alone.
+-- Safe to run: a change already made is skipped; if a line is neither in its old nor its new form exactly once, the
+-- script stops with an error and changes nothing. Safe to run more than once.
 -- The first result grid shows the procedure as it was: save it as your backup.
 -- Run on the test database (SAC400) and on live.
 -- =====================================================================================================================
@@ -22,11 +31,18 @@ SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 
 DECLARE @Name SYSNAME = N'WN_GetInvoicesListFiltered';
-DECLARE @OldText NVARCHAR(200) = N'AND (@Status IS NULL OR ls.ListStatus = @Status)';
-DECLARE @NewText NVARCHAR(400) =
-    N'AND (@Status IS NULL OR ls.ListStatus = @Status OR (@Status = N''Outstanding'' AND ls.ListStatus IN (N''Unpaid'', N''Partial'', N''Overdue'')))';
 DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name)); -- SOURCE
-DECLARE @Sql NVARCHAR(MAX), @Pos INT, @Found INT, @Msg NVARCHAR(600);
+DECLARE @Sql NVARCHAR(MAX), @Pos INT, @Msg NVARCHAR(800), @Changes INT = 0;
+DECLARE @Id INT, @What NVARCHAR(100), @OldText NVARCHAR(400), @NewText NVARCHAR(400), @OldCount INT, @NewCount INT;
+
+DECLARE @Patch TABLE (Id INT PRIMARY KEY, What NVARCHAR(100), OldText NVARCHAR(400), NewText NVARCHAR(400));
+INSERT INTO @Patch VALUES
+ (1, N'Outstanding status',
+     N'AND (@Status IS NULL OR ls.ListStatus = @Status)',
+     N'AND (@Status IS NULL OR ls.ListStatus = @Status OR (@Status = N''Outstanding'' AND ls.ListStatus IN (N''Unpaid'', N''Partial'', N''Overdue'')))'),
+ (2, N'Location rule',
+     N'WHERE (@LocationId IS NULL OR i.LocationId = @LocationId OR s.LocationId = @LocationId OR u.LocationId = @LocationId)',
+     N'WHERE (@LocationId IS NULL OR COALESCE(i.LocationId, s.LocationId) = @LocationId)');
 
 -- Backup: save this result before going on
 SELECT @Name AS [Procedure], @Old AS CurrentDefinition;
@@ -37,36 +53,55 @@ BEGIN
     THROW 50010, @Msg, 1;
 END
 
-IF CHARINDEX(N'N''Outstanding''', @Old) > 0
+SET @Pos = CHARINDEX(N'PROCEDURE', @Old);
+IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Old, @Pos, 80)) = 0
 BEGIN
-    PRINT N'dbo.' + @Name + N' already knows Outstanding: left alone.';
+    SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+    THROW 50011, @Msg, 1;
 END
-ELSE
-BEGIN
-    SET @Pos = CHARINDEX(N'PROCEDURE', @Old);
-    IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Old, @Pos, 80)) = 0
-    BEGIN
-        SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
-        THROW 50011, @Msg, 1;
-    END
 
-    SET @Found = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @OldText, N''))) / DATALENGTH(@OldText);
-    IF @Found <> 1
+-- ---------- Check both lines and build the new text. Nothing is changed in this part. ----------
+SET @Sql = @Old;
+DECLARE patches CURSOR LOCAL FAST_FORWARD FOR SELECT Id, What, OldText, NewText FROM @Patch ORDER BY Id;
+OPEN patches;
+FETCH NEXT FROM patches INTO @Id, @What, @OldText, @NewText;
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    SET @NewCount = (DATALENGTH(@Sql) - DATALENGTH(REPLACE(@Sql, @NewText, N''))) / DATALENGTH(@NewText);
+    SET @OldCount = (DATALENGTH(@Sql) - DATALENGTH(REPLACE(@Sql, @OldText, N''))) / DATALENGTH(@OldText);
+    IF @NewCount = 1
+        PRINT @What + N': already done, left alone.';
+    ELSE IF @NewCount = 0 AND @OldCount = 1
     BEGIN
-        SET @Msg = CONCAT(@Name, N': expected the status filter line once but found it ', @Found, N' times. Nothing was changed.');
+        SET @Sql = REPLACE(@Sql, @OldText, @NewText);
+        SET @Changes += 1;
+        PRINT @What + N': will be changed.';
+    END
+    ELSE
+    BEGIN
+        SET @Msg = CONCAT(@Name, N': ', @What, N' - expected the old line once (found ', @OldCount, N') or the new line once (found ',
+                          @NewCount, N'). Nothing was changed.');
         THROW 50012, @Msg, 1;
     END
+    FETCH NEXT FROM patches INTO @Id, @What, @OldText, @NewText;
+END
+CLOSE patches;
+DEALLOCATE patches;
 
-    SET @Sql = N'CREATE OR ALTER ' + SUBSTRING(REPLACE(@Old, @OldText, @NewText), @Pos, LEN(@Old) + 400);
-
+-- ---------- All checks passed: apply. ----------
+IF @Changes > 0
+BEGIN
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Sql);
+    SET @Sql = N'CREATE OR ALTER ' + SUBSTRING(@Sql, @Pos, LEN(@Sql));
     -- APPLY START
     BEGIN TRANSACTION;
     EXEC sys.sp_executesql @Sql;
     COMMIT TRANSACTION;
-    PRINT N'dbo.' + @Name + N': updated, the Status filter now accepts Outstanding.';
+    PRINT N'dbo.' + @Name + N': updated.';
     -- APPLY END
 END
 
--- Result: Knows_Outstanding should be 1
+-- Result: both should be 1
 SELECT @Name AS [Procedure],
-       CASE WHEN CHARINDEX(N'N''Outstanding''', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) > 0 THEN 1 ELSE 0 END AS Knows_Outstanding;
+       CASE WHEN CHARINDEX(N'N''Outstanding''', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) > 0 THEN 1 ELSE 0 END AS Knows_Outstanding,
+       CASE WHEN CHARINDEX(N'COALESCE(i.LocationId, s.LocationId) = @LocationId', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) > 0 THEN 1 ELSE 0 END AS New_Location_Rule;
