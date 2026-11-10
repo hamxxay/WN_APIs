@@ -68,6 +68,17 @@ namespace WorkNest.Application.DTOs.Booking
         public string? AccessSuspendedInvoiceNumber { get; set; }
         public ContractDetailsDto Contract { get; set; } = new();
         public List<object> Details { get; set; } = new();
+        // Offer snapshot (script OFFER_01_offers); all null without an offer. Amounts are for ONE full month.
+        public int? OfferId { get; set; }
+        public string? OfferName { get; set; }
+        public string? OfferDiscountType { get; set; }
+        public decimal? OfferDiscountValue { get; set; }
+        public string? OfferApplyTo { get; set; }
+        public bool? OfferApplyToDeposit { get; set; }
+        public decimal? OfferDiscountAmount { get; set; }
+        public decimal? ManualDiscountAmount { get; set; }
+        public decimal? FinalMonthlyRent { get; set; }
+        public decimal? FinalSecurityDeposit { get; set; }
     }
 
     public class AdminBookingRequest

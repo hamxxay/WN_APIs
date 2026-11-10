@@ -1,0 +1,199 @@
+-- =====================================================================================================================
+-- OFFER_01 ROLLBACK: undoes Database/Offers/OFFER_01_offers.txt.
+--
+-- WHAT IT DOES, in plain words
+--   1. Takes the marked blocks ("OFFER_01 BEGIN" ... "OFFER_01 END") back out of dbo.WN_GetBookingInvoiceDetails,
+--      dbo.WN_Invoice_CreateRecurring, dbo.WN_Booking_TransferPreview and dbo.WN_Booking_TransferSpace. Nothing else in
+--      them is touched, so they are exactly as before OFFER_01. A procedure without the marker is left alone.
+--   2. Drops the 4 procedures WN_Offers_GetList / _Save / _Deactivate / _GetRunning and the audit trigger.
+--   3. Drops the table dbo.WN_Offers, and the 10 snapshot columns on dbo.WN_Quotations / WN_Bookings / WN_Invoices.
+--
+-- IT STOPS AND CHANGES NOTHING when:
+--   * any of the 30 snapshot columns holds a value other than NULL (a quotation, booking or invoice got an offer): those
+--     amounts would be lost. The message gives the counts. Roll back only on a database where no offer was ever used,
+--     or restore from a backup.
+--   * dbo.WN_Offers holds rows. If you really want the offers deleted too, change @DropOffersEvenIfRows to 1 below.
+--   * a marker is found but cannot be taken out cleanly.
+--
+-- Run the new API/CMS builds back to the previous version FIRST (or at least stop using Offers): the previous API does not
+-- know these columns, the new API reads them.
+-- The first result grid shows the procedures as they are now: save it as your backup. One batch (no GO): all or nothing.
+-- =====================================================================================================================
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @DropOffersEvenIfRows BIT = 0;      -- 1 = also delete the offers themselves
+
+DECLARE @Msg NVARCHAR(1500);
+DECLARE @Defs TABLE (ProcName SYSNAME NOT NULL PRIMARY KEY, Def NVARCHAR(MAX) NULL, NewDef NVARCHAR(MAX) NULL, Done BIT NOT NULL DEFAULT 0);
+INSERT INTO @Defs (ProcName, Def) VALUES
+    (N'WN_GetBookingInvoiceDetails', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_GetBookingInvoiceDetails'))),
+    (N'WN_Invoice_CreateRecurring',  OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Invoice_CreateRecurring'))),   -- SOURCE
+    (N'WN_Booking_TransferPreview',  OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Booking_TransferPreview'))),
+    (N'WN_Booking_TransferSpace',    OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Booking_TransferSpace')));
+
+-- Backup: save this result before going on
+SELECT ProcName AS [Procedure], Def AS CurrentDefinition FROM @Defs ORDER BY ProcName;
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- 1. Checks (nothing is changed here).
+-- ---------------------------------------------------------------------------------------------------------------------
+DECLARE @Cols TABLE (Seq INT IDENTITY(1, 1), ColName SYSNAME);
+INSERT INTO @Cols (ColName) VALUES (N'OfferId'), (N'OfferName'), (N'OfferDiscountType'), (N'OfferDiscountValue'), (N'OfferApplyTo'),
+    (N'OfferApplyToDeposit'), (N'OfferDiscountAmount'), (N'ManualDiscountAmount'), (N'FinalMonthlyRent'), (N'FinalSecurityDeposit');
+DECLARE @Tbls TABLE (Seq INT IDENTITY(1, 1), TblName SYSNAME);
+INSERT INTO @Tbls (TblName) VALUES (N'WN_Quotations'), (N'WN_Bookings'), (N'WN_Invoices');
+
+DECLARE @T SYSNAME, @C SYSNAME, @Sql NVARCHAR(MAX), @i INT = 1, @j INT, @n INT, @Problems NVARCHAR(MAX) = N'';
+WHILE @i <= (SELECT MAX(Seq) FROM @Tbls)
+BEGIN
+    SELECT @T = TblName FROM @Tbls WHERE Seq = @i;
+    SET @j = 1;
+    WHILE @j <= (SELECT MAX(Seq) FROM @Cols)
+    BEGIN
+        SELECT @C = ColName FROM @Cols WHERE Seq = @j;
+        IF COL_LENGTH(N'dbo.' + @T, @C) IS NOT NULL
+        BEGIN
+            SET @Sql = N'SELECT @n = COUNT(*) FROM dbo.' + QUOTENAME(@T) + N' WHERE ' + QUOTENAME(@C) + N' IS NOT NULL;';
+            EXEC sys.sp_executesql @Sql, N'@n INT OUTPUT', @n = @n OUTPUT;
+            IF @n > 0 SET @Problems = @Problems + @T + N'.' + @C + N' (' + CAST(@n AS NVARCHAR(20)) + N' rows) ';
+        END
+        SET @j = @j + 1;
+    END
+    SET @i = @i + 1;
+END
+IF @Problems <> N''
+BEGIN
+    SET @Msg = N'OFFER_01 rollback: these snapshot columns hold data and would be lost: ' + @Problems
+             + N'. Nothing was changed. Restore from a backup instead, or leave the columns in place.';
+    THROW 50040, @Msg, 1;
+END
+
+IF @DropOffersEvenIfRows = 0 AND OBJECT_ID(N'dbo.WN_Offers', N'U') IS NOT NULL
+BEGIN
+    EXEC sys.sp_executesql N'SELECT @n = COUNT(*) FROM dbo.WN_Offers;', N'@n INT OUTPUT', @n = @n OUTPUT;
+    IF @n > 0
+    BEGIN
+        SET @Msg = N'OFFER_01 rollback: dbo.WN_Offers holds ' + CAST(@n AS NVARCHAR(20)) + N' offer(s). Nothing was changed. Set @DropOffersEvenIfRows = 1 at the top of this script if they may be deleted.';
+        THROW 50041, @Msg, 1;
+    END
+END
+
+-- Build the procedures without the OFFER_01 blocks, in memory.
+DECLARE @Cur SYSNAME, @Old NVARCHAR(MAX), @W NVARCHAR(MAX), @Pos INT, @LineStart INT, @B INT, @E INT, @EEnd INT, @Guard INT;
+DECLARE @MarkB NVARCHAR(40) = N'/* OFFER_01 BEGIN */', @MarkE NVARCHAR(40) = N'/* OFFER_01 END */';
+WHILE EXISTS (SELECT 1 FROM @Defs WHERE Done = 0)
+BEGIN
+    SELECT TOP 1 @Cur = ProcName, @Old = Def FROM @Defs WHERE Done = 0 ORDER BY ProcName;
+    IF @Old IS NULL OR CHARINDEX(N'OFFER_01', @Old) = 0
+    BEGIN
+        UPDATE @Defs SET Done = 1 WHERE ProcName = @Cur;      -- not there, or no marker: leave alone
+        PRINT N'dbo.' + @Cur + N': no OFFER_01 marker, left alone.';
+        CONTINUE;
+    END
+
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Old);
+    WHILE @Pos > 0
+    BEGIN
+        SET @LineStart = LEN(LEFT(@Old, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Old, @Pos))) + 2;
+        IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Old, @Pos))) = 0 SET @LineStart = 1;
+        IF LEFT(LTRIM(SUBSTRING(@Old, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Old, @Pos + 1);
+    END
+    IF @Pos = 0 OR CHARINDEX(@Cur, SUBSTRING(@Old, @Pos, 80)) = 0
+    BEGIN
+        SET @Msg = N'OFFER_01 rollback: ' + @Cur + N': the procedure header is not as expected. Nothing was changed.';
+        THROW 50042, @Msg, 1;
+    END
+
+    SET @W = @Old;
+    SET @Guard = 0;
+    WHILE CHARINDEX(@MarkB, @W) > 0 AND @Guard < 20
+    BEGIN
+        SET @Guard = @Guard + 1;
+        SET @B = CHARINDEX(@MarkB, @W);
+        SET @E = CHARINDEX(@MarkE, @W, @B);
+        IF @E = 0
+        BEGIN
+            SET @Msg = N'OFFER_01 rollback: ' + @Cur + N': a BEGIN marker has no END marker. Nothing was changed.';
+            THROW 50043, @Msg, 1;
+        END
+        SET @EEnd = @E + LEN(@MarkE);
+        -- A block that started after indentation also takes the white space after it, so the next line is as before.
+        IF @B > 1 AND SUBSTRING(@W, @B - 1, 1) IN (N' ', NCHAR(9))
+            WHILE @EEnd <= LEN(@W) AND SUBSTRING(@W, @EEnd, 1) IN (N' ', NCHAR(9), NCHAR(10), NCHAR(13)) SET @EEnd = @EEnd + 1;
+        SET @W = STUFF(@W, @B, @EEnd - @B, N'');
+    END
+    IF CHARINDEX(N'OFFER_01', @W) > 0
+    BEGIN
+        SET @Msg = N'OFFER_01 rollback: ' + @Cur + N': OFFER_01 text is still there after taking the blocks out. Nothing was changed.';
+        THROW 50044, @Msg, 1;
+    END
+    UPDATE @Defs SET NewDef = N'CREATE OR ALTER ' + SUBSTRING(@W, @Pos, DATALENGTH(@W)), Done = 1 WHERE ProcName = @Cur;
+END
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- 2. APPLY: one transaction.
+-- ---------------------------------------------------------------------------------------------------------------------
+-- APPLY START
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    DECLARE @PName SYSNAME, @NewDef NVARCHAR(MAX);
+    DECLARE apply_cur CURSOR LOCAL FAST_FORWARD FOR SELECT ProcName, NewDef FROM @Defs WHERE NewDef IS NOT NULL ORDER BY ProcName;
+    OPEN apply_cur;
+    FETCH NEXT FROM apply_cur INTO @PName, @NewDef;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC sys.sp_executesql @NewDef;
+        PRINT N'dbo.' + @PName + N': OFFER_01 blocks removed.';
+        FETCH NEXT FROM apply_cur INTO @PName, @NewDef;
+    END
+    CLOSE apply_cur;
+    DEALLOCATE apply_cur;
+
+    IF OBJECT_ID(N'dbo.WN_Offers_GetList', N'P')    IS NOT NULL DROP PROCEDURE dbo.WN_Offers_GetList;
+    IF OBJECT_ID(N'dbo.WN_Offers_Save', N'P')       IS NOT NULL DROP PROCEDURE dbo.WN_Offers_Save;
+    IF OBJECT_ID(N'dbo.WN_Offers_Deactivate', N'P') IS NOT NULL DROP PROCEDURE dbo.WN_Offers_Deactivate;
+    IF OBJECT_ID(N'dbo.WN_Offers_GetRunning', N'P') IS NOT NULL DROP PROCEDURE dbo.WN_Offers_GetRunning;
+    IF OBJECT_ID(N'dbo.TR_WN_Offers_Audit', N'TR')  IS NOT NULL DROP TRIGGER dbo.TR_WN_Offers_Audit;
+    IF OBJECT_ID(N'dbo.WN_Offers', N'U')            IS NOT NULL DROP TABLE dbo.WN_Offers;
+
+    SET @i = 1;
+    WHILE @i <= (SELECT MAX(Seq) FROM @Tbls)
+    BEGIN
+        SELECT @T = TblName FROM @Tbls WHERE Seq = @i;
+        SET @j = 1;
+        WHILE @j <= (SELECT MAX(Seq) FROM @Cols)
+        BEGIN
+            SELECT @C = ColName FROM @Cols WHERE Seq = @j;
+            IF COL_LENGTH(N'dbo.' + @T, @C) IS NOT NULL
+            BEGIN
+                SET @Sql = N'ALTER TABLE dbo.' + QUOTENAME(@T) + N' DROP COLUMN ' + QUOTENAME(@C) + N';';
+                EXEC sys.sp_executesql @Sql;
+            END
+            SET @j = @j + 1;
+        END
+        SET @i = @i + 1;
+    END
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH
+-- APPLY END
+
+-- Result. Expected: all zeros.
+SELECT (SELECT COUNT(*) FROM sys.objects WHERE schema_id = SCHEMA_ID(N'dbo') AND name IN
+          (N'WN_Offers', N'TR_WN_Offers_Audit', N'WN_Offers_GetList', N'WN_Offers_Save', N'WN_Offers_Deactivate', N'WN_Offers_GetRunning')) AS Offer_Objects_Left,
+       (SELECT COUNT(*) FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id
+         WHERE o.name IN (N'WN_Quotations', N'WN_Bookings', N'WN_Invoices') AND o.schema_id = SCHEMA_ID(N'dbo')
+           AND c.name IN (N'OfferId', N'OfferName', N'OfferDiscountType', N'OfferDiscountValue', N'OfferApplyTo', N'OfferApplyToDeposit',
+                          N'OfferDiscountAmount', N'ManualDiscountAmount', N'FinalMonthlyRent', N'FinalSecurityDeposit')) AS Snapshot_Columns_Left,
+       (SELECT COUNT(*) FROM (VALUES (N'WN_GetBookingInvoiceDetails'), (N'WN_Invoice_CreateRecurring'), (N'WN_Booking_TransferPreview'), (N'WN_Booking_TransferSpace')) n(p)
+         WHERE CHARINDEX(N'OFFER_01', ISNULL(OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + n.p)), N'')) > 0) AS Procedures_Still_Marked;

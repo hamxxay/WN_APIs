@@ -239,6 +239,8 @@ try
     // The CMS address in the e-mail links comes from Approvals:CmsBaseUrl (default https://cms.worknestpk.com).
     builder.Services.AddScoped<IApprovalRepository, WorkNest.Infrastructure.Repositories.ApprovalRepository>();
     builder.Services.AddScoped<ApprovalService>();
+    // Offers (api/admin/offers, api/offers/running): dbo.WN_Offers + snapshot columns (script OFFER_01_offers); answers "no offer" / 503 before the script.
+    builder.Services.AddScoped<IOffersRepository, WorkNest.Infrastructure.Repositories.OffersRepository>();
     // The bot's branch list (active WN_Locations), shared by all requests: re-read every 10 minutes, 3 s time limit.
     builder.Services.AddSingleton<WhatsAppBranchCache>();
     builder.Services.AddScoped<IGalleryService, GalleryService>();

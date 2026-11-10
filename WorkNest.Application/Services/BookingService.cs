@@ -1,4 +1,5 @@
 using WorkNest.Application.DTOs.Booking;
+using WorkNest.Application.DTOs.Offers;
 using WorkNest.Application.Helpers;
 using WorkNest.Application.DTOs.Payment;
 using WorkNest.Application.Interfaces;
@@ -14,7 +15,25 @@ namespace WorkNest.Application.Services
         private readonly IPdfService _pdf;
         private readonly IOrderStatusService _orderStatus;
         private readonly IBusinessClock _clock;
-        public BookingService(IDbRepository db, IEmailService email, IPdfService pdf, IOrderStatusService orderStatus, IBusinessClock clock) { _db = db; _email = email; _pdf = pdf; _orderStatus = orderStatus; _clock = clock; }
+        private readonly IOffersRepository? _offers;
+        public BookingService(IDbRepository db, IEmailService email, IPdfService pdf, IOrderStatusService orderStatus, IBusinessClock clock, IOffersRepository? offers = null) { _db = db; _email = email; _pdf = pdf; _orderStatus = orderStatus; _clock = clock; _offers = offers; }
+
+        /// <summary>The offer snapshot of these bookings (empty when there is none, the script has not run, or offers are not wired).</summary>
+        private async Task<IReadOnlyDictionary<int, OfferSnapshot>> OfferSnapshotsOfAsync(IEnumerable<int> bookingIds)
+        {
+            if (_offers == null) return new Dictionary<int, OfferSnapshot>();
+            try { return await _offers.GetSnapshotsAsync(OfferEntity.Booking, bookingIds); }
+            catch (Exception) { return new Dictionary<int, OfferSnapshot>(); }
+        }
+
+        /// <summary>Adds the 10 offer snapshot keys (PascalCase here, camelCase in the JSON) to a booking row; null when the booking has no offer.</summary>
+        public static void PutOffer(IDictionary<string, object?> row, OfferSnapshot? s)
+        {
+            row["OfferId"] = s?.OfferId; row["OfferName"] = s?.OfferName; row["OfferDiscountType"] = s?.OfferDiscountType;
+            row["OfferDiscountValue"] = s?.OfferDiscountValue; row["OfferApplyTo"] = s?.OfferApplyTo; row["OfferApplyToDeposit"] = s?.OfferApplyToDeposit;
+            row["OfferDiscountAmount"] = s?.OfferDiscountAmount; row["ManualDiscountAmount"] = s?.ManualDiscountAmount;
+            row["FinalMonthlyRent"] = s?.FinalMonthlyRent; row["FinalSecurityDeposit"] = s?.FinalSecurityDeposit;
+        }
 
         // Booking statuses (WN_BookingStatuses): 5 Pending, 33 Confirmed. 1 is an older "pending" value still
         // written on new bookings (it has no WN_BookingStatuses row), so it counts as pending too.
@@ -33,7 +52,14 @@ namespace WorkNest.Application.Services
         public async Task<(IEnumerable<object> Items, int Total)> GetBookingsAsync(int page, int limit, string? search, int? locationId = null)
         {
             var (rows, total) = await _db.GetBookingsAsync(page, limit, search, locationId);
-            return (rows.Cast<object>(), total);
+            var list = rows.ToList();
+            if (_offers != null)
+            {
+                int Id(IDictionary<string, object?> r) => (r.TryGetValue("BookingId", out var v) || r.TryGetValue("Id", out v)) && v is not null && v is not DBNull ? Convert.ToInt32(v) : 0;
+                var snaps = await OfferSnapshotsOfAsync(list.Select(Id));
+                foreach (var r in list) PutOffer(r, snaps.TryGetValue(Id(r), out var sn) ? sn : null);
+            }
+            return (list.Cast<object>(), total);
         }
 
         public async Task<IEnumerable<object>> GetMyBookingsAsync(string userEmail) =>
@@ -61,13 +87,14 @@ namespace WorkNest.Application.Services
             var challans = await _db.GetChallansWithDetailsAsync(ids);
             // TotalPaidAmount: what is recorded as paid on the booking (0 = nothing; the customer cancel is refused when > 0).
             var paid = await _db.GetBookingPaidAmountsDbAsync(ids);
+            var offerSnaps = _offers == null ? null : await OfferSnapshotsOfAsync(ids);   // the challans below show the booking's offer
             for (int i = 0; i < rows.Count; i++)
             {
                 rows[i]["TotalPaidAmount"] = paid.TryGetValue(ids[i], out var paidAmount) ? paidAmount : 0m;
                 decimal? totalPayable = null;
                 if (challans.TryGetValue(ids[i], out var ch) && ch.ChallanHeader is not null)
                 {
-                    try { totalPayable = (await BuildChallanAsync(ch.ChallanHeader, ch.Lines)).TotalPayable; }
+                    try { totalPayable = (await BuildChallanAsync(ch.ChallanHeader, ch.Lines, offerSnaps)).TotalPayable; }
                     catch (Exception) { totalPayable = null; } // one odd challan must not break the whole list
                 }
                 rows[i]["TotalPayable"] = totalPayable;
@@ -230,6 +257,7 @@ namespace WorkNest.Application.Services
             // Same flag and door-access notice as GET booking/{id}: the row is WN_vw_BookingSummary (v.*).
             data["BillingFiguresReliable"] = BillingFiguresReliable(data);
             int bookingId = RowInt(data, "BookingId") ?? 0;
+            if (_offers != null) PutOffer(data, (await OfferSnapshotsOfAsync(new[] { bookingId })).TryGetValue(bookingId, out var offerSn) ? offerSn : null);
             var s = bookingId > 0 && !CustomerBills.IsClosedBooking(RowText(data, "BookingStatusCode"), RowText(data, "BookingStatusLabel"))
                     && (await SuspensionsOfAsync(new[] { bookingId })).TryGetValue(bookingId, out var found) ? found : null;
             data["AccessSuspended"] = s != null;
@@ -454,14 +482,12 @@ namespace WorkNest.Application.Services
 
             if (!isMeetingRoom && discountValue > 0)
             {
+                // Q8: the offering type of this id at the space's location, else the same id at any location; no hardcoded cap.
                 var offeringTypes = (await _db.GetOfferingTypesAsync()).ToList();
-                var offering = (request.OfferingTypeId.HasValue && request.OfferingTypeId.Value > 0)
-                    ? offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == request.OfferingTypeId.Value)
-                    : (int.TryParse(request.OfferingType, out int otId)
-                        ? offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == otId)
-                        : (offeringTypes.FirstOrDefault(o => string.Equals(o["Description"]?.ToString(), request.OfferingType, StringComparison.OrdinalIgnoreCase))
-                           ?? offeringTypes.FirstOrDefault()));
-                decimal baseCap = offering?["DiscountCap"] is { } dc ? Convert.ToDecimal(dc) : 10.00m;
+                var offering = OfferingTypeLookup.Find(offeringTypes, request.OfferingTypeId, request.OfferingType, await _db.GetSpaceLocationIdAsync(spaceId));
+                decimal? offeringCap = OfferingTypeLookup.CapOf(offering);
+                if (offeringCap == null) return ApiResponse.Fail(OfferingTypeLookup.NotSetUpMessage);
+                decimal baseCap = offeringCap.Value;
                 decimal perSeat = perSeatBasePrice ?? standardPerSeat;
                 decimal monthlyRent = isPrivate ? perSeat * seats : perSeat;
 
@@ -498,6 +524,12 @@ namespace WorkNest.Application.Services
             if (request.SendWhtInvoice && !await _db.IsActiveWhtTaxRateIdAsync(request.WhtRate))
                 return ApiResponse.Fail("Select a WHT rate from the list.");
 
+            // Offers: the offer running now at the space's location (never anything the client sent); private offices / shared spaces only.
+            // The cap above checked the MANUAL discount only (Q10).
+            OfferDto? runningOffer = null;
+            if (!isMeetingRoom && _offers != null)
+                runningOffer = await _offers.GetRunningAsync(await _db.GetSpaceLocationIdAsync(spaceId), _clock.Now);
+
             var result = await _db.InsertBookingAsync(
                 userId, spaceId, pricingId,
                 startOn, endOn,
@@ -507,7 +539,8 @@ namespace WorkNest.Application.Services
                 discountType == "Percentage" ? discountValue : 0,
                 discountType, discountValue,
                 null, request.FloorId, request.BillingPeriodMonths, securityDepositMonths, request.AdvanceRentMonths,
-                shiftType, capacity, perSeatBasePrice, request.SendWhtInvoice, request.SendWhtInvoice ? request.WhtRate : null);
+                shiftType, capacity, perSeatBasePrice, request.SendWhtInvoice, request.SendWhtInvoice ? request.WhtRate : null,
+                runningOffer, Math.Max(1, spaceCapacity));
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
                 return ApiResponse.Fail(err.ToString() ?? "An error occurred");
@@ -690,6 +723,17 @@ namespace WorkNest.Application.Services
                 AppliedTaxPercentage = header.TryGetValue("AppliedTaxPercentage", out var atp) && atp != null ? Convert.ToDecimal(atp) : 16.00m,
                 PerSeatSupportRate = header.TryGetValue("PerSeatSupportRate", out var pssr) && pssr != null ? Convert.ToDecimal(pssr) : 2000.00m
             };
+            int detailsBookingId = header.TryGetValue("BookingId", out var dbi) && dbi != null ? Convert.ToInt32(dbi) : 0;
+            var detailsOffer = (await OfferSnapshotsOfAsync(new[] { detailsBookingId })).TryGetValue(detailsBookingId, out var dOffer) ? dOffer : null;
+            if (detailsOffer is { HasOffer: true })
+            {
+                // The booking's offer snapshot (never WN_Offers): room rent only, and the stored final deposit as it is.
+                calcInput.OfferName = detailsOffer.OfferName;
+                calcInput.OfferDiscountType = detailsOffer.OfferDiscountType;
+                calcInput.OfferDiscountValue = detailsOffer.OfferDiscountValue ?? 0m;
+                calcInput.SecurityDepositIsFinal = true;
+                if (detailsOffer.FinalSecurityDeposit.HasValue) calcInput.SecurityDeposit = detailsOffer.FinalSecurityDeposit.Value;
+            }
             var calcResult = ChallanCalculationService.Calculate(calcInput);
 
             decimal supportTaxOnCycle = calcResult.TaxAmount;
@@ -757,6 +801,13 @@ namespace WorkNest.Application.Services
                 Contract = contractObj,
                 Details = lines.Cast<object>().ToList()
             };
+            if (detailsOffer is { HasOffer: true })
+            {
+                result.OfferId = detailsOffer.OfferId; result.OfferName = detailsOffer.OfferName; result.OfferDiscountType = detailsOffer.OfferDiscountType;
+                result.OfferDiscountValue = detailsOffer.OfferDiscountValue; result.OfferApplyTo = detailsOffer.OfferApplyTo; result.OfferApplyToDeposit = detailsOffer.OfferApplyToDeposit;
+                result.OfferDiscountAmount = detailsOffer.OfferDiscountAmount; result.ManualDiscountAmount = detailsOffer.ManualDiscountAmount;
+                result.FinalMonthlyRent = detailsOffer.FinalMonthlyRent; result.FinalSecurityDeposit = detailsOffer.FinalSecurityDeposit;
+            }
 
             // Same challan number / validity as GET booking/{guid} and GET booking/my (WN_vw_BookingSummary).
             var summary = await _db.GetBookingSummaryRowDbAsync(result.BookingId);
@@ -823,7 +874,7 @@ namespace WorkNest.Application.Services
         }
 
         /// <summary>The challan (and its totalPayable) from a WN_Challans_GetFullByBooking header + lines.</summary>
-        private async Task<ChallanResponseDto> BuildChallanAsync(IDictionary<string, object?> header, IEnumerable<IDictionary<string, object?>> lines)
+        private async Task<ChallanResponseDto> BuildChallanAsync(IDictionary<string, object?> header, IEnumerable<IDictionary<string, object?>> lines, IReadOnlyDictionary<int, OfferSnapshot>? offerSnapshots = null)
         {
             var startOn = ParseDateSafely(header["StartOn"]);
             var endOn = ParseDateSafely(header["EndOn"]);
@@ -931,7 +982,11 @@ namespace WorkNest.Application.Services
             }
 
             dto.DiscountAmount = Math.Abs(dto.DiscountAmount);
-            WorkNest.Application.Services.ChallanCalculationService.ApplyToChallan(dto);
+            // The booking's offer (snapshot): the challan shows the same discount as the booking's first invoice. Lists pass all snapshots in one read.
+            OfferSnapshot? challanOffer = null;
+            if (offerSnapshots != null) offerSnapshots.TryGetValue(dto.BookingId, out challanOffer);
+            else if (_offers != null && dto.BookingId > 0 && (await OfferSnapshotsOfAsync(new[] { dto.BookingId })).TryGetValue(dto.BookingId, out var singleOffer)) challanOffer = singleOffer;
+            WorkNest.Application.Services.ChallanCalculationService.ApplyToChallan(dto, challanOffer);
 
             if (dto.IsMeetingRoom)
             {

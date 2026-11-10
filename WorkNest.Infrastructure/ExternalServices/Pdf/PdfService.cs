@@ -148,6 +148,18 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             }
                         }
 
+                        // Offer (snapshot on the quotation, ApplyToQuotation): printed as its own line, the manual discount keeps its own.
+                        // The first cycle figures come from the same engine as the quotation total, so the PDF and the total agree.
+                        decimal offerDiscountPdf = 0m;
+                        string? offerNamePdf = null;
+                        if (q.OfferId.HasValue && q.OfferFirstCycleDiscount is > 0m && spaceType != "MeetingRoom")
+                        {
+                            offerDiscountPdf = q.OfferFirstCycleDiscount.Value;
+                            offerNamePdf = q.OfferName;
+                            discountAmount = q.ManualFirstCycleDiscount ?? 0m;
+                        }
+                        discountAmount += offerDiscountPdf;   // totals below subtract the whole discount
+
                         decimal supportCharge = q.SupportChargeAmount > 0 
                             ? q.SupportChargeAmount 
                             : (spaceType == "MeetingRoom" ? Math.Round(firstCycleRent * 0.10m, 2) : 2000.00m * (q.Capacity.HasValue && q.Capacity.Value > 0 ? q.Capacity.Value : 1) * billingMonths);
@@ -401,12 +413,20 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                                     r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"PKR {taxOnAdvanceRent:N0}").FontColor("#000000");
                                 });
                             }
-                            if (discountAmount > 0)
+                            if (offerDiscountPdf > 0)
+                            {
+                                c.Item().Row(r =>
+                                {
+                                    r.ConstantItem(220).AlignRight().Text(string.IsNullOrWhiteSpace(offerNamePdf) ? "Offer:" : $"Offer: {offerNamePdf}").FontColor("#000000");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"- PKR {offerDiscountPdf:N0}").FontColor("#000000");
+                                });
+                            }
+                            if (discountAmount - offerDiscountPdf > 0)
                             {
                                 c.Item().Row(r =>
                                 {
                                     r.ConstantItem(220).AlignRight().Text("Discount:").FontColor("#000000");
-                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"- PKR {discountAmount:N0}").FontColor("#000000");
+                                    r.ConstantItem(120).PaddingRight(6).AlignRight().Text($"- PKR {discountAmount - offerDiscountPdf:N0}").FontColor("#000000");
                                 });
                             }
                             c.Item().LineHorizontal(1).LineColor("#000000");

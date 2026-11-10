@@ -112,6 +112,22 @@ namespace WorkNest.Application.DTOs.Quotation
         public decimal TotalContractAmount { get; set; }
         public ContractDetailsDto? Contract { get; set; }
 
+        // Offer snapshot (WN_Offers, script OFFER_01_offers); all null when the quotation has no offer. Amounts are for ONE full month.
+        // DiscountAmount above stays the first-cycle TOTAL (manual + offer); the quotation's own manual discount fields are unchanged.
+        public int? OfferId { get; set; }
+        public string? OfferName { get; set; }
+        public string? OfferDiscountType { get; set; }
+        public decimal? OfferDiscountValue { get; set; }
+        public string? OfferApplyTo { get; set; }
+        public bool? OfferApplyToDeposit { get; set; }
+        public decimal? OfferDiscountAmount { get; set; }
+        public decimal? ManualDiscountAmount { get; set; }
+        public decimal? FinalMonthlyRent { get; set; }
+        public decimal? FinalSecurityDeposit { get; set; }
+        /// <summary>The offer's / manual discount's part of the first billing cycle's DiscountAmount (null without an offer): what the quotation PDF prints.</summary>
+        public decimal? OfferFirstCycleDiscount { get; set; }
+        public decimal? ManualFirstCycleDiscount { get; set; }
+
         public bool CanRespond { get; set; }
         /// <summary>Waiting for the customer's answer (Sent / Active) but its last valid day (ValidUntil, Pakistan date) has passed.</summary>
         public bool IsExpired { get; set; }

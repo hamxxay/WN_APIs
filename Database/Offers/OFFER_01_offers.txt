@@ -1,0 +1,613 @@
+-- =====================================================================================================================
+-- OFFER_01: Offers (super-admin discounts that are applied automatically to new quotations and bookings).
+--
+-- WHAT THIS SCRIPT DOES, in plain words
+--   1. Creates the table dbo.WN_Offers (the offers the super admin defines) with its audit trigger (create / edit / deactivate
+--      are written to WN_AuditLog).
+--   2. Adds 10 empty "snapshot" columns to dbo.WN_Quotations, dbo.WN_Bookings and dbo.WN_Invoices (OfferId, OfferName,
+--      OfferDiscountType, OfferDiscountValue, OfferApplyTo, OfferApplyToDeposit, OfferDiscountAmount, ManualDiscountAmount,
+--      FinalMonthlyRent, FinalSecurityDeposit). They stay NULL for everything that has no offer. No existing data is changed.
+--   3. Creates 4 procedures: WN_Offers_GetList, WN_Offers_Save (create / edit, with the no-overlap rule), WN_Offers_Deactivate,
+--      WN_Offers_GetRunning (the offer running right now for a location).
+--   4. Changes 4 existing procedures by INSERTING marked blocks (each block starts with "OFFER_01 BEGIN" and ends with
+--      "OFFER_01 END"; nothing else in them is touched):
+--        dbo.WN_GetBookingInvoiceDetails   also returns the booking's 10 offer columns.
+--        dbo.WN_Invoice_CreateRecurring    (a) the service charge on recurring invoices becomes per-seat rate x seats x months
+--                                              (for every booking, the same as the first invoice) instead of 10 percent of the rent;
+--                                          (b) a booking whose offer is "Whole booking term" gets the offer discount on its room
+--                                              rent (rent without the service charge) on every recurring invoice;
+--                                          (c) such an invoice is marked with the offer columns. A booking whose offer is
+--                                              "First billing period" gets NO offer on recurring invoices.
+--        dbo.WN_Booking_TransferPreview / dbo.WN_Booking_TransferSpace
+--                                          a space transfer settles an offer booking on the rent that was actually invoiced
+--                                          (FinalMonthlyRent). The new booking is created without any offer (its insert does
+--                                          not copy the offer columns). The security deposit moves as before.
+--      dbo.WN_UpdateInvoiceBreakdown is NOT changed: it writes the discount it is given, so an offer that is inside
+--      DiscountTotal stays there.
+--
+-- BEFORE YOU RUN
+--   * Run Database/Invoicing/INV_REC_01_date_to_date_months.txt first. If dbo.WN_Invoice_CreateRecurring does not contain
+--     "INV_REC_01" this script stops with a message and changes nothing.
+--   * Run on the TEST database (SAC400) first, then on live. Run the whole file in SSMS (select all, Execute). It is ONE batch
+--     (no GO), so it either completes or stops with nothing changed. Best run when few people are using the system: adding the
+--     columns takes a very short lock on the three tables.
+--   * The first result grid shows the 4 procedures as they are now: save it as your backup.
+--
+-- SAFE TO RUN AGAIN: every step checks first. A procedure that already contains "OFFER_01" is left alone. Before anything is
+-- changed the script checks every place it needs in every procedure; if one is not found exactly once (the live procedure may
+-- differ from the test one) it stops with a message naming it and changes nothing.
+--
+-- To undo: run Database/Offers/OFFER_01_rollback.txt.
+-- Times are Pakistan time. Server time zone is never assumed: CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time').
+-- =====================================================================================================================
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Msg NVARCHAR(900);
+
+IF OBJECT_ID(N'dbo.WN_Locations', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_Quotations', N'U') IS NULL
+   OR OBJECT_ID(N'dbo.WN_Bookings', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_Invoices', N'U') IS NULL
+   OR OBJECT_ID(N'dbo.WN_AuditLog', N'U') IS NULL
+    THROW 50030, N'OFFER_01: dbo.WN_Locations / WN_Quotations / WN_Bookings / WN_Invoices / WN_AuditLog is missing: wrong database? Nothing was changed.', 1;
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- 1. The procedures as they are now (backup) and the changes to make to them.
+-- ---------------------------------------------------------------------------------------------------------------------
+DECLARE @Defs TABLE (ProcName SYSNAME NOT NULL PRIMARY KEY, Def NVARCHAR(MAX) NULL, NewDef NVARCHAR(MAX) NULL, Skip BIT NOT NULL DEFAULT 0, Done BIT NOT NULL DEFAULT 0);
+DECLARE @Patch TABLE (Id INT IDENTITY(1, 1) PRIMARY KEY, ProcName SYSNAME NOT NULL, Anchor1 NVARCHAR(400) NOT NULL, Anchor2 NVARCHAR(400) NULL,
+                      Placement CHAR(1) NOT NULL, Block NVARCHAR(MAX) NOT NULL);   -- Placement: B = block goes before the anchor, A = after
+
+INSERT INTO @Defs (ProcName, Def) VALUES
+    (N'WN_GetBookingInvoiceDetails', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_GetBookingInvoiceDetails'))),
+    (N'WN_Invoice_CreateRecurring',  OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Invoice_CreateRecurring'))),   -- SOURCE
+    (N'WN_Booking_TransferPreview',  OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Booking_TransferPreview'))),
+    (N'WN_Booking_TransferSpace',    OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_Booking_TransferSpace')));
+
+-- Backup: save this result before going on
+SELECT ProcName AS [Procedure], Def AS CurrentDefinition FROM @Defs ORDER BY ProcName;
+
+INSERT INTO @Patch (ProcName, Anchor1, Anchor2, Placement, Block) VALUES
+    (N'WN_GetBookingInvoiceDetails', N'AS WithholdingTaxRate', NULL, 'A', N'/* OFFER_01 BEGIN */,
+        b.OfferId, b.OfferName, b.OfferDiscountType, b.OfferDiscountValue, b.OfferApplyTo, b.OfferApplyToDeposit,
+        b.OfferDiscountAmount, b.ManualDiscountAmount, b.FinalMonthlyRent, b.FinalSecurityDeposit/* OFFER_01 END */'),
+    (N'WN_Invoice_CreateRecurring', N'DECLARE @TotalBaseAmount DECIMAL(18,2) = @DiscountedRent + @AttendantSurchargeSubtotal;', NULL, 'B', N'/* OFFER_01 BEGIN */
+        -- OFFER_01 (a): seats and the per-seat service rate, the same source the first invoice uses.
+        DECLARE @OfrSeats INT = 1, @OfrRate DECIMAL(18,2) = NULL, @OfrStart DATETIME = NULL;
+        DECLARE @OfrId INT = NULL, @OfrApplyTo VARCHAR(20) = NULL, @OfrType VARCHAR(10) = NULL, @OfrValue DECIMAL(10,2) = NULL;
+        SELECT TOP 1
+            @OfrSeats   = COALESCE(NULLIF(q.Capacity, 0), NULLIF(s.Capacity, 0), 1),
+            @OfrRate    = bd.PerSeatSupportRate,
+            @OfrStart   = b.StartOn,
+            @OfrId      = b.OfferId,
+            @OfrApplyTo = b.OfferApplyTo,
+            @OfrType    = b.OfferDiscountType,
+            @OfrValue   = b.OfferDiscountValue
+        FROM dbo.WN_Bookings b WITH (NOLOCK)
+        LEFT JOIN dbo.WN_BookingDetails bd WITH (NOLOCK) ON bd.BookingGuid = b.IdGUID
+        LEFT JOIN dbo.WN_Quotations q WITH (NOLOCK) ON q.BookingId = b.Id
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        WHERE b.Id = @BookingId
+        ORDER BY CASE WHEN bd.PerSeatSupportRate > 0 THEN 0 ELSE 1 END;   -- some bookings have several detail rows: take the one with a rate
+        -- Rate: same order as WN_GetBookingInvoiceDetails (booking detail, rate valid at the booking start, latest rate, 2000).
+        IF @OfrRate IS NULL OR @OfrRate <= 0
+            SELECT TOP 1 @OfrRate = FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+            WHERE ChargeTypeId = 4 AND FixedAmount > 0
+              AND (StartDate IS NULL OR StartDate <= ISNULL(@OfrStart, @BillingPeriodStart)) AND (EndDate IS NULL OR EndDate >= ISNULL(@OfrStart, @BillingPeriodStart))
+            ORDER BY StartDate DESC;
+        IF @OfrRate IS NULL OR @OfrRate <= 0
+            SELECT TOP 1 @OfrRate = FixedAmount FROM dbo.WN_ChargeTypeRate WITH (NOLOCK)
+            WHERE ChargeTypeId = 4 AND FixedAmount > 0
+            ORDER BY StartDate DESC;
+        IF @OfrRate IS NULL OR @OfrRate <= 0 SET @OfrRate = 2000.00;
+        DECLARE @OfrSvcFull DECIMAL(18,2) = ROUND(@OfrRate * @OfrSeats * @EffectiveMonths, 2);
+
+        -- OFFER_01 (b): the manual discount never exceeds the rent; a whole-term offer takes room rent only
+        -- (rent without the service charge) and never more than the room rent left after the manual discount.
+        DECLARE @OfrManual DECIMAL(18,2), @OfrOffer DECIMAL(18,2) = 0;
+        IF @DiscountAmt > @RentAmount SET @DiscountAmt = @RentAmount;
+        SET @OfrManual = @DiscountAmt;
+        IF @OfrId IS NOT NULL AND @OfrApplyTo = ''WHOLE_TERM'' AND @OfrValue > 0
+        BEGIN
+            DECLARE @OfrMonthlyRoom DECIMAL(18,2) = @MonthlyRent - ROUND(@OfrRate * @OfrSeats, 2);
+            IF @OfrMonthlyRoom < 0 SET @OfrMonthlyRoom = 0;
+            SET @OfrOffer = CASE WHEN @OfrType = ''PERCENT'' THEN ROUND(@OfrMonthlyRoom * @OfrValue / 100.0 * @EffectiveMonths, 2)
+                                 WHEN @OfrType = ''FIXED'' THEN ROUND(CASE WHEN @OfrValue < @OfrMonthlyRoom THEN @OfrValue ELSE @OfrMonthlyRoom END * @EffectiveMonths, 2)
+                                 ELSE 0 END;
+            DECLARE @OfrRoomLeft DECIMAL(18,2) = @RentAmount - @DiscountAmt - @OfrSvcFull;
+            IF @OfrRoomLeft < 0 SET @OfrRoomLeft = 0;
+            IF @OfrOffer > @OfrRoomLeft SET @OfrOffer = @OfrRoomLeft;
+            SET @DiscountAmt = @DiscountAmt + @OfrOffer;
+        END
+        SET @DiscountedRent = @RentAmount - @DiscountAmt;
+        IF @DiscountedRent < 0 SET @DiscountedRent = 0;
+        /* OFFER_01 END */
+        '),
+    (N'WN_Invoice_CreateRecurring', N'DECLARE @TaxAmount DECIMAL(18,2) = ROUND(@SupportChargeAmount * (@AppliedTaxPercentage / 100.0), 2);', NULL, 'B', N'/* OFFER_01 BEGIN */
+        -- OFFER_01 (a): service charge = per-seat rate x seats x months (same as the first invoice), PST on it as before.
+        -- Never more than the rent left to pay, so RoomRent + Service = SubTotal - DiscountTotal always holds.
+        SET @SupportChargeAmount = @OfrSvcFull;
+        IF @SupportChargeAmount > @DiscountedRent SET @SupportChargeAmount = @DiscountedRent;
+        IF @SupportChargeAmount < 0 SET @SupportChargeAmount = 0;
+        /* OFFER_01 END */
+        '),
+    (N'WN_Invoice_CreateRecurring', N'-- Set ApprovalStatus to PendingApproval', N'-- Line Item 1: Recurring Room Rent', 'B', N'/* OFFER_01 BEGIN */
+        -- OFFER_01 (c): a whole-term offer marks this invoice (amounts of THIS invoice; the rest is the booking snapshot).
+        IF @OfrId IS NOT NULL AND @OfrApplyTo = ''WHOLE_TERM''
+            UPDATE i
+               SET i.OfferId = b.OfferId, i.OfferName = b.OfferName, i.OfferDiscountType = b.OfferDiscountType,
+                   i.OfferDiscountValue = b.OfferDiscountValue, i.OfferApplyTo = b.OfferApplyTo,
+                   i.OfferApplyToDeposit = b.OfferApplyToDeposit,
+                   i.OfferDiscountAmount = @OfrOffer, i.ManualDiscountAmount = @OfrManual,
+                   i.FinalMonthlyRent = b.FinalMonthlyRent, i.FinalSecurityDeposit = b.FinalSecurityDeposit
+              FROM dbo.WN_Invoices i
+              JOIN dbo.WN_Bookings b ON b.Id = @BookingId
+             WHERE i.Id = @InvoiceId;
+        /* OFFER_01 END */
+        '),
+    (N'WN_Booking_TransferPreview', N'DECLARE @DailyRateA DECIMAL(18, 4) = @OldMonthlyRent / 30.0000;', NULL, 'B', N'/* OFFER_01 BEGIN */
+    -- OFFER_01: a booking with an offer is settled on what was actually invoiced (offer and manual discount taken off),
+    -- not on the list rate. A first-period offer counts only while the transfer date is inside an invoice that got the offer.
+    DECLARE @OfrFinalRent DECIMAL(18, 2) = NULL;
+    SELECT @OfrFinalRent = b.FinalMonthlyRent
+      FROM dbo.WN_Bookings b WITH (NOLOCK)
+     WHERE b.Id = @BookingId AND b.OfferId IS NOT NULL AND ISNULL(b.FinalMonthlyRent, 0) > 0
+       AND (b.OfferApplyTo = ''WHOLE_TERM''
+            OR EXISTS (SELECT 1 FROM dbo.WN_Invoices i WITH (NOLOCK)
+                        WHERE i.BookingId = b.Id AND i.OfferId IS NOT NULL AND ISNULL(i.StatusId, 0) NOT IN (5, 40)
+                          AND CAST(i.BillingPeriodStart AS DATE) <= @EffectiveDate AND CAST(i.BillingPeriodEnd AS DATE) >= @EffectiveDate));
+    IF @OfrFinalRent IS NOT NULL SET @OldMonthlyRent = @OfrFinalRent;
+    /* OFFER_01 END */
+    '),
+    (N'WN_Booking_TransferSpace',   N'DECLARE @DailyRateA DECIMAL(18, 4) = @OldMonthlyRent / 30.0000;', NULL, 'B', N'/* OFFER_01 BEGIN */
+        -- OFFER_01: a booking with an offer is settled on what was actually invoiced (offer and manual discount taken off),
+        -- not on the list rate. A first-period offer counts only while the transfer date is inside an invoice that got the offer.
+        DECLARE @OfrFinalRent DECIMAL(18, 2) = NULL;
+        SELECT @OfrFinalRent = b.FinalMonthlyRent
+          FROM dbo.WN_Bookings b WITH (NOLOCK)
+         WHERE b.Id = @OldBookingId AND b.OfferId IS NOT NULL AND ISNULL(b.FinalMonthlyRent, 0) > 0
+           AND (b.OfferApplyTo = ''WHOLE_TERM''
+                OR EXISTS (SELECT 1 FROM dbo.WN_Invoices i WITH (NOLOCK)
+                            WHERE i.BookingId = b.Id AND i.OfferId IS NOT NULL AND ISNULL(i.StatusId, 0) NOT IN (5, 40)
+                              AND CAST(i.BillingPeriodStart AS DATE) <= @EffectiveDate AND CAST(i.BillingPeriodEnd AS DATE) >= @EffectiveDate));
+        IF @OfrFinalRent IS NOT NULL SET @OldMonthlyRent = @OfrFinalRent;
+        /* OFFER_01 END */
+        ');
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- 2. Check everything and build the new text of each procedure IN MEMORY. Nothing is changed in this section.
+-- ---------------------------------------------------------------------------------------------------------------------
+DECLARE @Cur SYSNAME, @Old NVARCHAR(MAX), @W NVARCHAR(MAX), @Pos INT, @LineStart INT, @Found INT, @A NVARCHAR(400), @Blk NVARCHAR(MAX),
+        @Place CHAR(1), @PatchId INT, @A1 NVARCHAR(400), @A2 NVARCHAR(400), @APos INT;
+
+-- Prerequisite: INV_REC_01 must already be in the recurring procedure.
+IF (SELECT Def FROM @Defs WHERE ProcName = N'WN_Invoice_CreateRecurring') IS NULL
+    THROW 50031, N'OFFER_01: dbo.WN_Invoice_CreateRecurring is not on this database. Nothing was changed.', 1;
+IF CHARINDEX(N'INV_REC_01', (SELECT Def FROM @Defs WHERE ProcName = N'WN_Invoice_CreateRecurring')) = 0
+   AND CHARINDEX(N'OFFER_01', (SELECT Def FROM @Defs WHERE ProcName = N'WN_Invoice_CreateRecurring')) = 0
+    THROW 50032, N'OFFER_01: dbo.WN_Invoice_CreateRecurring does not have INV_REC_01 yet. Run Database/Invoicing/INV_REC_01_date_to_date_months.txt first, then run this script again. Nothing was changed.', 1;
+
+WHILE EXISTS (SELECT 1 FROM @Defs WHERE Done = 0)
+BEGIN
+    SELECT TOP 1 @Cur = ProcName, @Old = Def FROM @Defs WHERE Done = 0 ORDER BY ProcName;
+
+    IF @Old IS NULL
+    BEGIN
+        SET @Msg = N'OFFER_01: dbo.' + @Cur + N' is not on this database. Nothing was changed.';
+        THROW 50033, @Msg, 1;
+    END
+
+    IF CHARINDEX(N'OFFER_01', @Old) > 0
+    BEGIN
+        UPDATE @Defs SET Skip = 1, Done = 1 WHERE ProcName = @Cur;
+        PRINT N'dbo.' + @Cur + N' already has OFFER_01: left alone.';
+        CONTINUE;
+    END
+
+    -- The real header: the first PROCEDURE on a line that is not a comment (some procedures start with comment lines).
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Old);
+    WHILE @Pos > 0
+    BEGIN
+        SET @LineStart = LEN(LEFT(@Old, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Old, @Pos))) + 2;
+        IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Old, @Pos))) = 0 SET @LineStart = 1;
+        IF LEFT(LTRIM(SUBSTRING(@Old, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Old, @Pos + 1);
+    END
+    IF @Pos = 0 OR CHARINDEX(@Cur, SUBSTRING(@Old, @Pos, 80)) = 0
+    BEGIN
+        SET @Msg = N'OFFER_01: ' + @Cur + N': the procedure header is not as expected. Nothing was changed.';
+        THROW 50034, @Msg, 1;
+    END
+
+    SET @W = @Old;
+    DECLARE patch_cur CURSOR LOCAL FAST_FORWARD FOR
+        SELECT Id, Anchor1, Anchor2, Placement, Block FROM @Patch WHERE ProcName = @Cur ORDER BY Id;
+    OPEN patch_cur;
+    FETCH NEXT FROM patch_cur INTO @PatchId, @A1, @A2, @Place, @Blk;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        -- The place to insert at: the first candidate found exactly once.
+        SET @A = NULL;
+        SET @Found = (DATALENGTH(@W) - DATALENGTH(REPLACE(@W, @A1, N''))) / DATALENGTH(@A1);
+        IF @Found = 1 SET @A = @A1;
+        ELSE IF @A2 IS NOT NULL AND (DATALENGTH(@W) - DATALENGTH(REPLACE(@W, @A2, N''))) / DATALENGTH(@A2) = 1 SET @A = @A2;
+        IF @A IS NULL
+        BEGIN
+            SET @Msg = CONCAT(N'OFFER_01: ', @Cur, N': expected "', @A1, N'" once but found it ', @Found, N' times. Nothing was changed.');
+            THROW 50035, @Msg, 1;
+        END
+        SET @APos = CHARINDEX(@A, @W);
+        IF @APos <= @Pos
+        BEGIN
+            SET @Msg = CONCAT(N'OFFER_01: ', @Cur, N': "', @A, N'" is not inside the procedure body. Nothing was changed.');
+            THROW 50036, @Msg, 1;
+        END
+        SET @W = REPLACE(@W, @A, CASE WHEN @Place = 'B' THEN @Blk + @A ELSE @A + @Blk END);
+        FETCH NEXT FROM patch_cur INTO @PatchId, @A1, @A2, @Place, @Blk;
+    END
+    CLOSE patch_cur;
+    DEALLOCATE patch_cur;
+
+    -- The blocks are inserted after the header, so the header position @Pos is unchanged.
+    UPDATE @Defs SET NewDef = N'CREATE OR ALTER ' + SUBSTRING(@W, @Pos, DATALENGTH(@W)), Done = 1 WHERE ProcName = @Cur;
+END
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- 3. APPLY: one transaction. If anything fails everything is rolled back.
+-- ---------------------------------------------------------------------------------------------------------------------
+-- APPLY START
+BEGIN TRY
+    BEGIN TRANSACTION;
+
+    -- 3a. The offers table.
+    IF OBJECT_ID(N'dbo.WN_Offers', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_Offers (
+    OfferId        INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_Offers PRIMARY KEY,
+    Name           NVARCHAR(100)  NOT NULL,
+    DiscountType   VARCHAR(10)    NOT NULL,
+    DiscountValue  DECIMAL(10, 2) NOT NULL,
+    StartDate      DATETIME       NOT NULL,
+    EndDate        DATETIME       NOT NULL,
+    LocationId     INT            NULL,
+    ApplyTo        VARCHAR(20)    NOT NULL CONSTRAINT DF_WN_Offers_ApplyTo DEFAULT (''FIRST_PERIOD''),
+    ApplyToDeposit BIT            NOT NULL CONSTRAINT DF_WN_Offers_ApplyToDeposit DEFAULT (0),
+    IsActive       BIT            NOT NULL CONSTRAINT DF_WN_Offers_IsActive DEFAULT (1),
+    CreatedBy      INT            NULL,
+    CreatedAt      DATETIME2      NOT NULL CONSTRAINT DF_WN_Offers_CreatedAt DEFAULT (SYSUTCDATETIME()),
+    UpdatedBy      INT            NULL,
+    UpdatedAt      DATETIME2      NULL,
+    CONSTRAINT CK_WN_Offers_Type    CHECK (DiscountType IN (''PERCENT'', ''FIXED'')),
+    CONSTRAINT CK_WN_Offers_Value   CHECK (DiscountValue > 0),
+    CONSTRAINT CK_WN_Offers_Percent CHECK (DiscountType <> ''PERCENT'' OR DiscountValue <= 100),
+    CONSTRAINT CK_WN_Offers_Dates   CHECK (EndDate > StartDate),
+    CONSTRAINT CK_WN_Offers_ApplyTo CHECK (ApplyTo IN (''FIRST_PERIOD'', ''WHOLE_TERM'')),
+    CONSTRAINT FK_WN_Offers_Location FOREIGN KEY (LocationId) REFERENCES dbo.WN_Locations (Id)
+)');
+
+    -- 3b. The ten snapshot columns on quotations, bookings and invoices (all NULL-able, no default, no constraint).
+    DECLARE @Cols TABLE (Seq INT IDENTITY(1, 1), ColName SYSNAME, ColType NVARCHAR(40));
+    INSERT INTO @Cols (ColName, ColType) VALUES
+        (N'OfferId', N'INT'), (N'OfferName', N'NVARCHAR(100)'), (N'OfferDiscountType', N'VARCHAR(10)'),
+        (N'OfferDiscountValue', N'DECIMAL(10,2)'), (N'OfferApplyTo', N'VARCHAR(20)'), (N'OfferApplyToDeposit', N'BIT'),
+        (N'OfferDiscountAmount', N'DECIMAL(18,2)'), (N'ManualDiscountAmount', N'DECIMAL(18,2)'),
+        (N'FinalMonthlyRent', N'DECIMAL(18,2)'), (N'FinalSecurityDeposit', N'DECIMAL(18,2)');
+    DECLARE @Tbls TABLE (Seq INT IDENTITY(1, 1), TblName SYSNAME);
+    INSERT INTO @Tbls (TblName) VALUES (N'WN_Quotations'), (N'WN_Bookings'), (N'WN_Invoices');
+    DECLARE @T SYSNAME, @C SYSNAME, @CT NVARCHAR(40), @Sql NVARCHAR(MAX), @i INT = 1, @j INT;
+    WHILE @i <= (SELECT MAX(Seq) FROM @Tbls)
+    BEGIN
+        SELECT @T = TblName FROM @Tbls WHERE Seq = @i;
+        SET @j = 1;
+        WHILE @j <= (SELECT MAX(Seq) FROM @Cols)
+        BEGIN
+            SELECT @C = ColName, @CT = ColType FROM @Cols WHERE Seq = @j;
+            IF COL_LENGTH(N'dbo.' + @T, @C) IS NULL
+            BEGIN
+                SET @Sql = N'ALTER TABLE dbo.' + QUOTENAME(@T) + N' ADD ' + QUOTENAME(@C) + N' ' + @CT + N' NULL;';
+                EXEC sys.sp_executesql @Sql;
+            END
+            SET @j = @j + 1;
+        END
+        SET @i = @i + 1;
+    END
+
+    -- 3c. Audit trigger (same pattern as TR_WN_Locations_Audit).
+    EXEC(N'CREATE OR ALTER TRIGGER dbo.TR_WN_Offers_Audit
+ON dbo.WN_Offers
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM inserted) AND NOT EXISTS (SELECT 1 FROM deleted)
+        RETURN;
+
+    DECLARE @UserId INT = CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    IF @UserId IS NULL SET @UserId = -1;
+
+    DECLARE @UserEmail NVARCHAR(256) = CAST(SESSION_CONTEXT(N''AppUserEmail'') AS NVARCHAR(256));
+    DECLARE @SourceApp NVARCHAR(50) = CAST(SESSION_CONTEXT(N''SourceApp'') AS NVARCHAR(50));
+    DECLARE @EntityName NVARCHAR(128) = N''WN_Offers'';
+    DECLARE @SysUtc DATETIME2(3) = SYSUTCDATETIME();
+
+    BEGIN TRY
+        IF EXISTS (SELECT 1 FROM inserted) AND NOT EXISTS (SELECT 1 FROM deleted)
+        BEGIN
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            SELECT @EntityName, CAST(i.[OfferId] AS NVARCHAR(64)), ''I'', NULL,
+                   (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+                   NULL, NULL, NULL, @UserId, @UserEmail, @SysUtc, @SourceApp
+            FROM inserted i;
+        END
+        ELSE IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        BEGIN
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            SELECT @EntityName, CAST(i.[OfferId] AS NVARCHAR(64)), ''U'',
+                   (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+                   (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+                   NULL, NULL, NULL, @UserId, @UserEmail, @SysUtc, @SourceApp
+            FROM inserted i
+            INNER JOIN deleted d ON i.[OfferId] = d.[OfferId];
+        END
+        ELSE IF NOT EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        BEGIN
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            SELECT @EntityName, CAST(d.[OfferId] AS NVARCHAR(64)), ''D'',
+                   (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER), NULL,
+                   NULL, NULL, NULL, @UserId, @UserEmail, @SysUtc, @SourceApp
+            FROM deleted d;
+        END
+    END TRY
+    BEGIN CATCH
+        BEGIN TRY
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            VALUES (@EntityName, ''TRIGGER_ERROR'', ''E'', NULL, NULL, ERROR_MESSAGE(), ''Error'',
+                    CONCAT(''Line: '', ERROR_LINE(), '' State: '', ERROR_STATE(), '' Procedure: '', ERROR_PROCEDURE()),
+                    @UserId, @UserEmail, SYSUTCDATETIME(), @SourceApp);
+        END TRY
+        BEGIN CATCH
+        END CATCH
+    END CATCH
+END');
+
+    -- 3d. The four new procedures (created through EXEC so they compile after the columns above exist).
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Offers_GetList
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @Now DATETIME = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME);
+    SELECT o.OfferId, o.Name, o.DiscountType, o.DiscountValue, o.StartDate, o.EndDate,
+           o.LocationId, l.Name AS LocationName, o.ApplyTo, o.ApplyToDeposit, o.IsActive,
+           o.CreatedBy, o.CreatedAt, o.UpdatedBy, o.UpdatedAt,
+           CASE WHEN o.IsActive = 0 THEN ''Inactive''
+                WHEN @Now < o.StartDate THEN ''Upcoming''
+                WHEN @Now < o.EndDate THEN ''Running''
+                ELSE ''Ended'' END AS Status,
+           (SELECT COUNT(*) FROM dbo.WN_Quotations q WITH (NOLOCK) WHERE q.OfferId = o.OfferId)
+         + (SELECT COUNT(*) FROM dbo.WN_Bookings bk WITH (NOLOCK) WHERE bk.OfferId = o.OfferId) AS UsedCount
+    FROM dbo.WN_Offers o WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = o.LocationId
+    ORDER BY o.StartDate DESC, o.OfferId DESC;
+END');
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Offers_GetRunning
+    @LocationId INT      = NULL,
+    @At         DATETIME = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    IF @At IS NULL SET @At = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME);
+    -- At most one row: overlapping active offers cannot be saved. StartDate <= @At < EndDate (strict on the end).
+    SELECT TOP 1 o.OfferId, o.Name, o.DiscountType, o.DiscountValue, o.StartDate, o.EndDate,
+           o.LocationId, l.Name AS LocationName, o.ApplyTo, o.ApplyToDeposit, o.IsActive
+    FROM dbo.WN_Offers o WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = o.LocationId
+    WHERE o.IsActive = 1
+      AND o.StartDate <= @At AND @At < o.EndDate
+      AND (o.LocationId IS NULL OR o.LocationId = @LocationId)
+    ORDER BY CASE WHEN o.LocationId IS NULL THEN 1 ELSE 0 END, o.StartDate DESC, o.OfferId DESC;
+END');
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Offers_Deactivate
+    @OfferId INT,
+    @UserId  INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    IF @UserId IS NOT NULL EXEC sys.sp_set_session_context @key = N''AppUserId'', @value = @UserId;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Offers WHERE OfferId = @OfferId)
+        THROW 50000, N''The offer was not found.'', 1;
+    -- Already inactive: nothing to do (success). Existing quotations, bookings and invoices are never touched.
+    UPDATE dbo.WN_Offers
+       SET IsActive = 0, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+     WHERE OfferId = @OfferId AND IsActive = 1;
+    SELECT @OfferId AS OfferId;
+END');
+    EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_Offers_Save
+    @OfferId        INT            = NULL,      -- NULL = create
+    @Name           NVARCHAR(200),
+    @DiscountType   VARCHAR(30),
+    @DiscountValue  DECIMAL(10, 2),
+    @StartDate      DATETIME,                   -- Pakistan wall-clock time, stored as sent
+    @EndDate        DATETIME,
+    @LocationId     INT            = NULL,      -- NULL = all locations
+    @ApplyTo        VARCHAR(30)    = ''FIRST_PERIOD'',
+    @ApplyToDeposit BIT            = 0,
+    @IsActive       BIT            = 1,
+    @UserId         INT            = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @Now DATETIME = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME);
+    DECLARE @Msg NVARCHAR(500), @Rc INT;
+
+    SET @Name           = LTRIM(RTRIM(ISNULL(@Name, N'''')));
+    SET @DiscountType   = UPPER(LTRIM(RTRIM(ISNULL(@DiscountType, ''''))));
+    SET @ApplyTo        = UPPER(LTRIM(RTRIM(ISNULL(@ApplyTo, ''FIRST_PERIOD''))));
+    SET @ApplyToDeposit = ISNULL(@ApplyToDeposit, 0);
+    SET @IsActive       = ISNULL(@IsActive, 1);
+
+    IF @Name = N'''' THROW 50000, N''Offer name is required.'', 1;
+    IF LEN(@Name) > 100 THROW 50000, N''Offer name can be at most 100 characters.'', 1;
+    IF @DiscountType NOT IN (''PERCENT'', ''FIXED'') THROW 50000, N''Discount type must be Percent or Fixed amount.'', 1;
+    IF @DiscountValue IS NULL OR @DiscountValue <= 0 THROW 50000, N''Discount value must be greater than 0.'', 1;
+    IF @DiscountType = ''PERCENT'' AND @DiscountValue > 100 THROW 50000, N''A percent discount cannot be more than 100.'', 1;
+    IF @StartDate IS NULL OR @EndDate IS NULL THROW 50000, N''Start and end date are required.'', 1;
+    IF @EndDate <= @StartDate THROW 50000, N''The end date must be after the start date.'', 1;
+    IF @ApplyTo NOT IN (''FIRST_PERIOD'', ''WHOLE_TERM'') THROW 50000, N''Apply to must be First billing period or Whole booking term.'', 1;
+    IF @LocationId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WHERE Id = @LocationId)
+        THROW 50000, N''The location was not found.'', 1;
+
+    IF @UserId IS NOT NULL EXEC sys.sp_set_session_context @key = N''AppUserId'', @value = @UserId;
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- One save at a time, so two overlapping offers can never be saved together.
+        EXEC @Rc = sys.sp_getapplock @Resource = N''WN_Offers_Save'', @LockMode = ''Exclusive'', @LockOwner = ''Transaction'', @LockTimeout = 15000;
+        IF @Rc < 0 THROW 50000, N''Another offer is being saved at this moment. Please try again.'', 1;
+
+        DECLARE @CurName NVARCHAR(100), @CurType VARCHAR(10), @CurValue DECIMAL(10, 2), @CurStart DATETIME, @CurEnd DATETIME,
+                @CurLoc INT, @CurApplyTo VARCHAR(20), @CurDep BIT, @CurActive BIT, @Found BIT = 0;
+        DECLARE @NameOnly BIT = 0;
+
+        IF @OfferId IS NOT NULL
+        BEGIN
+            SELECT @Found = 1, @CurName = Name, @CurType = DiscountType, @CurValue = DiscountValue, @CurStart = StartDate,
+                   @CurEnd = EndDate, @CurLoc = LocationId, @CurApplyTo = ApplyTo, @CurDep = ApplyToDeposit, @CurActive = IsActive
+              FROM dbo.WN_Offers WITH (UPDLOCK, HOLDLOCK)
+             WHERE OfferId = @OfferId;
+            IF @Found = 0 THROW 50000, N''The offer was not found.'', 1;
+
+            DECLARE @Changed BIT = CASE WHEN @CurType <> @DiscountType OR @CurValue <> @DiscountValue
+                                          OR DATEDIFF(MINUTE, @CurStart, @StartDate) <> 0 OR DATEDIFF(MINUTE, @CurEnd, @EndDate) <> 0   -- minute precision: the CMS sends yyyy-MM-ddTHH:mm
+                                          OR ISNULL(@CurLoc, -1) <> ISNULL(@LocationId, -1) OR @CurApplyTo <> @ApplyTo
+                                          OR @CurDep <> @ApplyToDeposit OR @CurActive <> @IsActive
+                                        THEN 1 ELSE 0 END;
+
+            IF @CurActive = 1 AND @CurStart <= @Now AND @Now < @CurEnd
+            BEGIN
+                -- Running: only the name may change.
+                IF @Changed = 1
+                BEGIN
+                    SET @Msg = CONCAT(N'''''''', @CurName, N'''''' is running: only its name can be changed. Deactivate it and create a new offer to change anything else.'');
+                    THROW 50000, @Msg, 1;
+                END
+                SET @NameOnly = 1;
+            END
+            ELSE IF @CurActive = 0 OR @Now >= @CurEnd
+            BEGIN
+                -- Ended or deactivated: only the name may change, and it can never be turned back on.
+                IF @CurActive = 0 AND @IsActive = 1
+                    THROW 50000, N''An ended or deactivated offer cannot be turned back on. Create a new offer.'', 1;
+                IF @Changed = 1
+                BEGIN
+                    SET @Msg = CONCAT(N'''''''', @CurName, N'''''' has ended or was deactivated: only its name can be changed.'');
+                    THROW 50000, @Msg, 1;
+                END
+                SET @NameOnly = 1;
+            END
+        END
+
+        IF @NameOnly = 1
+        BEGIN
+            IF @Name COLLATE Latin1_General_BIN2 <> @CurName COLLATE Latin1_General_BIN2
+                UPDATE dbo.WN_Offers SET Name = @Name, UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME() WHERE OfferId = @OfferId;
+        END
+        ELSE
+        BEGIN
+            -- Create, or edit of an offer that has not started yet. Overlap check only when the saved row will be active.
+            IF @IsActive = 1
+            BEGIN
+                DECLARE @OvName NVARCHAR(100) = NULL, @OvStart DATETIME, @OvEnd DATETIME, @OvLoc NVARCHAR(MAX);
+                SELECT TOP 1 @OvName = o.Name, @OvStart = o.StartDate, @OvEnd = o.EndDate, @OvLoc = l.Name
+                  FROM dbo.WN_Offers o WITH (UPDLOCK, HOLDLOCK)
+                  LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = o.LocationId
+                 WHERE o.IsActive = 1
+                   AND (@OfferId IS NULL OR o.OfferId <> @OfferId)
+                   AND o.StartDate < @EndDate AND @StartDate < o.EndDate           -- back-to-back is allowed
+                   AND (o.LocationId IS NULL OR @LocationId IS NULL OR o.LocationId = @LocationId)
+                 ORDER BY o.StartDate;
+                IF @OvName IS NOT NULL
+                BEGIN
+                    SET @Msg = CONCAT(N''This offer overlaps '''''', @OvName, N'''''' ('', CONVERT(VARCHAR(16), @OvStart, 120), N'' to '',
+                                      CONVERT(VARCHAR(16), @OvEnd, 120), N'', '', ISNULL(@OvLoc, N''All locations''), N'').'');
+                    THROW 50000, @Msg, 1;
+                END
+            END
+
+            IF @OfferId IS NULL
+            BEGIN
+                INSERT INTO dbo.WN_Offers (Name, DiscountType, DiscountValue, StartDate, EndDate, LocationId, ApplyTo, ApplyToDeposit, IsActive, CreatedBy)
+                VALUES (@Name, @DiscountType, @DiscountValue, @StartDate, @EndDate, @LocationId, @ApplyTo, @ApplyToDeposit, @IsActive, @UserId);
+                SET @OfferId = CAST(SCOPE_IDENTITY() AS INT);
+            END
+            ELSE
+                UPDATE dbo.WN_Offers
+                   SET Name = @Name, DiscountType = @DiscountType, DiscountValue = @DiscountValue, StartDate = @StartDate, EndDate = @EndDate,
+                       LocationId = @LocationId, ApplyTo = @ApplyTo, ApplyToDeposit = @ApplyToDeposit, IsActive = @IsActive,
+                       UpdatedBy = @UserId, UpdatedAt = SYSUTCDATETIME()
+                 WHERE OfferId = @OfferId;
+        END
+
+        COMMIT TRANSACTION;
+        SELECT @OfferId AS OfferId;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END');
+
+    -- 3e. The changed procedures (only those that do not have OFFER_01 yet).
+    DECLARE @PName SYSNAME, @NewDef NVARCHAR(MAX);
+    DECLARE apply_cur CURSOR LOCAL FAST_FORWARD FOR SELECT ProcName, NewDef FROM @Defs WHERE Skip = 0 AND NewDef IS NOT NULL ORDER BY ProcName;
+    OPEN apply_cur;
+    FETCH NEXT FROM apply_cur INTO @PName, @NewDef;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC sys.sp_executesql @NewDef;
+        PRINT N'dbo.' + @PName + N': updated.';
+        FETCH NEXT FROM apply_cur INTO @PName, @NewDef;
+    END
+    CLOSE apply_cur;
+    DEALLOCATE apply_cur;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH
+-- APPLY END
+
+-- ---------------------------------------------------------------------------------------------------------------------
+-- 4. Result. Expected: Has_OFFER_01 = 1 for the four procedures, table exists, 30 columns, 4 new procedures, trigger present.
+-- ---------------------------------------------------------------------------------------------------------------------
+SELECT n.ProcName AS [Procedure],
+       CASE WHEN CHARINDEX(N'OFFER_01', ISNULL(OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + n.ProcName)), N'')) > 0 THEN 1 ELSE 0 END AS Has_OFFER_01
+  FROM (VALUES (N'WN_GetBookingInvoiceDetails'), (N'WN_Invoice_CreateRecurring'), (N'WN_Booking_TransferPreview'), (N'WN_Booking_TransferSpace')) n(ProcName);
+
+SELECT CASE WHEN OBJECT_ID(N'dbo.WN_Offers', N'U') IS NOT NULL THEN 1 ELSE 0 END AS Offers_Table,
+       CASE WHEN OBJECT_ID(N'dbo.TR_WN_Offers_Audit', N'TR') IS NOT NULL THEN 1 ELSE 0 END AS Audit_Trigger,
+       (SELECT COUNT(*) FROM sys.columns c JOIN sys.objects o ON o.object_id = c.object_id
+         WHERE o.name IN (N'WN_Quotations', N'WN_Bookings', N'WN_Invoices') AND o.schema_id = SCHEMA_ID(N'dbo')
+           AND c.name IN (N'OfferId', N'OfferName', N'OfferDiscountType', N'OfferDiscountValue', N'OfferApplyTo', N'OfferApplyToDeposit',
+                          N'OfferDiscountAmount', N'ManualDiscountAmount', N'FinalMonthlyRent', N'FinalSecurityDeposit')) AS Snapshot_Columns_Of_30,
+       (SELECT COUNT(*) FROM sys.objects WHERE type = 'P' AND schema_id = SCHEMA_ID(N'dbo')
+           AND name IN (N'WN_Offers_GetList', N'WN_Offers_Save', N'WN_Offers_Deactivate', N'WN_Offers_GetRunning')) AS New_Procedures_Of_4;

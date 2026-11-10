@@ -66,6 +66,11 @@ namespace WorkNest.Application.Services
         public bool DisableProration { get; set; } = false;
         public bool SendWhtInvoice { get; set; } = false;
         public decimal WhtRatePercent { get; set; } = 0m;
+        /// <summary>Offer snapshot (WN_Offers) of the quotation / booking; see <see cref="InvoiceCalculationRequest.OfferDiscountType"/>.</summary>
+        public string? OfferName { get; set; }
+        public string? OfferDiscountType { get; set; }
+        public decimal OfferDiscountValue { get; set; }
+        public bool SecurityDepositIsFinal { get; set; }
     }
 
     public class ChallanCalculationResult
@@ -87,7 +92,11 @@ namespace WorkNest.Application.Services
         public decimal TaxAmount { get; set; }
         public decimal TaxAmountOnAdvanceRent { get; set; }
         public decimal TaxAmountOnContract { get; set; }
+        /// <summary>Total discount on the first cycle (manual + offer).</summary>
         public decimal DiscountAmount { get; set; }
+        /// <summary>The offer's part of <see cref="DiscountAmount"/> (0 without an offer) and the manual part.</summary>
+        public decimal OfferDiscountAmount { get; set; }
+        public decimal ManualDiscountAmount { get; set; }
         public decimal TotalPayable { get; set; }
         public decimal WhtAmount { get; set; }
         public bool IsWhtInvoice { get; set; }
@@ -130,7 +139,10 @@ namespace WorkNest.Application.Services
                 EndOn = input.EndOn,
                 ExplicitBillingType = input.ExplicitBillingType,
                 IsQuotation = input.IsQuotation,
-                DisableProration = input.DisableProration
+                DisableProration = input.DisableProration,
+                OfferDiscountType = input.OfferDiscountType,
+                OfferDiscountValue = input.OfferDiscountValue,
+                SecurityDepositIsFinal = input.SecurityDepositIsFinal
             };
 
             var engineResult = InvoiceCalculationEngine.CalculateInvoice(req);
@@ -139,6 +151,8 @@ namespace WorkNest.Application.Services
             decimal monthlyRent = engineResult.MonthlyRent;
             decimal totalContractRent = engineResult.MonthlyRent * engineResult.ContractPeriodMonths;
             decimal discountAmount = engineResult.Discount;
+            decimal offerDiscountAmount = engineResult.OfferDiscount;
+            decimal manualDiscountAmount = engineResult.ManualDiscount;
             decimal whtAmount = 0m;
             bool isWht = input.SendWhtInvoice && input.WhtRatePercent > 0m && input.WhtRatePercent < 100m;
 
@@ -151,6 +165,8 @@ namespace WorkNest.Application.Services
                 if (engineResult.Discount > 0)
                 {
                     discountAmount = Math.Round(engineResult.Discount / divisor, 2, MidpointRounding.AwayFromZero);
+                    offerDiscountAmount = Math.Round(engineResult.OfferDiscount / divisor, 2, MidpointRounding.AwayFromZero);
+                    manualDiscountAmount = discountAmount - offerDiscountAmount;
                 }
                 whtAmount = Math.Round((firstCycleRent - discountAmount) - (engineResult.Rent - engineResult.Discount), 2, MidpointRounding.AwayFromZero);
             }
@@ -177,6 +193,8 @@ namespace WorkNest.Application.Services
                 TaxAmountOnAdvanceRent = engineResult.Tax,
                 TaxAmountOnContract = Math.Round(req.PerSeatSupportRate * (req.Capacity > 0 ? req.Capacity : 1) * engineResult.ContractPeriodMonths * (req.AppliedTaxPercentage / 100.0m), 2, MidpointRounding.AwayFromZero),
                 DiscountAmount = discountAmount,
+                OfferDiscountAmount = offerDiscountAmount,
+                ManualDiscountAmount = manualDiscountAmount,
                 TotalPayable = totalPayable,
                 WhtAmount = whtAmount,
                 IsWhtInvoice = isWht,
@@ -298,7 +316,14 @@ namespace WorkNest.Application.Services
                     fields.Add(new ChallanFieldDto { Key = "tax", Label = "Provincial Sales Tax", Value = FormatCurrency(res.TaxAmount) });
                 }
 
-                if (res.DiscountAmount > 0)
+                if (res.OfferDiscountAmount > 0)
+                {
+                    // An offer: its own row (named), and "Discount" then shows the manual part only.
+                    fields.Add(new ChallanFieldDto { Key = "offerDiscount", Label = string.IsNullOrWhiteSpace(input.OfferName) ? "Offer" : $"Offer: {input.OfferName}", Value = FormatCurrency(res.OfferDiscountAmount) });
+                    if (res.ManualDiscountAmount > 0)
+                        fields.Add(new ChallanFieldDto { Key = "discount", Label = "Discount", Value = FormatCurrency(res.ManualDiscountAmount) });
+                }
+                else if (res.DiscountAmount > 0)
                 {
                     fields.Add(new ChallanFieldDto { Key = "discount", Label = "Discount", Value = FormatCurrency(res.DiscountAmount) });
                 }
@@ -399,8 +424,19 @@ namespace WorkNest.Application.Services
                 SendWhtInvoice = q.SendWhtInvoice,
                 WhtRatePercent = whtRate
             };
+            if (q.OfferId.HasValue && q.OfferId.Value > 0)
+            {
+                // The quotation's offer snapshot (never WN_Offers): the stored final deposit is used as it is.
+                input.OfferName = q.OfferName;
+                input.OfferDiscountType = q.OfferDiscountType;
+                input.OfferDiscountValue = q.OfferDiscountValue ?? 0m;
+                input.SecurityDepositIsFinal = true;
+                if (q.FinalSecurityDeposit.HasValue) input.SecurityDeposit = q.FinalSecurityDeposit.Value;
+            }
 
             var calc = Calculate(input);
+            q.OfferFirstCycleDiscount = q.OfferId.HasValue ? calc.OfferDiscountAmount : null;
+            q.ManualFirstCycleDiscount = q.OfferId.HasValue ? calc.ManualDiscountAmount : null;
 
             q.SpaceType = calc.SpaceType;
             q.BillingType = calc.BillingType;
@@ -459,7 +495,7 @@ namespace WorkNest.Application.Services
             }
         }
 
-        public static void ApplyToChallan(ChallanResponseDto c)
+        public static void ApplyToChallan(ChallanResponseDto c, WorkNest.Application.DTOs.Offers.OfferSnapshot? offer = null)
         {
             if (c == null) return;
 
@@ -504,6 +540,16 @@ namespace WorkNest.Application.Services
                 ExplicitBillingType = c.BillingType,
                 Details = c.Details
             };
+            if (offer is { HasOffer: true })
+            {
+                // The booking's offer snapshot (never WN_Offers): the challan is what the customer pays for the first invoice, so it
+                // takes the offer discount the same way (room rent only) and the stored final deposit as it is.
+                input.OfferName = offer.OfferName;
+                input.OfferDiscountType = offer.OfferDiscountType;
+                input.OfferDiscountValue = offer.OfferDiscountValue ?? 0m;
+                input.SecurityDepositIsFinal = true;
+                if (offer.FinalSecurityDeposit.HasValue) input.SecurityDeposit = offer.FinalSecurityDeposit.Value;
+            }
 
             var calc = Calculate(input);
 

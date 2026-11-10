@@ -32,6 +32,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
         public decimal SubTotal { get; set; }
         public decimal DiscountTotal { get; set; }
+        /// <summary>The invoice's offer (script OFFER_01_offers): name and the discount on this invoice. Shown as a note; the rent above is already net of it.</summary>
+        public string? OfferName { get; set; }
+        public decimal OfferDiscountAmount { get; set; }
         public decimal TaxTotal { get; set; }
 
         public decimal VatRate { get; set; } = 0.16m;
@@ -430,6 +433,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         decimal rentOnly = Math.Max(0, totalExclVat - supportCharges);
                         c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Total Rent (exc. tax and support charges):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, rentOnly)).FontColor("#000000"); });
                     }
+
+                    if (data.OfferDiscountAmount > 0)
+                        c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"Offer applied: {data.OfferName} (already deducted from the rent above):").Italic().FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text("- " + FormatCurrency(data.CurrencyCode, data.OfferDiscountAmount)).Italic().FontColor("#000000"); });
 
                     c.Item().Row(r => { r.RelativeItem().AlignRight().Text("Support Services:").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, supportCharges)).FontColor("#000000"); });
                     c.Item().Row(r => { r.RelativeItem().AlignRight().Text($"PST ({taxPercentage:G29}% on Support Services):").FontColor("#000000"); r.ConstantItem(140).PaddingRight(6).AlignRight().Text(FormatCurrency(data.CurrencyCode, totalVat)).FontColor("#000000"); });

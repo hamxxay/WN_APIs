@@ -1,3 +1,4 @@
+using WorkNest.Application.DTOs.Offers;
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.DTOs.SpaceConfig;
 using WorkNest.Application.DTOs.Payment;
@@ -54,7 +55,7 @@ namespace WorkNest.Application.Interfaces
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForBookingAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7");
         Task<IEnumerable<IDictionary<string, object?>>> GetAvailableSpacesForReassignmentAsync(int spaceTypeId, DateTime startOn, DateTime endOn, int excludeBookingId, string? shiftType = "24_7");
         Task<IEnumerable<IDictionary<string, object?>>> GetSmartAvailableSpacesAsync(string categoryCode, DateTime startOn, DateTime endOn, int? capacity = null, string? shiftType = "24_7", int? locationId = null);
-        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null, string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null);
+        Task<IDictionary<string, object?>> InsertBookingAsync(int userId, int spaceId, int pricingId, DateTime startOn, DateTime endOn, string? notes, int? createdById, string? userEmail, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0, decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null, string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null, OfferDto? offer = null, int offerSeats = 1);
         Task<IDictionary<string, object?>> InsertSmartBookingAsync(string userEmail, string categoryCode, DateTime startOn, DateTime endOn, int? capacity, string? notes, int? createdById, string? customerEmail = null, string? customerFirstName = null, string? customerLastName = null, string? customerPhone = null, string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null, string? shiftType = "24_7", int? locationId = null);
         Task UpdateBookingAsync(int id, DateTime? startOn, DateTime? endOn, string? notes, int? updatedById);
         /// <summary>
@@ -121,7 +122,8 @@ namespace WorkNest.Application.Interfaces
             decimal? securityDeposit = null,
             string? offeringType = null,
             decimal? withholdingTaxRate = null,
-            bool? sendWhtInvoice = null
+            bool? sendWhtInvoice = null,
+            OfferSnapshot? offerSnapshot = null
         );
         Task<IEnumerable<IDictionary<string, object?>>> GetOfferingTypesAsync(bool? activeOnly = null, int? locationId = null);
         Task<IDictionary<string, object?>?> GetQuotationByIdAsync(

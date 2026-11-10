@@ -31,6 +31,9 @@ namespace WorkNest.Application.DTOs.Transfer
 
     public class ActiveBookingSummaryDto
     {
+        /// <summary>The booking's offer (script OFFER_01_offers); null without one. The CMS warns before a transfer: the offer does not carry over.</summary>
+        public int? OfferId { get; set; }
+        public string? OfferName { get; set; }
         public int BookingId { get; set; }
         public Guid BookingPublicId { get; set; }
         public string? CustomerName { get; set; }

@@ -1,3 +1,4 @@
+using WorkNest.Application.DTOs.Offers;
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.DTOs.Contact;
 using WorkNest.Application.DTOs.Dashboard;
@@ -253,7 +254,8 @@ namespace WorkNest.Infrastructure.Repositories
             decimal? securityDeposit = null,
             string? offeringType = null,
             decimal? withholdingTaxRate = null,
-            bool? sendWhtInvoice = null)
+            bool? sendWhtInvoice = null,
+            OfferSnapshot? offerSnapshot = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Quotations_Insert", c);
@@ -322,6 +324,10 @@ namespace WorkNest.Infrastructure.Repositories
                 if (withholdingTaxRate.HasValue) upd.Parameters.AddWithValue("@WTR", withholdingTaxRate.Value);
 
                 await upd.ExecuteNonQueryAsync();
+
+                // Offer snapshot (OFFER_01): a separate defensive UPDATE, so the quotation still saves before the script has run.
+                if (offerSnapshot != null && offerSnapshot.HasOffer)
+                    await OfferSnapshotStore.WriteAsync(c, OfferEntity.Quotation, quotationId, offerSnapshot);
 
                 result["DiscountType"] = discountType;
                 result["DiscountAmount"] = discountAmount;
@@ -525,6 +531,12 @@ namespace WorkNest.Infrastructure.Repositories
                     : (quotation.TryGetValue("DiscountAmount", out var daObj) && daObj != null ? Convert.ToDecimal(daObj) : 0m);
                 decimal subtotal = quotation.TryGetValue("SubtotalAmount", out var stObj) && stObj != null ? Convert.ToDecimal(stObj) : 0m;
                 // The booking gets the quotation's WN_WHTaxRate Id only when the quotation has WHT ticked; otherwise no WHT rate.
+                // Q7: the booking copies the quotation's offer snapshot without re-evaluating WN_Offers, EXCEPT when the quotation is past
+                // its ValidUntil day (Pakistan date, QuotationValidity): then the booking has no offer and its deposit is the one without it.
+                var offerSnap = await OfferSnapshotStore.ReadOneAsync(c, OfferEntity.Quotation, quotationId);
+                bool hasOffer = offerSnap?.HasOffer == true;
+                bool offerExpired = hasOffer && quotation.TryGetValue("ValidUntil", out var vuObj) && vuObj is not null && vuObj is not DBNull
+                    && !OfferPricing.QuotationKeepsOffer(Convert.ToDateTime(vuObj), _clock.Today);
                 bool quotationSendsWht = await GetQuotationSendWhtInvoiceAsync(quotationId);
                 var whtObj = WhtIdValue(quotation, "WithholdingTaxRate");
                 decimal? whtRate = quotationSendsWht && whtObj is not null ? Convert.ToDecimal(whtObj) : null;
@@ -538,6 +550,8 @@ namespace WorkNest.Infrastructure.Repositories
                 decimal depositDiscount = SecurityDepositRules.DiscountFraction(discountType,
                     SecurityDepositRules.IsFixedDiscount(discountType) ? discountVal : discountPct, resolvedMonthlyRent);
                 decimal resolvedSecDeposit = SecurityDepositRules.Stored(depositKind, secDeposit, secMonths, resolvedMonthlyRent, depositDiscount);
+                if (hasOffer && !offerExpired) resolvedSecDeposit = offerSnap!.FinalSecurityDeposit ?? resolvedSecDeposit;   // the final deposit, even when 0
+                else if (offerExpired) resolvedSecDeposit = SecurityDepositRules.Amount(secMonths, resolvedMonthlyRent, depositDiscount);   // no offer: months x rent less the manual discount
                 if (resolvedSecDeposit <= 0m) secMonths = 0;
 
                 string syncSql = @"
@@ -588,6 +602,22 @@ namespace WorkNest.Infrastructure.Repositories
                 syncCmd.Parameters.AddWithValue("@BookingId", bookingId);
                 syncCmd.Parameters.AddWithValue("@QuotationId", quotationId);
                 await syncCmd.ExecuteNonQueryAsync();
+
+                if (hasOffer && !offerExpired)
+                    await OfferSnapshotStore.CopyQuotationToBookingAsync(c, quotationId, bookingId);
+                else if (offerExpired)
+                {
+                    // The booking keeps no offer; the deposit records the procedure made from the quotation's (offer-reduced) deposit follow the full one.
+                    await OfferSnapshotStore.ClearAsync(c, OfferEntity.Booking, bookingId);
+                    await using var depCmd = new SqlCommand(@"
+                        UPDATE dbo.WN_SecurityDeposits SET Amount = @SD WHERE BookingId = @BID AND RefId IS NULL AND @SD > 0;
+                        UPDATE dbo.WN_BookingLines SET UnitPrice = CASE WHEN @SDM > 0 THEN @SD / @SDM ELSE @SD END, Quantity = CASE WHEN @SDM > 0 THEN @SDM ELSE 1 END
+                        WHERE BookingId = @BID AND ChargeTypeId = 2 AND @SD > 0;", c);
+                    depCmd.Parameters.AddWithValue("@SD", resolvedSecDeposit);
+                    depCmd.Parameters.AddWithValue("@SDM", secMonths);
+                    depCmd.Parameters.AddWithValue("@BID", bookingId);
+                    await depCmd.ExecuteNonQueryAsync();
+                }
             }
 
             return result;
@@ -752,6 +782,9 @@ SELECT SCOPE_IDENTITY() AS NewId;";
 
             var newIdObj = await cmd.ExecuteScalarAsync();
             int newQuotationId = Convert.ToInt32(newIdObj);
+
+            // The new version carries the source's offer snapshot (its price and space are unchanged); defensive before OFFER_01.
+            await OfferSnapshotStore.CopyQuotationToQuotationAsync(c, quotationId, newQuotationId);
 
             var details = await GetQuotationDetailsAsync(quotationId);
             const string detSql = @"
@@ -1324,7 +1357,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             string? customerCnic = null, string? customerAddress = null, int? customerCityId = null, string? customerNotes = null,
             decimal discountPercentage = 0, string discountType = "Percentage", decimal discountValue = 0,
             decimal? securityDepositOverride = null, int? floorId = null, int? billingPeriodMonths = null, int? securityDepositMonths = null, int? advanceRentMonths = null,
-            string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null)
+            string? shiftType = "24_7", int? capacity = null, decimal? perSeatBasePrice = null, bool sendWhtInvoice = false, decimal? whtRate = null, OfferDto? offer = null, int offerSeats = 1)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Bookings_Insert", c);
@@ -1392,6 +1425,17 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 // checked and forced to 0 for shared spaces / meeting rooms by BookingService. No override.
                 decimal secDepReq = SecurityDepositRules.Amount(secDepM, monthlyRent,
                     SecurityDepositRules.DiscountFraction(discountType, discountValue > 0 ? discountValue : discountPercentage, monthlyRent));
+
+                // Offer (CMS Create Booking only: BookingService passes the offer running now): room rent only, on top of the manual discount;
+                // with "apply to deposit" the deposit is reduced too. The FINAL deposit goes to every place below that holds the deposit.
+                OfferSnapshot? offerSnap = null;
+                if (offer != null)
+                {
+                    var ob = OfferPricing.Breakdown(offer.DiscountType, offer.DiscountValue, offer.ApplyToDeposit, monthlyRent, offerSeats,
+                        OfferPricing.DefaultPerSeatSupportRate, discountType, discountValue > 0 ? discountValue : discountPercentage, secDepM, secDepReq);
+                    offerSnap = OfferPricing.ToSnapshot(offer, ob);
+                    secDepReq = ob.FinalSecurityDeposit;
+                }
                 if (secDepReq <= 0m) secDepM = 0;
 
                 var updateParts = new List<string> {
@@ -1458,6 +1502,25 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 if (sendWhtInvoice && whtRate is > 0) upd.Parameters.AddWithValue("@WHTR", whtRate.Value);
                 await upd.ExecuteNonQueryAsync();
 
+                // The booking's TotalAmount (= the amount of the WN_Payments challan record made below) is one month of rent - discount + deposit:
+                // it takes the offer's one-month discount too (DiscountAmount stays the manual part; if the manual part was cut to keep the
+                // room rent above 0, the cut is added back). Only when the snapshot was saved, so nothing changes before the script has run.
+                decimal offerTotalCut = 0m;
+                if (offerSnap != null && await OfferSnapshotStore.WriteAsync(c, OfferEntity.Booking, bookingId, offerSnap))
+                {
+                    offerTotalCut = (offerSnap.OfferDiscountAmount ?? 0m) + (offerSnap.ManualDiscountAmount ?? discountAmount) - discountAmount;
+                    if (offerTotalCut != 0m)
+                    {
+                        await using var totCmd = new SqlCommand("UPDATE dbo.WN_Bookings SET TotalAmount = CASE WHEN TotalAmount - @Cut < 0 THEN 0 ELSE TotalAmount - @Cut END WHERE Id = @BID AND TotalAmount IS NOT NULL", c);
+                        totCmd.Parameters.Add("@Cut", SqlDbType.Decimal).Value = offerTotalCut;
+                        totCmd.Parameters.Add("@BID", SqlDbType.Int).Value = bookingId;
+                        await totCmd.ExecuteNonQueryAsync();
+                    }
+                    result["OfferId"] = offerSnap.OfferId; result["OfferName"] = offerSnap.OfferName;
+                    result["OfferDiscountAmount"] = offerSnap.OfferDiscountAmount; result["ManualDiscountAmount"] = offerSnap.ManualDiscountAmount;
+                    result["FinalMonthlyRent"] = offerSnap.FinalMonthlyRent; result["FinalSecurityDeposit"] = offerSnap.FinalSecurityDeposit;
+                }
+
                 result["DiscountType"] = discountType;
                 result["DiscountAmount"] = discountAmount;
                 result["AdvanceRentMonths"] = advRentM;
@@ -1469,7 +1532,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 {
                     decimal sub = result.TryGetValue("SubtotalAmount", out var saVal) && saVal is not null ? Convert.ToDecimal(saVal) : 0m;
                     decimal tax = result.TryGetValue("TaxAmount", out var taVal) && taVal is not null ? Convert.ToDecimal(taVal) : 0m;
-                    result["TotalAmount"] = (sub - discountAmount) + tax + secDepReq;
+                    result["TotalAmount"] = (sub - discountAmount) + tax + secDepReq - offerTotalCut;
                 }
 
                 // Ensure WN_Payments entry is created for this booking cycle
