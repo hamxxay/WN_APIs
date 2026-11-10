@@ -138,6 +138,17 @@ namespace WorkNest.Application.Services
             var (deposit, depositMonths) = QuotationDeposit.Of(q);
             request.SecurityDeposit = deposit;
 
+            // Offer (snapshot on the quotation): the deposit above is already the final one. A whole-term offer also discounts the
+            // recurring fee, so the fee is the snapshot's final monthly rent; a first-period offer leaves the recurring fee standard.
+            // One line "Offer: <name>, <plain description>" is added to Schedule A.
+            request.OfferNote = null;
+            if (q.OfferId.HasValue)
+            {
+                request.OfferNote = $"{q.OfferName}, {OfferPricing.Describe(q.OfferDiscountType, q.OfferDiscountValue ?? 0m, q.OfferApplyTo, q.OfferApplyToDeposit == true)}";
+                if (string.Equals(q.OfferApplyTo, OfferPricing.WholeTerm, StringComparison.OrdinalIgnoreCase) && q.FinalMonthlyRent is > 0m)
+                    request.FeeAmount = q.FinalMonthlyRent.Value;
+            }
+
             // 2. Generate Page 1 (Dynamic Schedule & Preamble) via QuestPDF
             string qNum = q.QuotationNumber ?? $"QTN-{q.Id}";
             byte[] page1Pdf = _pdf.GenerateAgreementPdf(request, qNum, depositMonths);

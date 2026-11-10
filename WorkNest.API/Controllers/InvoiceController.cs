@@ -19,6 +19,8 @@ using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
 using Microsoft.AspNetCore.RateLimiting;
+using WorkNest.Application.DTOs.Offers;
+using WorkNest.Infrastructure.Repositories;
 
 namespace WorkNest.API.Controllers
 {
@@ -627,6 +629,8 @@ namespace WorkNest.API.Controllers
             }
 
             dto.OneBillNumber = await _oneBill.GetNumberAsync(id);
+            var pdfOffer = await OfferSnapshotStore.ReadOneAsync(conn, OfferEntity.Invoice, id);
+            if (pdfOffer is { HasOffer: true }) { dto.OfferName = pdfOffer.OfferName; dto.OfferDiscountAmount = pdfOffer.OfferDiscountAmount ?? 0m; }
             return dto;
         }
 
@@ -691,6 +695,8 @@ namespace WorkNest.API.Controllers
                 // Only once the invoice exists on EzPay (the raw column is set as soon as it is being sent).
                 invoice["OneBillNumber"] = await _oneBill.GetNumberAsync(id);
                 invoice["lines"] = lines;
+                var invOffer = await OfferSnapshotStore.ReadOneAsync(conn, OfferEntity.Invoice, id);
+                invoice["OfferId"] = invOffer?.OfferId; invoice["OfferName"] = invOffer?.OfferName; invoice["OfferDiscountAmount"] = invOffer?.OfferDiscountAmount;
                 return Ok(new { isSuccessful = true, data = invoice });
             }
             catch (Exception ex)
@@ -1004,6 +1010,10 @@ namespace WorkNest.API.Controllers
                 updateCmd.Parameters.AddWithValue("@AccountsCoaId", (object?)req.AccountsCoaId ?? (object?)req.RentAccountId ?? DBNull.Value);
                 updateCmd.Parameters.AddWithValue("@DueOn", (object?)req.DueOn ?? DBNull.Value);
                 await updateCmd.ExecuteNonQueryAsync();
+
+                // Offer snapshot of this invoice (first invoice of a booking with an offer): a defensive UPDATE after the invoice exists.
+                if (req.OfferSnapshotForInvoice is { HasOffer: true } invoiceOffer)
+                    await OfferSnapshotStore.WriteAsync(conn, OfferEntity.Invoice, newInvoiceId, invoiceOffer);
 
                 string stInvoiceNumber = invoiceNumber.Replace("INV-", "ST-INV-");
                 decimal stTaxRate = taxTotal > 0 ? 16.00m : 0.00m;
@@ -1354,6 +1364,13 @@ namespace WorkNest.API.Controllers
                             results.Add(row);
                         }
                     }
+                }
+
+                var queueOffers = await OfferSnapshotStore.ReadAsync(conn, OfferEntity.Invoice, results.Select(x => Convert.ToInt32(x["Id"])));
+                foreach (var row in results)
+                {
+                    queueOffers.TryGetValue(Convert.ToInt32(row["Id"]), out var qo);
+                    row["OfferId"] = qo?.OfferId; row["OfferName"] = qo?.OfferName; row["OfferDiscountAmount"] = qo?.OfferDiscountAmount;
                 }
 
                 return Ok(new { isSuccessful = true, data = results });
@@ -1816,6 +1833,9 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
+                // The booking's offer snapshot (never WN_Offers; null before OFFER_01 or without an offer). Both ApplyTo values discount THIS first invoice.
+                var bookingOffer = await OfferSnapshotStore.ReadOneAsync(conn, OfferEntity.Booking, bookingId);
+
                 int contractMonths = (startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays > 20) 
                     ? Math.Max(1, (int)Math.Round((endOn.Value - startOn.Value).TotalDays / 30.4375)) 
                     : 12;
@@ -1843,6 +1863,14 @@ namespace WorkNest.API.Controllers
                     StartOn = startOn,
                     EndOn = endOn
                 };
+
+                if (bookingOffer is { HasOffer: true })
+                {
+                    calcReq.OfferDiscountType = bookingOffer.OfferDiscountType;
+                    calcReq.OfferDiscountValue = bookingOffer.OfferDiscountValue ?? 0m;
+                    calcReq.SecurityDepositIsFinal = true;   // the booking's final deposit, as stored (it may be 0)
+                    if (bookingOffer.FinalSecurityDeposit.HasValue) calcReq.SecurityDeposit = bookingOffer.FinalSecurityDeposit.Value;
+                }
 
                 var calc = WorkNest.Application.Services.InvoiceCalculationEngine.CalculateInvoice(calcReq, _clock.Today);
 
@@ -2000,6 +2028,9 @@ namespace WorkNest.API.Controllers
                             rent = grossAdvanceRent,
                             discount = appliedDiscount + pendingOneTimeDiscount,
                             bookingDiscount = appliedDiscount,
+                            offerName = bookingOffer is { HasOffer: true } ? bookingOffer.OfferName : null,
+                            offerDiscount = calc.OfferDiscount,
+                            manualDiscount = calc.ManualDiscount,
                             oneTimeDiscount = pendingOneTimeDiscount,
                             oneTimeDiscountReason = pendingOneTimeDiscountReason,
                             roomRentExclTax = effectiveRoomRentExclusive,
@@ -2075,6 +2106,16 @@ namespace WorkNest.API.Controllers
                     AccountsCoaId = rentAccountId,
                     Lines = new List<CreateCustomInvoiceLineDto>()
                 };
+                if (bookingOffer is { HasOffer: true })
+                {
+                    dto.OfferSnapshotForInvoice = new OfferSnapshot
+                    {
+                        OfferId = bookingOffer.OfferId, OfferName = bookingOffer.OfferName, OfferDiscountType = bookingOffer.OfferDiscountType,
+                        OfferDiscountValue = bookingOffer.OfferDiscountValue, OfferApplyTo = bookingOffer.OfferApplyTo, OfferApplyToDeposit = bookingOffer.OfferApplyToDeposit,
+                        OfferDiscountAmount = calc.OfferDiscount, ManualDiscountAmount = calc.ManualDiscount,   // on THIS invoice
+                        FinalMonthlyRent = bookingOffer.FinalMonthlyRent, FinalSecurityDeposit = bookingOffer.FinalSecurityDeposit
+                    };
+                }
 
                 if (calc.NetRent > 0)
                 {
@@ -2716,6 +2757,9 @@ namespace WorkNest.API.Controllers
         public int? SecurityReceivedId { get; set; }
         public int? AccountsCoaId { get; set; }
         public List<CreateCustomInvoiceLineDto> Lines { get; set; } = new();
+        /// <summary>Server-set only (the first invoice of a booking with an offer): never read from the request body.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public OfferSnapshot? OfferSnapshotForInvoice { get; set; }
     }
 
     public class CreateCustomInvoiceLineDto

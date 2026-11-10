@@ -335,6 +335,11 @@ namespace WorkNest.Infrastructure.Repositories
                 });
             }
 
+            await reader.CloseAsync();
+            var offers = await OfferSnapshotStore.ReadAsync(conn, WorkNest.Application.DTOs.Offers.OfferEntity.Booking, list.Select(b => b.BookingId));
+            foreach (var b in list)
+                if (offers.TryGetValue(b.BookingId, out var o)) { b.OfferId = o.OfferId; b.OfferName = o.OfferName; }
+
             return list;
         }
     

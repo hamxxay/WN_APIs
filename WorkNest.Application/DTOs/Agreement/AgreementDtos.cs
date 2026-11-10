@@ -4,6 +4,10 @@ namespace WorkNest.Application.DTOs.Agreement
 {
     public class SendAgreementRequest
     {
+        /// <summary>Server-set from the quotation's offer snapshot (never read from the body): one line printed on page 1, e.g. "Spring offer: 15% off room rent on the first invoice".</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public string? OfferNote { get; set; }
+
         public int QuotationId { get; set; }
         public string EntityType { get; set; } = "Individual"; // "Individual", "Company", "AOP"
         public string? FullName { get; set; }

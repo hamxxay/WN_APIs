@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using WorkNest.Application.DTOs.Offers;
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
@@ -15,9 +16,11 @@ namespace WorkNest.Application.Services
         private readonly IPdfService _pdf;
 
         private readonly IBusinessClock _clock;
+        private readonly IOffersRepository? _offers;
 
-        public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf, IBusinessClock clock)
+        public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf, IBusinessClock clock, IOffersRepository? offers = null)
         {
+            _offers = offers;
             _clock = clock;
             _db = db;
             _email = email;
@@ -105,46 +108,31 @@ namespace WorkNest.Application.Services
             var discountType = string.IsNullOrWhiteSpace(request.DiscountType) ? "Percentage" : request.DiscountType;
             var discountValue = request.DiscountValue > 0 ? request.DiscountValue : request.DiscountPercentage;
 
-            // Lookup offering type dynamically from dbo.WN_OfferingType
+            // Offering type cap from dbo.WN_OfferingType: the row of this id at the space's location, else the same id at any
+            // location (Q8). No row = no cap: a manual discount cannot be checked and is refused. Nothing is hardcoded.
+            int? spaceLocationId = await _db.GetSpaceLocationIdAsync(request.SpaceId);
             var offeringTypes = (await _db.GetOfferingTypesAsync()).ToList();
-            IDictionary<string, object?>? matchedOt = null;
-            if (request.OfferingTypeId.HasValue && request.OfferingTypeId.Value > 0)
-            {
-                matchedOt = offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == request.OfferingTypeId.Value);
-            }
-            if (matchedOt == null && !string.IsNullOrWhiteSpace(request.OfferingType))
-            {
-                if (int.TryParse(request.OfferingType, out int parsedOtId))
-                {
-                    matchedOt = offeringTypes.FirstOrDefault(o => Convert.ToInt32(o["Id"]) == parsedOtId);
-                }
-                if (matchedOt == null)
-                {
-                    matchedOt = offeringTypes.FirstOrDefault(o => string.Equals(o["Description"]?.ToString(), request.OfferingType, StringComparison.OrdinalIgnoreCase));
-                }
-                if (matchedOt == null)
-                {
-                    matchedOt = offeringTypes.FirstOrDefault(o => (o["Description"]?.ToString() ?? "").StartsWith(request.OfferingType, StringComparison.OrdinalIgnoreCase));
-                }
-            }
-            if (matchedOt == null && offeringTypes.Any())
-            {
-                matchedOt = offeringTypes.First();
-            }
+            var matchedOt = OfferingTypeLookup.Find(offeringTypes, request.OfferingTypeId, request.OfferingType, spaceLocationId);
+            decimal? offeringCap = OfferingTypeLookup.CapOf(matchedOt);
+            if (offeringCap == null && discountValue > 0)
+                throw new ArgumentException(OfferingTypeLookup.NotSetUpMessage);
 
-            int resolvedOfferingTypeId = matchedOt != null ? Convert.ToInt32(matchedOt["Id"]) : 1;
-            decimal maxDiscountCap = matchedOt != null ? Convert.ToDecimal(matchedOt["DiscountCap"]) : 10.00m;
+            int resolvedOfferingTypeId = matchedOt != null ? Convert.ToInt32(matchedOt["Id"])
+                : (request.OfferingTypeId is > 0 ? request.OfferingTypeId.Value : (int.TryParse(request.OfferingType, out var reqOtId) && reqOtId > 0 ? reqOtId : 1));
+            decimal baseCap = offeringCap ?? 0m;
+            decimal maxDiscountCap = baseCap;
 
             // The cap protects a floor price per seat: standard rate minus the cap (35,000 - 10% = 31,500).
             // When the base price is raised above the standard rate, the cap widens so the discounted
             // price can come down to that same floor (40,000 -> up to 21.25%), never below it.
-            if (spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
+            if (offeringCap != null && spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
             {
                 decimal floorPerSeat = spaceDetails.Monthly * (1 - maxDiscountCap / 100m);
                 maxDiscountCap = Math.Round((perSeatBasePrice - floorPerSeat) / perSeatBasePrice * 100m, 2, MidpointRounding.ToZero);
             }
             string offeringTypeDbValue = resolvedOfferingTypeId.ToString();
 
+            // Q10: the cap checks the MANUAL discount only (an offer is never passed in here).
             if (discountType == "Percentage" || discountType == "Percent")
             {
                 if (discountValue > maxDiscountCap)
@@ -154,9 +142,8 @@ namespace WorkNest.Application.Services
             {
                 decimal maxAllowedFixed = Math.Round(monthlyBasePrice * (maxDiscountCap / 100m), 2);
                 // Raised base price: allow exactly (base price - floor) per seat, not the rounded percentage.
-                if (spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
+                if (offeringCap != null && spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
                 {
-                    decimal baseCap = matchedOt != null ? Convert.ToDecimal(matchedOt["DiscountCap"]) : 10.00m;
                     decimal floorPerSeat = spaceDetails.Monthly * (1 - baseCap / 100m);
                     maxAllowedFixed = Math.Round((perSeatBasePrice - floorPerSeat) * capacity, 2);
                 }
@@ -177,6 +164,23 @@ namespace WorkNest.Application.Services
             int securityDepositMonths = SecurityDepositRules.ResolveMonths(depositKind, request.SecurityDepositMonths);
             decimal securityDeposit = SecurityDepositRules.Amount(securityDepositMonths, monthlyBasePrice,
                 SecurityDepositRules.DiscountFraction(discountType, discountValue, monthlyBasePrice));
+
+            // Offers: the offer running NOW (IBusinessClock, Pakistan time) for the space's location, never anything the client sent. It
+            // discounts room rent only (monthly rent less the service charge) on top of the manual discount; with "apply to deposit" the
+            // deposit (with the manual mirror above) is reduced too. Staff quotations for private offices / shared spaces only. The
+            // snapshot columns are written by InsertQuotationAsync; the deposit stored and printed is the FINAL deposit.
+            OfferSnapshot? offerSnapshot = null;
+            if (spaceDetails.Category != "MeetingRoom" && _offers != null)
+            {
+                var running = await _offers.GetRunningAsync(spaceLocationId, _clock.Now);
+                if (running != null)
+                {
+                    var b = OfferPricing.Breakdown(running.DiscountType, running.DiscountValue, running.ApplyToDeposit, monthlyBasePrice, capacity,
+                        OfferPricing.DefaultPerSeatSupportRate, discountType, discountValue, securityDepositMonths, securityDeposit);
+                    offerSnapshot = OfferPricing.ToSnapshot(running, b);
+                    securityDeposit = b.FinalSecurityDeposit;
+                }
+            }
 
             string spaceTypeName = !string.IsNullOrWhiteSpace(spaceDetails.SpaceTypeName)
                 ? spaceDetails.SpaceTypeName.Trim()
@@ -333,7 +337,8 @@ namespace WorkNest.Application.Services
                 securityDeposit,
                 offeringTypeDbValue,
                 null,   // WHT is chosen on the Initial Invoice Preview, not the quotation:
-                null    // WN_Quotations.WHTaxId / SendWhtInvoice are no longer written
+                null,   // WN_Quotations.WHTaxId / SendWhtInvoice are no longer written
+                offerSnapshot
             );
 
             if (result.TryGetValue("ErrorMessage", out var err) && err is not null && !string.IsNullOrWhiteSpace(err.ToString()))
@@ -346,6 +351,20 @@ namespace WorkNest.Application.Services
 
             var response = await GetQuotationByIdAsync(quotationId);
             return response ?? throw new InvalidOperationException("Failed to retrieve generated quotation.");
+        }
+
+        /// <summary>The quotation's offer snapshot columns (when the offers script has run and the quotation has an offer) onto the response. Never fails the read.</summary>
+        private async Task ApplyOfferSnapshotAsync(QuotationResponse dto)
+        {
+            if (_offers == null) return;
+            try
+            {
+                if (!(await _offers.GetSnapshotsAsync(OfferEntity.Quotation, new[] { dto.Id })).TryGetValue(dto.Id, out var s) || !s.HasOffer) return;
+                dto.OfferId = s.OfferId; dto.OfferName = s.OfferName; dto.OfferDiscountType = s.OfferDiscountType; dto.OfferDiscountValue = s.OfferDiscountValue;
+                dto.OfferApplyTo = s.OfferApplyTo; dto.OfferApplyToDeposit = s.OfferApplyToDeposit; dto.OfferDiscountAmount = s.OfferDiscountAmount;
+                dto.ManualDiscountAmount = s.ManualDiscountAmount; dto.FinalMonthlyRent = s.FinalMonthlyRent; dto.FinalSecurityDeposit = s.FinalSecurityDeposit;
+            }
+            catch (Exception) { /* offers are display data here: a read problem means "no offer shown" */ }
         }
 
         public async Task<QuotationResponse?> GetQuotationByIdAsync(int id)
@@ -463,6 +482,7 @@ namespace WorkNest.Application.Services
                 : await _db.GetQuotationSendWhtInvoiceAsync(dto.Id);
             dto.WhtRatePercent = dto.SendWhtInvoice ? await _db.ResolveWhtRatePercentAsync(dto.WithholdingTaxRate) : 0m;
 
+            await ApplyOfferSnapshotAsync(dto);
             ChallanCalculationService.ApplyToQuotation(dto);
 
             // Sent and still valid (ValidUntil is the last valid day, a Pakistan date): an expired quotation can no longer

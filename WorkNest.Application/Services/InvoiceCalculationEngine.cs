@@ -36,6 +36,15 @@ namespace WorkNest.Application.Services
         public string? ExplicitBillingType { get; set; }
         public bool DisableProration { get; set; } = false;
         public bool IsQuotation { get; set; } = false;
+        /// <summary>
+        /// Offer snapshot of the booking / quotation (WN_Offers; null / 0 = no offer). The offer discounts ROOM RENT only (monthly rent
+        /// less the service charge) by <see cref="OfferPricing.InvoiceOfferDiscount"/> over the invoice's rent months, is added to the
+        /// manual discount and is part of <see cref="InvoiceCalculationResult.Discount"/>. Private offices / shared spaces only.
+        /// </summary>
+        public string? OfferDiscountType { get; set; }
+        public decimal OfferDiscountValue { get; set; }
+        /// <summary>True when <see cref="SecurityDeposit"/> is the final stored deposit of a booking / quotation with an offer: used as it is, even when 0.</summary>
+        public bool SecurityDepositIsFinal { get; set; }
     }
 
     public class InvoiceCalculationResult
@@ -58,7 +67,12 @@ namespace WorkNest.Application.Services
 
         public decimal Rent { get; set; }
         public decimal Discount { get; set; }
+        /// <summary>Total discount on the invoice = <see cref="ManualDiscount"/> + <see cref="OfferDiscount"/> (the invoice's DiscountTotal).</summary>
         public decimal NetRent => Math.Max(0m, Rent - Discount);
+        /// <summary>The offer's part of <see cref="Discount"/> (0 without an offer).</summary>
+        public decimal OfferDiscount { get; set; }
+        /// <summary>The manual (booking / quotation) discount part of <see cref="Discount"/>.</summary>
+        public decimal ManualDiscount { get; set; }
 
         public decimal ServiceCharge { get; set; }
         public decimal Tax { get; set; }
@@ -137,6 +151,7 @@ namespace WorkNest.Application.Services
                         discount = Round2(Math.Min(request.DiscountValue, result.Rent));
                 }
                 result.Discount = discount;
+                result.ManualDiscount = discount;
 
                 decimal discountedBase = result.NetRent;
                 result.ServiceCharge = Round2(discountedBase * (chargeRate / 100.0m));
@@ -244,19 +259,36 @@ namespace WorkNest.Application.Services
                     }
                 }
             }
-            result.Discount = discountAmount;
 
             // Support services: PKR 2,000 (per-seat support rate) × Capacity × Billing Months
             decimal perSeatSupportRate = request.PerSeatSupportRate > 0 ? request.PerSeatSupportRate : 2000.00m;
             result.ServiceCharge = Round2(perSeatSupportRate * capacity * billingMonths);
+
+            // Offer (never on the service charge): room rent per month = monthly rent - service charge per month; the discount covers
+            // this invoice's rent months (stub fraction + whole months). Offer + manual never take the room rent below 0: manual first.
+            decimal manualDiscount = discountAmount;
+            decimal offerDiscount = 0m;
+            if (request.OfferDiscountValue > 0m && !string.IsNullOrWhiteSpace(request.OfferDiscountType))
+            {
+                decimal roomRentPerMonth = OfferPricing.RoomRentPerMonth(result.MonthlyRent, capacity, perSeatSupportRate);
+                offerDiscount = OfferPricing.InvoiceOfferDiscount(request.OfferDiscountType, request.OfferDiscountValue, roomRentPerMonth, effectiveMonths);
+                if (offerDiscount > 0m)
+                    (manualDiscount, offerDiscount) = OfferPricing.ClampDiscounts(Math.Max(0m, result.Rent - result.ServiceCharge), manualDiscount, offerDiscount);
+            }
+            result.ManualDiscount = manualDiscount;
+            result.OfferDiscount = offerDiscount;
+            result.Discount = manualDiscount + offerDiscount;
+
             // Tax: 16% on service charge only
             result.Tax = Round2(result.ServiceCharge * (taxRate / 100.0m));
 
             // Security Deposit (never prorated), SecurityDepositRules: the stored amount; a stored 0 with months above 0
             // on a private office = months x monthly rent less the rent's discount %; otherwise none (no default months).
             var depositKind = result.SpaceType == "PrivateRoom" ? DepositSpaceKind.PrivateOffice : DepositSpaceKind.SharedSpace;
-            decimal deposit = SecurityDepositRules.Stored(depositKind, request.SecurityDeposit, request.SecurityDepositMonths,
-                result.MonthlyRent, discountPct / 100.0m);
+            decimal deposit = request.SecurityDepositIsFinal
+                ? Round2(Math.Max(0m, request.SecurityDeposit))   // a booking / quotation with an offer: its final deposit, as stored
+                : SecurityDepositRules.Stored(depositKind, request.SecurityDeposit, request.SecurityDepositMonths,
+                    result.MonthlyRent, discountPct / 100.0m);
             if (request.SecurityDeposit > 0 || deposit <= 0)
             {
                 result.DepositBase = deposit;

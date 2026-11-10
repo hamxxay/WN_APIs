@@ -83,6 +83,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             };
             string? deposit = SecurityDepositText(req.SecurityDeposit, securityDepositMonths);
             if (deposit != null) rows.Add(new(SecurityDepositLabel, deposit));
+            if (!string.IsNullOrWhiteSpace(req.OfferNote)) rows.Add(new("Offer", req.OfferNote!));
             rows.Add(new("Designated Operating Hours", OperatingHoursText(req.OperatingHours), "Contact Number", req.PhoneNumber ?? "-"));
             return rows;
         }
