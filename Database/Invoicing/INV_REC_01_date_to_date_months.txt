@@ -1,0 +1,120 @@
+-- =====================================================================================================================
+-- INV_REC_01: recurring invoices charge whole months for date-to-date periods.
+--
+-- The API bills recurring periods from the contract start date (BillingPeriods.cs: 15 Aug-14 Sep, 15 Sep-14 Oct ...).
+-- dbo.WN_Invoice_CreateRecurring assumed every period ends on a calendar month end: it counted the calendar months the
+-- period touches and took the first one as part of a month, so 15 Aug-14 Sep (one month) was charged as 1.5 months
+-- with Qty 2 (INV-REC-47-20260815: 120,000 for an 80,000 room).
+--
+-- This script does NOT replace the procedure. It reads it from THIS database and adds one block just before
+--     SET @BillingPeriodMonths = @SpanMonths;
+-- For a period that starts after the 1st and does NOT end on a month end (date to date):
+--   * whole months when the day after the period is that many months after its start (within 3 days, for short
+--     months: 31 Jan-27 Feb and 28 Feb-30 Mar are one month each) -> 15 Aug-14 Sep = 1 month, Qty 1;
+--   * otherwise (a last period cut short at the contract end) whole months plus the remaining days / 30.
+-- Periods that start on the 1st or end on a month end (calendar and prorated ones) are charged exactly as before.
+--
+-- Invoices already made are not changed: find them with the query at the end of this file.
+--
+-- Safe to run: if the line is not found exactly once the script stops with an error and changes nothing; a procedure
+-- that already has this block is left alone. The first result grid shows the procedure as it was: save it as your backup.
+-- Run on the test database (SAC400) and on live.
+-- =====================================================================================================================
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Name SYSNAME = N'WN_Invoice_CreateRecurring';
+DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name)); -- SOURCE
+DECLARE @Anchor NVARCHAR(100) = N'SET @BillingPeriodMonths = @SpanMonths;';
+DECLARE @Block NVARCHAR(MAX) = N'-- INV_REC_01: a date-to-date period (contract-start anchored, BillingPeriods.cs) is whole months, not calendar months.
+        IF DAY(@BillingPeriodStart) > 1 AND CAST(@BillingPeriodEnd AS DATE) <> EOMONTH(@BillingPeriodEnd)
+        BEGIN
+            DECLARE @RecStart DATE = CAST(@BillingPeriodStart AS DATE), @RecNext DATE = DATEADD(DAY, 1, CAST(@BillingPeriodEnd AS DATE));
+            DECLARE @RecWhole INT = DATEDIFF(MONTH, @RecStart, @RecNext);
+            IF @RecWhole >= 1 AND ABS(DATEDIFF(DAY, DATEADD(MONTH, @RecWhole, @RecStart), @RecNext)) <= 3
+            BEGIN
+                SET @EffectiveMonths = @RecWhole;
+                SET @SpanMonths = @RecWhole;
+            END
+            ELSE
+            BEGIN
+                WHILE @RecWhole > 0 AND DATEADD(MONTH, @RecWhole, @RecStart) > @RecNext SET @RecWhole = @RecWhole - 1;
+                IF @RecWhole < 0 SET @RecWhole = 0;
+                SET @EffectiveMonths = @RecWhole + CAST(DATEDIFF(DAY, DATEADD(MONTH, @RecWhole, @RecStart), @RecNext) AS DECIMAL(18,6)) / 30.0;
+                SET @SpanMonths = CASE WHEN CEILING(@EffectiveMonths) < 1 THEN 1 ELSE CAST(CEILING(@EffectiveMonths) AS INT) END;
+            END
+        END;
+
+        ';
+DECLARE @Sql NVARCHAR(MAX), @Pos INT, @Found INT, @Msg NVARCHAR(600);
+
+-- Backup: save this result before going on
+SELECT @Name AS [Procedure], @Old AS CurrentDefinition;
+
+IF @Old IS NULL
+BEGIN
+    SET @Msg = N'dbo.' + @Name + N' is not on this database. Nothing was changed.';
+    THROW 50020, @Msg, 1;
+END
+
+IF CHARINDEX(N'INV_REC_01', @Old) > 0
+    PRINT N'dbo.' + @Name + N' already has INV_REC_01: left alone.';
+ELSE
+BEGIN
+    -- The real header: the first PROCEDURE on a line that is not a comment (this procedure starts with a comment
+    -- line "-- 10. CREATE OR ALTER PROCEDURE: dbo.WN_Invoice_CreateRecurring").
+    DECLARE @LineStart INT;
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Old);
+    WHILE @Pos > 0
+    BEGIN
+        SET @LineStart = LEN(LEFT(@Old, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Old, @Pos))) + 2;
+        IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Old, @Pos))) = 0 SET @LineStart = 1;
+        IF LEFT(LTRIM(SUBSTRING(@Old, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Old, @Pos + 1);
+    END
+    IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Old, @Pos, 80)) = 0
+    BEGIN
+        SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+        THROW 50021, @Msg, 1;
+    END
+    -- The block needs the variables it changes; stop when this is an older version of the procedure.
+    IF CHARINDEX(N'@EffectiveMonths', @Old) = 0 OR CHARINDEX(N'DECLARE @SpanMonths', @Old) = 0
+    BEGIN
+        SET @Msg = @Name + N': this version has no @EffectiveMonths / @SpanMonths. Nothing was changed.';
+        THROW 50022, @Msg, 1;
+    END
+    SET @Found = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @Anchor, N''))) / DATALENGTH(@Anchor);
+    IF @Found <> 1
+    BEGIN
+        SET @Msg = CONCAT(@Name, N': expected "', @Anchor, N'" once but found it ', @Found, N' times. Nothing was changed.');
+        THROW 50023, @Msg, 1;
+    END
+
+    -- The block is inserted after the header, so the header position @Pos is unchanged.
+    SET @Sql = N'CREATE OR ALTER ' + SUBSTRING(REPLACE(@Old, @Anchor, @Block + @Anchor), @Pos, LEN(@Old) + LEN(@Block) + 10);
+
+    -- APPLY START
+    BEGIN TRANSACTION;
+    EXEC sys.sp_executesql @Sql;
+    COMMIT TRANSACTION;
+    PRINT N'dbo.' + @Name + N': updated.';
+    -- APPLY END
+END
+
+-- Result: Has_INV_REC_01 should be 1
+SELECT @Name AS [Procedure],
+       CASE WHEN CHARINDEX(N'INV_REC_01', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) > 0 THEN 1 ELSE 0 END AS Has_INV_REC_01;
+
+-- Recurring invoices already made for date-to-date periods (read-only). MonthsCharged above the real number of months
+-- (1.5 for a one-month period) means the invoice was overcharged and needs correcting.
+SELECT i.InvoiceNumber, i.BookingId, CAST(i.BillingPeriodStart AS DATE) AS PeriodStart, CAST(i.BillingPeriodEnd AS DATE) AS PeriodEnd,
+       i.SubTotal, b.MonthlyRent, CAST(i.SubTotal / NULLIF(b.MonthlyRent, 0) AS DECIMAL(9,3)) AS MonthsCharged, i.StatusId, i.PaidTotal
+  FROM dbo.WN_Invoices i JOIN dbo.WN_Bookings b ON b.Id = i.BookingId
+ WHERE i.InvoiceNumber LIKE N'INV-REC-%'
+   AND DAY(i.BillingPeriodStart) > 1
+   AND CAST(i.BillingPeriodEnd AS DATE) <> EOMONTH(i.BillingPeriodEnd)
+   AND ISNULL(i.StatusId, 0) <> 40
+ ORDER BY i.BillingPeriodStart DESC;
