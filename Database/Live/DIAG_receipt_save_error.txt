@@ -1,0 +1,37 @@
+-- =====================================================================================================================
+-- DIAG: "An unexpected error occurred" when saving a receipt. Shows the REAL database error. Changes nothing:
+-- the test save runs inside a transaction that is always rolled back.
+-- Put the invoice number and the amount below, run the whole file on live, and send the result grids + Messages tab.
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT OFF;
+DECLARE @InvoiceNumber NVARCHAR(50)  = N'PUT-INVOICE-NUMBER-HERE';
+DECLARE @Amount        DECIMAL(18,2) = 60000.00;
+
+-- 1. Unique indexes on the receipts table (only UQ_WN_FeeReceipts_Code and UQ_WN_FeeReceipts_InvoiceMonth_Active
+--    "WHERE Status = 1 AND MonthNo IS NOT NULL" should be here).
+SELECT i.name, i.is_unique, i.filter_definition,
+       STUFF((SELECT N', ' + c.name FROM sys.index_columns ic JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+               WHERE ic.object_id = i.object_id AND ic.index_id = i.index_id ORDER BY ic.key_ordinal FOR XML PATH('')), 1, 2, N'') AS Columns
+  FROM sys.indexes i
+ WHERE i.object_id = OBJECT_ID(N'dbo.WN_FeeReceipts') AND i.is_unique = 1;
+
+-- 2. The invoice and its active receipts.
+DECLARE @Guid UNIQUEIDENTIFIER = (SELECT TOP 1 PublicId FROM dbo.WN_Invoices WHERE InvoiceNumber = @InvoiceNumber);
+SELECT InvoiceNumber, GrandTotal, PaidTotal, WHTAmount, StatusId, ApprovalStatus FROM dbo.WN_Invoices WHERE PublicId = @Guid;
+SELECT Id, Code, TotalAmount, PreviousPaid, BalanceAfter, MonthNo, MonthCount, Status FROM dbo.WN_FeeReceipts WHERE InvoiceIdGUID = @Guid ORDER BY Id;
+
+-- 3. The same save, rolled back: the Messages tab / last grid shows the real error.
+DECLARE @UserId INT = (SELECT TOP 1 Id FROM dbo.WN_Users ORDER BY Id);
+BEGIN TRANSACTION;
+BEGIN TRY
+    EXEC dbo.WN_FeeReceipts_Insert
+        @InvoiceIdGUID = @Guid, @PaymentType = 'Cash', @ReceiptDate = NULL, @Remarks = N'DIAG test (rolled back)',
+        @CreatedById = @UserId, @DepositorName = N'Diag Test', @DepositorCNIC = '11111-1111111-1', @Amount = @Amount;
+    SELECT N'The save worked (and was rolled back): the problem is not in the database.' AS Result;
+END TRY
+BEGIN CATCH
+    SELECT N'REAL ERROR' AS Result, ERROR_NUMBER() AS Number, ERROR_MESSAGE() AS Message, ERROR_PROCEDURE() AS [Procedure], ERROR_LINE() AS Line;
+END CATCH;
+IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+SELECT N'Rolled back: nothing was saved.' AS Note, @@TRANCOUNT AS OpenTransactions;
