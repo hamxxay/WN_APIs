@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\WorkNest.API\WorkNest.API.csproj" />
     <ProjectReference Include="..\WorkNest.Infrastructure\WorkNest.Infrastructure.csproj" />
     <ProjectReference Include="..\WorkNest.Application\WorkNest.Application.csproj" />
     <ProjectReference Include="..\WorkNest.Domain\WorkNest.Domain.csproj" />
