@@ -6430,6 +6430,26 @@ END";
         }
 
         /// <summary>Returns the procedure's validation message (RAISERROR) as an error instead of throwing.</summary>
+        public async Task<(bool Ok, string? Error)> ExtendBookingDbAsync(int bookingId, DateTime newEndDate, string updatedBy, string? remarks)
+        {
+            try
+            {
+                await using var c = await Open();
+                await using var cmd = SP("dbo.WN_Bookings_Extend", c);
+                cmd.Parameters.AddWithValue("@BookingId", bookingId);
+                cmd.Parameters.Add("@NewEndDate", SqlDbType.Date).Value = newEndDate.Date;
+                cmd.Parameters.Add("@UpdatedBy", SqlDbType.NVarChar, 200).Value = updatedBy;
+                cmd.Parameters.Add("@Remarks", SqlDbType.NVarChar, 500).Value = (object?)remarks ?? DBNull.Value;
+                await cmd.ExecuteNonQueryAsync();
+                return (true, null);
+            }
+            catch (SqlException ex) when (ex.Class == 16)
+            {
+                return (false, ex.Message); // e.g. "New end date must be after the current end date."
+            }
+        }
+
+        /// <summary>Returns the procedure's validation message (RAISERROR) as an error instead of throwing.</summary>
         public async Task<(bool Ok, string? Error)> ExtendChallanValidityDbAsync(int bookingId, DateTime newExpiryDate, string updatedBy, string? remarks)
         {
             try

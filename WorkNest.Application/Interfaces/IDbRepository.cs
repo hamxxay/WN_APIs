@@ -502,6 +502,9 @@ namespace WorkNest.Application.Interfaces
         // --- dbo.OrderStatus (status lookup by description) ---
         Task<IReadOnlyDictionary<int, string>> GetOrderStatusesDbAsync();
 
+        /// <summary>Extends a booking's contract end date (dbo.WN_Bookings_Extend); the procedure's validation message is returned as the error.</summary>
+        Task<(bool Ok, string? Error)> ExtendBookingDbAsync(int bookingId, DateTime newEndDate, string updatedBy, string? remarks);
+
         // --- Challan Validity Extension (existing WN_Challan_* procedures) ---
         Task<IDictionary<string, object?>?> SearchChallanDbAsync(string query);
         Task<(bool Ok, string? Error)> ExtendChallanValidityDbAsync(int bookingId, DateTime newExpiryDate, string updatedBy, string? remarks);

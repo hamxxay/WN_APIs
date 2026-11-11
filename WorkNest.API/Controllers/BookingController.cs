@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WorkNest.Application.DTOs.Booking;
 using WorkNest.Application.DTOs.Lists;
@@ -288,6 +288,27 @@ namespace WorkNest.API.Controllers
             var id = booking.TryGetValue("Id", out var bid) ? Convert.ToInt32(bid) : 0;
             var result = await _bookings.UpdateBookingAsync(id, request, null);
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
+
+        /// <summary>
+        /// Extends the booking's contract end date. The extra period is billed by the normal recurring-invoice
+        /// automation (it bills cycle by cycle until the booking's end date). Logged in WN_BookingExtensionLog.
+        /// </summary>
+        [HttpPost("api/booking/{id:int}/extend")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        public async Task<IActionResult> Extend(int id, [FromBody] BookingExtendRequest request)
+        {
+            if (id <= 0 || request == null) return BadRequest(ApiResponse.Fail("Booking is required."));
+            if (!DateTime.TryParse(request.NewEndDate, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var newEnd))
+                return BadRequest(ApiResponse.Fail("Choose a valid new end date."));
+            var remarks = string.IsNullOrWhiteSpace(request.Remarks) ? null : request.Remarks.Trim();
+            if (remarks == null || remarks.Length < 3) return BadRequest(ApiResponse.Fail("Enter a reason for the extension."));
+            if (remarks.Length > 500) remarks = remarks[..500];
+
+            var user = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? User.Identity?.Name ?? "unknown";
+            var (ok, error) = await _db.ExtendBookingDbAsync(id, newEnd.Date, user, remarks);
+            if (!ok) return BadRequest(ApiResponse.Fail(error ?? "Could not extend the booking."));
+            return Ok(ApiResponse.Ok(new { bookingId = id, newEndDate = newEnd.Date }, "Booking extended. The extra period will be billed by the recurring invoices as usual."));
         }
 
         [HttpPatch("api/booking/{id:int}/cancel")]

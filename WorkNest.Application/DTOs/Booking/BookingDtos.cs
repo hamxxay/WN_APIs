@@ -176,6 +176,15 @@ namespace WorkNest.Application.DTOs.Booking
         public byte StatusId { get; set; }
     }
 
+    /// <summary>Body of POST api/booking/{id}/extend ("Extend Booking" in the Booking Details popup).</summary>
+    public class BookingExtendRequest
+    {
+        /// <summary>New contract end date (yyyy-MM-dd); must be after the current end date.</summary>
+        public string NewEndDate { get; set; } = string.Empty;
+        /// <summary>Reason for the extension (required).</summary>
+        public string? Remarks { get; set; }
+    }
+
     public class BookingUpdateRequest
     {
         public DateTime? StartDateTime { get; set; }
