@@ -1,0 +1,75 @@
+-- =====================================================================================================================
+-- FR_04 (LIVE and test): fee receipts cannot be saved: "An unexpected error occurred".
+--
+-- Cause: dbo.WN_FeeReceipts_PostVoucher (posts each receipt's voucher) was replaced on 11 Nov 2026 with a version that
+-- calls dbo.Ledgers_Insert with @TransDate and without @ProjectId. Ledgers_Insert on this database has no @TransDate and
+-- needs @ProjectId, so every receipt fails with error 201 "Procedure or function 'Ledgers_Insert' expects parameter
+-- ... which was not supplied" and nothing is saved.
+--
+-- Fix: PATCH, not replace. In its Ledgers_Insert calls only, "@TransDate = @ReceiptTransDateTime," becomes
+-- "@ProjectId = NULL," (as the version that worked on live, LIVE_RC02_RC04_SAFE). Everything else in the procedure stays
+-- (the voucher itself keeps its date). If the procedure is not as expected the script stops and changes nothing.
+-- Safe to run again. The first result grid shows the procedure as it was: save it as your backup.
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Name SYSNAME = N'WN_FeeReceipts_PostVoucher';
+DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name));
+DECLARE @Bad NVARCHAR(200) = N'@TransDate                   = @ReceiptTransDateTime,';
+DECLARE @Good NVARCHAR(200) = N'@ProjectId                   = NULL, -- FR_04';
+DECLARE @Calls INT, @Found INT, @Sql NVARCHAR(MAX), @Pos INT, @LineStart INT, @Msg NVARCHAR(600);
+
+-- Backup: save this result before going on
+SELECT @Name AS [Procedure], @Old AS CurrentDefinition;
+
+IF @Old IS NULL
+BEGIN
+    SET @Msg = N'dbo.' + @Name + N' is not on this database. Nothing was changed.';
+    THROW 50040, @Msg, 1;
+END
+
+IF CHARINDEX(N'FR_04', @Old) > 0 OR (CHARINDEX(N'@ProjectId', @Old) > 0 AND CHARINDEX(@Bad, @Old) = 0)
+    PRINT N'dbo.' + @Name + N' already passes @ProjectId to Ledgers_Insert: left alone.';
+ELSE
+BEGIN
+    SET @Calls = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, N'EXEC dbo.Ledgers_Insert', N''))) / DATALENGTH(N'EXEC dbo.Ledgers_Insert');
+    SET @Found = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @Bad, N''))) / DATALENGTH(@Bad);
+    IF @Calls < 1 OR @Found <> @Calls
+    BEGIN
+        SET @Msg = CONCAT(@Name, N': expected the @TransDate line once in each of its Ledgers_Insert calls, but found ', @Found,
+                          N' of ', @Calls, N' calls. Nothing was changed. Send the backup grid to the developer.');
+        THROW 50041, @Msg, 1;
+    END
+
+    SET @Sql = REPLACE(@Old, @Bad, @Good);
+
+    -- The real header: the first PROCEDURE on a line that is not a comment.
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Sql);
+    WHILE @Pos > 0
+    BEGIN
+        SET @LineStart = LEN(LEFT(@Sql, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) + 2;
+        IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) = 0 SET @LineStart = 1;
+        IF LEFT(LTRIM(SUBSTRING(@Sql, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Sql, @Pos + 1);
+    END
+    IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Sql, @Pos, 80)) = 0
+    BEGIN
+        SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+        THROW 50042, @Msg, 1;
+    END
+    SET @Sql = N'CREATE OR ALTER ' + SUBSTRING(@Sql, @Pos, LEN(@Sql));
+
+    -- APPLY START
+    BEGIN TRANSACTION;
+    EXEC sys.sp_executesql @Sql;
+    COMMIT TRANSACTION;
+    PRINT N'dbo.' + @Name + N': updated.';
+    -- APPLY END
+END
+
+-- Result: Fixed should be 1
+SELECT @Name AS [Procedure],
+       CASE WHEN CHARINDEX(@Bad, OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) = 0 THEN 1 ELSE 0 END AS Fixed;
