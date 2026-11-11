@@ -81,19 +81,19 @@ namespace WorkNest.Application.Services
             if (remarks != null && remarks.Length > MaxTextLength)
                 return BadRequest($"Remarks cannot be longer than {MaxTextLength} characters.");
 
-            var depositorName = dto.DepositorName?.Trim();
-            if (string.IsNullOrEmpty(depositorName))
-                return BadRequest("Depositor name is required.");
-            if (depositorName.Length < MinDepositorNameLength || depositorName.Length > MaxDepositorNameLength)
+            var depositorName = string.IsNullOrWhiteSpace(dto.DepositorName) ? null : dto.DepositorName.Trim();
+            if (depositorName != null && (depositorName.Length < MinDepositorNameLength || depositorName.Length > MaxDepositorNameLength))
                 return BadRequest($"Depositor name must be between {MinDepositorNameLength} and {MaxDepositorNameLength} characters.");
 
-            var depositorCnic = dto.DepositorCnic?.Trim();
-            if (string.IsNullOrEmpty(depositorCnic))
-                return BadRequest("Depositor CNIC is required.");
-            if (CnicDigitsOnly.IsMatch(depositorCnic))
-                depositorCnic = $"{depositorCnic[..5]}-{depositorCnic.Substring(5, 7)}-{depositorCnic[12..]}";
-            if (!CnicFormatted.IsMatch(depositorCnic))
-                return BadRequest(DepositorCnicFormatMessage);
+            string? depositorCnic = null;
+            if (!string.IsNullOrWhiteSpace(dto.DepositorCnic))
+            {
+                depositorCnic = dto.DepositorCnic.Trim();
+                if (CnicDigitsOnly.IsMatch(depositorCnic))
+                    depositorCnic = $"{depositorCnic[..5]}-{depositorCnic.Substring(5, 7)}-{depositorCnic[12..]}";
+                if (!CnicFormatted.IsMatch(depositorCnic))
+                    return BadRequest(DepositorCnicFormatMessage);
+            }
 
             var (amount, amountError) = ResolveAmount(dto.PaymentMode, dto.Amount);
             if (amountError != null)

@@ -11,9 +11,9 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public string PaymentType { get; set; } = "Cash";
         public DateTime ReceiptDate { get; set; }
         public string? Remarks { get; set; }
-        /// <summary>Person who paid at the counter. Required for new receipts (2-150 characters).</summary>
+        /// <summary>Person who paid at the counter. Optional (2-150 characters when provided).</summary>
         public string? DepositorName { get; set; }
-        /// <summary>Depositor's CNIC: 12345-1234567-1, or 13 digits without dashes (the API adds them). Required.</summary>
+        /// <summary>Depositor's CNIC: 12345-1234567-1, or 13 digits without dashes (the API adds them). Optional.</summary>
         public string? DepositorCnic { get; set; }
         /// <summary>
         /// "Full" (default): the invoice's whole remaining balance, worked out by the database at the moment of saving.
