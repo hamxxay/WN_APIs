@@ -1,0 +1,374 @@
+-- =====================================================================================================================
+-- FR_03 (LIVE and test): receipts part payments fixed again.
+--
+-- What is wrong now: dbo.WN_FeeReceipts_Insert and dbo.WN_FeeReceipts_Void were replaced on 11 Nov 2026 (15:54 on the
+-- test database) with versions that bring back the bugs FR_02 fixed on 22 Oct:
+--   1. The balance of an invoice of more than one month is only month 1's share, so e.g. an invoice of PKR 285,000 with
+--      PKR 210,000 paid says "This invoice has nothing left to pay." while the Receipts page shows PKR 75,000 left.
+--   2. Paying that share marks the whole invoice Paid with only part of it received.
+--   3. Every receipt is saved as month 1, so a second part payment of the same invoice can be refused.
+--   4. Voiding does not remove the receipt's voucher / ledger lines and does not take a part payment off the invoice.
+--
+-- What this script does (one transaction: if anything fails, nothing is changed; safe to run again):
+--   * WN_FeeReceipts_Insert: PATCHED, not replaced. Everything else in today's version stays (customer matching by the
+--     booking / user / e-mail / invoice code, location from the invoice or custom invoice). Only the balance (the whole
+--     invoice again) and what a receipt holds (the whole invoice in one receipt = month 1 of its plan; any other receipt
+--     = its own amount, outside the plan, its parts in proportion) go back to FR_02. If the procedure is not as expected
+--     the script stops and changes nothing.
+--   * WN_FeeReceipts_Void: FR_02's version again, with today's location change (invoice / custom invoice) added.
+--   * Data, same as FR_02 (labels / statuses only, no amounts; every row changed is listed): part payments saved as
+--     month 1 since then are taken out of the month plan; invoices marked Paid with only month 1's share received go
+--     back to Partial so the rest can be received.
+-- The first result grid shows both procedures as they were: save it as your backup.
+-- =====================================================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+SET NOCOUNT ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_FeeReceipt_MonthPlan') IS NULL
+        THROW 50001, N'dbo.WN_FeeReceipt_MonthPlan is missing: run RC_01_month_plan.txt first. Nothing changed.', 1;
+    IF OBJECT_ID(N'dbo.WN_FeeReceipts_PostVoucher', N'P') IS NULL
+        THROW 50002, N'dbo.WN_FeeReceipts_PostVoucher is missing: run LIVE_RC02_RC04_SAFE.txt first. Nothing changed.', 1;
+    IF COL_LENGTH('dbo.WN_FeeReceipts', 'MonthNo') IS NULL OR COL_LENGTH('dbo.WN_FeeReceipts', 'InvoiceTotal') IS NULL
+       OR COL_LENGTH('dbo.WN_FeeReceipts', 'PreviousPaid') IS NULL OR COL_LENGTH('dbo.WN_FeeReceipts', 'BalanceAfter') IS NULL
+       OR COL_LENGTH('dbo.WN_Invoices', 'ApprovalStatus') IS NULL
+        THROW 50003, N'The FR_01 / RC_02 columns are missing on this database (MonthNo, InvoiceTotal, PreviousPaid, BalanceAfter, ApprovalStatus). Nothing changed.', 1;
+
+    DECLARE @PaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 2);
+    DECLARE @PartialId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 3);
+
+
+    -- Backup: save this grid before going on.
+    SELECT N'WN_FeeReceipts_Insert' AS [Procedure], OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Insert')) AS CurrentDefinition
+    UNION ALL
+    SELECT N'WN_FeeReceipts_Void', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Void'));
+
+    -- ---------- Build the patched WN_FeeReceipts_Insert (in memory; nothing changed yet) ----------
+    DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Insert'));
+    DECLARE @NewIns NVARCHAR(MAX) = NULL, @Msg NVARCHAR(800), @Pos INT, @LineStart INT, @S INT, @E INT;
+    DECLARE @A1 NVARCHAR(200) = N'DECLARE @MonthCount INT = NULL, @BillingMonth DATE = NULL,';
+    DECLARE @A2 NVARCHAR(200) = N'ROUND(@RcNet, 2);';
+    DECLARE @A3 NVARCHAR(200) = N'SET @Prefix = ''FR-''';
+    DECLARE @A4 NVARCHAR(200) = N'@InvoiceTypeId, @Amount,';
+    DECLARE @A5 NVARCHAR(200) = N'@BillingMonth, 1, @MonthCount,';
+    DECLARE @Holds NVARCHAR(MAX) = N'-- FR_03 (as FR_02): what this receipt holds. The whole invoice in one receipt: month 1 of its month plan (one month = the whole
+        -- invoice); otherwise its own amount, outside the plan.
+        DECLARE @MonthCount INT = NULL, @BillingMonth DATE = NULL, @MonthNo INT = NULL,
+                @RcAmount DECIMAL(18,4) = @Amount, @RcWHT DECIMAL(18,4) = 0, @RcDeposit DECIMAL(18,4) = @SecurityDepositAmount,
+                @RcRoomRent DECIMAL(18,4) = @RoomRentExclTax, @RcService DECIMAL(18,4) = @ServiceCharges, @RcTax DECIMAL(18,4) = @TaxOnServiceCharges;
+
+        IF @PrevPaid = 0 AND @Amount = @Payable
+        BEGIN
+            SET @MonthNo = 1;
+            SET @RcWHT = @CalcWHTAmount;
+            SELECT @MonthCount = p.MonthCount, @BillingMonth = p.BillingMonth
+            FROM dbo.WN_FeeReceipt_MonthPlan(@InvoiceId) p
+            WHERE p.MonthNo = 1;
+
+            IF ISNULL(@MonthCount, 1) > 1
+                SELECT @RcAmount   = ROUND(p.Payable, 2),
+                       @RcWHT      = CASE WHEN @IsWhtInvoice = 1 THEN p.WHT ELSE 0 END,
+                       @RcDeposit  = p.Deposit,
+                       @RcRoomRent = p.RentGross - p.Discount - p.Service,
+                       @RcService  = p.Service,
+                       @RcTax      = p.Tax
+                FROM dbo.WN_FeeReceipt_MonthPlan(@InvoiceId) p
+                WHERE p.MonthNo = 1;
+            ELSE
+                SET @MonthCount = 1;
+        END
+        ELSE
+        BEGIN
+            -- A part payment (or the rest after one): the invoice''s parts in proportion to the amount (they add up to the
+            -- invoice over its receipts; the printed receipt and the dashboards'' deposit share read them).
+            DECLARE @Share DECIMAL(18,8) = CASE WHEN @Payable > 0 THEN @Amount / @Payable ELSE 0 END;
+            SELECT @RcDeposit  = ROUND(@SecurityDepositAmount * @Share, 2),
+                   @RcRoomRent = ROUND(@RoomRentExclTax * @Share, 2),
+                   @RcService  = ROUND(@ServiceCharges * @Share, 2),
+                   @RcTax      = ROUND(@TaxOnServiceCharges * @Share, 2);
+        END;
+
+';
+
+    IF @Old IS NULL
+        THROW 50031, N'dbo.WN_FeeReceipts_Insert is not on this database. Nothing changed.', 1;
+
+    IF CHARINDEX(N'FR_03', @Old) > 0 OR CHARINDEX(N'FR_02', @Old) > 0
+        PRINT N'WN_FeeReceipts_Insert already has the part-payment fix: left alone.';
+    ELSE
+    BEGIN
+        IF (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @A1, N''))) / DATALENGTH(@A1) <> 1
+           OR (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @A2, N''))) / DATALENGTH(@A2) <> 1
+           OR (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @A3, N''))) / DATALENGTH(@A3) <> 1
+           OR (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @A4, N''))) / DATALENGTH(@A4) <> 1
+           OR (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @A5, N''))) / DATALENGTH(@A5) <> 1
+            THROW 50032, N'WN_FeeReceipts_Insert is not the version this script expects (its month-1 balance lines were not found exactly once). Nothing changed. Send the backup grid to the developer.', 1;
+
+        SET @S = CHARINDEX(@A1, @Old);
+        SET @E = CHARINDEX(@A2, @Old, @S);
+        IF @E = 0 OR @E - @S > 3000
+            THROW 50033, N'WN_FeeReceipts_Insert: the month-1 balance block is not where expected. Nothing changed.', 1;
+
+        SET @NewIns = STUFF(@Old, @S, @E + LEN(@A2) - @S,
+            N'-- FR_03 (as FR_02): the balance is the whole invoice''s (was month 1''s share of a multi-month invoice).
+        DECLARE @Payable     DECIMAL(18,2) = ROUND(@NetTotal, 2);');
+        SET @NewIns = REPLACE(@NewIns, @A3, @Holds + N'        ' + @A3);
+        SET @NewIns = REPLACE(@NewIns, @A4, N'@InvoiceTypeId, @RcAmount,');
+        SET @NewIns = REPLACE(@NewIns, @A5, N'@BillingMonth, @MonthNo, @MonthCount,');
+
+        -- The real header: the first PROCEDURE on a line that is not a comment.
+        SET @Pos = CHARINDEX(N'PROCEDURE', @NewIns);
+        WHILE @Pos > 0
+        BEGIN
+            SET @LineStart = LEN(LEFT(@NewIns, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@NewIns, @Pos))) + 2;
+            IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@NewIns, @Pos))) = 0 SET @LineStart = 1;
+            IF LEFT(LTRIM(SUBSTRING(@NewIns, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+            SET @Pos = CHARINDEX(N'PROCEDURE', @NewIns, @Pos + 1);
+        END
+        IF @Pos = 0 OR CHARINDEX(N'WN_FeeReceipts_Insert', SUBSTRING(@NewIns, @Pos, 80)) = 0
+            THROW 50034, N'WN_FeeReceipts_Insert: the procedure header is not as expected. Nothing changed.', 1;
+        SET @NewIns = N'CREATE OR ALTER ' + SUBSTRING(@NewIns, @Pos, LEN(@NewIns));
+    END
+
+    DECLARE @OldVoid NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Void'));
+    DECLARE @VoidHasFix BIT = CASE WHEN CHARINDEX(N'FR_03', ISNULL(@OldVoid, N'')) > 0 OR CHARINDEX(N'FR_02', ISNULL(@OldVoid, N'')) > 0 THEN 1 ELSE 0 END;
+
+    -- APPLY START
+    BEGIN TRANSACTION;
+
+
+    -- (b) first: invoices marked Paid with only month 1's share received.
+    DECLARE @ShortPaid TABLE (InvoiceId INT PRIMARY KEY, InvoiceNumber NVARCHAR(100), InvoiceGuid UNIQUEIDENTIFIER, ReceiptId INT,
+                              Asks DECIMAL(18,2), Paid DECIMAL(18,2));
+    INSERT INTO @ShortPaid
+    SELECT i.Id, i.InvoiceNumber, i.PublicId, fr.Id,
+           ROUND(ISNULL(i.GrandTotal, 0) - CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN ISNULL(i.WHTAmount, 0) ELSE 0 END, 2),
+           ROUND(ISNULL(i.PaidTotal, 0), 2)
+      FROM dbo.WN_Invoices i
+      JOIN dbo.WN_FeeReceipts fr ON fr.InvoiceIdGUID = i.PublicId AND fr.Status = 1 AND fr.MonthNo = 1 AND fr.MonthCount > 1
+     WHERE i.StatusId IN (2, @PaidId)
+       AND ISNULL(fr.PreviousPaid, 0) = 0
+       AND ROUND(ISNULL(i.PaidTotal, 0), 2) > 0
+       AND ROUND(ISNULL(i.PaidTotal, 0), 2) < ROUND(ISNULL(i.GrandTotal, 0) - CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN ISNULL(i.WHTAmount, 0) ELSE 0 END, 2) - 0.01
+       AND (SELECT COUNT(*) FROM dbo.WN_FeeReceipts x WHERE x.InvoiceIdGUID = i.PublicId AND x.Status = 1 AND ISNULL(x.MonthNo, 1) = 1) = 1;
+
+    -- Listed: monthly receipts (month 2+) already made for those invoices (not changed).
+    SELECT N'REVIEW: monthly receipt made for an invoice that was only part-paid (void it after checking)' AS Note,
+           sp.InvoiceNumber, fr.Id AS ReceiptId, fr.Code, fr.MonthNo, fr.BillingMonth, fr.TotalAmount, fr.ReceiptDate
+      FROM @ShortPaid sp
+      JOIN dbo.WN_FeeReceipts fr ON fr.InvoiceIdGUID = sp.InvoiceGuid AND fr.Status = 1 AND fr.MonthNo > 1;
+
+    UPDATE i SET StatusId = @PartialId
+      FROM dbo.WN_Invoices i JOIN @ShortPaid sp ON sp.InvoiceId = i.Id;
+
+    -- (a) + (b): receipts that are part payments leave the month plan.
+    DECLARE @Cleared TABLE (ReceiptId INT PRIMARY KEY, Code VARCHAR(50), InvoiceNumber NVARCHAR(100), TotalAmount DECIMAL(18,2), Why NVARCHAR(100));
+    UPDATE fr
+       SET MonthNo = NULL, MonthCount = NULL, BillingMonth = NULL
+    OUTPUT inserted.Id, inserted.Code, i.InvoiceNumber, inserted.TotalAmount,
+           CASE WHEN sp.ReceiptId IS NOT NULL THEN N'month 1 share only: invoice set to Partial' ELSE N'part payment saved as month 1' END
+      INTO @Cleared
+      FROM dbo.WN_FeeReceipts fr
+      LEFT JOIN dbo.WN_Invoices i ON i.PublicId = fr.InvoiceIdGUID
+      LEFT JOIN @ShortPaid sp ON sp.ReceiptId = fr.Id
+     WHERE fr.Status = 1 AND fr.MonthNo IS NOT NULL
+       AND (ISNULL(fr.PreviousPaid, 0) > 0 OR ISNULL(fr.BalanceAfter, 0) > 0 OR sp.ReceiptId IS NOT NULL);
+
+    SELECT N'CHANGED: receipt taken out of the month plan' AS Note, c.* FROM @Cleared c;
+    SELECT N'CHANGED: invoice Paid -> Partial (only month 1''s share was received)' AS Note, sp.InvoiceNumber, sp.Asks, sp.Paid,
+           sp.Asks - sp.Paid AS StillToPay FROM @ShortPaid sp;
+
+
+    IF @NewIns IS NOT NULL
+        EXEC sys.sp_executesql @NewIns;
+
+    IF @VoidHasFix = 0
+        EXEC(N'CREATE OR ALTER PROCEDURE dbo.WN_FeeReceipts_Void
+    -- FR_03: FR_02''s void (reverses the payment and its accounting) + the invoice / custom-invoice location (10-11 Nov).
+    @ReceiptId          INT              = NULL,
+    @ReceiptGUID        UNIQUEIDENTIFIER = NULL,
+    @VoidReason         NVARCHAR(500),
+    @UpdatedById        INT,
+    @AllowedLocationIds NVARCHAR(MAX)    = NULL   -- NULL = every location
+AS
+BEGIN
+    -- FR_02 (on live''s version): voiding takes the money back off the invoice and removes the accounting.
+    --   A receipt of a whole payment received month by month (MonthNo set): every active monthly receipt of the invoice
+    --   is voided (else WN_FeeReceipts_CreateDueMonthly would make the voided months again), and the payment it took
+    --   (InvoiceTotal - PreviousPaid on the receipt; the receipts'' sum for older rows) comes off PaidTotal.
+    --   Any other receipt (a part payment): only it, and its amount comes off PaidTotal.
+    --   Their vouchers, ledger lines and customer ledger entries are removed (live left them, so a voided receipt stayed
+    --   in the accounts). The invoice becomes Un Paid (nothing left paid) or Partial (something still paid).
+    -- Errors are RAISERROR(..., 16, state): state 1 = rule broken (HTTP 400), 2 = not found (404),
+    -- 3 = outside the caller''s locations (403). The API maps them by state.
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs (LocId)
+        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+        FROM STRING_SPLIT(@AllowedLocationIds, '','')
+        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    DECLARE @UnPaidId    INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Un Paid'' ORDER BY Id), 1);
+    DECLARE @PaidId      INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Paid'' ORDER BY Id), 2);
+    DECLARE @PartialId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Partial'' ORDER BY Id), 3);
+    DECLARE @OverdueId   INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Challan Expire'' ORDER BY Id), 4);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = ''Cancelled'' ORDER BY Id), 5);
+
+    DECLARE
+        @TargetReceiptId       INT,
+        @InvoiceGUID           UNIQUEIDENTIFIER,
+        @CurrentStatus         TINYINT,
+        @TargetMonthNo         INT,
+        @InvoiceId             INT,
+        @InvStatusId           INT,
+        @InvPaidTotal          DECIMAL(18,4),
+        @BookingId             INT,
+        @UserId                INT,
+        @LocationId            INT,
+        @Reverse               DECIMAL(18,4),
+        @NewPaid               DECIMAL(18,4),
+        @VoidedCount           INT = 0,
+        @InvoiceRestored       BIT = 0,
+        @AccessCardsNeedReview BIT = 0,
+        @Message               NVARCHAR(300);
+    DECLARE @Voided TABLE (Id INT PRIMARY KEY, Code VARCHAR(50), VoucherId INT NULL, TotalAmount DECIMAL(18,4), MonthNo INT NULL,
+                           InvoiceTotal DECIMAL(18,4) NULL, PreviousPaid DECIMAL(18,4) NULL);
+
+    BEGIN TRY
+        IF @VoidReason IS NULL OR LTRIM(RTRIM(@VoidReason)) = ''''
+            RAISERROR(''A void reason is required.'', 16, 1);
+
+        IF @ReceiptId IS NULL AND @ReceiptGUID IS NULL
+            RAISERROR(''Receipt identifier is required.'', 16, 1);
+
+        SELECT @TargetReceiptId = fr.Id, @InvoiceGUID = fr.InvoiceIdGUID
+        FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+        WHERE (@ReceiptId IS NOT NULL AND fr.Id = @ReceiptId)
+           OR (@ReceiptId IS NULL AND fr.IdGUID = @ReceiptGUID);
+
+        IF @TargetReceiptId IS NULL
+            RAISERROR(''Fee receipt not found.'', 16, 2);
+
+        BEGIN TRANSACTION;
+
+        -- Same lock order as WN_FeeReceipts_Insert: invoice first, then receipt.
+        SELECT
+            @InvoiceId     = i.Id,
+            @InvStatusId   = ISNULL(i.StatusId, 0),
+            @InvPaidTotal  = ISNULL(i.PaidTotal, 0),
+            @BookingId     = i.BookingId,
+            @UserId        = i.UserId,
+            @LocationId    = i.LocationId
+        FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
+        WHERE i.PublicId = @InvoiceGUID;
+
+        SELECT @CurrentStatus = fr.Status, @TargetMonthNo = fr.MonthNo
+        FROM dbo.WN_FeeReceipts fr WITH (UPDLOCK, HOLDLOCK)
+        WHERE fr.Id = @TargetReceiptId;
+
+        IF @CurrentStatus IS NULL
+            RAISERROR(''Fee receipt not found.'', 16, 2);
+
+        SELECT @LocationId = COALESCE(@LocationId, ci.LocationId, s.LocationId, u.LocationId)
+        FROM (SELECT 1 AS One) z
+        LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = @InvoiceId
+        LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = @BookingId
+        LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+        LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = @UserId;
+
+        IF @AllowedLocationIds IS NOT NULL
+           AND (@LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @AllowedLocs WHERE LocId = @LocationId))
+            RAISERROR(''You are not authorized to void receipts for invoices outside your assigned location(s).'', 16, 3);
+
+        IF @CurrentStatus = 0
+            RAISERROR(''Fee receipt is already void.'', 16, 1);
+
+        -- The receipts to void: a monthly payment''s receipts (MonthNo set) all together; otherwise only this one.
+        INSERT INTO @Voided (Id, Code, VoucherId, TotalAmount, MonthNo, InvoiceTotal, PreviousPaid)
+        SELECT fr.Id, fr.Code, fr.VoucherId, ISNULL(fr.TotalAmount, 0), fr.MonthNo, fr.InvoiceTotal, fr.PreviousPaid
+        FROM dbo.WN_FeeReceipts fr WITH (UPDLOCK, HOLDLOCK)
+        WHERE fr.Status = 1
+          AND (fr.Id = @TargetReceiptId
+               OR (@TargetMonthNo IS NOT NULL AND fr.InvoiceIdGUID = @InvoiceGUID AND fr.MonthNo IS NOT NULL));
+        SET @VoidedCount = (SELECT COUNT(*) FROM @Voided);
+
+        -- The money the voided receipt(s) took onto the invoice.
+        SET @Reverse = CASE
+            WHEN @TargetMonthNo IS NULL THEN (SELECT TotalAmount FROM @Voided WHERE Id = @TargetReceiptId)
+            ELSE ISNULL((SELECT TOP 1 v.InvoiceTotal - ISNULL(v.PreviousPaid, 0) FROM @Voided v
+                          WHERE v.MonthNo = 1 AND v.InvoiceTotal IS NOT NULL ORDER BY v.Id),
+                        (SELECT SUM(TotalAmount) FROM @Voided))
+        END;
+
+        DELETE l FROM dbo.Ledgers l JOIN @Voided v ON v.VoucherId = l.VoucherId;
+        DELETE vc FROM dbo.Vouchers vc JOIN @Voided v ON v.VoucherId = vc.Id;
+        DELETE cl FROM dbo.CustomerLedger cl JOIN @Voided v ON cl.RefId = v.Id AND cl.RefNo = v.Code;
+
+        UPDATE fr
+        SET Status      = 0,   -- 0 = Void
+            VoidReason  = LTRIM(RTRIM(@VoidReason)),
+            UpdatedById = @UpdatedById,
+            UpdatedOn   = SYSUTCDATETIME(),
+            VoucherId   = NULL
+        FROM dbo.WN_FeeReceipts fr
+        JOIN @Voided v ON v.Id = fr.Id;
+
+        -- The invoice: what is still paid after this, and its status (a cancelled invoice is left as it is).
+        IF @InvoiceId IS NOT NULL AND @InvStatusId NOT IN (5, @CancelledId)
+        BEGIN
+            SET @NewPaid = CASE WHEN @InvPaidTotal - ISNULL(@Reverse, 0) > 0 THEN @InvPaidTotal - ISNULL(@Reverse, 0) ELSE 0 END;
+            UPDATE dbo.WN_Invoices
+            SET PaidTotal = @NewPaid,
+                StatusId  = CASE WHEN @NewPaid = 0 THEN @UnPaidId ELSE @PartialId END
+            WHERE Id = @InvoiceId;
+            SET @InvoiceRestored = 1;
+        END;
+
+        -- Access cards: Insert set them Active when the invoice was paid in full; their earlier state is not stored, so
+        -- they are left as they are and flagged for review when the invoice is no longer paid.
+        IF @InvoiceRestored = 1 AND @InvStatusId IN (2, @PaidId) AND @BookingId IS NOT NULL AND @BookingId > 0
+           AND EXISTS (SELECT 1 FROM dbo.WN_AccessCards ac WITH (NOLOCK) WHERE ac.BookingId = @BookingId AND ac.Status = 1)
+            SET @AccessCardsNeedReview = 1;
+
+        COMMIT TRANSACTION;
+
+        SET @Message = CASE
+            WHEN @InvoiceRestored = 0 THEN ''Fee receipt voided. The invoice was not changed (it is cancelled).''
+            WHEN @NewPaid = 0 AND @VoidedCount > 1 THEN CONCAT(''Payment voided: '', @VoidedCount, '' monthly receipts voided and invoice restored to unpaid.'')
+            WHEN @NewPaid = 0 THEN ''Fee receipt voided successfully and invoice restored to unpaid.''
+            ELSE CONCAT(''Fee receipt voided. The invoice is part-paid: PKR '', FORMAT(@NewPaid, ''N2''), '' still paid.'') END;
+
+        SELECT
+            1                      AS IsSuccessful,
+            @Message               AS Message,
+            @TargetReceiptId       AS ReceiptId,
+            @InvoiceRestored       AS InvoiceRestored,
+            @AccessCardsNeedReview AS AccessCardsNeedReview,
+            @VoidedCount           AS VoidedCount;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END');
+
+    COMMIT TRANSACTION;
+    -- APPLY END
+
+    SELECT N'WN_FeeReceipts_Insert' AS [Procedure],
+           CASE WHEN CHARINDEX(N'FR_03', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Insert'))) > 0
+                  OR CHARINDEX(N'FR_02', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Insert'))) > 0 THEN 1 ELSE 0 END AS HasFix
+    UNION ALL
+    SELECT N'WN_FeeReceipts_Void',
+           CASE WHEN CHARINDEX(N'FR_03', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Void'))) > 0
+                  OR CHARINDEX(N'FR_02', OBJECT_DEFINITION(OBJECT_ID(N'dbo.WN_FeeReceipts_Void'))) > 0 THEN 1 ELSE 0 END;
+    SELECT N'OK: FR_03 done (both HasFix should be 1).' AS Result;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH

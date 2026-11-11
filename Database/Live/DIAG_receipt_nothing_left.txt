@@ -1,0 +1,30 @@
+-- =====================================================================================================================
+-- DIAG: "This invoice has nothing left to pay." while the Receipts page shows a balance (READ-ONLY, changes nothing).
+-- Put the invoice number from the Receipts page below, run the whole file on live, and send the result grids.
+-- =====================================================================================================================
+DECLARE @InvoiceNumber NVARCHAR(50) = N'PUT-INVOICE-NUMBER-HERE';
+
+-- 1. The invoice as the receipt procedures see it.
+SELECT i.Id, i.InvoiceNumber, i.InvoiceTypeId, i.IsCustom, i.StatusId, i.ApprovalStatus,
+       i.GrandTotal, i.PaidTotal, i.WHTAmount, i.WHTRate, i.SecurityDepositAmount,
+       CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN i.GrandTotal - ISNULL(i.WHTAmount, 0) ELSE i.GrandTotal END AS NetReceivable,
+       (CASE WHEN i.InvoiceTypeId = 6 OR ISNULL(i.WHTAmount, 0) > 0 THEN i.GrandTotal - ISNULL(i.WHTAmount, 0) ELSE i.GrandTotal END)
+         - ISNULL(i.PaidTotal, 0) AS BalanceTheSaveSees,
+       i.BillingPeriodStart, i.BillingPeriodEnd, i.PublicId
+  FROM dbo.WN_Invoices i
+ WHERE i.InvoiceNumber = @InvoiceNumber;
+
+-- 2. Receipts already saved against it (voided ones included).
+SELECT r.Id, r.Code, r.ReceiptDate, r.TotalAmount, r.InvoiceTotal, r.PreviousPaid, r.BalanceAfter, r.MonthNo, r.MonthCount,
+       r.BillingMonth, r.Status, r.FeeStatus, r.VoidReason, r.WHTAmount, r.CreatedOn
+  FROM dbo.WN_FeeReceipts r
+  JOIN dbo.WN_Invoices i ON i.PublicId = r.InvoiceIdGUID
+ WHERE i.InvoiceNumber = @InvoiceNumber
+ ORDER BY r.Id;
+
+-- 3. Which version of the two receipt procedures live has (1 = has the FR_02 part-payment fix).
+SELECT o.name,
+       CASE WHEN CHARINDEX(N'FR_02', OBJECT_DEFINITION(o.object_id)) > 0 THEN 1 ELSE 0 END AS Has_FR_02,
+       o.modify_date
+  FROM sys.objects o
+ WHERE o.name IN (N'WN_FeeReceipts_Insert', N'WN_FeeReceipts_GetUnpaidInvoices', N'WN_FeeReceipt_MonthPlan');
