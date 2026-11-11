@@ -14306,6 +14306,7 @@ BEGIN
         @BillingPeriodEnd      DATETIME2,
         @ApprovalStatus        NVARCHAR(50),
         @LocationId            INT,
+        @InvoiceCustomerCode   NVARCHAR(50),
         @CompanyId             INT,
         @BranchId              INT,
         @CustomerIdGUID        UNIQUEIDENTIFIER,
@@ -14344,7 +14345,9 @@ BEGIN
             @BookingId             = i.BookingId,
             @UserId                = i.UserId,
             @BillingPeriodEnd      = i.BillingPeriodEnd,
-            @ApprovalStatus        = ISNULL(i.ApprovalStatus, '')
+            @ApprovalStatus        = ISNULL(i.ApprovalStatus, ''),
+            @LocationId            = i.LocationId,
+            @InvoiceCustomerCode   = NULLIF(LTRIM(RTRIM(i.CustomerCode)), '')
         FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
         WHERE i.PublicId = @InvoiceIdGUID;
 
@@ -14354,8 +14357,10 @@ BEGIN
         IF @ApprovalStatus = 'PendingApproval'
             THROW 50000, N'This recurring invoice is awaiting approval and cannot be paid until it is approved.', 1;
 
-        SELECT @LocationId = ISNULL(s.LocationId, u.LocationId)
+        -- Location resolution: check Invoice -> Custom Invoice -> Booking Space -> User
+        SELECT @LocationId = COALESCE(@LocationId, ci.LocationId, s.LocationId, u.LocationId)
         FROM (SELECT 1 AS One) z
+        LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = @InvoiceId
         LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = @BookingId
         LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
         LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = @UserId;
@@ -14503,6 +14508,14 @@ BEGIN
             SELECT TOP 1 @CustomerIdGUID = c.IdGUID
             FROM dbo.WN_Customers c WITH (NOLOCK)
             WHERE LOWER(LTRIM(RTRIM(c.Email))) = LOWER(@BkCustomerEmail)
+            ORDER BY c.Id;
+        END
+
+        IF @CustomerIdGUID IS NULL AND @InvoiceCustomerCode IS NOT NULL
+        BEGIN
+            SELECT TOP 1 @CustomerIdGUID = c.IdGUID
+            FROM dbo.WN_Customers c WITH (NOLOCK)
+            WHERE c.Code = @InvoiceCustomerCode
             ORDER BY c.Id;
         END
 
@@ -14664,7 +14677,8 @@ BEGIN
         @Total               DECIMAL(18,4),
         @IsWhtInvoice        BIT,
         @VoucherId           INT = NULL,
-        @ReceiptTransDateTime DATETIME = @TransDate;
+        @ReceiptTransDateTime DATETIME = @TransDate,
+        @InvoiceCustomerCode NVARCHAR(50) = NULL;
 
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -14677,6 +14691,8 @@ BEGIN
             @WHTRate             = ISNULL(i.WHTRate, 0),
             @BookingId           = i.BookingId,
             @UserId              = i.UserId,
+            @LocationId          = i.LocationId,
+            @InvoiceCustomerCode = NULLIF(LTRIM(RTRIM(i.CustomerCode)), ''),
             @CompanyId           = fr.CompanyId,
             @BranchId            = fr.BranchId,
             @CashInHandAccountId = fr.CashInHandAccountId,
@@ -14697,9 +14713,10 @@ BEGIN
         IF @IsWhtInvoice = 0 SET @CalcWHTAmount = 0;
         SET @Total = @NetTotal + @CalcWHTAmount;
 
-        -- Location: booking space's location, else the user's location (same rule as the other fee receipt procedures).
-        SELECT @LocationId = ISNULL(s.LocationId, u.LocationId)
+        -- Location resolution: check Invoice -> Custom Invoice -> Booking Space -> User
+        SELECT @LocationId = COALESCE(@LocationId, ci.LocationId, s.LocationId, u.LocationId)
         FROM (SELECT 1 AS One) z
+        LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = @InvoiceId
         LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = @BookingId
         LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
         LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = @UserId;
@@ -14720,6 +14737,17 @@ BEGIN
         LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
         LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
         WHERE i.Id = @InvoiceId;
+
+        -- Fallback to WN_ChargeTypeAccountMapping for Location if ARAccountId not on space/invoice
+        IF (@ARAccountId IS NULL OR @ARAccountId <= 0) AND @LocationId IS NOT NULL
+        BEGIN
+            SELECT TOP 1 @ARAccountId = NULLIF(m.AccountReceivableId, 0)
+            FROM dbo.WN_ChargeTypeAccountMapping m WITH (NOLOCK)
+            WHERE m.LocationId = @LocationId AND m.ChargeTypeId = 1
+              AND m.EffectiveFrom <= @ReceiptTransDateTime
+              AND (m.EffectiveTo IS NULL OR m.EffectiveTo >= @ReceiptTransDateTime)
+            ORDER BY m.EffectiveFrom DESC;
+        END
 
         IF @ARAccountId IS NULL OR @ARAccountId <= 0
         BEGIN
@@ -14815,6 +14843,11 @@ BEGIN
             FROM dbo.WN_Customers c WITH (NOLOCK)
             JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Email = c.Email
             WHERE u.Id = @UserId AND c.Code IS NOT NULL AND LTRIM(RTRIM(c.Code)) <> '';
+        END
+
+        IF (@CustomerCode IS NULL OR @CustomerCode = '') AND @InvoiceCustomerCode IS NOT NULL
+        BEGIN
+            SELECT TOP 1 @CustomerCode = @InvoiceCustomerCode;
         END
 
         DECLARE @CustomerVendorId INT = NULL;
@@ -15130,7 +15163,8 @@ BEGIN
             @InvPaidTotal  = ISNULL(i.PaidTotal, 0),
             @InvGrandTotal = ISNULL(i.GrandTotal, 0),
             @BookingId     = i.BookingId,
-            @UserId        = i.UserId
+            @UserId        = i.UserId,
+            @LocationId    = i.LocationId
         FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK)
         WHERE i.PublicId = @InvoiceGUID;
 
@@ -15141,9 +15175,10 @@ BEGIN
         IF @CurrentStatus IS NULL
             RAISERROR('Fee receipt not found.', 16, 2);
 
-        -- Location: booking space's location, else the user's location (same rule as the other fee receipt procedures).
-        SELECT @LocationId = ISNULL(s.LocationId, u.LocationId)
+        -- Location resolution: check Invoice -> Custom Invoice -> Booking Space -> User
+        SELECT @LocationId = COALESCE(@LocationId, ci.LocationId, s.LocationId, u.LocationId)
         FROM (SELECT 1 AS One) z
+        LEFT JOIN dbo.WN_CustomInvoices ci WITH (NOLOCK) ON ci.InvoiceId = @InvoiceId
         LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = @BookingId
         LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
         LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = @UserId;
