@@ -32,6 +32,10 @@ appsettings.json
 appsettings.*.json
 
 **/WorkNest.Tests/
+!WorkNest.Tests/
+WorkNest.Tests/*
+!WorkNest.Tests/WorkNest.Tests.csproj
+!WorkNest.Tests/InvoiceRentPeriodCalculationTests.cs
 
 scratch/*
 .dotnet/* 

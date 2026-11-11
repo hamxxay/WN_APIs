@@ -95,6 +95,46 @@ namespace WorkNest.Application.Services
         private static decimal Round2(decimal val) =>
             Math.Round(val, 2, MidpointRounding.AwayFromZero);
 
+        /// <summary>
+        /// Calculates rent for an inclusive date range, counting each full calendar month as one month and
+        /// prorating partial months on the same 30-day basis as invoice calculations.
+        /// </summary>
+        public static (decimal EffectiveMonths, decimal Rent) CalculateRentForPeriod(
+            decimal monthlyRent, DateTime periodStart, DateTime periodEnd)
+        {
+            if (monthlyRent < 0m) throw new ArgumentOutOfRangeException(nameof(monthlyRent));
+
+            var start = periodStart.Date;
+            var end = periodEnd.Date;
+            if (start > end) throw new ArgumentException("Period start must be on or before period end.", nameof(periodEnd));
+
+            var firstMonth = new DateTime(start.Year, start.Month, 1);
+            var lastMonth = new DateTime(end.Year, end.Month, 1);
+            decimal effectiveMonths;
+            if (firstMonth == lastMonth)
+            {
+                bool coversFullMonth = start.Day == 1 && end.Day == DateTime.DaysInMonth(end.Year, end.Month);
+                int firstDay = Math.Min(start.Day, ProrationDaysPerMonth);
+                int lastDay = Math.Min(end.Day, ProrationDaysPerMonth);
+                effectiveMonths = coversFullMonth
+                    ? 1m
+                    : (decimal)Math.Max(0, lastDay - firstDay + 1) / ProrationDaysPerMonth;
+            }
+            else
+            {
+                decimal startMonth = start.Day == 1
+                    ? 1m
+                    : (decimal)(ProrationDaysPerMonth - Math.Min(start.Day, ProrationDaysPerMonth) + 1) / ProrationDaysPerMonth;
+                decimal endMonth = end.Day == DateTime.DaysInMonth(end.Year, end.Month)
+                    ? 1m
+                    : (decimal)Math.Min(end.Day, ProrationDaysPerMonth) / ProrationDaysPerMonth;
+                int fullMonthsBetween = (lastMonth.Year - firstMonth.Year) * 12 + lastMonth.Month - firstMonth.Month - 1;
+                effectiveMonths = startMonth + fullMonthsBetween + endMonth;
+            }
+
+            return (effectiveMonths, Round2(monthlyRent * effectiveMonths));
+        }
+
         public static InvoiceCalculationResult CalculateInvoice(InvoiceCalculationRequest request)
             => CalculateInvoice(request, BusinessClock.Default.Today);
 

@@ -1,0 +1,13 @@
+@baseUrl = http://localhost:5200
+@token = replace-with-staff-access-token
+
+### Recalculate rent for an edited invoice period
+POST {{baseUrl}}/api/invoice/calculate-rent-period
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "monthlyRent": 100000,
+  "periodStart": "2026-11-10T00:00:00+05:00",
+  "periodEnd": "2027-01-31T00:00:00+05:00"
+}

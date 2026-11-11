@@ -171,6 +171,37 @@ namespace WorkNest.API.Controllers
         public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
             ListFilterResults.StatusOptionsAsync(lists, ListFilterRules.Invoices);
 
+        /// <summary>Recalculates the rent amount for an edited invoice rent period.</summary>
+        /// <remarks>Full calendar months count as one month; partial months use the existing 30-day proration rule.</remarks>
+        [HttpPost("api/invoice/calculate-rent-period")]
+        [Authorize(Roles = StaffRoles)]
+        [ProducesResponseType(typeof(ApiResponse<CalculateRentPeriodResponse>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public ActionResult<CalculateRentPeriodResponse> CalculateRentPeriod(
+            [FromBody] CalculateRentPeriodRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (request.PeriodStart == default || request.PeriodEnd == default)
+                return BadRequest(new { isSuccessful = false, message = "PeriodStart and PeriodEnd are required." });
+
+            if (request.PeriodStart.Date > request.PeriodEnd.Date)
+                return BadRequest(new { isSuccessful = false, message = "PeriodStart must be on or before PeriodEnd." });
+
+            var (effectiveMonths, rent) = WorkNest.Application.Services.InvoiceCalculationEngine.CalculateRentForPeriod(
+                request.MonthlyRent,
+                request.PeriodStart.DateTime,
+                request.PeriodEnd.DateTime);
+
+            return Ok(ApiResponse.Ok(new CalculateRentPeriodResponse(
+                request.MonthlyRent,
+                request.PeriodStart,
+                request.PeriodEnd,
+                effectiveMonths,
+                rent), "Rent recalculated successfully."));
+        }
+
         /// <summary>
         /// The signed-in customer's bills (app Payments tab): their invoices (paid, unpaid, overdue, with the
         /// door-access suspension date) plus the booking challans that have no invoice, and the totals. Only the
