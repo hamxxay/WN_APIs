@@ -41,6 +41,11 @@ namespace WorkNest.API.Controllers
         public Task<IActionResult> Remove(int bookingId, int personId) =>
             RunAsync(userId => _employees.RemoveAsync(bookingId, userId, personId));
 
+        /// <summary>Set (or correct) a person's e-mail: the account they sign in to the app with to open the room door.</summary>
+        [HttpPut("api/booking/my/{bookingId:int}/employees/{personId:int}/email")]
+        public Task<IActionResult> SetEmail(int bookingId, int personId, [FromBody] SetBookingEmployeeEmailRequest? request) =>
+            RunAsync(userId => _employees.SetEmailAsync(bookingId, userId, personId, request));
+
         /// <summary>
         /// Fingerprint or face (kind) on the room's machine, then copied to the Entrance machines. Long-running: it waits
         /// for the person at the machine (fingerprint about 45 s, face up to about 90 s).

@@ -22,6 +22,27 @@ namespace WorkNest.Application.DTOs.Attendant
         public int? PersonId { get; set; }
     }
 
+    /// <summary>Body of PUT api/booking/my/{bookingId}/employees/{personId}/email.</summary>
+    public class SetBookingEmployeeEmailRequest
+    {
+        public string? Email { get; set; }
+    }
+
+    /// <summary>One line of GET api/booking/{bookingId}/employee-history (CMS).</summary>
+    public class BookingEmployeeHistoryItemDto
+    {
+        /// <summary>ISO date-time, Pakistan time (+05:00).</summary>
+        public string At { get; set; } = string.Empty;
+        public int PersonId { get; set; }
+        public string PersonName { get; set; } = string.Empty;
+        public string IdNumberMasked { get; set; } = string.Empty;
+        /// <summary>added | removed | fingerprint | face | card | access_off | access_on | email</summary>
+        public string Action { get; set; } = string.Empty;
+        /// <summary>Who did it: an e-mail, or "Customer" / "Staff" when unknown.</summary>
+        public string By { get; set; } = string.Empty;
+        public string? Detail { get; set; }
+    }
+
     /// <summary>Body of POST api/bookings/{bookingDetailId}/attendants/by-cnic.</summary>
     public class VerifyBookingEmployeeRequest
     {
@@ -52,6 +73,8 @@ namespace WorkNest.Application.DTOs.Attendant
         public int PersonId { get; set; }
         public string Name { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
+        /// <summary>True when there is no e-mail on record: the person can't use the app's door feature until the customer adds one.</summary>
+        public bool NeedsEmail { get; set; }
         public string Phone { get; set; } = string.Empty;
         public string IdType { get; set; } = string.Empty;
         public string IdNumber { get; set; } = string.Empty;

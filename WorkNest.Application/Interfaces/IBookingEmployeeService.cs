@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Attendant;
 
@@ -16,6 +17,13 @@ namespace WorkNest.Application.Interfaces
         Task<BookingEmployeeOutcome> GetAsync(int bookingId, int userId);
         Task<BookingEmployeeOutcome> AddAsync(int bookingId, int userId, AddBookingEmployeeRequest? body);
         Task<BookingEmployeeOutcome> RemoveAsync(int bookingId, int userId, int personId);
+
+        /// <summary>The owner sets the e-mail of a person on the booking (the e-mail the app's door login must match). 404 not the owner's
+        /// booking / person not on it; 400 invalid or used by another person.</summary>
+        Task<BookingEmployeeOutcome> SetEmailAsync(int bookingId, int userId, int personId, SetBookingEmployeeEmailRequest? body);
+
+        /// <summary>Staff (CMS): who was added / removed / enrolled / e-mail changed on the booking, newest first. The caller checks the staff's location scope.</summary>
+        Task<List<BookingEmployeeHistoryItemDto>> GetHistoryAsync(int bookingId);
 
         /// <summary>
         /// The owner enrols a fingerprint or face (kind) for a person on the booking, on the room's machine + the Entrance

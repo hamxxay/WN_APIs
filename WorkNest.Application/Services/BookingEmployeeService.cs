@@ -75,6 +75,7 @@ namespace WorkNest.Application.Services
                 PersonId = a.PersonId,
                 Name = a.Name,
                 Email = a.Email,
+                NeedsEmail = string.IsNullOrWhiteSpace(a.Email),
                 Phone = a.Phone,
                 IdType = a.IdType,
                 IdNumber = FormatId(a.IdType, a.IdNumber),
@@ -87,6 +88,7 @@ namespace WorkNest.Application.Services
                 PersonId = r.PersonId,
                 Name = r.Name,
                 Email = r.Email,
+                NeedsEmail = string.IsNullOrWhiteSpace(r.Email),
                 Phone = r.Phone,
                 IdType = r.IdType,
                 IdNumber = FormatId(r.IdType, r.IdNumber),
@@ -149,9 +151,8 @@ namespace WorkNest.Application.Services
                 if (name.Length < 2 || name.Length > MaxNameLength)
                     return Bad($"Full name must be 2 to {MaxNameLength} characters.");
 
-                var email = (body.Email ?? "").Trim().ToLowerInvariant();
-                if (email.Length > MaxEmailLength || (email.Length > 0 && !IsValidEmail(email)))
-                    return Bad("Enter a valid email address.");
+                var emailError = EmailError(body.Email, out var email);
+                if (emailError != null) return Bad(emailError);
 
                 var phoneError = Phone.Validate(body.Phone);
                 if (phoneError != null) return Bad(phoneError);
@@ -185,9 +186,12 @@ namespace WorkNest.Application.Services
                         return Bad("This ID is already registered with WorkNest. Please ask WorkNest staff at the branch to add this person.");
                     if (s.IsOnBooking(existing.PersonId)) return Bad("This person is already on this booking.");
                     personId = existing.PersonId;
+                    // Their login e-mail for the app's door: the one just typed (same owner, same uniqueness rule).
+                    if (!await _repo.SetPersonEmailAsync(personId, email, userId)) return Bad(EmailTakenMessage);
                 }
                 else
                 {
+                    if (await _repo.EmailUsedByOtherAsync(email, 0)) return Bad(EmailTakenMessage);
                     // The staff "Add attendant" procedure: WN_Persons + WN_CustomerAttendants.
                     (personId, _) = await _db.AddAttendantSpAsync(name, email, phone, idType, idNumber, customerId);
                 }
@@ -242,6 +246,41 @@ namespace WorkNest.Application.Services
                 Message = isActive ? "Employee removed and their door access cancelled." : "Employee removed."
             };
         }
+
+        // ---- Customer: e-mail of an employee (the app's door login) ---------------------------------------
+
+        public async Task<BookingEmployeeOutcome> SetEmailAsync(int bookingId, int userId, int personId, SetBookingEmployeeEmailRequest? body)
+        {
+            var (booking, requests) = await _repo.GetAsync(bookingId, userId);
+            if (booking == null) return NotFound("Booking not found.");
+            var s = await LoadAsync(booking, requests);
+            if (!s.IsOnBooking(personId)) return NotFound("This employee is not on this booking.");
+            // Allowed at any time (like remove): it only helps the person sign in.
+
+            var error = EmailError(body?.Email, out var email);
+            if (error != null) return Bad(error);
+            if (await _repo.EmailUsedByOtherAsync(email, personId) || !await _repo.SetPersonEmailAsync(personId, email, userId))
+                return Bad(EmailTakenMessage);
+            return new BookingEmployeeOutcome { Message = "Email saved.", Data = new { personId, email } };
+        }
+
+        public const string EmailRequiredMessage = "Enter their email: they sign in to the WorkNest app with it to open the room door.";
+        public const string EmailInvalidMessage = "Enter a valid email.";
+        public const string EmailTakenMessage = "This email is already used by another person.";
+
+        /// <summary>Required, valid format, fits WN_Persons.Email; the cleaned (trimmed, lower case) e-mail comes out.</summary>
+        internal static string? EmailError(string? raw, out string email)
+        {
+            email = (raw ?? "").Trim().ToLowerInvariant();
+            if (email.Length == 0) return EmailRequiredMessage;
+            if (email.Length > MaxEmailLength || !IsValidEmail(email)) return EmailInvalidMessage;
+            return null;
+        }
+
+        // ---- Staff: employee history of a booking (CMS) -----------------------------------------------------
+
+        public async Task<List<BookingEmployeeHistoryItemDto>> GetHistoryAsync(int bookingId) =>
+            EmployeeHistory.Build(await _repo.GetHistoryAsync(bookingId), _clock.TimeZone);
 
         // ---- Customer: fingerprint / face on the room machine -------------------------------------------
 

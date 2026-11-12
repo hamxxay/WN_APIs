@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using WorkNest.Application.DTOs.Attendant;
+using WorkNest.Application.Helpers;
 
 namespace WorkNest.Application.Interfaces
 {
@@ -36,6 +37,18 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Pending (not yet CNIC-checked) requests of a customer and/or a booking detail, with whether the person
         /// is already active on any booking.</summary>
         Task<List<(int PersonId, int? BookingDetailId, bool IsActiveSomewhere)>> GetPendingPersonsAsync(int? customerId, int? bookingDetailId);
+
+        /// <summary>True when another person (a different PersonId) already has this e-mail (trimmed, case-insensitive).</summary>
+        Task<bool> EmailUsedByOtherAsync(string email, int exceptPersonId);
+
+        /// <summary>
+        /// Sets WN_Persons.Email, audited (TR_WN_Persons_Audit) as the acting user. False when another person has the e-mail
+        /// (checked in the same statement, so two requests can't both take it).
+        /// </summary>
+        Task<bool> SetPersonEmailAsync(int personId, string email, int actorUserId);
+
+        /// <summary>Raw sources of the CMS employee history of a booking (read-only; a source whose table is missing is empty).</summary>
+        Task<EmployeeHistoryRaw> GetHistoryAsync(int bookingId);
 
         /// <summary>Verified -> Pending again (adding the person to the space failed).</summary>
         Task ReopenAsync(int requestId);
