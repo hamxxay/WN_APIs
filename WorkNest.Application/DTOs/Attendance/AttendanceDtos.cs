@@ -169,6 +169,11 @@ namespace WorkNest.Application.DTOs.Attendance
         public DateTime AssignedFrom { get; set; }
         /// <summary>Last day on the room (null = open).</summary>
         public DateTime? AssignedTo { get; set; }
+        /// <summary>ATT_03: the day the customer / staff removed the person (their last day on the room is the day before,
+        /// so the seat frees at once). Attendance still counts the removal day itself.</summary>
+        public DateTime? RemovedOn { get; set; }
+        /// <summary>Last day attendance counts for this assignment: the removal day when removed, else AssignedTo.</summary>
+        public DateTime? CountedTo => RemovedOn.HasValue && (AssignedTo == null || RemovedOn.Value.Date > AssignedTo.Value.Date) ? RemovedOn : AssignedTo;
     }
 
     public class AttendanceRoomRow

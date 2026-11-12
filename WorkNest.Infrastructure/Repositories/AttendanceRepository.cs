@@ -93,6 +93,7 @@ namespace WorkNest.Infrastructure.Repositories
                 }
                 if (await r.NextResultAsync())
                 {
+                    var hasRemovedOn = Enumerable.Range(0, r.FieldCount).Any(i => r.GetName(i) == "RemovedOn"); // ATT_03 run?
                     while (await r.ReadAsync())
                     {
                         assignments.Add(new AttendanceAssignmentRow
@@ -101,7 +102,8 @@ namespace WorkNest.Infrastructure.Repositories
                             BookingDetailId = Int(r, "BookingDetailId") ?? 0,
                             SpaceName = Str(r, "SpaceName"),
                             AssignedFrom = Date(r, "AssignedFrom") ?? DateTime.MinValue,
-                            AssignedTo = Date(r, "AssignedTo")
+                            AssignedTo = Date(r, "AssignedTo"),
+                            RemovedOn = hasRemovedOn ? Date(r, "RemovedOn") : null
                         });
                     }
                 }

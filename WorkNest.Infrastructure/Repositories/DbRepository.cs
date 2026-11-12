@@ -4645,6 +4645,15 @@ END";
         {
             await using var c = await Open();
             const string sql = @"
+                -- ATT_03: remember the removal day on the assignments being ended now, so attendance still counts that
+                -- day (the seat is free from today: the last day on the room becomes yesterday, below).
+                IF COL_LENGTH('dbo.WN_BookingAttendants', 'RemovedOn') IS NOT NULL
+                    EXEC sys.sp_executesql N'UPDATE dbo.WN_BookingAttendants
+                        SET RemovedOn = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE)
+                        WHERE BookingDetailId = @B AND PersonId = @P
+                          AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATE));',
+                        N'@B INT, @P INT', @B = @BookingDetailId, @P = @PersonId;
+
                 UPDATE dbo.WN_BookingAttendants 
                 SET AssignedTo = DATEADD(day, -1, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE)) 
                 WHERE BookingDetailId = @BookingDetailId AND PersonId = @PersonId AND (AssignedTo IS NULL OR AssignedTo >= CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE));

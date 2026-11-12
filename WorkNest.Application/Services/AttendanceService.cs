@@ -73,7 +73,7 @@ namespace WorkNest.Application.Services
             if (personId != null && personId != 0) people = people.Where(p => p.PersonId == personId).ToList();
             var periods = assignments.ToLookup(a => a.PersonId);
             // Only people who were an employee of the customer on some day of the range.
-            people = people.Where(p => periods[p.PersonId].Any(a => a.AssignedFrom.Date <= to && (a.AssignedTo == null || a.AssignedTo.Value.Date >= from))).ToList();
+            people = people.Where(p => periods[p.PersonId].Any(a => a.AssignedFrom.Date <= to && (a.CountedTo == null || a.CountedTo.Value.Date >= from))).ToList();
             if (people.Count == 0) return AttendanceOutcome.Ok(report);
 
             var (shifts, ownShift) = await _repo.GetShiftsAsync(customer.CustomerId);
@@ -108,7 +108,7 @@ namespace WorkNest.Application.Services
                 var rule = shiftRow == null ? null : rules[shiftRow.Id];
                 var personPeriods = periods[p.PersonId].ToList();
                 var days = AttendanceCalculator.ComputeDays(personScans, rule, holidays, from, to, now,
-                    d => personPeriods.Any(a => a.AssignedFrom.Date <= d && (a.AssignedTo == null || a.AssignedTo.Value.Date >= d)));
+                    d => personPeriods.Any(a => a.AssignedFrom.Date <= d && (a.CountedTo == null || a.CountedTo.Value.Date >= d))); // through the removal day
                 foreach (var d in days)
                 {
                     d.PersonId = p.PersonId;

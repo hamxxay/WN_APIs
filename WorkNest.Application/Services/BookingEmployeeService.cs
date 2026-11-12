@@ -224,7 +224,7 @@ namespace WorkNest.Application.Services
             var isActive = s.Active.Any(a => a.PersonId == personId);
             var isPending = requests.Any(r => r.PersonId == personId && IsStatus(r, "Pending"));
             if (!isActive && !isPending) return NotFound("This employee is not on this booking.");
-            if (!s.CanManage) return Bad(s.Reason!);
+            // Removing is allowed at any time (it only takes access away), even when adding is not.
 
             if (isActive)
             {
@@ -528,10 +528,10 @@ namespace WorkNest.Application.Services
             if (b.BookingStatusId == 1 || b.BookingStatusId == (int)BookingStatus.Pending) // 1 = older "pending" value
                 return "Employees can be added once the booking is confirmed.";
             if (b.BookingStatusId != (int)BookingStatus.Confirmed)
-                return "This booking is not active, so its employees can't be changed.";
+                return "This booking is not active, so employees can't be added. You can still remove them.";
             var end = b.DetailEnd ?? b.EndOn;
             if (end.HasValue && end.Value.Date < _clock.Today)
-                return "This booking has ended, so its employees can't be changed.";
+                return "This booking has ended, so employees can't be added. You can still remove them.";
             if (b.BookingDetailId == null)
                 return "This booking has no room assigned yet. Please contact WorkNest.";
             return null;

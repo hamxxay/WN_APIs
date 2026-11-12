@@ -1,0 +1,77 @@
+-- =====================================================================================================================
+-- ATT_03: attendance counts the day an employee is removed.
+--
+-- When a customer (or staff) removes an employee, the employee's last day on the room becomes YESTERDAY, so the seat is
+-- free at once and a replacement can be added the same day. But attendance then dropped the removal day itself:
+-- removed on the 14th = attendance only up to the 13th. Now the removal day is kept in a new column and attendance counts
+-- up to and including it (removed on the 14th: the old employee's attendance up to the 14th; a new employee added on the
+-- 15th: from the 15th). Seats and door access are unchanged.
+--
+--   1. dbo.WN_BookingAttendants.RemovedOn DATE NULL (new column; existing rows stay NULL).
+--   2. dbo.WN_Attendance_GetPeople: also returns ba.RemovedOn (PATCH: one line added; nothing else changes).
+-- The API sets RemovedOn when someone is removed (it skips that while this script has not been run).
+-- Safe to run again. If the procedure is not as expected the script stops and changes nothing.
+-- The first result grid shows the procedure as it was: save it as your backup. Run on the test database and on live.
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Name SYSNAME = N'WN_Attendance_GetPeople';
+DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name));
+DECLARE @Anchor NVARCHAR(100) = N',ba.AssignedTo';
+DECLARE @Sql NVARCHAR(MAX) = NULL, @Pos INT, @LineStart INT, @Found INT, @Msg NVARCHAR(600);
+
+-- Backup: save this result before going on
+SELECT @Name AS [Procedure], @Old AS CurrentDefinition;
+
+IF OBJECT_ID(N'dbo.WN_BookingAttendants', N'U') IS NULL
+    THROW 50060, N'dbo.WN_BookingAttendants is not on this database. Nothing was changed.', 1;
+IF @Old IS NULL
+BEGIN
+    SET @Msg = N'dbo.' + @Name + N' is not on this database (run ATT_01 first). Nothing was changed.';
+    THROW 50061, @Msg, 1;
+END
+
+IF CHARINDEX(N'RemovedOn', @Old) > 0
+    PRINT N'dbo.' + @Name + N' already returns RemovedOn: left alone.';
+ELSE
+BEGIN
+    SET @Found = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @Anchor, N''))) / DATALENGTH(@Anchor);
+    IF @Found <> 1
+    BEGIN
+        SET @Msg = CONCAT(@Name, N': expected "', @Anchor, N'" once but found it ', @Found, N' times. Nothing was changed.');
+        THROW 50062, @Msg, 1;
+    END
+    SET @Sql = REPLACE(@Old, @Anchor, @Anchor + NCHAR(13) + NCHAR(10) + N'		,ba.RemovedOn -- ATT_03: the removal day (attendance counts it)');
+
+    -- The real header: the first PROCEDURE on a line that is not a comment.
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Sql);
+    WHILE @Pos > 0
+    BEGIN
+        SET @LineStart = LEN(LEFT(@Sql, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) + 2;
+        IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) = 0 SET @LineStart = 1;
+        IF LEFT(LTRIM(SUBSTRING(@Sql, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Sql, @Pos + 1);
+    END
+    IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Sql, @Pos, 80)) = 0
+    BEGIN
+        SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+        THROW 50063, @Msg, 1;
+    END
+    SET @Sql = N'CREATE OR ALTER ' + SUBSTRING(@Sql, @Pos, LEN(@Sql));
+END
+
+-- APPLY START
+BEGIN TRANSACTION;
+IF COL_LENGTH('dbo.WN_BookingAttendants', 'RemovedOn') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_BookingAttendants ADD RemovedOn DATE NULL;');
+IF @Sql IS NOT NULL
+    EXEC sys.sp_executesql @Sql;
+COMMIT TRANSACTION;
+-- APPLY END
+
+-- Result: both should be 1
+SELECT CASE WHEN COL_LENGTH('dbo.WN_BookingAttendants', 'RemovedOn') IS NOT NULL THEN 1 ELSE 0 END AS Has_RemovedOn_Column,
+       CASE WHEN CHARINDEX(N'RemovedOn', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) > 0 THEN 1 ELSE 0 END AS GetPeople_Returns_RemovedOn;
