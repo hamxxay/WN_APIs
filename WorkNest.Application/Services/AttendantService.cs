@@ -17,9 +17,12 @@ namespace WorkNest.Application.Services
         private readonly IHikEnrollmentService _hikEnrollment;
 
         private readonly ILogger<AttendantService> _logger;
+        private readonly IAttendantAddedInfoRepository _addedInfo;
 
-        public AttendantService(IDbRepository db, IEmailService email, IHikEnrollmentService hikEnrollment, ILogger<AttendantService> logger)
+        public AttendantService(IDbRepository db, IEmailService email, IHikEnrollmentService hikEnrollment, ILogger<AttendantService> logger,
+            IAttendantAddedInfoRepository addedInfo)
         {
+            _addedInfo = addedInfo;
             _logger = logger;
             _db = db;
             _email = email;
@@ -192,7 +195,36 @@ namespace WorkNest.Application.Services
             foreach (var a in list)
                 if (app.TryGetValue(a.PersonId, out var v)) a.AppAccess = v;
 
+            // Enrolment chips and who added each person: additive, never fails the list.
+            try
+            {
+                var rosters = list.Any(x => !string.IsNullOrWhiteSpace(x.MachineId))
+                    ? HikEnrollmentService.ParseRosters(await _db.GetHikDevCacheSnapshotsDbAsync())
+                    : new Dictionary<int, Dictionary<string, System.Text.Json.Nodes.JsonNode>>();
+                ApplyEnrolmentAndProvenance(list, rosters, await _addedInfo.GetAsync(bookingDetailId));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Enrolment status / added-by of booking detail {BookingDetailId} could not be read", bookingDetailId);
+            }
+
             return list;
+        }
+
+        /// <summary>Fills fingerprint / face / card (same source as the customer Employees chips) and addedOn / addedBy.</summary>
+        public static void ApplyEnrolmentAndProvenance(IEnumerable<BookingAttendantDetailDto> list,
+            Dictionary<int, Dictionary<string, System.Text.Json.Nodes.JsonNode>> rosters, IEnumerable<AttendantAddedInfo> info)
+        {
+            var byPerson = info.GroupBy(i => i.PersonId).ToDictionary(g => g.Key, g => g.First());
+            foreach (var a in list)
+            {
+                var acc = BookingEmployeeService.CredentialsOn(rosters, a.MachineId);
+                a.Fingerprint = acc.Fingerprint; a.Face = acc.Face; a.Card = acc.Card;
+                if (!byPerson.TryGetValue(a.PersonId, out var i)) continue;
+                var who = string.IsNullOrWhiteSpace(i.ByEmail) ? "" : " " + i.ByEmail!.Trim();
+                a.AddedBy = (i.ByCustomer ? "Customer" : "Staff") + who;
+                a.AddedOn = i.On;
+            }
         }
 
         public async Task<AttendantCapacityCheckDto> CheckCapacityBeforeAssignAsync(int bookingDetailId)

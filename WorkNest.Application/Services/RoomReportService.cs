@@ -80,9 +80,26 @@ namespace WorkNest.Application.Services
                 _db.GetHikAccessEventsDbAsync(from, rangeEnd, d.Id, null, null, int.MaxValue, null)));
 
             var rows = batches.SelectMany(b => b).Select(ToRow).Where(x => x.Time != default).ToList();
+            // Events with no name on them (the machine was emptied, or never sent one): look the name up for ever.
+            var unnamed = rows.Where(x => string.IsNullOrWhiteSpace(x.Name) && !string.IsNullOrWhiteSpace(x.EmployeeNo)).Select(x => x.EmployeeNo!.Trim()).Distinct().ToList();
+            if (unnamed.Count > 0)
+            {
+                try { ApplyNameFallback(rows, await _attendance.GetEmployeeNamesAsync(unnamed)); }
+                catch { /* names are a nicety: the report still works without them */ }
+            }
             var machines = chosen.OrderBy(d => d.Code, StringComparer.OrdinalIgnoreCase).ThenBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
                 .Select(d => new RoomReportMachineDto { Id = d.Id, Name = d.Name, Code = d.Code, LocationName = d.LocationName }).ToList();
             return RoomReportOutcome.Ok(RoomReportBuilder.Build(machines, rows, from, to, _clock.Now));
+        }
+
+        /// <summary>Fills the name of events that carry none from the lookup (machine id -> name); events with a name are left alone.</summary>
+        public static void ApplyNameFallback(IEnumerable<RoomReportEventRow> rows, IReadOnlyDictionary<string, string> names)
+        {
+            foreach (var row in rows)
+            {
+                if (!string.IsNullOrWhiteSpace(row.Name) || string.IsNullOrWhiteSpace(row.EmployeeNo)) continue;
+                if (names.TryGetValue(row.EmployeeNo.Trim(), out var n) && !string.IsNullOrWhiteSpace(n)) row.Name = n;
+            }
         }
 
         private static List<HikDeviceDto> ResolveDevices(IEnumerable<int> ids, List<HikDeviceDto> all, HashSet<int> scopedIds, out RoomReportOutcome? failure)

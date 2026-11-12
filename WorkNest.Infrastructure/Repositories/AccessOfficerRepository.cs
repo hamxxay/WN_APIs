@@ -11,7 +11,7 @@ namespace WorkNest.Infrastructure.Repositories
     /// 2812 / 208 (procedure / table missing) mean AO_01 has not run: <see cref="AccessOfficerDatabaseUpdateMissingException"/>
     /// (503). The writes go through the existing attendants / customer-employees procedures.
     /// </summary>
-    public class AccessOfficerRepository : IAccessOfficerRepository
+    public partial class AccessOfficerRepository : IAccessOfficerRepository
     {
         private readonly string _connectionString;
 

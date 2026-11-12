@@ -1,0 +1,131 @@
+-- =====================================================================================================================
+-- ATT_04: machine people are remembered for ever (Room Report names).
+--
+-- Problem: dbo.WN_HIK_Sync_Users_Rebuild deletes dbo.WN_HIK_Users and re-inserts it from the machines' rosters, so someone
+-- who is taken off the machines (contract ended) loses the name: their old scans in the Room Report show as nobody.
+--
+--   1. dbo.WN_HIK_KnownUsers (new table, never purged): one row per machine id (employee_no; ids are unique across all
+--      machines: WN_HIK_PersonMap.MachineID is unique) with name, cnic, room text, first_seen, last_seen, last_device.
+--   2. Seeded once from dbo.WN_HIK_Users and from the names carried by dbo.WN_HIK_Events (latest non-empty name per id;
+--      first_seen / last_seen come from the events too). Running the script again only adds what is missing.
+--   3. dbo.WN_HIK_Sync_Users_Rebuild (PATCH: one block added before its DELETE; nothing else changes): every rebuild also
+--      upserts the people it read from the machines into WN_HIK_KnownUsers (a name is only replaced by a non-empty one;
+--      last_seen = now; last_device = their first machine). Rows are never deleted.
+-- The API (Room Report) takes names from WN_HIK_Users, WN_HIK_PersonMap, then WN_HIK_KnownUsers when an event has no name,
+-- and works as before while this script has not been run. Customer attendance only showing the customer's own people is
+-- done in the API: dbo.WN_Attendance_GetPeople is NOT changed here (ATT_01 or ATT_02 version both work).
+-- Safe to run again. If the procedure is not as expected the script stops and changes nothing.
+-- The first result grid shows the procedure as it was: save it as your backup. Run on the test database and on live.
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Name SYSNAME = N'WN_HIK_Sync_Users_Rebuild';
+DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name));
+DECLARE @Anchor NVARCHAR(100) = N'DELETE FROM dbo.WN_HIK_Users;';
+DECLARE @Sql NVARCHAR(MAX) = NULL, @Pos INT, @LineStart INT, @Found INT, @Msg NVARCHAR(600);
+
+-- Backup: save this result before going on
+SELECT @Name AS [Procedure], @Old AS CurrentDefinition;
+
+IF OBJECT_ID(N'dbo.WN_HIK_Users', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_HIK_Events', N'U') IS NULL
+    THROW 50070, N'dbo.WN_HIK_Users / dbo.WN_HIK_Events are not on this database. Nothing was changed.', 1;
+IF @Old IS NULL
+BEGIN
+    SET @Msg = N'dbo.' + @Name + N' is not on this database (run WN_HIK_Sync_Procedures first). Nothing was changed.';
+    THROW 50071, @Msg, 1;
+END
+
+IF CHARINDEX(N'WN_HIK_KnownUsers', @Old) > 0
+    PRINT N'dbo.' + @Name + N' already fills WN_HIK_KnownUsers: left alone.';
+ELSE
+BEGIN
+    SET @Found = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @Anchor, N''))) / DATALENGTH(@Anchor);
+    IF @Found <> 1 OR CHARINDEX(N'@UsersJson', @Old) = 0
+    BEGIN
+        SET @Msg = CONCAT(@Name, N': expected "', @Anchor, N'" once (and @UsersJson) but found it ', @Found, N' times. Nothing was changed.');
+        THROW 50072, @Msg, 1;
+    END
+    SET @Sql = REPLACE(@Old, @Anchor, N'-- ATT_04: remember everyone read from the machines (never deleted)
+        ;WITH j AS (
+            SELECT x.employee_no, x.name, x.room, x.cnic, JSON_VALUE(x.machines, ''$[0]'') AS last_device,
+                   ROW_NUMBER() OVER (PARTITION BY x.employee_no ORDER BY CASE WHEN LEN(LTRIM(RTRIM(ISNULL(x.name, N'''')))) > 0 THEN 0 ELSE 1 END) AS rn
+            FROM OPENJSON(@UsersJson) WITH (
+                employee_no NVARCHAR(32) ''$.employee_no'', name NVARCHAR(128) ''$.name'', room NVARCHAR(256) ''$.room'',
+                machines NVARCHAR(MAX) ''$.machines'' AS JSON, cnic NVARCHAR(20) ''$.cnic'') x
+            WHERE LEN(LTRIM(RTRIM(ISNULL(x.employee_no, N'''')))) > 0)
+        MERGE dbo.WN_HIK_KnownUsers AS t
+        USING (SELECT employee_no, ISNULL(name, N'''') AS name, cnic, room, last_device FROM j WHERE rn = 1) AS s ON t.employee_no = s.employee_no
+        WHEN MATCHED THEN UPDATE SET
+            t.name = CASE WHEN LEN(LTRIM(RTRIM(s.name))) > 0 THEN s.name ELSE t.name END,
+            t.cnic = CASE WHEN LEN(s.cnic) > 0 THEN s.cnic ELSE t.cnic END,
+            t.room = CASE WHEN LEN(s.room) > 0 THEN s.room ELSE t.room END,
+            t.last_device = ISNULL(s.last_device, t.last_device),
+            t.last_seen = CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME2(0))
+        WHEN NOT MATCHED THEN INSERT (employee_no, name, cnic, room, first_seen, last_seen, last_device)
+            VALUES (s.employee_no, s.name, s.cnic, s.room, CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME2(0)),
+                    CAST(SYSDATETIMEOFFSET() AT TIME ZONE ''Pakistan Standard Time'' AS DATETIME2(0)), s.last_device);
+        ' + @Anchor);
+
+    -- The real header: the first PROCEDURE on a line that is not a comment.
+    SET @Pos = CHARINDEX(N'PROCEDURE', @Sql);
+    WHILE @Pos > 0
+    BEGIN
+        SET @LineStart = LEN(LEFT(@Sql, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) + 2;
+        IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) = 0 SET @LineStart = 1;
+        IF LEFT(LTRIM(SUBSTRING(@Sql, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Sql, @Pos + 1);
+    END
+    IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Sql, @Pos, 80)) = 0
+    BEGIN
+        SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+        THROW 50073, @Msg, 1;
+    END
+    SET @Sql = N'CREATE OR ALTER ' + SUBSTRING(@Sql, @Pos, LEN(@Sql));
+END
+
+-- APPLY START
+BEGIN TRANSACTION;
+IF OBJECT_ID(N'dbo.WN_HIK_KnownUsers', N'U') IS NULL
+    EXEC(N'CREATE TABLE dbo.WN_HIK_KnownUsers (
+        employee_no NVARCHAR(64) NOT NULL CONSTRAINT PK_WN_HIK_KnownUsers PRIMARY KEY,
+        name        NVARCHAR(256) NOT NULL CONSTRAINT DF_WN_HIK_KnownUsers_name DEFAULT (N''''),
+        cnic        NVARCHAR(40) NULL,
+        room        NVARCHAR(512) NULL,
+        first_seen  DATETIME2(0) NULL,
+        last_seen   DATETIME2(0) NULL,
+        last_device NVARCHAR(200) NULL);');
+
+-- Seed 1: the people on the machines now (one row per machine id; a row with a name wins, then the newest).
+EXEC(N'INSERT INTO dbo.WN_HIK_KnownUsers (employee_no, name, cnic, room, first_seen, last_seen, last_device)
+SELECT u.employee_no, u.name, u.cnic, u.room, CAST(u.updated_at AS DATETIME2(0)), CAST(u.updated_at AS DATETIME2(0)), JSON_VALUE(u.machines, ''$[0]'')
+FROM (SELECT x.*, ROW_NUMBER() OVER (PARTITION BY x.employee_no ORDER BY CASE WHEN LEN(LTRIM(RTRIM(x.name))) > 0 THEN 0 ELSE 1 END, x.updated_at DESC) AS rn
+      FROM dbo.WN_HIK_Users x WITH (NOLOCK) WHERE LEN(LTRIM(RTRIM(x.employee_no))) > 0) u
+WHERE u.rn = 1 AND NOT EXISTS (SELECT 1 FROM dbo.WN_HIK_KnownUsers k WHERE k.employee_no = u.employee_no);');
+
+-- Seed 2: names carried by the events (latest non-empty name per id) and first / last scan times.
+EXEC(N'SELECT e.employee_no, e.name, e.device_name, e.event_time,
+       ROW_NUMBER() OVER (PARTITION BY e.employee_no ORDER BY CASE WHEN LEN(LTRIM(RTRIM(ISNULL(e.name, N'''')))) > 0 THEN 0 ELSE 1 END, e.event_time DESC) AS rn,
+       MIN(e.event_time) OVER (PARTITION BY e.employee_no) AS first_t, MAX(e.event_time) OVER (PARTITION BY e.employee_no) AS last_t
+INTO #ev FROM dbo.WN_HIK_Events e WITH (NOLOCK) WHERE LEN(LTRIM(RTRIM(ISNULL(e.employee_no, N'''')))) > 0;
+INSERT INTO dbo.WN_HIK_KnownUsers (employee_no, name, first_seen, last_seen, last_device)
+SELECT v.employee_no, LTRIM(RTRIM(v.name)), CAST(v.first_t AS DATETIME2(0)), CAST(v.last_t AS DATETIME2(0)), v.device_name
+FROM #ev v WHERE v.rn = 1 AND LEN(LTRIM(RTRIM(ISNULL(v.name, N'''')))) > 0
+  AND NOT EXISTS (SELECT 1 FROM dbo.WN_HIK_KnownUsers k WHERE k.employee_no = v.employee_no);
+UPDATE k SET k.name = CASE WHEN LEN(LTRIM(RTRIM(k.name))) = 0 AND LEN(LTRIM(RTRIM(ISNULL(v.name, N'''')))) > 0 THEN LTRIM(RTRIM(v.name)) ELSE k.name END,
+             k.first_seen = CASE WHEN k.first_seen IS NULL OR v.first_t < k.first_seen THEN CAST(v.first_t AS DATETIME2(0)) ELSE k.first_seen END,
+             k.last_seen = CASE WHEN k.last_seen IS NULL OR v.last_t > k.last_seen THEN CAST(v.last_t AS DATETIME2(0)) ELSE k.last_seen END
+FROM dbo.WN_HIK_KnownUsers k JOIN #ev v ON v.employee_no = k.employee_no AND v.rn = 1;
+DROP TABLE #ev;');
+
+IF @Sql IS NOT NULL
+    EXEC sys.sp_executesql @Sql;
+COMMIT TRANSACTION;
+-- APPLY END
+
+-- Result: all should be 1 (the rows count is informational)
+SELECT CASE WHEN OBJECT_ID(N'dbo.WN_HIK_KnownUsers', N'U') IS NOT NULL THEN 1 ELSE 0 END AS Has_KnownUsers_Table,
+       CASE WHEN CHARINDEX(N'WN_HIK_KnownUsers', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name))) > 0 THEN 1 ELSE 0 END AS Rebuild_Fills_KnownUsers,
+       (SELECT COUNT(*) FROM dbo.WN_HIK_KnownUsers) AS KnownUsers_Rows;

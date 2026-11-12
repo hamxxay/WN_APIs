@@ -18,6 +18,10 @@ namespace WorkNest.Application.Interfaces
 
         /// <summary>Everyone ever on one of the customer's rooms, and their room assignments.</summary>
         Task<(List<AttendancePersonRow> People, List<AttendanceAssignmentRow> Assignments)> GetPeopleAsync(int customerId);
+        /// <summary>The customer's own people keys (ATT_02 shows more than that): who is a booked attendant, and the account holder's CNIC. Null = could not be read (no filtering).</summary>
+        Task<AttendanceOwnPeopleKeys?> GetOwnPeopleKeysAsync(int customerId);
+        /// <summary>Machine id (employee_no) -> name from WN_HIK_Users, then WN_HIK_PersonMap/WN_Persons, then WN_HIK_KnownUsers (permanent). Missing tables are skipped.</summary>
+        Task<Dictionary<string, string>> GetEmployeeNamesAsync(IReadOnlyCollection<string> employeeNos);
         /// <summary>The customer's booked rooms overlapping from .. to (null = no limit).</summary>
         Task<List<AttendanceRoomRow>> GetRoomsAsync(int customerId, DateTime? from, DateTime? to);
         /// <summary>Successful scans of the machine ids on the devices, from &lt;= time &lt; to (machine time).</summary>

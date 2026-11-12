@@ -297,6 +297,7 @@ try
     builder.Services.AddScoped<ILeaseTemplateService, LeaseTemplateService>();
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();
     builder.Services.AddScoped<IAttendantService, AttendantService>();
+    builder.Services.AddScoped<IAttendantAddedInfoRepository, WorkNest.Infrastructure.Repositories.AttendantAddedInfoRepository>();
     builder.Services.AddScoped<IBookingEmployeeRepository, WorkNest.Infrastructure.Repositories.BookingEmployeeRepository>(); // customer "Employees" (EMP_01)
     builder.Services.AddScoped<IBookingEmployeeService, BookingEmployeeService>();
     builder.Services.AddScoped<IAttendanceRepository, WorkNest.Infrastructure.Repositories.AttendanceRepository>(); // customer attendance (ATT_01)

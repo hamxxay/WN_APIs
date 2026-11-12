@@ -110,6 +110,66 @@ namespace WorkNest.Infrastructure.Repositories
                 return (people, assignments);
             });
 
+        public async Task<AttendanceOwnPeopleKeys?> GetOwnPeopleKeysAsync(int customerId)
+        {
+            try
+            {
+                await using var c = new SqlConnection(_connectionString);
+                await c.OpenAsync();
+                await using var cmd = new SqlCommand(@"
+                    SELECT DISTINCT ba.PersonId, CAST(NULL AS NVARCHAR(100)) AS CnicOrPassport FROM dbo.WN_BookingAttendants ba WITH (NOLOCK) WHERE ba.CustomerId=@CustomerId
+                    UNION ALL
+                    SELECT CAST(NULL AS INT), c.CnicOrPassport FROM dbo.WN_Customers c WITH (NOLOCK) WHERE c.Id=@CustomerId;", c);
+                cmd.Parameters.Add("@CustomerId", SqlDbType.Int).Value = customerId;
+                var keys = new AttendanceOwnPeopleKeys();
+                await using var r = await cmd.ExecuteReaderAsync();
+                while (await r.ReadAsync())
+                {
+                    if (r[0] is not DBNull) keys.AttendantPersonIds.Add(Convert.ToInt32(r[0]));
+                    else if (r[1] is not DBNull) keys.HolderIdNumber = Convert.ToString(r[1]);
+                }
+                return keys;
+            }
+            catch (SqlException)
+            {
+                return null; // cannot tell: the people list stays as the procedure returned it
+            }
+        }
+
+        public async Task<Dictionary<string, string>> GetEmployeeNamesAsync(IReadOnlyCollection<string> employeeNos)
+        {
+            // Names for machine ids, in this order: the machine rosters (WN_HIK_Users), the dashboard's persons
+            // (WN_HIK_PersonMap), then the permanent WN_HIK_KnownUsers (never purged). A missing table is skipped.
+            var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (employeeNos.Count == 0) return names;
+            var list = string.Join(",", employeeNos.Select(n => n.Trim()).Where(n => n.Length > 0 && !n.Contains(',')).Distinct());
+            var sources = new[]
+            {
+                "SELECT u.employee_no AS EmployeeNo, u.name AS Name FROM dbo.WN_HIK_Users u WITH (NOLOCK) WHERE u.employee_no IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@Nos, N','))",
+                "SELECT pm.MachineID, p.Name FROM dbo.WN_HIK_PersonMap pm WITH (NOLOCK) JOIN dbo.WN_Persons p WITH (NOLOCK) ON p.PersonId=pm.PersonId WHERE pm.MachineID IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@Nos, N','))",
+                "SELECT k.employee_no, k.name FROM dbo.WN_HIK_KnownUsers k WITH (NOLOCK) WHERE k.employee_no IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@Nos, N','))"
+            };
+            foreach (var sql in sources)
+            {
+                try
+                {
+                    await using var c = new SqlConnection(_connectionString);
+                    await c.OpenAsync();
+                    await using var cmd = new SqlCommand(sql, c);
+                    cmd.Parameters.Add("@Nos", SqlDbType.NVarChar, -1).Value = list;
+                    await using var r = await cmd.ExecuteReaderAsync();
+                    while (await r.ReadAsync())
+                    {
+                        var no = r[0] is DBNull ? "" : Convert.ToString(r[0])!.Trim();
+                        var name = r[1] is DBNull ? "" : Convert.ToString(r[1])!.Trim();
+                        if (no.Length > 0 && name.Length > 0 && !names.ContainsKey(no)) names[no] = name;
+                    }
+                }
+                catch (SqlException) { /* table not there (yet): the next source */ }
+            }
+            return names;
+        }
+
         public Task<List<AttendanceRoomRow>> GetRoomsAsync(int customerId, DateTime? from, DateTime? to) =>
             Run(async c =>
             {

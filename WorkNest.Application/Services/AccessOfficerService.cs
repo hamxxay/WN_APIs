@@ -178,6 +178,103 @@ namespace WorkNest.Application.Services
             return Ok(new AccessOfficerAccessChangeDto { Match = match, Machines = machines }, message);
         }
 
+        // ---- 6. Employees list (everyone on the officer's rooms, with what is enrolled) ------------------------------
+
+        public async Task<AccessOfficerOutcome> ListEmployeesAsync(string? filter, string? search, AccessOfficerScope scope)
+        {
+            var f = NormaliseFilter(filter);
+            if (f == null) return Bad("filter must be needs, enrolled or all.");
+
+            var rows = await _repo.EmployeesAsync(LocationCsv(scope));
+            var devices = (await _db.GetHikDevicesAsync()).ToList();
+            Dictionary<int, Dictionary<string, JsonNode>> rosters;
+            try { rosters = HikEnrollmentService.ParseRosters(await _db.GetHikDevCacheSnapshotsDbAsync()); }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Access Officer: the machines' user lists could not be read; credentials shown as none");
+                rosters = new Dictionary<int, Dictionary<string, JsonNode>>();
+            }
+
+            var list = rows.Where(r => scope.Covers(r.LocationId)).Select(r =>
+            {
+                var cred = BookingEmployeeService.CredentialsOn(rosters, r.MachineId);
+                var machine = HikEnrollmentService.PickRoomMachine(devices, r.LocationId is int loc ? new[] { loc } : null, r.SpaceCode, r.SpaceName);
+                return new AccessOfficerEmployeeDto
+                {
+                    PersonId = r.PersonId,
+                    Name = r.Name,
+                    IdNumber = Blank(r.IdNumber) == null ? null : BookingEmployeeService.FormatId(r.IdType ?? "", r.IdNumber!),
+                    Phone = Blank(r.Phone),
+                    Email = Blank(r.Email),
+                    CustomerName = Blank(r.Customer),
+                    BookingId = r.BookingId,
+                    BookingDetailId = r.BookingDetailId,
+                    Room = r.Room,
+                    Location = Blank(r.Location),
+                    LocationId = r.LocationId,
+                    AddedOn = r.AddedAtUtc?.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
+                    AddedBy = AddedByText(r),
+                    Fingerprint = cred.Fingerprint,
+                    Face = cred.Face,
+                    Card = cred.Card,
+                    AccessEnabled = r.OnRoom && r.AccessEnabled,
+                    OnRoom = r.OnRoom,
+                    RoomMachine = machine == null ? null : new AccessOfficerRoomMachineDto { Name = machine.Name, Online = machine.Online == 1 }
+                };
+            }).ToList();
+
+            return Ok(FilterEmployees(list, f, search));
+        }
+
+        /// <summary>needs | enrolled | all (blank = needs); null = not a filter.</summary>
+        public static string? NormaliseFilter(string? filter)
+        {
+            var f = (filter ?? "").Trim().ToLowerInvariant();
+            return f switch
+            {
+                "" or AccessOfficerEmployeeFilters.Needs => AccessOfficerEmployeeFilters.Needs,
+                AccessOfficerEmployeeFilters.Enrolled => AccessOfficerEmployeeFilters.Enrolled,
+                AccessOfficerEmployeeFilters.All => AccessOfficerEmployeeFilters.All,
+                _ => null
+            };
+        }
+
+        /// <summary>
+        /// needs = on the room and no fingerprint and no face (a card alone still needs one); enrolled = on the room with a
+        /// fingerprint or a face; all = everyone. The search matches name, ID number (letters and digits only), phone, email,
+        /// customer, room and location. Newest added first (people without an added date after, by booking order kept).
+        /// </summary>
+        public static List<AccessOfficerEmployeeDto> FilterEmployees(IEnumerable<AccessOfficerEmployeeDto> rows, string filter, string? search)
+        {
+            var q = (search ?? "").Trim();
+            var key = BookingEmployeeService.IdKey(q);
+            var phoneKey = new string(q.Where(char.IsDigit).ToArray());
+            var result = rows.Where(r => filter switch
+            {
+                AccessOfficerEmployeeFilters.Needs => r.OnRoom && !r.Fingerprint && !r.Face,
+                AccessOfficerEmployeeFilters.Enrolled => r.OnRoom && (r.Fingerprint || r.Face),
+                _ => true
+            });
+            if (q.Length > 0)
+            {
+                result = result.Where(r =>
+                    Has(r.Name, q) || Has(r.Email, q) || Has(r.CustomerName, q) || Has(r.Room, q) || Has(r.Location, q)
+                    || (key.Length >= 3 && BookingEmployeeService.IdKey(r.IdNumber).Contains(key, StringComparison.Ordinal))
+                    || (phoneKey.Length >= 3 && new string((r.Phone ?? "").Where(char.IsDigit).ToArray()).Contains(phoneKey, StringComparison.Ordinal)));
+            }
+            // Stable: OrderByDescending keeps the repository's order among equal / missing dates.
+            return result.OrderByDescending(r => r.AddedOn ?? "").ToList();
+        }
+
+        private static bool Has(string? text, string q) => text != null && text.Contains(q, StringComparison.OrdinalIgnoreCase);
+
+        private static string? AddedByText(AccessOfficerEmployeeRow r)
+        {
+            var who = Blank(r.AddedByEmail);
+            if (r.AddedByCustomer) return who == null ? "Customer" : $"Customer {who}";
+            return who == null ? null : $"Staff {who}";
+        }
+
         // ---- helpers ---------------------------------------------------------------------------------------------------
 
         /// <summary>

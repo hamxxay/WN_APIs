@@ -40,6 +40,14 @@ namespace WorkNest.API.Controllers
         public Task<IActionResult> Lookup([FromQuery] string? cnic) =>
             Run(scope => _access.LookupAsync(cnic, scope));
 
+        /// <summary>
+        /// Employees tab: everyone on the caller's rooms with what is enrolled. filter = needs (default) | enrolled | all,
+        /// search = name / ID / phone / email / customer / room. Access Officer: own locations; super admin: all.
+        /// </summary>
+        [HttpGet("api/access-officer/employees")]
+        public Task<IActionResult> Employees([FromQuery] string? filter, [FromQuery] string? search) =>
+            Run(scope => _access.ListEmployeesAsync(filter, search, scope));
+
         /// <summary>A customer-added person ("pending"): the sales CNIC check, which puts them on the room.</summary>
         [HttpPost("api/access-officer/add-to-room")]
         public Task<IActionResult> AddToRoom([FromBody] AccessOfficerAddToRoomRequest? request) =>

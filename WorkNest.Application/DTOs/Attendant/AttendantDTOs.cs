@@ -92,6 +92,14 @@ namespace WorkNest.Application.DTOs.Attendant
         /// <summary>Verified in the mobile app (Access Request), or null; shown on the web next to the user.</summary>
         public MobileAccessVerificationDto? AppAccess { get; set; }
         public int HikPendingOps { get; set; }
+        /// <summary>Enrolled on the room machine (HIK roster cache); false when never enrolled.</summary>
+        public bool Fingerprint { get; set; }
+        public bool Face { get; set; }
+        public bool Card { get; set; }
+        /// <summary>yyyy-MM-dd (Pakistan date) the person was added, or null when unknown.</summary>
+        public string? AddedOn { get; set; }
+        /// <summary>"Customer &lt;email&gt;" / "Staff &lt;email&gt;" (e-mail omitted when unknown), or null when unknown.</summary>
+        public string? AddedBy { get; set; }
     }
 
     public class AccessStatusExportDto

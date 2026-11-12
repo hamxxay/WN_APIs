@@ -151,6 +151,13 @@ namespace WorkNest.Application.DTOs.Attendance
         public int EmployeeCount { get; set; }
     }
 
+    /// <summary>Who counts as the customer's own: everyone in WN_BookingAttendants of the customer, plus the account holder (matched by CNIC / passport).</summary>
+    public class AttendanceOwnPeopleKeys
+    {
+        public HashSet<int> AttendantPersonIds { get; set; } = new();
+        public string? HolderIdNumber { get; set; }
+    }
+
     public class AttendancePersonRow
     {
         public int PersonId { get; set; }

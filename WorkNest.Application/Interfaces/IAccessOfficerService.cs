@@ -10,6 +10,12 @@ namespace WorkNest.Application.Interfaces
     public interface IAccessOfficerRepository
     {
         Task<List<AccessOfficerMatchRow>> LookupAsync(string? idKey, int? personId, int? bookingDetailId, string? locationIds);
+
+        /// <summary>
+        /// Everyone on a confirmed, running booking at the locations (CSV, null = all): assigned people and customer-added
+        /// people waiting for the CNIC check; newest first. Inline SQL (no database update needed beyond AO_01 tables).
+        /// </summary>
+        Task<List<AccessOfficerEmployeeRow>> EmployeesAsync(string? locationIds);
     }
 
     /// <summary>
@@ -25,6 +31,8 @@ namespace WorkNest.Application.Interfaces
         /// <summary><paramref name="kind"/> = face | fingerprint.</summary>
         Task<AccessOfficerOutcome> EnrollAsync(string kind, AccessOfficerEnrollRequest? request, AccessOfficerScope scope);
         Task<AccessOfficerOutcome> SetAccessAsync(AccessOfficerPersonRequest? request, bool enable, AccessOfficerScope scope);
+        /// <summary>filter = needs | enrolled | all (default needs); search = name, ID number, phone, email, customer, room.</summary>
+        Task<AccessOfficerOutcome> ListEmployeesAsync(string? filter, string? search, AccessOfficerScope scope);
     }
 
     /// <summary>dbo.WN_AccessOfficer_Lookup (script AO_01) is not on this database yet (answered 503).</summary>

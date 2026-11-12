@@ -68,7 +68,7 @@ namespace WorkNest.Application.Services
                 To = AttendanceCalculator.Date(to)
             };
 
-            var (people, assignments) = await _repo.GetPeopleAsync(customer.CustomerId);
+            var (people, assignments) = await GetOwnPeopleAsync(customer.CustomerId);
             people = DedupeByMachine(people);
             if (personId != null && personId != 0) people = people.Where(p => p.PersonId == personId).ToList();
             var periods = assignments.ToLookup(a => a.PersonId);
@@ -124,6 +124,27 @@ namespace WorkNest.Application.Services
             return AttendanceOutcome.Ok(report);
         }
 
+        /// <summary>The customer's people, reduced to its own: booked attendants and the account holder (the other "machine people" ATT_02 finds on the room machines are not shown).</summary>
+        private async Task<(List<AttendancePersonRow> People, List<AttendanceAssignmentRow> Assignments)> GetOwnPeopleAsync(int customerId)
+        {
+            var (people, assignments) = await _repo.GetPeopleAsync(customerId);
+            var keys = await _repo.GetOwnPeopleKeysAsync(customerId);
+            if (keys == null) return (people, assignments);
+            var own = FilterOwnPeople(people, keys.AttendantPersonIds, keys.HolderIdNumber);
+            var ownIds = own.Select(p => p.PersonId).ToHashSet();
+            return (own, assignments.Where(a => ownIds.Contains(a.PersonId)).ToList());
+        }
+
+        private static string IdKey(string? id) => new string((id ?? "").Where(ch => ch != '-' && !char.IsWhiteSpace(ch)).ToArray());
+
+        /// <summary>Keeps booked attendants (their PersonId is in <paramref name="attendantIds"/>) and the account holder (id number equal to the customer's CNIC / passport, as ATT_02 matches it); drops other machine people.</summary>
+        public static List<AttendancePersonRow> FilterOwnPeople(IEnumerable<AttendancePersonRow> people, ISet<int> attendantIds, string? holderIdNumber)
+        {
+            var holder = IdKey(holderIdNumber);
+            var holderOk = holder.Length >= 5 && holder.Any(ch => ch is >= '1' and <= '9');
+            return people.Where(p => attendantIds.Contains(p.PersonId) || (holderOk && IdKey(p.IdNumber) == holder)).ToList();
+        }
+
         /// <summary>One row per machine id (the same machine id must not count twice): the person with a WN_Persons row (PersonId &gt; 0) wins.</summary>
         public static List<AttendancePersonRow> DedupeByMachine(IEnumerable<AttendancePersonRow> people)
         {
@@ -171,7 +192,7 @@ namespace WorkNest.Application.Services
 
         public async Task<List<AttendanceEmployeeDto>> GetEmployeesAsync(int customerId)
         {
-            var (people, assignments) = await _repo.GetPeopleAsync(customerId);
+            var (people, assignments) = await GetOwnPeopleAsync(customerId);
             var (shifts, ownShift) = await _repo.GetShiftsAsync(customerId);
             return BuildEmployees(people, assignments, shifts, ownShift, _clock.Today);
         }
@@ -220,7 +241,7 @@ namespace WorkNest.Application.Services
         public async Task<List<AttendanceShiftDto>> GetShiftsAsync(int customerId)
         {
             var (shifts, ownShift) = await _repo.GetShiftsAsync(customerId);
-            var (people, assignments) = await _repo.GetPeopleAsync(customerId);
+            var (people, assignments) = await GetOwnPeopleAsync(customerId);
             var active = BuildEmployees(people, assignments, shifts, ownShift, _clock.Today).Where(e => e.Active).ToList();
             var defaultId = shifts.FirstOrDefault(s => s.IsDefault)?.Id;
             return shifts.Select(s => new AttendanceShiftDto
