@@ -489,10 +489,22 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 tc.Spacing(2);
                 int itemNum = 1;
 
+                bool isLocation3 = data.LocationId == 3;
                 bool isLocation2 = data.LocationId == 2
                     || (data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase)));
 
-                if (isLocation2)
+                if (isLocation3)
+                {
+                    tc.Item().Text($"{itemNum++}. Please deposit this payment in the following bank account: ").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Bank Name: [Location 3 bank name]").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Account Title: [Location 3 account title]").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Account Number: [Location 3 account number]").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("IBAN: [Location 3 IBAN]").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Swift code: [Location 3 SWIFT code]").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Branch code: [Location 3 branch code]").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("And send the receipt to [Location 3 contact number]").FontSize(7.5f).FontColor("#000000");
+                }
+                else if (isLocation2)
                 {
                     if (!string.IsNullOrWhiteSpace(data.OneBillNumber))
                     {
