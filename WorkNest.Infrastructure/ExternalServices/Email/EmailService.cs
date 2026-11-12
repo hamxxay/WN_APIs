@@ -164,6 +164,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 return;
             }
 
+            // Tour requests follow their own switch (Tour Request Emails), not Email Sending: on = sent at once, off = not sent
+            // and not kept (the request is still in Tour Inquiries).
+            if (!await TourRequestEmailsOnAsync())
+            {
+                _logger.LogWarning("[EMAIL] Tour request e-mail for {Name} not sent: the Tour Request Emails switch is off.", fullName);
+                return;
+            }
+
             try
             {
                 var body = $"""
@@ -189,7 +197,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     mailMessage.ReplyToList.Add(replyTo);
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mailMessage, "Tour request notification");   // Email Sending off: held in Pending emails
+                await smtp.SendMailAsync(mailMessage);   // own switch (checked above): not held by Email Sending
                 _logger.LogInformation("[EMAIL] Tour notification sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -716,6 +724,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         /// does not hold them, so an outage e-mail is never left waiting in Pending emails.</summary>
         public Task SendNetworkAlertEmailAsync(string toEmail, string subject, string html) =>
             SendHtmlAsync(toEmail, subject, html, "WorkNest Network Alerts", approval: false, bypassHold: true);
+
+        private async Task<bool> TourRequestEmailsOnAsync()
+        {
+            if (_serviceSwitch == null) return true;
+            try { return await _serviceSwitch.IsEnabledAsync(BackgroundServiceCatalog.TourRequestEmails); }
+            catch (Exception) { return true; }
+        }
 
         private async Task<bool> ApprovalEmailsOnAsync()
         {
