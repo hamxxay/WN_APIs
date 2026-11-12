@@ -8,7 +8,8 @@
 -- 15th: from the 15th). Seats and door access are unchanged.
 --
 --   1. dbo.WN_BookingAttendants.RemovedOn DATE NULL (new column; existing rows stay NULL).
---   2. dbo.WN_Attendance_GetPeople: also returns ba.RemovedOn (PATCH: one line added; nothing else changes).
+--   2. dbo.WN_Attendance_GetPeople: also returns ba.RemovedOn (PATCH: one line added; nothing else changes). On a
+--      database with ATT_02 (machine-enrolled people, a UNION) their part gets an empty RemovedOn, as they are never removed.
 -- The API sets RemovedOn when someone is removed (it skips that while this script has not been run).
 -- Safe to run again. If the procedure is not as expected the script stops and changes nothing.
 -- The first result grid shows the procedure as it was: save it as your backup. Run on the test database and on live.
@@ -21,6 +22,8 @@ SET QUOTED_IDENTIFIER ON;
 DECLARE @Name SYSNAME = N'WN_Attendance_GetPeople';
 DECLARE @Old NVARCHAR(MAX) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + @Name));
 DECLARE @Anchor NVARCHAR(100) = N',ba.AssignedTo';
+DECLARE @Anchor2 NVARCHAR(200) = N'm.AssignedFrom, m.AssignedTo';   -- ATT_02's machine-people part of the UNION
+DECLARE @Found2 INT;
 DECLARE @Sql NVARCHAR(MAX) = NULL, @Pos INT, @LineStart INT, @Found INT, @Msg NVARCHAR(600);
 
 -- Backup: save this result before going on
@@ -44,7 +47,17 @@ BEGIN
         SET @Msg = CONCAT(@Name, N': expected "', @Anchor, N'" once but found it ', @Found, N' times. Nothing was changed.');
         THROW 50062, @Msg, 1;
     END
+    SET @Found2 = (DATALENGTH(@Old) - DATALENGTH(REPLACE(@Old, @Anchor2, N''))) / DATALENGTH(@Anchor2);
+    IF @Found2 = 0 AND CHARINDEX(N'WN_Attendance_MachinePeople', @Old) > 0
+        THROW 50065, N'WN_Attendance_GetPeople has the machine-people part (ATT_02) but not in the expected form. Nothing was changed. Send the backup grid to the developer.', 1;
+    IF @Found2 > 1
+    BEGIN
+        SET @Msg = CONCAT(@Name, N': expected "', @Anchor2, N'" at most once but found it ', @Found2, N' times. Nothing was changed.');
+        THROW 50064, @Msg, 1;
+    END
     SET @Sql = REPLACE(@Old, @Anchor, @Anchor + NCHAR(13) + NCHAR(10) + N'		,ba.RemovedOn -- ATT_03: the removal day (attendance counts it)');
+    IF @Found2 = 1
+        SET @Sql = REPLACE(@Sql, @Anchor2, @Anchor2 + N', CAST(NULL AS DATE) AS RemovedOn');   -- machine people: never removed
 
     -- The real header: the first PROCEDURE on a line that is not a comment.
     SET @Pos = CHARINDEX(N'PROCEDURE', @Sql);
