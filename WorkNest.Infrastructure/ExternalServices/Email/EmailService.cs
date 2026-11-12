@@ -712,6 +712,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         public Task SendApprovalEmailAsync(string toEmail, string subject, string html, string fromName) =>
             SendHtmlAsync(toEmail, subject, html, fromName, approval: true);
 
+        /// <summary>Network alerts follow their own switch (the alert job only runs while Network Alerts is on): Email Sending
+        /// does not hold them, so an outage e-mail is never left waiting in Pending emails.</summary>
+        public Task SendNetworkAlertEmailAsync(string toEmail, string subject, string html) =>
+            SendHtmlAsync(toEmail, subject, html, "WorkNest Network Alerts", approval: false, bypassHold: true);
+
         private async Task<bool> ApprovalEmailsOnAsync()
         {
             if (_serviceSwitch == null) return true;
@@ -719,7 +724,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             catch (Exception) { return true; }
         }
 
-        private async Task SendHtmlAsync(string toEmail, string subject, string html, string fromName, bool approval)
+        private async Task SendHtmlAsync(string toEmail, string subject, string html, string fromName, bool approval, bool bypassHold = false)
         {
             var (fromEmail, password, host, port) = GetEmailSettings();
 
@@ -751,7 +756,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 mail.Body = html;
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                if (approval) await smtp.SendMailAsync(mail);
+                if (approval || bypassHold) await smtp.SendMailAsync(mail);
                 else await DeliverAsync(smtp, mail, "Report e-mail");   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Report '{Subject}' sent to {ToEmail} via {Host}:{Port}.", subject, toEmail, host, port);
             }

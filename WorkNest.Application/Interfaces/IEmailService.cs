@@ -17,6 +17,9 @@ namespace WorkNest.Application.Interfaces
         /// <summary>An Approvals e-mail: sent under <paramref name="fromName"/> and governed by the Approval Emails switch only, not
         /// Email Sending. Switch off: <see cref="EmailSendingOffException"/>, nothing kept. Throws when it could not be sent.</summary>
         Task SendApprovalEmailAsync(string toEmail, string subject, string html, string fromName) => SendHtmlReportAsync(toEmail, subject, html);
+        /// <summary>A network alert (access machine / internet / network device down or back): governed by the Network Alerts
+        /// switch only (the alert job runs only while it is on), not held by Email Sending. Throws when it could not be sent.</summary>
+        Task SendNetworkAlertEmailAsync(string toEmail, string subject, string html) => SendHtmlReportAsync(toEmail, subject, html);
         /// <summary>Sends an e-mail held in Pending emails (its MessageJson) as it was asked for. Throws when it fails.</summary>
         Task SendHeldAsync(string messageJson);
     }
