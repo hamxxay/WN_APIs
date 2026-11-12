@@ -18,6 +18,13 @@ namespace WorkNest.Application.Interfaces
         Task<BookingEmployeeOutcome> RemoveAsync(int bookingId, int userId, int personId);
 
         /// <summary>
+        /// The owner enrols a fingerprint or face (kind) for a person on the booking, on the room's machine + the Entrance
+        /// machines (the staff / Access Officer enrolment). 400 when blocked (not confirmed, ended, access suspended, machine
+        /// offline, nothing captured), 404 not the owner's booking, 409 while a capture runs for the room.
+        /// </summary>
+        Task<BookingEmployeeOutcome> EnrollAsync(int bookingId, int userId, int personId, string? kind);
+
+        /// <summary>
         /// Sales: verify a customer-added employee by CNIC and add them to the booked space. <paramref name="acceptOtherIds"/>
         /// (Access Officer): a passport / other ID number is accepted too (letters and digits), not only a 13-digit CNIC.
         /// </summary>

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Mail;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -27,10 +28,20 @@ namespace WorkNest.Application.Services
         private readonly IDbRepository _db;
         private readonly IBusinessClock _clock;
         private readonly ILogger<BookingEmployeeService> _logger;
+        private readonly IHikEnrollmentService _hik;
+        private readonly IHikAccessSuspensionService _suspension;
+
+        /// <summary>One capture at a time per booked room (the customer stands at the room's machine). In-process only.</summary>
+        private static readonly ConcurrentDictionary<int, SemaphoreSlim> RoomLocks = new();
+
+        public const string MachineBusyMessage = "The room's machine is busy with another enrolment. Try again in a minute.";
+        public const string SuspendedMessage = "Door access is suspended until the overdue challan is paid.";
 
         public BookingEmployeeService(IBookingEmployeeRepository repo, IAttendantService attendants, IDbRepository db,
-            IBusinessClock clock, ILogger<BookingEmployeeService> logger)
+            IBusinessClock clock, ILogger<BookingEmployeeService> logger, IHikEnrollmentService hik, IHikAccessSuspensionService suspension)
         {
+            _hik = hik;
+            _suspension = suspension;
             _repo = repo;
             _attendants = attendants;
             _db = db;
@@ -80,12 +91,14 @@ namespace WorkNest.Application.Services
                 IdType = r.IdType,
                 IdNumber = FormatId(r.IdType, r.IdNumber),
                 AddedOn = _clock.FromUtc(r.AddedAt).ToString("yyyy-MM-dd"),
-                Status = "pending",
+                Status = "active", // no sales check any more: a person added earlier and still pending counts as active
                 AddedBy = "customer",
                 Access = new BookingEmployeeAccessDto()
             }))
             .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+            var enrollBlock = await EnrollBlockedReasonAsync(booking, checkMachine: true);
 
             var dto = new BookingEmployeesDto
             {
@@ -96,6 +109,8 @@ namespace WorkNest.Application.Services
                 Used = s.Used,
                 CanManage = s.CanManage,
                 Reason = s.Reason,
+                CanEnroll = enrollBlock == null,
+                EnrollBlockedReason = enrollBlock,
                 Employees = employees,
                 SavedEmployees = await SavedEmployeesAsync(booking.CustomerId, s)
             };
@@ -178,13 +193,20 @@ namespace WorkNest.Application.Services
                 }
             }
 
-            var (result, _, _) = await _repo.AddRequestAsync(booking.BookingId, bookingDetailId, customerId, personId, userId, s.Seats);
+            // The request row keeps the seat limit atomic (and who added the person); there is no sales check any more, so
+            // the person goes on the room at once, with the same procedure as the staff / sales assignment.
+            var (result, requestId, _) = await _repo.AddRequestAsync(booking.BookingId, bookingDetailId, customerId, personId, userId, s.Seats);
+            if (result == "ok")
+            {
+                var assignError = await AssignToRoomAsync(bookingDetailId, personId, customerId, userId, removeRequestOnFailure: booking.BookingId);
+                if (assignError != null) return Bad(assignError);
+            }
             return result switch
             {
                 "ok" => new BookingEmployeeOutcome
                 {
                     StatusCode = 201,
-                    Message = "Employee added. WorkNest will add their fingerprint or face at the branch.",
+                    Message = "Employee added. You can now add their fingerprint or face at the room's machine.",
                     Data = new { personId }
                 },
                 "duplicate" => Bad("This person is already on this booking."),
@@ -219,6 +241,136 @@ namespace WorkNest.Application.Services
             {
                 Message = isActive ? "Employee removed and their door access cancelled." : "Employee removed."
             };
+        }
+
+        // ---- Customer: fingerprint / face on the room machine -------------------------------------------
+
+        public async Task<BookingEmployeeOutcome> EnrollAsync(int bookingId, int userId, int personId, string? kind)
+        {
+            var (booking, requests) = await _repo.GetAsync(bookingId, userId);
+            if (booking == null) return NotFound("Booking not found.");
+
+            var type = (kind ?? "").Trim().ToLowerInvariant();
+            if (type != "fingerprint" && type != "face") return Bad("Choose fingerprint or face.");
+
+            var s = await LoadAsync(booking, requests);
+            var onRoom = s.Active.FirstOrDefault(a => a.PersonId == personId);
+            var waiting = onRoom == null ? s.Pending.FirstOrDefault(p => p.PersonId == personId) : null;
+            if (onRoom == null && waiting == null) return Bad("This person is not on this booking.");
+
+            var blocked = await EnrollBlockedReasonAsync(booking, checkMachine: false);
+            if (blocked != null) return Bad(blocked);
+            var detailId = booking.BookingDetailId!.Value;
+
+            var gate = RoomLocks.GetOrAdd(detailId, _ => new SemaphoreSlim(1, 1));
+            if (!await gate.WaitAsync(0)) return new BookingEmployeeOutcome { StatusCode = 409, Message = MachineBusyMessage };
+            try
+            {
+                if (onRoom == null)
+                {
+                    // Added before the sales check was dropped and still pending: put them on the room now (seats are
+                    // already counted for them), then enrol.
+                    var customerId = booking.CustomerId ?? 0;
+                    var assignError = await AssignToRoomAsync(detailId, personId, customerId, userId, removeRequestOnFailure: null);
+                    if (assignError != null) return Bad(assignError);
+                }
+
+                var result = type == "face"
+                    ? await _hik.EnrollFaceAsync(detailId, personId, new HikEnrollRequest())
+                    : await _hik.EnrollFingerprintAsync(detailId, personId, new HikEnrollRequest { FingerNo = 1 });
+                if (!result.Ok) return Bad(EnrollErrorText(result.Error, type));
+
+                var access = onRoom != null && !string.IsNullOrWhiteSpace(onRoom.MachineId)
+                    ? await EnrolledCredentialsAsync(new List<BookingAttendantDetailDto> { onRoom }) : new();
+                var acc = access.TryGetValue(personId, out var known) ? known : new BookingEmployeeAccessDto();
+                if (type == "face") acc.Face = true; else acc.Fingerprint = true; // the roster cache is a little behind
+                return new BookingEmployeeOutcome
+                {
+                    Message = type == "face" ? "Face added." : "Fingerprint added.",
+                    Data = new { personId, kind = type, access = acc }
+                };
+            }
+            finally { gate.Release(); }
+        }
+
+        /// <summary>The device's plain wording for the customer (the "no finger in time" case in particular).</summary>
+        internal static string EnrollErrorText(string? error, string type)
+        {
+            if (string.IsNullOrWhiteSpace(error)) return type == "face" ? "The face could not be added. Try again." : "The fingerprint could not be added. Try again.";
+            if (error.Contains("in time", StringComparison.OrdinalIgnoreCase) && error.Contains("finger", StringComparison.OrdinalIgnoreCase))
+                return "No finger was placed on the machine in time. Try again.";
+            return error;
+        }
+
+        /// <summary>
+        /// Puts the person on the booked room (WN_AssignAttendantToBooking, never over the seats) and marks their request
+        /// Verified by the customer. null = done, else the reason. With removeRequestOnFailure (a new add) the request is
+        /// removed again so no seat stays taken.
+        /// </summary>
+        private async Task<string?> AssignToRoomAsync(int bookingDetailId, int personId, int customerId, int userId, int? removeRequestOnFailure)
+        {
+            try
+            {
+                await _attendants.AssignAttendantToBookingAsync(new AssignBookingAttendantRequest
+                {
+                    BookingDetailId = bookingDetailId, PersonId = personId, CustomerId = customerId
+                }, allowOverCapacity: false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (removeRequestOnFailure is int bookingId) await _repo.RemoveRequestsAsync(bookingId, personId);
+                return ex.Message;
+            }
+            catch
+            {
+                if (removeRequestOnFailure is int bookingId) await _repo.RemoveRequestsAsync(bookingId, personId);
+                throw;
+            }
+            await MarkVerifiedIfRequestedAsync(bookingDetailId, personId, userId);
+            return null;
+        }
+
+        /// <summary>Why a fingerprint / face can't be added now (null = it can): booking state, overdue challan, room machine.</summary>
+        private async Task<string?> EnrollBlockedReasonAsync(BookingEmployeeBookingRow b, bool checkMachine)
+        {
+            var state = EnrollStateReason(b, _clock.Today);
+            if (state != null) return state;
+            var detailId = b.BookingDetailId!.Value;
+            try
+            {
+                var suspension = await _suspension.GetAccessSuspensionAsync(detailId);
+                if (suspension.Open && suspension.Suspended) return SuspendedMessage;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Access suspension of booking detail {BookingDetailId} could not be read", detailId);
+            }
+            if (!checkMachine) return null;
+            try
+            {
+                var machine = await _hik.GetRoomMachineAsync(detailId);
+                if (machine.Checked && machine.Name == null) return machine.Reason;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Room machine of booking detail {BookingDetailId} could not be read", detailId);
+            }
+            return null;
+        }
+
+        /// <summary>Confirmed, not ended (Pakistan date), has a room; else why not (pure).</summary>
+        internal static string? EnrollStateReason(BookingEmployeeBookingRow b, DateTime today)
+        {
+            if (b.BookingStatusId == 1 || b.BookingStatusId == (int)BookingStatus.Pending)
+                return "Fingerprint and face can be added once the booking is confirmed.";
+            if (b.BookingStatusId != (int)BookingStatus.Confirmed)
+                return "This booking is not active, so a fingerprint or face can't be added.";
+            var end = b.DetailEnd ?? b.EndOn;
+            if (end.HasValue && end.Value.Date < today)
+                return "This booking has ended, so a fingerprint or face can't be added.";
+            if (b.BookingDetailId == null)
+                return "This booking has no room assigned yet. Please contact WorkNest.";
+            return null;
         }
 
         // ---- Sales: CNIC check at the branch -------------------------------------------------------

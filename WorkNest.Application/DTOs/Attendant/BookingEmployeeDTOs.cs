@@ -39,6 +39,10 @@ namespace WorkNest.Application.DTOs.Attendant
         public bool CanManage { get; set; }
         /// <summary>Why the employees can't be changed (null when they can).</summary>
         public string? Reason { get; set; }
+        /// <summary>False when a fingerprint / face can't be added now (booking not confirmed / ended, access suspended, room has no machine).</summary>
+        public bool CanEnroll { get; set; }
+        /// <summary>Plain words why not (null when CanEnroll).</summary>
+        public string? EnrollBlockedReason { get; set; }
         public List<BookingEmployeeDto> Employees { get; set; } = new();
         public List<SavedEmployeeDto> SavedEmployees { get; set; } = new();
     }
