@@ -39,6 +39,29 @@ namespace WorkNest.API.Controllers
             return Ok(new PaginatedResponse<object> { Data = items, Total = total });
         }
 
+        [Authorize(Roles = ManageRoles)]
+        [HttpGet("api/user/eligible-managers")]
+        public async Task<IActionResult> EligibleManagers([FromQuery] string? locationIds)
+        {
+            var parsed = new List<int>();
+            if (!string.IsNullOrWhiteSpace(locationIds))
+            {
+                foreach (var value in locationIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var locationId) || locationId <= 0)
+                        return BadRequest(ApiResponse.Fail("locationIds must be a comma-separated list of positive location IDs."));
+                    parsed.Add(locationId);
+                }
+            }
+            var uniqueLocationIds = parsed.Distinct().ToList();
+            if (AssignsForeignLocation(null, uniqueLocationIds))
+                return BadRequest(ApiResponse.Fail("You can only request managers for locations you are assigned to yourself."));
+
+            var result = await _users.GetEligibleManagersAsync(uniqueLocationIds);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
+
         [HttpGet("api/user/{id:int}")]
         public async Task<IActionResult> Get(int id)
         {

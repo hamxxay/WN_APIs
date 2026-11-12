@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 namespace WorkNest.Application.DTOs.User
 {
     public class UserCreateRequest
@@ -17,6 +18,7 @@ namespace WorkNest.Application.DTOs.User
         public int? LocationId { get; set; }
         /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
         public List<int>? LocationIds { get; set; }
+        public int? ManagerId { get; set; }
     }
 
     public class UserUpdateRequest
@@ -30,6 +32,14 @@ namespace WorkNest.Application.DTOs.User
         public int? LocationId { get; set; }
         /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
         public List<int>? LocationIds { get; set; }
+        private int? _managerId;
+        public int? ManagerId
+        {
+            get => _managerId;
+            set { _managerId = value; ManagerIdSpecified = true; }
+        }
+        [JsonIgnore]
+        public bool ManagerIdSpecified { get; private set; }
         public string? Address { get; set; }
         public string? CnicOrPassport { get; set; }
         public string? AvatarUrl { get; set; }
@@ -44,6 +54,14 @@ namespace WorkNest.Application.DTOs.User
         public int? LocationId { get; set; }
         /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
         public List<int>? LocationIds { get; set; }
+        private int? _managerId;
+        public int? ManagerId
+        {
+            get => _managerId;
+            set { _managerId = value; ManagerIdSpecified = true; }
+        }
+        [JsonIgnore]
+        public bool ManagerIdSpecified { get; private set; }
     }
 
     public class UserDto
@@ -60,6 +78,14 @@ namespace WorkNest.Application.DTOs.User
         public int? LocationId { get; set; }
         /// <summary>All locations for an Admin/Sales Executive (LocationId, if set, is the primary one).</summary>
         public List<int>? LocationIds { get; set; }
+        public int? ManagerId { get; set; }
+        public string? ManagerName { get; set; }
+    }
+
+    public class EligibleManagerDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = string.Empty;
     }
 
     public class UserHistoryResponse

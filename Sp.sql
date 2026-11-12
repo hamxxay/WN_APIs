@@ -24858,7 +24858,8 @@ CREATE   PROCEDURE [dbo].[WN_SalesMgr_Dashboard]
                                               -- branch (all my locations), 0 = only those of @LocationIds (one location
                                               -- chosen); NULL = every inquiry of every branch (as before BR_02)
     @From              DATE = NULL,           -- CS_01: first day of a custom range (with @To; replaces @PMonths)
-    @To                DATE = NULL            -- CS_01: last day of a custom range (included)
+    @To                DATE = NULL,           -- CS_01: last day of a custom range (included)
+    @CurrentManagerId  INT = NULL             -- Team only: assigned reports plus unassigned executives; NULL preserves super-admin view
 AS
 BEGIN
     -- Sales Manager dashboard (read-only), in desks, no money (SM_02). Same rules as the CEO dashboard
@@ -25004,7 +25005,8 @@ BEGIN
     INSERT INTO @People (UserId)
     SELECT u.Id FROM dbo.WN_Users u WITH (NOLOCK)
      WHERE u.IsActive = 1 AND u.RoleId IN (2, 16)
-       AND (@All = 1 OR EXISTS (SELECT 1 FROM @UL ul JOIN @Scope sc ON sc.Id = ul.LocationId WHERE ul.UserId = u.Id));
+       AND (@All = 1 OR EXISTS (SELECT 1 FROM @UL ul JOIN @Scope sc ON sc.Id = ul.LocationId WHERE ul.UserId = u.Id))
+       AND (u.RoleId <> 16 OR @CurrentManagerId IS NULL OR u.ManagerId = @CurrentManagerId OR u.ManagerId IS NULL);
     -- Inquiries each person gave feedback on in the period (Tour Inquiries page feedback); BR_02: only the inquiries in
     -- scope (@Inq), unless every inquiry counts.
     DECLARE @Handled TABLE (UserId INT PRIMARY KEY, Inquiries INT NOT NULL);
@@ -25018,7 +25020,7 @@ BEGIN
     --     converted and the desks on the converted ones (desks sold); inquiries handled in the period; follow-ups due
     --     now (their latest feedback is a future prospect whose date has come, inquiry still open). Role name from
     --     WN_Roles.DisplayName. Ranked by desks sold, converted, quotations, name.
-    SELECT u.Id AS UserId, COALESCE(NULLIF(u.Name, N''), NULLIF(u.UserName, N''), u.Email) AS Name, u.RoleId,
+    SELECT u.Id AS UserId, COALESCE(NULLIF(u.Name, N''), NULLIF(u.UserName, N''), u.Email) AS Name, u.RoleId, u.ManagerId,
            COALESCE(NULLIF(r.DisplayName, N''), r.RoleName) AS RoleName,
            STUFF((SELECT N', ' + l.Name FROM @UL ul JOIN @LocAll l ON l.Id = ul.LocationId AND l.Shown = 1
                    WHERE ul.UserId = u.Id ORDER BY l.Name FOR XML PATH(''), TYPE).value('.', 'NVARCHAR(MAX)'), 1, 2, N'') AS Locations,
@@ -28131,37 +28133,92 @@ CREATE   PROCEDURE [dbo].[WN_Users_Insert]
     @AvatarUrl      NVARCHAR(500) = NULL,
     @Notes          NVARCHAR(1000)= NULL,
     @CreatedById    INT           = NULL,
-    @LocationId     INT           = NULL
+    @LocationId     INT           = NULL,
+    @ManagerId      INT           = NULL,
+    @LocationIds    NVARCHAR(MAX) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
-    INSERT INTO dbo.WN_Users (
-        IdGUID, Email, PasswordHash, Name, PhoneNumber,
-        RoleId, CompanyId, CityId, Address, CnicOrPassport,
-        AvatarUrl, Notes, IsActive, CreatedOn, CreatedById, LocationId
-    ) VALUES (
-        NEWID(), @Email, @PasswordHash, @Name, @PhoneNumber,
-        @RoleId, @CompanyId, @CityId, @Address, @CnicOrPassport,
-        @AvatarUrl, @Notes, 1, GETDATE(), @CreatedById, @LocationId
-    );
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        DECLARE @TargetLocations TABLE (LocationId INT PRIMARY KEY);
+        IF @LocationId IS NOT NULL INSERT INTO @TargetLocations VALUES (@LocationId);
+        IF @LocationIds IS NOT NULL
+        BEGIN
+            IF EXISTS (SELECT 1 FROM STRING_SPLIT(@LocationIds, N',')
+                       WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NULL
+                          OR TRY_CAST(LTRIM(RTRIM(value)) AS INT) <= 0)
+                THROW 51010, 'LocationIds must contain positive location IDs.', 1;
+            INSERT INTO @TargetLocations
+            SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+            FROM STRING_SPLIT(@LocationIds, N',')
+            WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0
+              AND NOT EXISTS (SELECT 1 FROM @TargetLocations t WHERE t.LocationId = TRY_CAST(LTRIM(RTRIM(value)) AS INT));
+        END;
 
-    DECLARE @NewUserId INT = CAST(SCOPE_IDENTITY() AS INT);
+        IF @ManagerId IS NOT NULL
+        BEGIN
+            IF ISNULL(@RoleId, 0) <> 16
+                THROW 51011, 'Only a sales_executive can have a ManagerId.', 1;
+            IF NOT EXISTS (SELECT 1 FROM dbo.WN_Users WITH (UPDLOCK, HOLDLOCK) WHERE Id = @ManagerId AND IsActive = 1 AND RoleId = 18)
+                THROW 51012, 'ManagerId must identify an active sales_manager.', 1;
+            IF NOT EXISTS (
+                SELECT 1
+                FROM @TargetLocations e
+                JOIN (
+                    SELECT LocationId FROM dbo.WN_Users WHERE Id = @ManagerId AND LocationId IS NOT NULL
+                    UNION
+                    SELECT LocationId FROM dbo.WN_UserLocations WHERE UserId = @ManagerId
+                ) m ON m.LocationId = e.LocationId
+            )
+                THROW 51013, 'The sales executive and manager must share at least one location.', 1;
+            IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NULL
+               AND EXISTS (SELECT 1 FROM @TargetLocations WHERE LocationId <> @LocationId)
+               AND NOT EXISTS (SELECT 1 FROM dbo.WN_Users WHERE Id = @ManagerId AND LocationId = @LocationId)
+                THROW 51014, 'WN_UserLocations is required to assign a manager through a secondary location.', 1;
+        END;
 
-    IF @NewUserId IS NOT NULL AND @Email IS NOT NULL AND LTRIM(RTRIM(@Email)) <> ''
-    BEGIN
-        UPDATE dbo.WN_Customers
-        SET UserId = @NewUserId
-        WHERE (UserId IS NULL OR UserId <= 0)
-          AND LOWER(LTRIM(RTRIM(Email))) = LOWER(LTRIM(RTRIM(@Email)))
-          AND NOT EXISTS (SELECT 1 FROM dbo.WN_Customers c2 WITH (NOLOCK) WHERE c2.UserId = @NewUserId);
-    END
+        INSERT INTO dbo.WN_Users (
+            IdGUID, Email, PasswordHash, Name, PhoneNumber,
+            RoleId, CompanyId, CityId, Address, CnicOrPassport,
+            AvatarUrl, Notes, IsActive, CreatedOn, CreatedById, LocationId, ManagerId
+        ) VALUES (
+            NEWID(), @Email, @PasswordHash, @Name, @PhoneNumber,
+            @RoleId, @CompanyId, @CityId, @Address, @CnicOrPassport,
+            @AvatarUrl, @Notes, 1, GETDATE(), @CreatedById, @LocationId, @ManagerId
+        );
 
-    SELECT 
-        u.Id, u.IdGUID AS PublicId, u.IdGUID, u.Email, u.Name, u.PhoneNumber,
-        u.RoleId, u.CompanyId, u.CityId, u.Address, u.CnicOrPassport, u.AvatarUrl,
-        u.IsActive, u.Notes, u.CreatedOn, u.LocationId
-    FROM dbo.WN_Users u WITH (NOLOCK)
-    WHERE u.Id = @NewUserId;
+        DECLARE @NewUserId INT = CAST(SCOPE_IDENTITY() AS INT);
+        IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL AND @LocationIds IS NOT NULL
+        BEGIN
+            INSERT INTO dbo.WN_UserLocations (UserId, LocationId, CreatedById)
+            SELECT @NewUserId, t.LocationId, @CreatedById
+            FROM @TargetLocations t
+            WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_UserLocations ul WHERE ul.UserId = @NewUserId AND ul.LocationId = t.LocationId);
+        END;
+
+        IF @NewUserId IS NOT NULL AND @Email IS NOT NULL AND LTRIM(RTRIM(@Email)) <> ''
+        BEGIN
+            UPDATE dbo.WN_Customers
+            SET UserId = @NewUserId
+            WHERE (UserId IS NULL OR UserId <= 0)
+              AND LOWER(LTRIM(RTRIM(Email))) = LOWER(LTRIM(RTRIM(@Email)))
+              AND NOT EXISTS (SELECT 1 FROM dbo.WN_Customers c2 WITH (NOLOCK) WHERE c2.UserId = @NewUserId);
+        END;
+
+        COMMIT TRANSACTION;
+        SELECT
+            u.Id, u.IdGUID AS PublicId, u.IdGUID, u.Email, u.Name, u.PhoneNumber,
+            u.RoleId, u.CompanyId, u.CityId, u.Address, u.CnicOrPassport, u.AvatarUrl,
+            u.IsActive, u.Notes, u.CreatedOn, u.LocationId, u.ManagerId
+        FROM dbo.WN_Users u WITH (NOLOCK)
+        WHERE u.Id = @NewUserId;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
 END;
 GO
 /****** Object:  StoredProcedure [dbo].[WN_Users_SetPassword]    Script Date: 04/11/2026 10:31:38 am ******/
@@ -28189,12 +28246,41 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 CREATE   PROCEDURE [dbo].[WN_Users_SetRole]
-    @Id     INT,
-    @RoleId INT
+    @Id                    INT,
+    @RoleId                INT,
+    @LocationId            INT = NULL,
+    @LocationIdSpecified   BIT = 0,
+    @ManagerId             INT = NULL,
+    @ManagerIdSpecified    BIT = 0,
+    @LocationIds           NVARCHAR(MAX) = NULL,
+    @LocationIdsSpecified  BIT = 0
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_Users SET RoleId = @RoleId WHERE Id = @Id;
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        UPDATE dbo.WN_Users
+        SET RoleId = @RoleId,
+            LocationId = CASE WHEN @LocationIdSpecified = 1 THEN @LocationId ELSE LocationId END
+        WHERE Id = @Id;
+        IF @@ROWCOUNT = 0 THROW 51015, 'User not found.', 1;
+
+        EXEC dbo.WN_Users_Update
+            @Id = @Id,
+            @LocationId = @LocationId,
+            @ManagerId = @ManagerId,
+            @ManagerIdSpecified = @ManagerIdSpecified,
+            @LocationIds = @LocationIds,
+            @LocationIdsSpecified = @LocationIdsSpecified,
+            @LocationIdSpecified = @LocationIdSpecified;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
 END
 GO
 /****** Object:  StoredProcedure [dbo].[WN_Users_SetStatus]    Script Date: 04/11/2026 10:31:38 am ******/
@@ -28226,24 +28312,158 @@ CREATE   PROCEDURE [dbo].[WN_Users_Update]
     @CnicOrPassport NVARCHAR(50)   = NULL,
     @AvatarUrl      NVARCHAR(500)  = NULL,
     @Notes          NVARCHAR(1000) = NULL,
-    @LocationId     INT            = NULL,
-    @Email          NVARCHAR(256)  = NULL
+    @LocationId            INT            = NULL,
+    @Email                 NVARCHAR(256)  = NULL,
+    @ManagerId             INT            = NULL,
+    @ManagerIdSpecified    BIT            = 0,
+    @LocationIds           NVARCHAR(MAX)  = NULL,
+    @LocationIdsSpecified  BIT            = 0,
+    @LocationIdSpecified   BIT            = 0
 AS
 BEGIN
     SET NOCOUNT ON;
-    UPDATE dbo.WN_Users SET
-        Name           = ISNULL(@Name,           Name),
-        PhoneNumber    = ISNULL(@PhoneNumber,     PhoneNumber),
-        CompanyId      = ISNULL(@CompanyId,       CompanyId),
-        CityId         = ISNULL(@CityId,          CityId),
-        Address        = ISNULL(@Address,         Address),
-        CnicOrPassport = ISNULL(@CnicOrPassport,  CnicOrPassport),
-        AvatarUrl      = ISNULL(@AvatarUrl,       AvatarUrl),
-        Notes          = ISNULL(@Notes,           Notes),
-        LocationId     = ISNULL(@LocationId,      LocationId),
-        Email          = ISNULL(@Email,           Email)
-    WHERE Id = @Id;
-    SELECT @@ROWCOUNT AS AffectedRows;
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        DECLARE @RoleId INT, @CurrentManagerId INT, @CurrentLocationId INT;
+        SELECT @RoleId = RoleId, @CurrentManagerId = ManagerId, @CurrentLocationId = LocationId
+        FROM dbo.WN_Users WITH (UPDLOCK, HOLDLOCK)
+        WHERE Id = @Id;
+        IF @@ROWCOUNT = 0 THROW 51016, 'User not found.', 1;
+
+        DECLARE @TargetLocationId INT = CASE WHEN @LocationIdSpecified = 1 THEN @LocationId ELSE @CurrentLocationId END;
+        DECLARE @TargetLocations TABLE (LocationId INT PRIMARY KEY);
+        IF @TargetLocationId IS NOT NULL INSERT INTO @TargetLocations VALUES (@TargetLocationId);
+
+        IF @LocationIdsSpecified = 1
+        BEGIN
+            IF @LocationIds IS NOT NULL AND EXISTS (SELECT 1 FROM STRING_SPLIT(@LocationIds, N',')
+                       WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) IS NULL
+                          OR TRY_CAST(LTRIM(RTRIM(value)) AS INT) <= 0)
+                THROW 51017, 'LocationIds must contain positive location IDs.', 1;
+
+            IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
+            BEGIN
+                DELETE FROM dbo.WN_UserLocations WHERE UserId = @Id;
+                IF @LocationIds IS NOT NULL
+                    INSERT INTO dbo.WN_UserLocations (UserId, LocationId)
+                    SELECT @Id, parsed.LocationId
+                    FROM (
+                        SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT) AS LocationId
+                        FROM STRING_SPLIT(@LocationIds, N',')
+                        WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0
+                    ) parsed
+                    WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_UserLocations ul WHERE ul.UserId = @Id AND ul.LocationId = parsed.LocationId);
+            END;
+            IF @LocationIds IS NOT NULL
+                INSERT INTO @TargetLocations
+                SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT)
+                FROM STRING_SPLIT(@LocationIds, N',')
+                WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0
+                  AND NOT EXISTS (SELECT 1 FROM @TargetLocations t WHERE t.LocationId = TRY_CAST(LTRIM(RTRIM(value)) AS INT));
+        END
+        ELSE IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
+            INSERT INTO @TargetLocations
+            SELECT DISTINCT LocationId FROM dbo.WN_UserLocations
+            WHERE UserId = @Id AND NOT EXISTS (SELECT 1 FROM @TargetLocations t WHERE t.LocationId = dbo.WN_UserLocations.LocationId);
+
+        DECLARE @TargetManagerId INT = CASE WHEN @ManagerIdSpecified = 1 THEN @ManagerId ELSE @CurrentManagerId END;
+        IF @ManagerIdSpecified = 1 AND @TargetManagerId = @Id
+            THROW 51021, 'A user cannot be their own ManagerId.', 1;
+        IF ISNULL(@RoleId, 0) <> 16
+        BEGIN
+            IF @ManagerIdSpecified = 1 AND @ManagerId IS NOT NULL
+                THROW 51018, 'Only a sales_executive can have a ManagerId.', 1;
+            SET @TargetManagerId = NULL;
+        END;
+
+        IF @TargetManagerId IS NOT NULL
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM dbo.WN_Users WITH (UPDLOCK, HOLDLOCK) WHERE Id = @TargetManagerId AND IsActive = 1 AND RoleId = 18)
+            BEGIN
+                IF @ManagerIdSpecified = 1 AND ISNULL(@TargetManagerId, -1) <> ISNULL(@CurrentManagerId, -1)
+                    THROW 51019, 'ManagerId must identify an active sales_manager.', 1;
+                SET @TargetManagerId = NULL;
+            END
+            ELSE IF NOT EXISTS (
+                SELECT 1 FROM @TargetLocations e
+                JOIN (
+                    SELECT LocationId FROM dbo.WN_Users WHERE Id = @TargetManagerId AND LocationId IS NOT NULL
+                    UNION
+                    SELECT LocationId FROM dbo.WN_UserLocations WHERE UserId = @TargetManagerId
+                ) m ON m.LocationId = e.LocationId)
+            BEGIN
+                IF @ManagerIdSpecified = 1 AND ISNULL(@TargetManagerId, -1) <> ISNULL(@CurrentManagerId, -1)
+                    THROW 51020, 'The sales executive and manager must share at least one location.', 1;
+                SET @TargetManagerId = NULL;
+            END;
+        END;
+
+        UPDATE dbo.WN_Users SET
+            Name           = ISNULL(@Name,           Name),
+            PhoneNumber    = ISNULL(@PhoneNumber,     PhoneNumber),
+            CompanyId      = ISNULL(@CompanyId,       CompanyId),
+            CityId         = ISNULL(@CityId,          CityId),
+            Address        = ISNULL(@Address,         Address),
+            CnicOrPassport = ISNULL(@CnicOrPassport,  CnicOrPassport),
+            AvatarUrl      = ISNULL(@AvatarUrl,       AvatarUrl),
+            Notes          = ISNULL(@Notes,           Notes),
+            LocationId     = CASE WHEN @LocationIdSpecified = 1 THEN @LocationId ELSE LocationId END,
+            Email          = ISNULL(@Email,           Email),
+            ManagerId      = @TargetManagerId
+        WHERE Id = @Id;
+
+        IF OBJECT_ID(N'dbo.WN_UserLocations', N'U') IS NOT NULL
+        BEGIN
+            UPDATE report
+            SET ManagerId = NULL
+            FROM dbo.WN_Users report
+            WHERE report.ManagerId = @Id
+              AND (
+                    NOT EXISTS (
+                        SELECT 1
+                        FROM dbo.WN_Users manager
+                        WHERE manager.Id = @Id
+                          AND (
+                            (manager.LocationId IS NOT NULL AND manager.LocationId = report.LocationId)
+                            OR (manager.LocationId IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM dbo.WN_UserLocations reportLocation
+                                WHERE reportLocation.UserId = report.Id AND reportLocation.LocationId = manager.LocationId))
+                            OR (report.LocationId IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM dbo.WN_UserLocations managerLocation
+                                WHERE managerLocation.UserId = @Id AND managerLocation.LocationId = report.LocationId))
+                            OR EXISTS (
+                                SELECT 1
+                                FROM dbo.WN_UserLocations reportLocation
+                                JOIN dbo.WN_UserLocations managerLocation ON managerLocation.LocationId = reportLocation.LocationId
+                                WHERE reportLocation.UserId = report.Id AND managerLocation.UserId = @Id)
+                          )
+                    )
+                  );
+        END
+        ELSE
+        BEGIN
+            UPDATE report
+            SET ManagerId = NULL
+            FROM dbo.WN_Users report
+            WHERE report.ManagerId = @Id
+              AND (report.LocationId IS NULL
+                   OR NOT EXISTS (SELECT 1 FROM dbo.WN_Users manager WHERE manager.Id = @Id AND manager.LocationId = report.LocationId));
+        END;
+
+        UPDATE report
+        SET ManagerId = NULL
+        FROM dbo.WN_Users report
+        WHERE report.ManagerId = @Id
+          AND NOT EXISTS (SELECT 1 FROM dbo.WN_Users manager WHERE manager.Id = @Id AND manager.IsActive = 1 AND manager.RoleId = 18);
+
+        COMMIT TRANSACTION;
+        SELECT 1 AS AffectedRows;
+    END TRY
+    BEGIN CATCH
+        IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
 END;
 GO
 /****** Object:  StoredProcedure [dbo].[WN_WhatsApp_AddMessage]    Script Date: 04/11/2026 10:31:38 am ******/

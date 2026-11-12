@@ -28,19 +28,38 @@ namespace WorkNest.API.Controllers
     public class SalesManagerController : ControllerBase
     {
         private readonly ISalesManagerDashboardService _sales;
+        private readonly IDbRepository _db;
         private readonly ILogger<SalesManagerController> _logger;
 
-        public SalesManagerController(ISalesManagerDashboardService sales, ILogger<SalesManagerController> logger)
+        public SalesManagerController(ISalesManagerDashboardService sales, IDbRepository db, ILogger<SalesManagerController> logger)
         {
             _sales = sales;
+            _db = db;
             _logger = logger;
         }
 
         /// <summary>Level 1: sales funnel, team, tour inquiries, renewals and desks, plus the locations for the picker.</summary>
         [HttpGet("api/sales-manager/dashboard")]
-        public Task<IActionResult> Dashboard([FromQuery] string? period, [FromQuery] int? locationId,
-            [FromQuery] string? from = null, [FromQuery] string? to = null) =>
-            Run(locationId, false, scope => _sales.GetDashboardAsync(period, scope, from, to));
+        public async Task<IActionResult> Dashboard([FromQuery] string? period, [FromQuery] int? locationId,
+            [FromQuery] string? from = null, [FromQuery] string? to = null)
+        {
+            int? currentManagerId = null;
+            if (User.IsSalesManager())
+            {
+                var email = User.GetEmail();
+                var manager = string.IsNullOrWhiteSpace(email) ? null : await _db.GetUserByEmailAsync(email);
+                if (manager is null
+                    || !manager.TryGetValue("RoleId", out var roleId)
+                    || roleId is null
+                    || Convert.ToInt32(roleId) != 18
+                    || !manager.TryGetValue("Id", out var id)
+                    || id is null)
+                    return Forbidden("The signed-in Sales Manager account could not be verified.");
+                currentManagerId = Convert.ToInt32(id);
+            }
+
+            return await Run(locationId, false, scope => _sales.GetDashboardAsync(period, scope, from, to, currentManagerId));
+        }
 
         /// <summary>
         /// Level 2: one chart element broken down. metric = funnel-month (month) | staff (userId) | inquiries-type (type)

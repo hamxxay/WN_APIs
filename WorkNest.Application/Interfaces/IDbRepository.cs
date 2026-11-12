@@ -18,15 +18,19 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>?> GetUserByIdAsync(int id);
         Task<IDictionary<string, object?>?> GetUserByPublicIdAsync(Guid publicId);
         Task<(IEnumerable<IDictionary<string, object?>> Rows, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null);
+        Task<Dictionary<int, (int? ManagerId, string? ManagerName)>> GetUserManagerMapAsync(IEnumerable<int> userIds);
+        Task<List<WorkNest.Application.DTOs.User.EligibleManagerDto>> GetEligibleManagersAsync(IReadOnlyCollection<int> locationIds);
         Task<IEnumerable<IDictionary<string, object?>>> GetUserHistoryAsync(int userId);
-        Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById, int? locationId = null);
-        Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null, string? email = null);
+        Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById, int? locationId = null, int? managerId = null, IReadOnlyCollection<int>? locationIds = null);
+        Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null, string? email = null,
+            int? managerId = null, bool managerIdSpecified = false, IReadOnlyCollection<int>? locationIds = null, bool locationIdsSpecified = false, bool locationIdSpecified = false);
         /// <summary>Sets the user's WorkNest password (dbo.WN_Users_SetPassword, PW_01): rows changed, or null when that procedure is not on the database yet.</summary>
         Task<int?> SetUserPasswordAsync(int id, string password);
         Task DeleteUserAsync(int id);
         Task SetUserStatusAsync(int id, bool isActive);
         Task SetUserRoleAsync(int id, int roleId);
-        Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId);
+        Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId, int? managerId = null, bool managerIdSpecified = false,
+            IReadOnlyCollection<int>? locationIds = null, bool locationIdsSpecified = false, bool locationIdSpecified = true);
         Task<(int? Id, bool IsActive)?> CheckUserEmailStatusAsync(string email);
         /// <summary>
         /// The WN_Users row with this email whether it is active or not (an active one first): Id, IsActive and the stored

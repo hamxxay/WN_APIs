@@ -23,7 +23,7 @@ namespace WorkNest.Application.Interfaces
         /// naming CS_01).
         /// </remarks>
         Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(string? locationIds, string? pickerLocationIds, bool inquiriesNoBranch,
-            int periodMonths, DateTime businessNow, int expiringDays, DateTime? from = null, DateTime? to = null);
+            int periodMonths, DateTime businessNow, int expiringDays, DateTime? from = null, DateTime? to = null, int? currentManagerId = null);
 
         /// <summary><paramref name="inquiriesNoBranch"/>: as <see cref="GetDashboardAsync"/> (metric inquiries-type).</summary>
         Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, string? locationIds, bool inquiriesNoBranch,
@@ -71,7 +71,7 @@ namespace WorkNest.Application.Interfaces
     public interface ISalesManagerDashboardService
     {
         /// <summary>period = month | quarter | year | custom (custom: <paramref name="from"/> / <paramref name="to"/>, yyyy-MM-dd).</summary>
-        Task<ApiResponse> GetDashboardAsync(string? period, SalesManagerScope scope, string? from = null, string? to = null);
+        Task<ApiResponse> GetDashboardAsync(string? period, SalesManagerScope scope, string? from = null, string? to = null, int? currentManagerId = null);
         Task<ApiResponse> GetBreakdownAsync(SalesManagerBreakdownQuery query, SalesManagerScope scope);
         Task<ApiResponse> GetRecordsAsync(string kind, SalesManagerRecordsQuery query, SalesManagerScope scope);
 

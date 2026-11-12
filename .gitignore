@@ -48,3 +48,9 @@ Table.sql
 Database/WN_AuditLog_All_Triggers.sql
 Sp.sql
 Sp.sql
+
+!Table.sql
+!Database/USR_01_sales_manager_link.sql
+!Database/ROLLBACK_USR_01_sales_manager_link.sql
+!Database/USR_02_sales_manager_link_procedures.sql
+!WorkNest.Tests/SalesExecutiveManagerTests.cs

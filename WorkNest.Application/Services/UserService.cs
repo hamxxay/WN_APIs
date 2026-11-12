@@ -35,6 +35,8 @@ namespace WorkNest.Application.Services
         {
             var (rows, total) = await _db.GetUsersAsync(page, limit, search, locationId);
             var rowList = rows.ToList();
+            var managerMap = await _db.GetUserManagerMapAsync(rowList
+                .Where(r => r.TryGetValue("Id", out var v) && v is not null).Select(r => Convert.ToInt32(r["Id"])));
             var extra = await _db.GetUserLocationsMapAsync(rowList
                 .Where(r => r.TryGetValue("Id", out var v) && v is not null).Select(r => Convert.ToInt32(r["Id"])));
             // Role names shown to people come from dbo.WN_Roles.DisplayName (cached), never from code.
@@ -53,6 +55,10 @@ namespace WorkNest.Application.Services
                 createdAt    = r.TryGetValue("CreatedOn",    out var ca) ? ca : null,
                 role         = Roles.FromRow(r),
                 roleDisplayName = roleNames.GetValueOrDefault(Roles.FromRow(r)),
+                managerId    = r.TryGetValue("Id", out var managerUserId) && managerUserId is not null
+                    && managerMap.TryGetValue(Convert.ToInt32(managerUserId), out var managerInfo) ? managerInfo.ManagerId : null,
+                managerName  = r.TryGetValue("Id", out var managerNameUserId) && managerNameUserId is not null
+                    && managerMap.TryGetValue(Convert.ToInt32(managerNameUserId), out var managerNameInfo) ? managerNameInfo.ManagerName : null,
                 locationId   = r.TryGetValue("LocationId",   out var loc)&& loc is not null ? Convert.ToInt32(loc) : (int?)null,
                 locationIds  = AllLocations(r, extra).Select(x => x.Id).ToList(),
                 locationName = string.Join(", ", AllLocations(r, extra).Select(x => x.Name).Where(x => x.Length > 0)),
@@ -99,10 +105,57 @@ namespace WorkNest.Application.Services
             return locationId is > 0 && list.Contains(locationId.Value) ? locationId : list[0];
         }
 
+        private static List<int> LocationSet(int? primary, IEnumerable<int>? locationIds)
+        {
+            var locations = (locationIds ?? Array.Empty<int>()).Where(x => x > 0).Distinct().ToList();
+            if (primary is > 0 && !locations.Contains(primary.Value)) locations.Insert(0, primary.Value);
+            return locations;
+        }
+
+        private async Task<int?> GetManagerIdAsync(int userId)
+        {
+            var managerMap = await _db.GetUserManagerMapAsync(new[] { userId });
+            return managerMap.TryGetValue(userId, out var info) ? info.ManagerId : null;
+        }
+
+        private async Task<string?> ValidateManagerAssignmentAsync(int roleId, int? managerId, IReadOnlyCollection<int> userLocations)
+        {
+            if (managerId is null) return null;
+            if (roleId != Roles.SalesExecutiveId)
+                return "Only a sales_executive can have a ManagerId.";
+
+            var manager = await _db.GetUserByIdAsync(managerId.Value);
+            if (manager is null
+                || !manager.TryGetValue("IsActive", out var active)
+                || active is null
+                || !Convert.ToBoolean(active)
+                || !manager.TryGetValue("RoleId", out var managerRole)
+                || managerRole is null
+                || Convert.ToInt32(managerRole) != Roles.SalesManagerId)
+                return "ManagerId must identify an active sales_manager.";
+
+            var managerLocations = await _db.GetUserLocationIdsAsync(managerId.Value);
+            if (manager.TryGetValue("LocationId", out var primary) && primary is not null)
+                managerLocations.Add(Convert.ToInt32(primary));
+            if (!userLocations.Any(managerLocations.Contains))
+                return "The sales executive and manager must share at least one location.";
+            return null;
+        }
+
+        public async Task<ApiResponse> GetEligibleManagersAsync(IReadOnlyCollection<int> locationIds)
+        {
+            if (locationIds.Any(x => x <= 0))
+                return ApiResponse.Fail("locationIds must contain positive location IDs.");
+            var managers = await _db.GetEligibleManagersAsync(locationIds);
+            return ApiResponse.Ok(managers);
+        }
+
         public async Task<ApiResponse> GetUserByIdAsync(int id)
         {
             var row = await _db.GetUserByIdAsync(id);
             if (row is null) return ApiResponse.Fail("User not found");
+            var managerMap = await _db.GetUserManagerMapAsync(new[] { id });
+            managerMap.TryGetValue(id, out var managerInfo);
             var extra = await _db.GetUserLocationsMapAsync(new[] { id });
             var locations = AllLocations(row, extra);
             var role = Roles.FromRow(row);
@@ -117,6 +170,8 @@ namespace WorkNest.Application.Services
                 createdOn       = row.TryGetValue("CreatedOn",    out var c)  ? c  : null,
                 role            = role,
                 roleDisplayName = _roles is null ? null : await _roles.GetDisplayNameAsync(Roles.ParseRoleId(role)),
+                managerId       = managerInfo.ManagerId,
+                managerName     = managerInfo.ManagerName,
                 locationId      = row.TryGetValue("LocationId",   out var loc)&& loc is not null ? Convert.ToInt32(loc) : (int?)null,
                 locationIds     = locations.Select(x => x.Id).ToList(),
                 locationName    = locations.Count > 0
@@ -152,6 +207,11 @@ namespace WorkNest.Application.Services
                     return ApiResponse.Fail(LocationRequiredFor(roleId) ?? "Location is required for Sales Executives.");
                 }
             }
+            var targetLocationIds = Roles.IsLocationBoundRole(roleId)
+                ? LocationSet(finalLocationId, request.LocationIds)
+                : new List<int>();
+            var managerError = await ValidateManagerAssignmentAsync(roleId, request.ManagerId, targetLocationIds);
+            if (managerError != null) return ApiResponse.Fail(managerError);
 
             // One WorkNest account per email (UX_WN_Users_Email): the insert would fail with a database error ("An unexpected
             // error occurred"), e.g. for a customer who already signed up on the website or app with this email.
@@ -161,13 +221,13 @@ namespace WorkNest.Application.Services
             // Deleting a user only turns the account off (WN_Users_Delete sets IsActive = 0) and the email stays taken, so
             // creating the user again turns that account back on with the new details (19 Oct 2026).
             if (existing is not null)
-                return await RestoreDeletedUserAsync(existing.Id, request, roleId, finalLocationId, actorId);
+                return await RestoreDeletedUserAsync(existing.Id, request, roleId, finalLocationId, targetLocationIds, actorId);
 
             var (id, publicId) = await _db.CreateUserAsync(
                 request.Email, request.Password, request.Name, request.Phone,
                 roleId, request.CompanyId, request.CityId,
                 request.Address, request.CnicOrPassport, request.AvatarUrl,
-                request.Notes, actorId, finalLocationId);
+                request.Notes, actorId, finalLocationId, request.ManagerId, targetLocationIds);
 
             // The user is saved at this point. The customer profile and the locations are extras: when one of them fails the
             // user still exists, so say what's missing instead of failing the whole request (a retry would only hit the
@@ -233,7 +293,8 @@ namespace WorkNest.Application.Services
         /// first, so when it can't be saved (PW_01 not run) nothing changes and the account stays off. Fields left empty
         /// keep what the account had (WN_Users_Update leaves a NULL as it is).
         /// </summary>
-        private async Task<ApiResponse> RestoreDeletedUserAsync(int id, UserCreateRequest request, int roleId, int? finalLocationId, int? actorId)
+        private async Task<ApiResponse> RestoreDeletedUserAsync(int id, UserCreateRequest request, int roleId, int? finalLocationId,
+            IReadOnlyCollection<int> targetLocationIds, int? actorId)
         {
             var password = string.IsNullOrWhiteSpace(request.Password) ? null : request.Password;
             if (password != null && (password.Length < MinPasswordLength || password.Length > MaxPasswordLength))
@@ -245,7 +306,8 @@ namespace WorkNest.Application.Services
                 if (changed == 0) return ApiResponse.Fail("User not found.");
             }
 
-            await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId);
+            await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId, request.ManagerId, true,
+                targetLocationIds, true, true);
             await _db.UpdateUserAsync(id, request.Name, request.Phone, request.CompanyId, request.CityId, request.Address,
                 request.CnicOrPassport, request.AvatarUrl, request.Notes, finalLocationId);
             await _db.SetUserStatusAsync(id, true);
@@ -313,58 +375,76 @@ namespace WorkNest.Application.Services
             var phoneError = Phone.Validate(request.Phone);
             if (phoneError != null) return ApiResponse.Fail(phoneError);
 
-            int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
-            int? effectiveRoleId = null;
+            var existingUser = await _db.GetUserByIdAsync(id);
+            if (existingUser is null) return ApiResponse.Fail("User not found.");
+            var currentRoleId = existingUser.TryGetValue("RoleId", out var currentRole) && currentRole is not null
+                ? Convert.ToInt32(currentRole) : Roles.GeneralId;
+            var currentLocationId = existingUser.TryGetValue("LocationId", out var currentLocation) && currentLocation is not null
+                ? Convert.ToInt32(currentLocation) : (int?)null;
+            var currentLocations = LocationSet(currentLocationId, await _db.GetUserLocationIdsAsync(id));
+            var roleSpecified = !string.IsNullOrWhiteSpace(request.Role);
+            var effectiveRoleId = roleSpecified ? Roles.ParseRoleId(request.Role, Roles.GeneralId) : currentRoleId;
+            var locationUpdateRequested = roleSpecified || request.LocationId.HasValue || request.LocationIds is not null;
+            int? finalLocationId = currentLocationId;
+            List<int> targetLocationIds;
 
-            if (!string.IsNullOrWhiteSpace(request.Role))
+            if (!Roles.IsLocationBoundRole(effectiveRoleId))
             {
-                int roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
-
-                if (!Roles.IsLocationBoundRole(roleId))
-                {
-                    finalLocationId = null;
-                }
-                else if (Roles.IsLocationBoundRole(roleId))
-                {
-                    if (!finalLocationId.HasValue || finalLocationId.Value <= 0)
-                    {
-                        var existingUser = await _db.GetUserByIdAsync(id);
-                        var existingLoc = existingUser?.TryGetValue("LocationId", out var loc) == true && loc is not null ? Convert.ToInt32(loc) : (int?)null;
-                        if (existingLoc.HasValue && existingLoc.Value > 0)
-                        {
-                            finalLocationId = existingLoc.Value;
-                        }
-                        else if (LocationRequiredFor(roleId) is { } locationRequired)
-                        {
-                            // A Sales Manager / Access Officer / Network Engineer works only at their locations: one is required (nothing is saved).
-                            return ApiResponse.Fail(locationRequired);
-                        }
-                    }
-                }
-
-                await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId);
-                effectiveRoleId = roleId;
+                finalLocationId = null;
+                targetLocationIds = new List<int>();
             }
-            else if (finalLocationId.HasValue)
+            else if (locationUpdateRequested)
             {
-                var existingUser = await _db.GetUserByIdAsync(id);
-                var existingRoleId = existingUser?.TryGetValue("RoleId", out var rid) == true && rid is not null ? Convert.ToInt32(rid) : Roles.GeneralId;
-                if (!Roles.IsLocationBoundRole(existingRoleId))
+                finalLocationId = request.LocationId.HasValue || request.LocationIds is not null
+                    ? PrimaryLocation(request.LocationId, request.LocationIds)
+                    : currentLocationId;
+                if (!finalLocationId.HasValue)
                 {
-                    finalLocationId = null;
+                    if (LocationRequiredFor(effectiveRoleId) is { } locationRequired)
+                        return ApiResponse.Fail(locationRequired);
+                    var firstLocation = currentLocations.FirstOrDefault();
+                    finalLocationId = firstLocation > 0 ? firstLocation : null;
                 }
-                await _db.SetUserRoleAndLocationAsync(id, existingRoleId, finalLocationId);
-                effectiveRoleId = existingRoleId;
+                targetLocationIds = LocationSet(finalLocationId, request.LocationIds ?? currentLocations);
             }
+            else
+            {
+                targetLocationIds = currentLocations;
+            }
+
+            var currentManagerId = await GetManagerIdAsync(id);
+            int? targetManagerId = request.ManagerIdSpecified
+                ? request.ManagerId
+                : effectiveRoleId == Roles.SalesExecutiveId && currentRoleId == Roles.SalesExecutiveId ? currentManagerId : null;
+            var managerError = await ValidateManagerAssignmentAsync(effectiveRoleId, targetManagerId, targetLocationIds);
+            if (managerError != null)
+            {
+                if (request.ManagerIdSpecified && targetManagerId != currentManagerId) return ApiResponse.Fail(managerError);
+                targetManagerId = null;
+            }
+            var managerIdSpecified = request.ManagerIdSpecified
+                || (currentManagerId.HasValue && targetManagerId != currentManagerId)
+                || effectiveRoleId != Roles.SalesExecutiveId;
+
+            if (roleSpecified)
+                await _db.SetUserRoleAndLocationAsync(id, effectiveRoleId, finalLocationId, targetManagerId, managerIdSpecified,
+                    targetLocationIds, locationUpdateRequested, true);
 
             await _db.UpdateUserAsync(id, request.Name, request.Phone,
                 request.CompanyId, request.CityId, request.Address,
-                request.CnicOrPassport, request.AvatarUrl, request.Notes, finalLocationId, newEmail);
+                request.CnicOrPassport, request.AvatarUrl, request.Notes,
+                roleSpecified ? null : locationUpdateRequested ? finalLocationId : null,
+                newEmail,
+                roleSpecified ? null : targetManagerId,
+                roleSpecified ? false : managerIdSpecified,
+                roleSpecified ? null : targetLocationIds,
+                roleSpecified ? false : locationUpdateRequested,
+                !roleSpecified && locationUpdateRequested);
 
-            // Only touch the location list when the form sent one (or changed the role).
+            // The procedure saves these atomically when WN_UserLocations exists; this call retains the existing fallback warning.
             string? warning = null;
-            if (effectiveRoleId.HasValue && (request.LocationIds != null || !Roles.IsLocationBoundRole(effectiveRoleId.Value)))
-                warning = await SaveLocationsAsync(id, effectiveRoleId.Value, finalLocationId, request.LocationIds, null);
+            if (locationUpdateRequested)
+                warning = await SaveLocationsAsync(id, effectiveRoleId, finalLocationId, targetLocationIds, null);
 
             // Before 19 Oct 2026 an edit dropped the password without a word, so sign-in kept the old one.
             if (newPassword != null)
@@ -401,35 +481,45 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(request.Role))
                 return ApiResponse.Fail("Role is required.");
 
+            var existingUser = await _db.GetUserByIdAsync(id);
+            if (existingUser is null) return ApiResponse.Fail("User not found.");
+            int currentRoleId = existingUser.TryGetValue("RoleId", out var currentRole) && currentRole is not null
+                ? Convert.ToInt32(currentRole) : Roles.GeneralId;
+            int? currentLocationId = existingUser.TryGetValue("LocationId", out var currentLocation) && currentLocation is not null
+                ? Convert.ToInt32(currentLocation) : null;
+            var currentLocations = LocationSet(currentLocationId, await _db.GetUserLocationIdsAsync(id));
             int roleId = Roles.ParseRoleId(request.Role, Roles.GeneralId);
-            int? finalLocationId = PrimaryLocation(request.LocationId, request.LocationIds);
+            int? finalLocationId = request.LocationId.HasValue || request.LocationIds is not null
+                ? PrimaryLocation(request.LocationId, request.LocationIds)
+                : currentLocationId;
+            List<int> targetLocationIds;
 
             if (!Roles.IsLocationBoundRole(roleId))
             {
                 finalLocationId = null;
+                targetLocationIds = new List<int>();
             }
             else if (Roles.IsLocationBoundRole(roleId))
             {
                 if (!finalLocationId.HasValue || finalLocationId.Value <= 0)
                 {
-                    // Check if user already has a location assigned in DB
-                    var existingUser = await _db.GetUserByIdAsync(id);
-                    var existingLoc = existingUser?.TryGetValue("LocationId", out var loc) == true && loc is not null ? Convert.ToInt32(loc) : (int?)null;
-                    if (existingLoc.HasValue && existingLoc.Value > 0)
-                    {
-                        finalLocationId = existingLoc.Value;
-                    }
-                    else
-                    {
+                    if (LocationRequiredFor(roleId) is not null)
                         return ApiResponse.Fail(LocationRequiredFor(roleId) ?? "Location is required when making a user a Sales Executive.");
-                    }
+                    var firstLocation = currentLocations.FirstOrDefault();
+                    finalLocationId = firstLocation > 0 ? firstLocation : null;
                 }
+                targetLocationIds = LocationSet(finalLocationId, request.LocationIds ?? currentLocations);
             }
+            else targetLocationIds = currentLocations;
 
-            await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId);
-            string? warning = null;
-            if (request.LocationIds != null || !Roles.IsLocationBoundRole(roleId))
-                warning = await SaveLocationsAsync(id, roleId, finalLocationId, request.LocationIds, null);
+            var currentManagerId = await GetManagerIdAsync(id);
+            int? targetManagerId = roleId == Roles.SalesExecutiveId && currentRoleId == Roles.SalesExecutiveId ? currentManagerId : null;
+            var managerError = await ValidateManagerAssignmentAsync(roleId, targetManagerId, targetLocationIds);
+            if (managerError != null) targetManagerId = null;
+            var managerIdSpecified = roleId != Roles.SalesExecutiveId || targetManagerId != currentManagerId;
+            await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId, targetManagerId, managerIdSpecified,
+                targetLocationIds, true, true);
+            string? warning = await SaveLocationsAsync(id, roleId, finalLocationId, targetLocationIds, null);
             return ApiResponse.Ok(warning ?? "Role and location binding updated.");
         }
     }

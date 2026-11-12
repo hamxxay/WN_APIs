@@ -130,7 +130,7 @@ namespace WorkNest.Infrastructure.Repositories
         // BR_02 marks: the inquiries row's ByBranch, the breakdown head's InqByBranch, the inquiry records' ByBranch.
 
         public Task<List<List<IDictionary<string, object?>>>> GetDashboardAsync(string? locationIds, string? pickerLocationIds,
-            bool inquiriesNoBranch, int periodMonths, DateTime businessNow, int expiringDays, DateTime? from = null, DateTime? to = null) =>
+            bool inquiriesNoBranch, int periodMonths, DateTime businessNow, int expiringDays, DateTime? from = null, DateTime? to = null, int? currentManagerId = null) =>
             RunWithInquiryBranchAsync("dbo.WN_SalesMgr_Dashboard", p =>
             {
                 p.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = Db(locationIds);
@@ -138,6 +138,8 @@ namespace WorkNest.Infrastructure.Repositories
                 p.Add("@PMonths", SqlDbType.Int).Value = periodMonths;
                 p.Add("@BizNow", SqlDbType.DateTime2).Value = businessNow;
                 p.Add("@ExpiringDays", SqlDbType.Int).Value = expiringDays;
+                if (currentManagerId.HasValue)
+                    p.Add("@CurrentManagerId", SqlDbType.Int).Value = currentManagerId.Value;
             }, p => p.Add("@InquiriesNoBranch", SqlDbType.Bit).Value = inquiriesNoBranch, 1, "BookedDesks", from, to);
 
         public Task<List<List<IDictionary<string, object?>>>> GetBreakdownAsync(string metric, string? locationIds, bool inquiriesNoBranch,

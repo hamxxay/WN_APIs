@@ -950,6 +950,60 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return (rows, total);
         }
 
+        public async Task<Dictionary<int, (int? ManagerId, string? ManagerName)>> GetUserManagerMapAsync(IEnumerable<int> userIds)
+        {
+            var ids = userIds.Distinct().ToList();
+            var result = new Dictionary<int, (int?, string?)>();
+            if (ids.Count == 0) return result;
+
+            await using var c = await Open();
+            var names = string.Join(",", ids.Select((_, i) => "@U" + i));
+            await using var cmd = new SqlCommand($@"
+                SELECT u.Id, u.ManagerId,
+                       COALESCE(NULLIF(m.Name, N''), NULLIF(m.UserName, N''), m.Email) AS ManagerName
+                FROM dbo.WN_Users u WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Users m WITH (NOLOCK) ON m.Id = u.ManagerId
+                WHERE u.Id IN ({names})", c);
+            for (var i = 0; i < ids.Count; i++) cmd.Parameters.AddWithValue("@U" + i, ids[i]);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync())
+                result[r.GetInt32(0)] = (r.IsDBNull(1) ? null : r.GetInt32(1), r.IsDBNull(2) ? null : r.GetString(2));
+            return result;
+        }
+
+        public async Task<List<WorkNest.Application.DTOs.User.EligibleManagerDto>> GetEligibleManagersAsync(IReadOnlyCollection<int> locationIds)
+        {
+            var locations = locationIds.Where(x => x > 0).Distinct().ToList();
+            if (locations.Count == 0) return new List<WorkNest.Application.DTOs.User.EligibleManagerDto>();
+
+            await using var c = await Open();
+            await using var cmd = new SqlCommand(@"
+                SELECT DISTINCT m.Id,
+                       COALESCE(NULLIF(m.Name, N''), NULLIF(m.UserName, N''), m.Email) AS Name
+                FROM dbo.WN_Users m WITH (NOLOCK)
+                WHERE m.IsActive = 1 AND m.RoleId = 18
+                  AND (
+                    m.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N','))
+                    OR EXISTS (
+                        SELECT 1
+                        FROM dbo.WN_UserLocations ul WITH (NOLOCK)
+                        WHERE ul.UserId = m.Id
+                          AND ul.LocationId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@LocationIds, N','))
+                    )
+                  )
+                ORDER BY Name, m.Id", c);
+            cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value = string.Join(",", locations);
+            await using var r = await cmd.ExecuteReaderAsync();
+            var result = new List<WorkNest.Application.DTOs.User.EligibleManagerDto>();
+            while (await r.ReadAsync())
+                result.Add(new WorkNest.Application.DTOs.User.EligibleManagerDto
+                {
+                    Id = r.GetInt32(0),
+                    Name = r.IsDBNull(1) ? string.Empty : r.GetString(1)
+                });
+            return result;
+        }
+
         public async Task<IEnumerable<IDictionary<string, object?>>> GetUserHistoryAsync(int userId)
         {
             await using var c = await Open();
@@ -981,7 +1035,7 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             return await ReadAll(r);
         }
 
-        public async Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById, int? locationId = null)
+        public async Task<(int? Id, string? PublicId)> CreateUserAsync(string email, string? passwordHash, string? name, string? phone, int? roleId, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? createdById, int? locationId = null, int? managerId = null, IReadOnlyCollection<int>? locationIds = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_Users_Insert", c);
@@ -998,6 +1052,9 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@CreatedById", (object?)createdById ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ManagerId", (object?)managerId ?? DBNull.Value);
+            cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value =
+                locationIds is null ? DBNull.Value : string.Join(",", locationIds.Distinct());
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -1024,7 +1081,8 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             }
         }
 
-        public async Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null, string? email = null)
+        public async Task UpdateUserAsync(int id, string? name, string? phone, int? companyId, int? cityId, string? address, string? cnic, string? avatarUrl, string? notes, int? locationId = null, string? email = null,
+            int? managerId = null, bool managerIdSpecified = false, IReadOnlyCollection<int>? locationIds = null, bool locationIdsSpecified = false, bool locationIdSpecified = false)
         {
             await using var c = await Open();
             try
@@ -1041,9 +1099,16 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 cmd.Parameters.AddWithValue("@Notes", (object?)notes ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@Email", (object?)email ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@ManagerId", (object?)managerId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@ManagerIdSpecified", managerIdSpecified);
+                cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value =
+                    locationIds is null ? DBNull.Value : string.Join(",", locationIds.Distinct());
+                cmd.Parameters.AddWithValue("@LocationIdsSpecified", locationIdsSpecified);
+                cmd.Parameters.AddWithValue("@LocationIdSpecified", locationIdSpecified);
                 await cmd.ExecuteNonQueryAsync();
             }
-            catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Message.Contains("@LocationId") || ex.Message.Contains("@Email") || ex.Message.Contains("too many arguments"))
+            catch (Microsoft.Data.SqlClient.SqlException ex) when (!managerIdSpecified && !locationIdsSpecified && !locationIdSpecified
+                && (ex.Message.Contains("@LocationId") || ex.Message.Contains("@Email") || ex.Message.Contains("too many arguments")))
             {
                 await using var fallback = SP("dbo.WN_Users_Update", c);
                 fallback.Parameters.AddWithValue("@Id", id);
@@ -1062,14 +1127,40 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
         public async Task DeleteUserAsync(int id)
         {
             await using var c = await Open();
-            await using var cmd = SP("dbo.WN_Users_Delete", c);
-            cmd.Parameters.AddWithValue("@Id", id);
-            await cmd.ExecuteNonQueryAsync();
+            await using var tx = (SqlTransaction)await c.BeginTransactionAsync();
+            await using (var cmd = new SqlCommand("dbo.WN_Users_Delete", c, tx) { CommandType = CommandType.StoredProcedure })
+            {
+                cmd.Parameters.AddWithValue("@Id", id);
+                await cmd.ExecuteNonQueryAsync();
+            }
+            await using (var cleanup = new SqlCommand("UPDATE dbo.WN_Users SET ManagerId = NULL WHERE ManagerId = @Id;", c, tx))
+            {
+                cleanup.Parameters.AddWithValue("@Id", id);
+                await cleanup.ExecuteNonQueryAsync();
+            }
+            await tx.CommitAsync();
         }
 
         public async Task SetUserStatusAsync(int id, bool isActive)
         {
             await using var c = await Open();
+            if (!isActive)
+            {
+                await using var tx = (SqlTransaction)await c.BeginTransactionAsync();
+                await using (var statusCmd = new SqlCommand("dbo.WN_Users_SetStatus", c, tx) { CommandType = CommandType.StoredProcedure })
+                {
+                    statusCmd.Parameters.AddWithValue("@Id", id);
+                    statusCmd.Parameters.AddWithValue("@IsActive", 0);
+                    await statusCmd.ExecuteNonQueryAsync();
+                }
+                await using (var cleanup = new SqlCommand("UPDATE dbo.WN_Users SET ManagerId = NULL WHERE ManagerId = @Id;", c, tx))
+                {
+                    cleanup.Parameters.AddWithValue("@Id", id);
+                    await cleanup.ExecuteNonQueryAsync();
+                }
+                await tx.CommitAsync();
+                return;
+            }
             await using var cmd = SP("dbo.WN_Users_SetStatus", c);
             cmd.Parameters.AddWithValue("@Id", id);
             cmd.Parameters.AddWithValue("@IsActive", isActive ? 1 : 0);
@@ -1085,13 +1176,20 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
             await cmd.ExecuteNonQueryAsync();
         }
 
-        public async Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId)
+        public async Task SetUserRoleAndLocationAsync(int id, int roleId, int? locationId, int? managerId = null, bool managerIdSpecified = false,
+            IReadOnlyCollection<int>? locationIds = null, bool locationIdsSpecified = false, bool locationIdSpecified = true)
         {
             await using var c = await Open();
-            await using var cmd = new SqlCommand("UPDATE dbo.WN_Users SET RoleId = @RoleId, LocationId = @LocationId WHERE Id = @Id", c);
+            await using var cmd = SP("dbo.WN_Users_SetRole", c);
             cmd.Parameters.AddWithValue("@Id", id);
             cmd.Parameters.AddWithValue("@RoleId", roleId);
             cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@LocationIdSpecified", locationIdSpecified);
+            cmd.Parameters.AddWithValue("@ManagerId", (object?)managerId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@ManagerIdSpecified", managerIdSpecified);
+            cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value =
+                locationIds is null ? DBNull.Value : string.Join(",", locationIds.Distinct());
+            cmd.Parameters.AddWithValue("@LocationIdsSpecified", locationIdsSpecified);
             await cmd.ExecuteNonQueryAsync();
         }
 
@@ -4589,6 +4687,12 @@ END";
             {
                 await using var c = await Open();
                 await using var tx = (SqlTransaction)await c.BeginTransactionAsync();
+                await using (var userLock = new SqlCommand(
+                    "SELECT Id FROM dbo.WN_Users WITH (UPDLOCK, HOLDLOCK) WHERE Id = @UserId;", c, tx))
+                {
+                    userLock.Parameters.AddWithValue("@UserId", userId);
+                    await userLock.ExecuteScalarAsync();
+                }
                 await using (var del = new SqlCommand("DELETE FROM dbo.WN_UserLocations WHERE UserId = @UserId", c, tx))
                 {
                     del.Parameters.AddWithValue("@UserId", userId);
@@ -4602,6 +4706,73 @@ END";
                     ins.Parameters.AddWithValue("@LocationId", locId);
                     ins.Parameters.AddWithValue("@CreatedById", (object?)actorId ?? DBNull.Value);
                     await ins.ExecuteNonQueryAsync();
+                }
+                await using (var clearOwn = new SqlCommand(
+                    "UPDATE dbo.WN_Users SET ManagerId = NULL WHERE Id = @UserId AND RoleId <> 16;", c, tx))
+                {
+                    clearOwn.Parameters.AddWithValue("@UserId", userId);
+                    await clearOwn.ExecuteNonQueryAsync();
+                }
+                await using (var clearStaleAssignment = new SqlCommand(@"
+                    UPDATE executive
+                    SET ManagerId = NULL
+                    FROM dbo.WN_Users executive
+                    WHERE executive.Id = @UserId
+                      AND executive.ManagerId IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM dbo.WN_Users manager
+                        WHERE manager.Id = executive.ManagerId AND manager.IsActive = 1 AND manager.RoleId = 18
+                          AND (
+                            (manager.LocationId IS NOT NULL AND manager.LocationId = executive.LocationId)
+                            OR (manager.LocationId IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM dbo.WN_UserLocations executiveLocation
+                                WHERE executiveLocation.UserId = executive.Id AND executiveLocation.LocationId = manager.LocationId))
+                            OR (executive.LocationId IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM dbo.WN_UserLocations managerLocation
+                                WHERE managerLocation.UserId = manager.Id AND managerLocation.LocationId = executive.LocationId))
+                            OR EXISTS (
+                                SELECT 1
+                                FROM dbo.WN_UserLocations executiveLocation
+                                JOIN dbo.WN_UserLocations managerLocation ON managerLocation.LocationId = executiveLocation.LocationId
+                                WHERE executiveLocation.UserId = executive.Id AND managerLocation.UserId = manager.Id)
+                          )
+                      );", c, tx))
+                {
+                    clearStaleAssignment.Parameters.AddWithValue("@UserId", userId);
+                    await clearStaleAssignment.ExecuteNonQueryAsync();
+                }
+                await using (var cleanup = new SqlCommand(@"
+                    UPDATE report
+                    SET ManagerId = NULL
+                    FROM dbo.WN_Users report
+                    WHERE report.ManagerId = @UserId
+                      AND (
+                        NOT EXISTS (SELECT 1 FROM dbo.WN_Users manager
+                                    WHERE manager.Id = @UserId AND manager.IsActive = 1 AND manager.RoleId = 18)
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM dbo.WN_Users manager
+                            WHERE manager.Id = @UserId
+                              AND (
+                                (manager.LocationId IS NOT NULL AND manager.LocationId = report.LocationId)
+                                OR (manager.LocationId IS NOT NULL AND EXISTS (
+                                    SELECT 1 FROM dbo.WN_UserLocations reportLocation
+                                    WHERE reportLocation.UserId = report.Id AND reportLocation.LocationId = manager.LocationId))
+                                OR (report.LocationId IS NOT NULL AND EXISTS (
+                                    SELECT 1 FROM dbo.WN_UserLocations managerLocation
+                                    WHERE managerLocation.UserId = @UserId AND managerLocation.LocationId = report.LocationId))
+                                OR EXISTS (
+                                    SELECT 1
+                                    FROM dbo.WN_UserLocations reportLocation
+                                    JOIN dbo.WN_UserLocations managerLocation ON managerLocation.LocationId = reportLocation.LocationId
+                                    WHERE reportLocation.UserId = report.Id AND managerLocation.UserId = @UserId)
+                              )
+                        )
+                      );", c, tx))
+                {
+                    cleanup.Parameters.AddWithValue("@UserId", userId);
+                    await cleanup.ExecuteNonQueryAsync();
                 }
                 await tx.CommitAsync();
                 return true;

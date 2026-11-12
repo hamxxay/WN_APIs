@@ -50,12 +50,12 @@ namespace WorkNest.Application.Services
 
         // ------------------------------------------------------------------ level 1: dashboard
 
-        public async Task<ApiResponse> GetDashboardAsync(string? period, SalesManagerScope scope, string? from = null, string? to = null)
+        public async Task<ApiResponse> GetDashboardAsync(string? period, SalesManagerScope scope, string? from = null, string? to = null, int? currentManagerId = null)
         {
             if (!DashboardPeriod.TryParse(period, from, to, _clock.Today, out var p, out var periodError)) return ApiResponse.Fail(periodError!);
             var now = _clock.Now;
             var s = await _repo.GetDashboardAsync(scope.LocationIdsCsv, scope.PickerCsv, scope.IncludeNoBranch, p.Months, now, ExpiringDays,
-                p.From, p.To);
+                p.From, p.To, currentManagerId);
 
             var funnel = Set(s, 1).FirstOrDefault();
             var inq = Set(s, 5).FirstOrDefault();
@@ -114,7 +114,10 @@ namespace WorkNest.Application.Services
                     // executives working at the locations in scope (WN_Users.LocationId or WN_UserLocations = the
                     // manager's assigned locations, or the one chosen); everyone but the sales executives is left out
                     // here, so the CMS and the app get the same list. The procedure's ranking is kept.
-                    People = Set(s, 3).Where(IsSalesExecutive).Select(r => new SalesManagerPersonDto
+                    People = Set(s, 3).Where(IsSalesExecutive)
+                        .Where(r => currentManagerId is null || !r.TryGetValue("ManagerId", out var managerValue)
+                            || managerValue is null || managerValue is DBNull || Convert.ToInt32(managerValue) == currentManagerId.Value)
+                        .Select(r => new SalesManagerPersonDto
                     {
                         UserId = Int(r, "UserId"), Name = Str(r, "Name") ?? "", Role = Str(r, "RoleName") ?? "",
                         Locations = Str(r, "Locations"), InquiriesHandled = Int(r, "InquiriesHandled"),
