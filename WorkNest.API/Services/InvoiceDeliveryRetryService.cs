@@ -375,7 +375,12 @@ namespace WorkNest.API.Services
 
             // Same resolver as the download / e-mail paths: the invoice's own location and stamped content version.
             if (invoiceContent != null)
-                dto.Content = (await invoiceContent.ResolveForInvoiceAsync(id, dto.LocationId)).Fields;
+            {
+                var resolved = await invoiceContent.ResolveForInvoiceAsync(id, dto.LocationId);
+                dto.Content = resolved.Fields;
+                dto.VendorAddress = resolved.AddressOr(dto.VendorAddress);
+                if (dto.SalesTaxInvoice != null) dto.SalesTaxInvoice.VendorAddress = resolved.AddressOr(dto.SalesTaxInvoice.VendorAddress);
+            }
             return dto;
         }
 

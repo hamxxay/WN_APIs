@@ -388,7 +388,11 @@ namespace WorkNest.API.Controllers
 
                 // The sales-tax invoice prints the same location content as its invoice (resolved from the invoice, not from the link).
                 if (_invoiceContent != null && dto.CustomerInvoiceId > 0)
-                    dto.Content = (await _invoiceContent.ResolveForInvoiceAsync(dto.CustomerInvoiceId, dto.LocationId)).Fields;
+                {
+                    var resolved = await _invoiceContent.ResolveForInvoiceAsync(dto.CustomerInvoiceId, dto.LocationId);
+                    dto.Content = resolved.Fields;
+                    dto.VendorAddress = resolved.AddressOr(dto.VendorAddress);
+                }
 
                 byte[] pdfBytes = _pdf.GenerateSalesTaxInvoicePdf(dto);
 
@@ -670,7 +674,12 @@ namespace WorkNest.API.Controllers
             if (pdfOffer is { HasOffer: true }) { dto.OfferName = pdfOffer.OfferName; dto.OfferDiscountAmount = pdfOffer.OfferDiscountAmount ?? 0m; }
             // The location's invoice content (and its stamped version) for this invoice: one resolver for every render path.
             if (_invoiceContent != null)
-                dto.Content = (await _invoiceContent.ResolveForInvoiceAsync(id, dto.LocationId)).Fields;
+            {
+                var resolved = await _invoiceContent.ResolveForInvoiceAsync(id, dto.LocationId);
+                dto.Content = resolved.Fields;
+                dto.VendorAddress = resolved.AddressOr(dto.VendorAddress);
+                if (dto.SalesTaxInvoice != null) dto.SalesTaxInvoice.VendorAddress = resolved.AddressOr(dto.SalesTaxInvoice.VendorAddress);
+            }
             return dto;
         }
 

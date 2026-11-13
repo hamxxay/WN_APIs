@@ -93,24 +93,35 @@ namespace WorkNest.Tests
         }
 
         [Fact]
-        public async Task CreateWithNullManagerDoesNotBlockExecutive()
+        public async Task CreateRequiresAManagerForASalesExecutive()
         {
             var db = CreateUserRepository();
             var service = new UserService(db.Object);
 
             var result = await service.CreateUserAsync(ExecutiveRequest(null, 3, new[] { 3 }), null);
 
-            Assert.True(result.IsSuccessful);
-            db.Verify(x => x.GetUserByIdAsync(It.IsAny<int>()), Times.Never);
+            Assert.False(result.IsSuccessful);
+            Assert.Equal(UserService.ManagerRequiredMessage, result.Message);
             db.Verify(x => x.CreateUserAsync(
                 It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
                 It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), 3, null,
-                It.IsAny<IReadOnlyCollection<int>?>()), Times.Once);
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<int?>(), It.IsAny<IReadOnlyCollection<int>?>()), Times.Never);
         }
 
         [Fact]
-        public async Task UpdateClearsExistingManagerWhenExecutiveChangesToUnsharedLocations()
+        public async Task CreateDoesNotRequireAManagerForOtherRoles()
+        {
+            var db = CreateUserRepository();
+            var service = new UserService(db.Object);
+
+            var result = await service.CreateUserAsync(new UserCreateRequest { Email = "a@example.com", Role = "admin", LocationId = 3, LocationIds = new List<int> { 3 } }, null);
+
+            Assert.True(result.IsSuccessful);
+        }
+
+        [Fact]
+        public async Task UpdateRefusesAnExecutiveWhoWouldBeLeftWithoutAManager()
         {
             var db = CreateUserRepository();
             db.Setup(x => x.GetUserByIdAsync(1)).ReturnsAsync(UserRow(1, 16, true, 10));
@@ -121,17 +132,30 @@ namespace WorkNest.Tests
                 .ReturnsAsync(new Dictionary<int, (int? ManagerId, string? ManagerName)> { [1] = (20, "Manager") });
             var service = new UserService(db.Object);
 
-            var result = await service.UpdateUserAsync(1, new UserUpdateRequest
-            {
-                LocationId = 30,
-                LocationIds = new List<int> { 30 }
-            });
+            // moved to a location the manager does not cover: the manager can no longer stay, and an executive needs one
+            var result = await service.UpdateUserAsync(1, new UserUpdateRequest { LocationId = 30, LocationIds = new List<int> { 30 } });
 
-            Assert.True(result.IsSuccessful);
-            db.Verify(x => x.UpdateUserAsync(1, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(),
+            Assert.False(result.IsSuccessful);
+            db.Verify(x => x.UpdateUserAsync(It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(),
                 It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
-                30, It.IsAny<string?>(), null, true,
-                It.Is<IReadOnlyCollection<int>?>(ids => ids != null && ids.SequenceEqual(new[] { 30 })), true, true), Times.Once);
+                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<bool>(),
+                It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<bool>(), It.IsAny<bool>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task UpdateRefusesAnExecutiveWithoutAnyManager()
+        {
+            var db = CreateUserRepository();
+            db.Setup(x => x.GetUserByIdAsync(1)).ReturnsAsync(UserRow(1, 16, true, 10));
+            db.Setup(x => x.GetUserLocationIdsAsync(1)).ReturnsAsync(new List<int> { 10 });
+            db.Setup(x => x.GetUserManagerMapAsync(It.IsAny<IEnumerable<int>>()))
+                .ReturnsAsync(new Dictionary<int, (int? ManagerId, string? ManagerName)>());
+            var service = new UserService(db.Object);
+
+            var result = await service.UpdateUserAsync(1, new UserUpdateRequest { Phone = "03001234567" });
+
+            Assert.False(result.IsSuccessful);
+            Assert.Equal(UserService.ManagerRequiredMessage, result.Message);
         }
 
         [Fact]

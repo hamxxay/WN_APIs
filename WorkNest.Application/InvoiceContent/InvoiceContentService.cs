@@ -28,6 +28,9 @@ namespace WorkNest.Application.InvoiceContent
         private readonly IInvoiceContentRepository _repo;
         public InvoiceContentService(IInvoiceContentRepository repo) => _repo = repo;
 
+        /// <summary>The selected location's WN_Locations.Address for the preview header (null when there is none).</summary>
+        public Task<string?> GetLocationAddressAsync(int locationId, CancellationToken ct = default) => InvoiceVendorAddress.LookupAsync(_repo, locationId, ct);
+
         public async Task<IReadOnlyList<InvoiceContentLocationSummary>> GetLocationsAsync(IReadOnlyCollection<int>? allowedLocationIds, CancellationToken ct = default)
         {
             var locations = await _repo.GetLocationsAsync(ct);

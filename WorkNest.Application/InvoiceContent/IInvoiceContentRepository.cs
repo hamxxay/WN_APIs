@@ -49,6 +49,8 @@ namespace WorkNest.Application.InvoiceContent
         Task<bool> DeleteDraftAsync(int locationId, CancellationToken ct = default);
         /// <summary>Turns the draft into the next published version (the previous one becomes Superseded), in one transaction. Null when there is no draft.</summary>
         Task<InvoiceContentVersionRow?> PublishDraftAsync(int locationId, string? by, CancellationToken ct = default);
+        /// <summary>dbo.WN_Locations.Address of the location; null when the row or the address is missing.</summary>
+        Task<string?> GetLocationAddressAsync(int locationId, CancellationToken ct = default);
         Task<InvoiceContentInvoiceRef?> GetInvoiceRefAsync(int invoiceId, CancellationToken ct = default);
         /// <summary>Stamps the invoice with the version only while it has none; returns the version id the invoice ends up with.</summary>
         Task<int?> StampInvoiceAsync(int invoiceId, int versionId, CancellationToken ct = default);

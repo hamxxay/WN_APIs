@@ -23,10 +23,20 @@ namespace WorkNest.Application.InvoiceContent
 
         public async Task<ResolvedInvoiceContent> ResolveForInvoiceAsync(int invoiceId, int? derivedLocationId, CancellationToken ct = default)
         {
+            int? addressLocation = derivedLocationId;
+            var content = await ResolveCoreAsync(invoiceId, derivedLocationId, loc => addressLocation = loc, ct);
+            // The header address follows the same authoritative location as the content (never the centre name, never a fallback location).
+            content.LocationAddress = await InvoiceVendorAddress.LookupAsync(_repo, addressLocation, ct);
+            return content;
+        }
+
+        private async Task<ResolvedInvoiceContent> ResolveCoreAsync(int invoiceId, int? derivedLocationId, Action<int?> authoritativeLocation, CancellationToken ct)
+        {
             try
             {
                 var inv = await _repo.GetInvoiceRefAsync(invoiceId, ct);
                 int? locationId = inv?.LocationId ?? derivedLocationId;
+                authoritativeLocation(locationId);
 
                 // 1. The version stamped on the invoice: immutable, so the PDF is the same as the first time.
                 if (inv?.InvoiceContentVersionId is int stamped)

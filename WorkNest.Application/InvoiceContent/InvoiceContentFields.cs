@@ -82,7 +82,31 @@ namespace WorkNest.Application.InvoiceContent
         /// <summary>Row id of WN_InvoiceContentVersions (what WN_Invoices.InvoiceContentVersionId holds); null for the built-in content.</summary>
         public int? VersionId { get; init; }
         public int? VersionNo { get; init; }
+        /// <summary>dbo.WN_Locations.Address of the invoice's authoritative location; null when it has no row / no address.</summary>
+        public string? LocationAddress { get; set; }
+        /// <summary>The header address to print: the location's address, else <paramref name="current"/> (the invoice's own value), else today's default text.</summary>
+        public string AddressOr(string? current) => InvoiceVendorAddress.Choose(LocationAddress, current);
         /// <summary>True when the tables are not set up (script INVC_01 not run): today's hardcoded wording.</summary>
         public bool IsBuiltIn => VersionId == null;
+    }
+
+    /// <summary>The company address line of the invoice header (second line of the top-right block): one rule for every invoice render path.</summary>
+    public static class InvoiceVendorAddress
+    {
+        /// <summary>Today's text, used when the location has no (or an empty) address.</summary>
+        public const string Default = "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad";
+
+        public static string Choose(string? locationAddress, string? current)
+            => !string.IsNullOrWhiteSpace(locationAddress) ? locationAddress.Trim()
+             : !string.IsNullOrWhiteSpace(current) ? current
+             : Default;
+
+        /// <summary>WN_Locations.Address of the location (parameterized read); null for no location, no row, an empty address or any read failure (the header then keeps today's text).</summary>
+        public static async Task<string?> LookupAsync(IInvoiceContentRepository repo, int? locationId, CancellationToken ct = default)
+        {
+            if (locationId is not > 0) return null;
+            try { var a = await repo.GetLocationAddressAsync(locationId.Value, ct); return string.IsNullOrWhiteSpace(a) ? null : a.Trim(); }
+            catch (Exception) when (!ct.IsCancellationRequested) { return null; }
+        }
     }
 }

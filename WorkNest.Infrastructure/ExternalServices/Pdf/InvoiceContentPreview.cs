@@ -11,7 +11,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
     {
         public const string SampleOneBillNumber = "1013401034000000";
 
-        public static StatementInvoicePdfDto SampleInvoice(int locationId, InvoiceContentFields content, bool withOneBillNumber = true, bool withDeposit = true)
+        public static StatementInvoicePdfDto SampleInvoice(int locationId, InvoiceContentFields content, bool withOneBillNumber = true, bool withDeposit = true, string? locationAddress = null)
         {
             var issued = new DateTime(2026, 11, 1);
             var due = new DateTime(2026, 11, 10);
@@ -33,7 +33,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 CenterName = "Sample",
                 LocationId = locationId,
                 VendorLegalName = "WorkNest Coworking Spaces (Pvt) Ltd",
-                VendorAddress = "3rd Floor EOBI Building-II, I-8 Markaz, Islamabad",
+                VendorAddress = InvoiceVendorAddress.Choose(locationAddress, null),
                 VendorPhone = "+92 328 0256000",
                 VendorFax = "", VendorNtn = "7492018-3", VendorLogoPath = "",
                 CurrencyCode = "PKR",
@@ -58,10 +58,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 LineItems = new List<CustomerSTInvoiceLineDto> { new() { Description = "Service Charges", ExclusiveAmount = support, TaxPercentage = 16m, TaxAmount = pst } },
                 Content = content,
             };
+            dto.SalesTaxInvoice.VendorAddress = dto.VendorAddress;
             return dto;
         }
 
-        public static byte[] Render(int locationId, InvoiceContentFields content, bool withOneBillNumber = true, bool withDeposit = true)
-            => StatementInvoicePdfGenerator.GeneratePdf(SampleInvoice(locationId, content, withOneBillNumber, withDeposit));
+        public static byte[] Render(int locationId, InvoiceContentFields content, bool withOneBillNumber = true, bool withDeposit = true, string? locationAddress = null)
+            => StatementInvoicePdfGenerator.GeneratePdf(SampleInvoice(locationId, content, withOneBillNumber, withDeposit, locationAddress));
     }
 }

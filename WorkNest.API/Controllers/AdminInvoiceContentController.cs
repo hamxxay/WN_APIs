@@ -74,7 +74,7 @@ namespace WorkNest.API.Controllers
             var denied = DenyLocation(locationId);
             if (denied != null) return denied;
             var content = await _service.GetPreviewContentAsync(locationId, request?.Content, ct);
-            var pdf = InvoiceContentPreview.Render(locationId, content, withOneBillNumber, withDeposit);
+            var pdf = InvoiceContentPreview.Render(locationId, content, withOneBillNumber, withDeposit, await _service.GetLocationAddressAsync(locationId, ct));
             Response.Headers["Content-Disposition"] = $"inline; filename=\"Invoice-content-preview-location-{locationId}.pdf\"";
             return File(pdf, "application/pdf");
         });

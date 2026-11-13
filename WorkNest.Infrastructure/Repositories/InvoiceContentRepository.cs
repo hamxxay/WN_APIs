@@ -162,6 +162,12 @@ namespace WorkNest.Infrastructure.Repositories
             return (await Rows(cmd, ct)).FirstOrDefault();
         });
 
+        public Task<string?> GetLocationAddressAsync(int locationId, CancellationToken ct = default) => Run<string?>(async c =>
+        {
+            await using var cmd = Cmd(c, "SELECT Address FROM dbo.WN_Locations WHERE Id = @id;", ct, ("@id", SqlDbType.Int, locationId));
+            return await cmd.ExecuteScalarAsync(ct) is string a ? a : null;
+        });
+
         public Task<InvoiceContentInvoiceRef?> GetInvoiceRefAsync(int invoiceId, CancellationToken ct = default) => Run<InvoiceContentInvoiceRef?>(async c =>
         {
             const string sql = @"
