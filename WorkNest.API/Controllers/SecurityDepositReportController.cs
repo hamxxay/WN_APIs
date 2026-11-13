@@ -31,6 +31,23 @@ namespace WorkNest.API.Controllers
         /// <summary>The caller's locations (location-bound staff); null = every location.</summary>
         private List<int>? Scope => User.ScopedLocationIds(null);
 
+        /// <summary>The locations asked for, limited to the caller's own for location-bound staff (same rule as the dashboard).</summary>
+        private List<int>? RequestedScope(int? locationId, string? locationIds)
+        {
+            var requested = (locationIds ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(x => int.TryParse(x, out var id) ? id : 0)
+                .Append(locationId ?? 0)
+                .Where(id => id > 0).Distinct().ToList();
+            if (requested.Count == 0) return Scope;
+            if (User.IsLocationBoundRole())
+            {
+                var allowed = User.GetLocationIds();
+                var mine = requested.Where(allowed.Contains).ToList();
+                return mine.Count > 0 ? mine : Scope;
+            }
+            return requested;
+        }
+
         private async Task<IActionResult> Scoped(Func<Task<IActionResult>> action)
         {
             try
@@ -45,9 +62,12 @@ namespace WorkNest.API.Controllers
 
         [HttpGet("")]
         [HttpGet("summary")]
-        public Task<IActionResult> Index([FromQuery] SecurityDepositReportFilterDto filter) => Scoped(async () =>
+        public Task<IActionResult> Index([FromQuery] SecurityDepositReportFilterDto filter, [FromQuery] int? locationId = null,
+            [FromQuery] string? locationIds = null) => Scoped(async () =>
         {
-            var result = await _reportService.GetCustomerSummaryAsync(filter, Scope);
+            // locationId / locationIds (comma-separated): the dashboard's location picker. Location-bound staff stay within their
+            // own locations (as the dashboard cards); none = everything the caller may see.
+            var result = await _reportService.GetCustomerSummaryAsync(filter, RequestedScope(locationId, locationIds));
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         });
 
