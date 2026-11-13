@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using WorkNest.API.Filters;
 using WorkNest.Application.DTOs.AmountField;
 using WorkNest.Application.Interfaces;
 
@@ -14,10 +15,12 @@ namespace WorkNest.API.Controllers
 
         private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
 
+        [ReceptionistAllowed]   // read-only lookup the front-desk pages load (Invoices, Customers)
         [HttpGet("api/amount-fields")]
         public async Task<IActionResult> GetAll() => Ok(await _svc.GetAllAsync());
 
         /// <summary>WHT rate options from dbo.WN_WHTaxRate (Description shown, WHRate applied).</summary>
+        [ReceptionistAllowed]   // read-only lookup the front-desk pages load (Invoices, Customers)
         [HttpGet("api/amount-fields/wht-rates")]
         public async Task<IActionResult> GetWhtRates() => Ok(await _svc.GetWhtRatesAsync());
 

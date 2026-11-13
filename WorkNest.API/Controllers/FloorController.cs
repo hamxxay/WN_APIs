@@ -20,6 +20,7 @@ namespace WorkNest.API.Controllers
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
         private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
 
+        [ReceptionistAllowed]   // read-only lookup the front-desk pages load (Invoices, Customers)
         [HttpGet("api/floor")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List([FromQuery] int? locationId)

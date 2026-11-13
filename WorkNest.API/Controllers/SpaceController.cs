@@ -79,6 +79,7 @@ namespace WorkNest.API.Controllers
             return Ok(ApiResponse.Ok(items));
         }
 
+        [ReceptionistAllowed]   // read-only lookup the front-desk pages load (Invoices, Customers)
         [HttpGet("api/space")]
         [NetworkEngineerAllowed] // the SSIDs page's room picker (own locations' spaces only, as other location-bound staff)
         public async Task<IActionResult> List(
