@@ -1,0 +1,110 @@
+-- =====================================================================================================================
+-- OB_07: 1Bill uses the invoice's OWN saved location first (run on the test database, then live).
+--
+-- Why: an invoice stores its location in dbo.WN_Invoices.LocationId; the invoice wording, bank details and header address
+-- use it. The 1Bill procedures worked the location out again (custom invoice -> booked space -> the customer's USER
+-- location) and ignored it, so e.g. an F-7 invoice of a customer whose account is set to I-8 got NO 1Bill number, and an
+-- I-8 invoice of a customer set to F-7 could get F-7's. Only F-7 invoices must get 1Bill numbers (the locations whose
+-- WN_Locations.OneBillBillerCode / OneBillPrefix are filled).
+--
+-- What it changes (PATCH, nothing else): in dbo.WN_OneBill_GetPending and dbo.WN_OneBill_ClaimInvoice
+--     COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+-- becomes
+--     COALESCE(i.LocationId, ci.LocationId, s.LocationId, u.LocationId)
+-- i.e. the invoice's saved location first; the old chain only when an invoice has none. Number format, biller code,
+-- prefix and the OneBillFrom date are unchanged.
+--
+-- Safe to run: one transaction; if the line is not found exactly once in a procedure the script stops and changes nothing;
+-- a procedure that already has OB_07 is left alone. The first result grid is the backup of both procedures.
+-- The last grids list the invoices whose 1Bill location changes because of this (read-only).
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Old NVARCHAR(200) = N'COALESCE(ci.LocationId, s.LocationId, u.LocationId)';
+DECLARE @New NVARCHAR(200) = N'COALESCE(i.LocationId /* OB_07 */, ci.LocationId, s.LocationId, u.LocationId)';
+DECLARE @Procs TABLE (Seq INT IDENTITY, Name SYSNAME, Def NVARCHAR(MAX), NewSql NVARCHAR(MAX));
+INSERT INTO @Procs (Name, Def)
+SELECT p.Name, OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + p.Name))
+  FROM (VALUES (N'WN_OneBill_GetPending'), (N'WN_OneBill_ClaimInvoice')) p(Name);
+
+-- Backup: save this result before going on
+SELECT Name AS [Procedure], Def AS CurrentDefinition FROM @Procs ORDER BY Seq;
+
+DECLARE @Seq INT = 1, @Name SYSNAME, @Def NVARCHAR(MAX), @Sql NVARCHAR(MAX), @Found INT, @Pos INT, @LineStart INT, @Msg NVARCHAR(600);
+WHILE @Seq <= (SELECT MAX(Seq) FROM @Procs)
+BEGIN
+    SELECT @Name = Name, @Def = Def FROM @Procs WHERE Seq = @Seq;
+    IF @Def IS NULL
+    BEGIN
+        SET @Msg = N'dbo.' + @Name + N' is not on this database. Nothing was changed.';
+        THROW 50070, @Msg, 1;
+    END
+    IF CHARINDEX(N'OB_07', @Def) = 0
+    BEGIN
+        SET @Found = (DATALENGTH(@Def) - DATALENGTH(REPLACE(@Def, @Old, N''))) / DATALENGTH(@Old);
+        IF @Found <> 1
+        BEGIN
+            SET @Msg = CONCAT(N'dbo.', @Name, N': expected the location line once but found it ', @Found, N' times. Nothing was changed.');
+            THROW 50071, @Msg, 1;
+        END
+        SET @Sql = REPLACE(@Def, @Old, @New);
+        -- The real header: the first PROCEDURE on a line that is not a comment.
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Sql);
+        WHILE @Pos > 0
+        BEGIN
+            SET @LineStart = LEN(LEFT(@Sql, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) + 2;
+            IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) = 0 SET @LineStart = 1;
+            IF LEFT(LTRIM(SUBSTRING(@Sql, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+            SET @Pos = CHARINDEX(N'PROCEDURE', @Sql, @Pos + 1);
+        END
+        IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Sql, @Pos, 80)) = 0
+        BEGIN
+            SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+            THROW 50072, @Msg, 1;
+        END
+        UPDATE @Procs SET NewSql = N'CREATE OR ALTER ' + SUBSTRING(@Sql, @Pos, LEN(@Sql)) WHERE Seq = @Seq;
+    END
+    ELSE
+        PRINT N'dbo.' + @Name + N' already has OB_07: left alone.';
+    SET @Seq += 1;
+END
+
+-- APPLY START
+BEGIN TRANSACTION;
+SET @Seq = 1;
+WHILE @Seq <= (SELECT MAX(Seq) FROM @Procs)
+BEGIN
+    SELECT @Sql = NewSql, @Name = Name FROM @Procs WHERE Seq = @Seq;
+    IF @Sql IS NOT NULL
+    BEGIN
+        EXEC sys.sp_executesql @Sql;
+        PRINT N'dbo.' + @Name + N': updated.';
+    END
+    SET @Seq += 1;
+END
+COMMIT TRANSACTION;
+-- APPLY END
+
+-- Result: both should be 1
+SELECT Name AS [Procedure],
+       CASE WHEN CHARINDEX(N'OB_07', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + Name))) > 0 THEN 1 ELSE 0 END AS Has_OB_07
+  FROM @Procs ORDER BY Seq;
+
+-- Read-only: invoices whose 1Bill location is now their own saved location instead of the derived one.
+SELECT i.Id, i.InvoiceNumber, i.LocationId AS SavedLocation, li.Name AS SavedLocationName,
+       COALESCE(ci.LocationId, s.LocationId, u.LocationId) AS OldOneBillLocation, lo.Name AS OldOneBillLocationName,
+       CASE WHEN NULLIF(LTRIM(RTRIM(li.OneBillPrefix)), '') IS NOT NULL THEN 1 ELSE 0 END AS NowEligibleFor1Bill
+  FROM dbo.WN_Invoices i
+  LEFT JOIN dbo.WN_CustomInvoices ci ON ci.InvoiceId = i.Id
+  LEFT JOIN dbo.WN_Bookings b ON b.Id = i.BookingId
+  LEFT JOIN dbo.WN_Spaces s ON s.Id = b.SpaceId
+  LEFT JOIN dbo.WN_Users u ON u.Id = i.UserId
+  LEFT JOIN dbo.WN_Locations li ON li.Id = i.LocationId
+  LEFT JOIN dbo.WN_Locations lo ON lo.Id = COALESCE(ci.LocationId, s.LocationId, u.LocationId)
+ WHERE ISNULL(i.StatusId, 0) <> 40
+   AND i.LocationId IS NOT NULL
+   AND COALESCE(ci.LocationId, s.LocationId, u.LocationId) <> i.LocationId
+ ORDER BY i.Id DESC;
