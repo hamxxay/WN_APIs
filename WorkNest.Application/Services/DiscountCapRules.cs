@@ -20,13 +20,22 @@ namespace WorkNest.Application.Services
         public static Item ToItem(DiscountCapRow r) => new(r.Id, r.Description, r.DiscountCap, r.IsActive, r.UpdatedBy, r.UpdatedAt);
 
         /// <summary>One group per location (by location id, locations without a row last as "All locations"), items by id.</summary>
-        public static IReadOnlyList<LocationGroup> Group(IEnumerable<DiscountCapRow> rows) =>
-            rows.GroupBy(r => r.LocationId)
-                .OrderBy(g => g.Key == null ? 1 : 0).ThenBy(g => g.Key)
+        public static IReadOnlyList<LocationGroup> Group(IEnumerable<DiscountCapRow> rows) => Group(rows, Array.Empty<(int Id, string Name)>());
+
+        /// <summary>The offering types per location, plus every active location that has none (Items empty): a location without
+        /// offering types cannot have a manual discount, so the page shows it instead of hiding it.</summary>
+        public static IReadOnlyList<LocationGroup> Group(IEnumerable<DiscountCapRow> rows, IEnumerable<(int Id, string Name)> locations)
+        {
+            var groups = rows.GroupBy(r => r.LocationId)
                 .Select(g => new LocationGroup(
                     g.Key,
                     g.Key == null ? "All locations" : (g.Select(r => r.LocationName).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? $"Location {g.Key}"),
                     g.OrderBy(r => r.Id).Select(ToItem).ToList()))
                 .ToList();
+            foreach (var (id, name) in locations)
+                if (!groups.Any(g => g.LocationId == id))
+                    groups.Add(new LocationGroup(id, string.IsNullOrWhiteSpace(name) ? $"Location {id}" : name, Array.Empty<Item>()));
+            return groups.OrderBy(g => g.LocationId == null ? 1 : 0).ThenBy(g => g.LocationId).ToList();
+        }
     }
 }

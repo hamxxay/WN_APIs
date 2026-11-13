@@ -30,7 +30,7 @@ namespace WorkNest.API.Controllers
         /// <summary>Offering types grouped by location: { locationId, locationName, items: [{ id, description, discountCap, isActive, updatedBy, updatedAt }] }.</summary>
         [HttpGet]
         public Task<IActionResult> List(CancellationToken ct = default) => Run(async () =>
-            Ok(ApiResponse.Ok(DiscountCapRules.Group(await _caps.GetAllAsync(ct)))));
+            Ok(ApiResponse.Ok(DiscountCapRules.Group(await _caps.GetAllAsync(ct), await _caps.GetLocationsAsync(ct)))));
 
         [HttpPut("{id:int}")]
         public Task<IActionResult> Update(int id, [FromBody] DiscountCapSaveRequest? request, CancellationToken ct = default) => Run(async () =>

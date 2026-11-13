@@ -1,0 +1,48 @@
+-- =====================================================================================================================
+-- OT_01: offering types (24/7, Morning, Evening) and their discount caps for "F-7 2nd Floor" (run on the test database,
+-- then live).
+--
+-- Why: dbo.WN_OfferingType holds the offering types and the manual-discount cap per location. I-8 (location 1) and
+-- F-7 3rd Floor (location 2) have them; F-7 2nd Floor (location 4) has none, so the Discount Caps page does not show it
+-- and a quotation / booking there cannot have a discount ("not set up").
+--
+-- What it does: copies location 2's offering types (description, cap, status) to location 4, only if location 4 has none.
+-- The caps can then be changed on the CMS Discount Caps page. Nothing else is changed.
+--
+-- Safe to run: one transaction; stops without changing anything if location 4 or location 2's offering types are missing;
+-- running it again does nothing (location 4 already has offering types).
+-- To undo: DELETE FROM dbo.WN_OfferingType WHERE LocationId = 4;  (only before any quotation / booking there uses them)
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+DECLARE @FromLocationId INT = 2;   -- F-7 3rd Floor
+DECLARE @ToLocationId   INT = 4;   -- F-7 2nd Floor
+
+-- Before: what exists now (save this result)
+SELECT Id, Description, DiscountCap, Status, LocationId FROM dbo.WN_OfferingType ORDER BY LocationId, Id;
+SELECT Id, Name FROM dbo.WN_Locations WHERE Id IN (@FromLocationId, @ToLocationId);
+
+IF NOT EXISTS (SELECT 1 FROM dbo.WN_Locations WHERE Id = @ToLocationId)
+    THROW 50080, 'Location 4 (F-7 2nd Floor) is not on this database. Nothing was changed.', 1;
+IF NOT EXISTS (SELECT 1 FROM dbo.WN_OfferingType WHERE LocationId = @FromLocationId)
+    THROW 50081, 'Location 2 (F-7 3rd Floor) has no offering types to copy. Nothing was changed.', 1;
+
+-- APPLY START
+BEGIN TRANSACTION;
+IF NOT EXISTS (SELECT 1 FROM dbo.WN_OfferingType WITH (UPDLOCK, HOLDLOCK) WHERE LocationId = @ToLocationId)
+BEGIN
+    INSERT INTO dbo.WN_OfferingType (Description, DiscountCap, Status, LocationId)
+    SELECT Description, DiscountCap, Status, @ToLocationId
+      FROM dbo.WN_OfferingType
+     WHERE LocationId = @FromLocationId
+     ORDER BY Id;
+    PRINT 'F-7 2nd Floor: offering types added.';
+END
+ELSE
+    PRINT 'F-7 2nd Floor already has offering types: left alone.';
+COMMIT TRANSACTION;
+-- APPLY END
+
+-- After: F-7 2nd Floor should now have 3 rows (24/7, Morning, Evening)
+SELECT Id, Description, DiscountCap, Status, LocationId FROM dbo.WN_OfferingType WHERE LocationId = @ToLocationId ORDER BY Id;

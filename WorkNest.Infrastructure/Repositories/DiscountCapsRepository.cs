@@ -63,6 +63,20 @@ namespace WorkNest.Infrastructure.Repositories
             catch (SqlException ex) when (ex.Number is 208 or 2812) { throw new DiscountCapsMissingException(ex); }
         }
 
+        public async Task<IReadOnlyList<(int Id, string Name)>> GetLocationsAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                await using var c = await OpenAsync(ct);
+                await using var cmd = new SqlCommand("SELECT Id, Name FROM dbo.WN_Locations WITH (NOLOCK) WHERE ISNULL(IsActive, 1) = 1 ORDER BY Id", c) { CommandTimeout = CommandTimeoutSeconds };
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                var list = new List<(int, string)>();
+                while (await r.ReadAsync(ct)) list.Add((r.GetInt32(0), r.IsDBNull(1) ? "" : r.GetString(1)));
+                return list;
+            }
+            catch (SqlException) { return Array.Empty<(int, string)>(); }   // the caps still show without the location list
+        }
+
         private static async Task<IReadOnlyList<DiscountCapRow>> ReadAsync(SqlConnection c, int? id, CancellationToken ct)
         {
             var audit = await HasAuditColumnsAsync(c, ct);
