@@ -15,6 +15,20 @@ namespace WorkNest.Application.InvoiceContent
         public string Get(string key) => Text.TryGetValue(key, out var v) ? v ?? string.Empty : string.Empty;
         public IReadOnlyList<string> GetList(string key) => Lists.TryGetValue(key, out var v) ? v : Array.Empty<string>();
 
+        /// <summary>
+        /// The content as the 1Bill switch of the location allows it (script OB_08). Switch ON: unchanged. Switch OFF: the "1Bill line (no 1Bill number yet)"
+        /// lines are emptied, so no 1Bill line is printed for an invoice without a number; the "with number" lines stay, because they are only
+        /// printed for an invoice that ALREADY has a 1Bill consumer number (the customer may be paying with it). Never changes the stored version.
+        /// </summary>
+        public InvoiceContentFields WithOneBillSwitch(bool enabled)
+        {
+            if (enabled) return this;
+            var c = Clone();
+            c.Text[InvoiceContentKeys.OneBillWithoutNumber] = string.Empty;
+            c.Text[InvoiceContentKeys.StOneBillWithoutNumber] = string.Empty;
+            return c;
+        }
+
         public InvoiceContentFields Clone()
         {
             var c = new InvoiceContentFields();
@@ -76,7 +90,9 @@ namespace WorkNest.Application.InvoiceContent
     /// <summary>The content a PDF is rendered with, and which version it came from.</summary>
     public sealed class ResolvedInvoiceContent
     {
-        public InvoiceContentFields Fields { get; init; } = new();
+        public InvoiceContentFields Fields { get; set; } = new();
+        /// <summary>The location's 1Bill switch (script OB_08): false = no 1Bill line for an invoice without a number. True before the script is run.</summary>
+        public bool OneBillEnabled { get; set; } = true;
         /// <summary>The location whose content this is (an unknown location uses Location 1's).</summary>
         public int LocationId { get; init; }
         /// <summary>Row id of WN_InvoiceContentVersions (what WN_Invoices.InvoiceContentVersionId holds); null for the built-in content.</summary>

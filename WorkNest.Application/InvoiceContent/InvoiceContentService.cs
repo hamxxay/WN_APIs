@@ -7,7 +7,8 @@ namespace WorkNest.Application.InvoiceContent
     public sealed record InvoiceContentDraftView(Dictionary<string, object> Content, string? UpdatedBy, DateTime? UpdatedAt);
     public sealed record InvoiceContentVersionSummary(int VersionNo, string Status, string? PublishedBy, DateTime? PublishedAt);
     public sealed record InvoiceContentLocationView(int LocationId, string LocationName, InvoiceContentPublishedView? Published, InvoiceContentDraftView? Draft,
-        IReadOnlyList<InvoiceContentVersionSummary> Versions, IReadOnlyList<string> Placeholders);
+        IReadOnlyList<InvoiceContentVersionSummary> Versions, IReadOnlyList<string> Placeholders,
+        bool OneBillSwitchAvailable = false, bool OneBillEnabled = false, bool HasBillerSetup = false, string? OneBillChangedBy = null, DateTime? OneBillChangedAt = null);
 
     /// <summary>The request was not valid (400): the messages are shown to the staff member.</summary>
     public sealed class InvoiceContentValidationException : Exception
@@ -56,7 +57,23 @@ namespace WorkNest.Application.InvoiceContent
                 await _repo.EnsureSeedAsync(locationId, InvoiceContentDefaults.ForLocation(locationId).ToJson(), "invoice-content", ct);
                 rows = await _repo.GetVersionsAsync(locationId, ct);
             }
-            return View(loc, rows);
+            return View(loc, rows, await _repo.GetOneBillSwitchAsync(locationId, ct));
+        }
+
+        /// <summary>The 1Bill switch of a location (404 for an unknown one).</summary>
+        public async Task<OneBillSwitchRow> GetOneBillSwitchAsync(int locationId, CancellationToken ct = default)
+        {
+            await RequireLocationAsync(locationId, ct);
+            return await _repo.GetOneBillSwitchAsync(locationId, ct);
+        }
+
+        /// <summary>Super admin: switch 1Bill on / off for the location. Returns the location as GET does.</summary>
+        public async Task<InvoiceContentLocationView> SetOneBillEnabledAsync(int locationId, bool? enabled, string? by, CancellationToken ct = default)
+        {
+            if (enabled == null) throw new InvoiceContentValidationException("Say whether 1Bill is on or off: { \"enabled\": true } or { \"enabled\": false }.", new[] { "enabled is required (true or false)." });
+            await RequireLocationAsync(locationId, ct);
+            if (!await _repo.SetOneBillEnabledAsync(locationId, enabled.Value, by, ct)) throw new InvoiceContentLocationNotFoundException();
+            return await GetAsync(locationId, ct);
         }
 
         public async Task<InvoiceContentLocationView> SaveDraftAsync(int locationId, JsonElement? content, string? by, CancellationToken ct = default)
@@ -111,7 +128,7 @@ namespace WorkNest.Application.InvoiceContent
 
         private static string NameOf(InvoiceContentLocationRow l) => string.IsNullOrWhiteSpace(l.LocationName) ? $"Location {l.LocationId}" : l.LocationName!;
 
-        private static InvoiceContentLocationView View(InvoiceContentLocationRow loc, IReadOnlyList<InvoiceContentVersionRow> rows)
+        private static InvoiceContentLocationView View(InvoiceContentLocationRow loc, IReadOnlyList<InvoiceContentVersionRow> rows, OneBillSwitchRow oneBill)
         {
             var pub = rows.FirstOrDefault(r => r.Status == InvoiceContentStatus.Published);
             var draft = rows.FirstOrDefault(r => r.Status == InvoiceContentStatus.Draft);
@@ -122,7 +139,8 @@ namespace WorkNest.Application.InvoiceContent
                 draft == null ? null : new InvoiceContentDraftView(InvoiceContentFields.FromJson(draft.ContentJson).ToApi(), draft.UpdatedBy ?? draft.CreatedBy, draft.UpdatedAt ?? draft.CreatedAt),
                 rows.Where(r => r.VersionNo != null).OrderByDescending(r => r.VersionNo)
                     .Select(r => new InvoiceContentVersionSummary(r.VersionNo!.Value, r.Status, r.PublishedBy, r.PublishedAt)).ToList(),
-                shown == null ? new List<string>() : InvoiceContentFields.FromJson(shown.ContentJson).PlaceholderKeys());
+                shown == null ? new List<string>() : InvoiceContentFields.FromJson(shown.ContentJson).PlaceholderKeys(),
+                oneBill.Available, oneBill.Enabled, oneBill.HasBillerSetup, oneBill.ChangedBy, oneBill.ChangedAt);
         }
     }
 }

@@ -27,6 +27,21 @@ namespace WorkNest.Application.InvoiceContent
             var content = await ResolveCoreAsync(invoiceId, derivedLocationId, loc => addressLocation = loc, ct);
             // The header address follows the same authoritative location as the content (never the centre name, never a fallback location).
             content.LocationAddress = await InvoiceVendorAddress.LookupAsync(_repo, addressLocation, ct);
+            // The location's 1Bill switch (OB_08). Switch OFF: no "no number yet" line; an invoice that already has a number keeps its "with number" line.
+            // Before the script, or when it cannot be read: unchanged (today's behaviour).
+            if (addressLocation is > 0)
+            {
+                try
+                {
+                    var sw = await _repo.GetOneBillSwitchAsync(addressLocation.Value, ct);
+                    if (sw.Available && !sw.Enabled)
+                    {
+                        content.OneBillEnabled = false;
+                        content.Fields = content.Fields.WithOneBillSwitch(false);
+                    }
+                }
+                catch (Exception) when (!ct.IsCancellationRequested) { }
+            }
             return content;
         }
 

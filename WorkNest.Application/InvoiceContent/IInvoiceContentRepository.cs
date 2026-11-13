@@ -26,6 +26,20 @@ namespace WorkNest.Application.InvoiceContent
 
     public sealed record InvoiceContentLocationRow(int LocationId, string? LocationName, bool HasContent);
 
+    /// <summary>
+    /// The 1Bill switch of a location (script OB_08: dbo.WN_Locations.OneBillEnabled). <paramref name="Available"/> false = the script has not run: the
+    /// switch is read-only and the prefix decides (<paramref name="Enabled"/> then equals <paramref name="HasBillerSetup"/>).
+    /// <paramref name="HasBillerSetup"/> = OneBillBillerCode and OneBillPrefix are both filled (without them no numbers are issued).
+    /// </summary>
+    public sealed record OneBillSwitchRow(bool Available, bool Enabled, bool HasBillerSetup, string? ChangedBy, DateTime? ChangedAt);
+
+    /// <summary>Script OB_08 is not on the database (no WN_Locations.OneBillEnabled column): the switch cannot be changed.</summary>
+    public sealed class OneBillSwitchUnavailableException : Exception
+    {
+        public const string UserMessage = "Run OB_08 to switch 1Bill per location.";
+        public OneBillSwitchUnavailableException() : base(UserMessage) { }
+    }
+
     /// <summary>What the resolver needs of an invoice: its own WN_Invoices.LocationId and stamp, and where the feature started.</summary>
     public sealed record InvoiceContentInvoiceRef(int InvoiceId, int? LocationId, int? InvoiceContentVersionId, int ActivatedFromInvoiceId);
 
@@ -51,6 +65,10 @@ namespace WorkNest.Application.InvoiceContent
         Task<InvoiceContentVersionRow?> PublishDraftAsync(int locationId, string? by, CancellationToken ct = default);
         /// <summary>dbo.WN_Locations.Address of the location; null when the row or the address is missing.</summary>
         Task<string?> GetLocationAddressAsync(int locationId, CancellationToken ct = default);
+        /// <summary>The location's 1Bill switch. Never throws for a missing column (Available = false then).</summary>
+        Task<OneBillSwitchRow> GetOneBillSwitchAsync(int locationId, CancellationToken ct = default);
+        /// <summary>Sets the switch and who / when. False when the location has no WN_Locations row; throws <see cref="OneBillSwitchUnavailableException"/> before OB_08.</summary>
+        Task<bool> SetOneBillEnabledAsync(int locationId, bool enabled, string? by, CancellationToken ct = default);
         Task<InvoiceContentInvoiceRef?> GetInvoiceRefAsync(int invoiceId, CancellationToken ct = default);
         /// <summary>Stamps the invoice with the version only while it has none; returns the version id the invoice ends up with.</summary>
         Task<int?> StampInvoiceAsync(int invoiceId, int versionId, CancellationToken ct = default);

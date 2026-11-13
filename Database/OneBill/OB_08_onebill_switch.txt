@@ -1,0 +1,157 @@
+-- =====================================================================================================================
+-- OB_08: a per-location "1Bill on invoices" switch (run on the test database, then live).
+--
+-- Decision (13 Nov 2026): 1Bill must only appear for locations where it is switched ON (today only F-7 3rd Floor). A super
+-- admin turns it on / off per location in the staff CMS (Invoice Content page), manually.
+--
+-- What it does
+--   1. Adds dbo.WN_Locations.OneBillEnabled BIT NOT NULL DEFAULT 0 (+ OneBillChangedBy NVARCHAR(256) NULL, OneBillChangedAt
+--      DATETIME2 NULL). Only when the column is new it is seeded: ON for every location whose OneBillBillerCode and OneBillPrefix are both filled today,
+--      OFF for the rest (so I-8 is off). A rerun never touches what a super admin set.
+--   2. PATCHES (nothing else is changed) the two 1Bill procedures so a location with OneBillEnabled = 0 gets NO NEW numbers:
+--        dbo.WN_OneBill_GetPending  : adds   AND (OneBillEnabled + 1 if the invoice already has a number) > 0   (no OR)
+--        dbo.WN_OneBill_ClaimInvoice: reads OneBillEnabled with the location and answers NotApplicable when the switch is off
+--                                     and the invoice has no 1Bill number yet.
+--      An invoice that ALREADY has a 1Bill number keeps being handled (sent / retried / "Done"): customers may be paying with it.
+--      A location still needs OneBillBillerCode + OneBillPrefix to get numbers (unchanged); the CMS warns when they are missing.
+--      The location is the invoice's own (OB_07: COALESCE(i.LocationId, ci.LocationId, s.LocationId, u.LocationId)); unchanged.
+--
+-- Safe to run: one transaction; every anchor must be found EXACTLY once in its procedure, otherwise the script stops
+-- (THROW) and changes nothing; a procedure that already has OB_08 is left alone; CREATE OR ALTER; rerunnable. The first
+-- result grids are the backup (current definition of both procedures and the current 1Bill columns of every location):
+-- save them before going on. The API keeps working before this script is run (the prefix decides, the CMS switch is read-only).
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+DECLARE @Msg NVARCHAR(600), @NL NCHAR(2) = NCHAR(13) + NCHAR(10);
+
+-- Pre-checks (read-only)
+IF OBJECT_ID(N'dbo.WN_Locations', N'U') IS NULL
+    THROW 50080, N'dbo.WN_Locations is not on this database. Nothing was changed.', 1;
+IF COL_LENGTH(N'dbo.WN_Locations', N'OneBillPrefix') IS NULL OR COL_LENGTH(N'dbo.WN_Locations', N'OneBillBillerCode') IS NULL
+    THROW 50081, N'dbo.WN_Locations has no OneBillBillerCode / OneBillPrefix: run OB_01 first. Nothing was changed.', 1;
+
+DECLARE @Procs TABLE (Seq INT IDENTITY, Name SYSNAME, Def NVARCHAR(MAX), NewSql NVARCHAR(MAX));
+INSERT INTO @Procs (Name, Def)
+SELECT p.Name, OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + p.Name))
+  FROM (VALUES (N'WN_OneBill_GetPending'), (N'WN_OneBill_ClaimInvoice')) p(Name);
+
+-- The patches: (procedure, text that must be found exactly once, what it becomes)
+DECLARE @Edits TABLE (Seq INT IDENTITY, Name SYSNAME, Anchor NVARCHAR(400), Replacement NVARCHAR(1500));
+INSERT INTO @Edits (Name, Anchor, Replacement) VALUES
+ (N'WN_OneBill_GetPending', N'AND i.CreatedOn >= ISNULL(l.OneBillFrom, i.CreatedOn)',
+  N'AND (CAST(ISNULL(l.OneBillEnabled, 0) AS INT) + CASE WHEN i.OneBillNumber IS NULL THEN 0 ELSE 1 END) > 0   /* OB_08: 1Bill switched on for the location, or the invoice already has a number */'
+  + @NL + N'       AND i.CreatedOn >= ISNULL(l.OneBillFrom, i.CreatedOn)'),
+ (N'WN_OneBill_ClaimInvoice', N'@BillerCode VARCHAR(10), @Prefix VARCHAR(20),',
+  N'@Enabled BIT = 0 /* OB_08 */, @BillerCode VARCHAR(10), @Prefix VARCHAR(20),'),
+ (N'WN_OneBill_ClaimInvoice', N'@From = l.OneBillFrom',
+  N'@From = l.OneBillFrom, @Enabled = ISNULL(l.OneBillEnabled, 0) /* OB_08 */'),
+ (N'WN_OneBill_ClaimInvoice', N'ELSE IF @CreatedOn IS NULL',
+  N'ELSE IF @Enabled = 0 AND @Number IS NULL                    SET @Outcome = ''NotApplicable'';   /* OB_08: 1Bill is switched off for this location and the invoice has no number yet */'
+  + @NL + N'    ELSE IF @CreatedOn IS NULL');
+
+-- Backup: save these results before going on
+SELECT Name AS [Procedure], Def AS CurrentDefinition FROM @Procs ORDER BY Seq;
+SELECT l.Id, l.Name, l.OneBillBillerCode, l.OneBillPrefix, l.OneBillFrom,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Locations', N'OneBillEnabled') IS NULL THEN N'(column not added yet)' ELSE N'already added by an earlier OB_08 run' END AS OneBillEnabledColumn
+  FROM dbo.WN_Locations l ORDER BY l.Id;
+
+DECLARE @Seq INT = 1, @Name SYSNAME, @Def NVARCHAR(MAX), @Sql NVARCHAR(MAX), @Found INT, @Pos INT, @LineStart INT,
+        @EditSeq INT, @Anchor NVARCHAR(400), @Repl NVARCHAR(1500);
+WHILE @Seq <= (SELECT MAX(Seq) FROM @Procs)
+BEGIN
+    SELECT @Name = Name, @Def = Def FROM @Procs WHERE Seq = @Seq;
+    IF @Def IS NULL
+    BEGIN
+        SET @Msg = N'dbo.' + @Name + N' is not on this database. Nothing was changed.';
+        THROW 50082, @Msg, 1;
+    END
+    IF CHARINDEX(N'OB_08', @Def) = 0
+    BEGIN
+        SET @Sql = @Def;
+        SET @EditSeq = 0;
+        WHILE 1 = 1
+        BEGIN
+            SELECT TOP (1) @EditSeq = e.Seq, @Anchor = e.Anchor, @Repl = e.Replacement FROM @Edits e WHERE e.Name = @Name AND e.Seq > @EditSeq ORDER BY e.Seq;
+            IF @@ROWCOUNT = 0 BREAK;
+            SET @Found = (DATALENGTH(@Sql) - DATALENGTH(REPLACE(@Sql, @Anchor, N''))) / DATALENGTH(@Anchor);
+            IF @Found <> 1
+            BEGIN
+                SET @Msg = CONCAT(N'dbo.', @Name, N': expected "', @Anchor, N'" once but found it ', @Found, N' times. Nothing was changed.');
+                THROW 50083, @Msg, 1;
+            END
+            SET @Sql = REPLACE(@Sql, @Anchor, @Repl);
+        END
+        -- The real header: the first PROCEDURE on a line that is not a comment.
+        SET @Pos = CHARINDEX(N'PROCEDURE', @Sql);
+        WHILE @Pos > 0
+        BEGIN
+            SET @LineStart = LEN(LEFT(@Sql, @Pos)) - CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) + 2;
+            IF CHARINDEX(NCHAR(10), REVERSE(LEFT(@Sql, @Pos))) = 0 SET @LineStart = 1;
+            IF LEFT(LTRIM(SUBSTRING(@Sql, @LineStart, @Pos - @LineStart)), 2) <> N'--' BREAK;
+            SET @Pos = CHARINDEX(N'PROCEDURE', @Sql, @Pos + 1);
+        END
+        IF @Pos = 0 OR CHARINDEX(@Name, SUBSTRING(@Sql, @Pos, 80)) = 0
+        BEGIN
+            SET @Msg = @Name + N': the procedure header is not as expected. Nothing was changed.';
+            THROW 50084, @Msg, 1;
+        END
+        UPDATE @Procs SET NewSql = N'CREATE OR ALTER ' + SUBSTRING(@Sql, @Pos, LEN(@Sql)) WHERE Seq = @Seq;
+    END
+    ELSE
+        PRINT N'dbo.' + @Name + N' already has OB_08: left alone.';
+    SET @Seq += 1;
+END
+
+-- APPLY START
+BEGIN TRANSACTION;
+
+IF COL_LENGTH(N'dbo.WN_Locations', N'OneBillEnabled') IS NULL
+BEGIN
+    EXEC sys.sp_executesql N'ALTER TABLE dbo.WN_Locations ADD
+        OneBillEnabled    BIT           NOT NULL CONSTRAINT DF_WN_Locations_OneBillEnabled DEFAULT (0),
+        OneBillChangedBy  NVARCHAR(256) NULL,
+        OneBillChangedAt  DATETIME2     NULL;';
+    -- Seed (only now, when the column is new): ON where the biller code AND prefix are filled today, OFF for the rest.
+    EXEC sys.sp_executesql N'UPDATE dbo.WN_Locations
+           SET OneBillEnabled   = CASE WHEN NULLIF(LTRIM(RTRIM(OneBillPrefix)), '''') IS NOT NULL AND NULLIF(LTRIM(RTRIM(OneBillBillerCode)), '''') IS NOT NULL THEN 1 ELSE 0 END,
+               OneBillChangedBy = N''OB_08 script (initial value)'',
+               OneBillChangedAt = DATEADD(HOUR, 5, SYSUTCDATETIME());';
+    PRINT N'dbo.WN_Locations: OneBillEnabled / OneBillChangedBy / OneBillChangedAt added and seeded.';
+END
+ELSE
+BEGIN
+    IF COL_LENGTH(N'dbo.WN_Locations', N'OneBillChangedBy') IS NULL
+        EXEC sys.sp_executesql N'ALTER TABLE dbo.WN_Locations ADD OneBillChangedBy NVARCHAR(256) NULL;';
+    IF COL_LENGTH(N'dbo.WN_Locations', N'OneBillChangedAt') IS NULL
+        EXEC sys.sp_executesql N'ALTER TABLE dbo.WN_Locations ADD OneBillChangedAt DATETIME2 NULL;';
+    PRINT N'dbo.WN_Locations: OneBillEnabled already there: values left as they are.';
+END
+
+SET @Seq = 1;
+WHILE @Seq <= (SELECT MAX(Seq) FROM @Procs)
+BEGIN
+    SELECT @Sql = NewSql, @Name = Name FROM @Procs WHERE Seq = @Seq;
+    IF @Sql IS NOT NULL
+    BEGIN
+        EXEC sys.sp_executesql @Sql;
+        PRINT N'dbo.' + @Name + N': updated.';
+    END
+    SET @Seq += 1;
+END
+COMMIT TRANSACTION;
+-- APPLY END
+
+-- Result: both procedures should show 1
+SELECT Name AS [Procedure],
+       CASE WHEN CHARINDEX(N'OB_08', OBJECT_DEFINITION(OBJECT_ID(N'dbo.' + Name))) > 0 THEN 1 ELSE 0 END AS Has_OB_08
+  FROM @Procs ORDER BY Seq;
+
+-- Result: the switch per location (read-only). Locations ON without a biller code / prefix get no numbers until those are set.
+EXEC sys.sp_executesql N'SELECT l.Id, l.Name, l.OneBillEnabled, l.OneBillBillerCode, l.OneBillPrefix,
+       CASE WHEN NULLIF(LTRIM(RTRIM(l.OneBillBillerCode)), '''') IS NOT NULL AND NULLIF(LTRIM(RTRIM(l.OneBillPrefix)), '''') IS NOT NULL THEN 1 ELSE 0 END AS HasBillerSetup,
+       l.OneBillChangedBy, l.OneBillChangedAt
+  FROM dbo.WN_Locations l ORDER BY l.Id;';

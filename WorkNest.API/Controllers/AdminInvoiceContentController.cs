@@ -63,6 +63,22 @@ namespace WorkNest.API.Controllers
             return Ok(ApiResponse.Ok(view, $"Published as version {view.Published?.VersionNo}. New invoices use it; invoices already issued keep their version."));
         });
 
+        public sealed class OneBillSwitchRequest { public bool? Enabled { get; set; } }
+
+        /// <summary>
+        /// Super admin only: switch "1Bill on invoices" on / off for a location (script OB_08). Off = no 1Bill line and no new 1Bill number for the
+        /// location's invoices; an invoice that already has a number keeps its "with number" line. 400 without enabled, 404 unknown location,
+        /// 503 before OB_08. Answers the location like GET.
+        /// </summary>
+        [HttpPut("{locationId:int}/onebill")]
+        [Authorize(Roles = "super_admin,SuperAdmin")]
+        public Task<IActionResult> SetOneBill(int locationId, [FromBody] OneBillSwitchRequest? request, CancellationToken ct = default) => Run(async () =>
+        {
+            var view = await _service.SetOneBillEnabledAsync(locationId, request?.Enabled, Actor(), ct);
+            _logger.LogInformation("1Bill on invoices of location {LocationId} switched {State} by {Actor}.", locationId, view.OneBillEnabled ? "ON" : "OFF", Actor());
+            return Ok(ApiResponse.Ok(view, view.OneBillEnabled ? "1Bill is on for this location." : "1Bill is off for this location."));
+        });
+
         /// <summary>
         /// The current invoice renderer with sample invoice data: the submitted content, else the draft, else the published version.
         /// Optional query flags (sample data only): withOneBillNumber (default true), withDeposit (default true). Saves and sends nothing.
@@ -74,7 +90,11 @@ namespace WorkNest.API.Controllers
             var denied = DenyLocation(locationId);
             if (denied != null) return denied;
             var content = await _service.GetPreviewContentAsync(locationId, request?.Content, ct);
-            var pdf = InvoiceContentPreview.Render(locationId, content, withOneBillNumber, withDeposit, await _service.GetLocationAddressAsync(locationId, ct));
+            // The preview honours the location's 1Bill switch: off = no 1Bill line at all (the sample is a "no number" invoice then).
+            var sw = await _service.GetOneBillSwitchAsync(locationId, ct);
+            bool oneBillOn = !sw.Available || sw.Enabled;
+            content = content.WithOneBillSwitch(oneBillOn);
+            var pdf = InvoiceContentPreview.Render(locationId, content, withOneBillNumber && oneBillOn, withDeposit, await _service.GetLocationAddressAsync(locationId, ct));
             Response.Headers["Content-Disposition"] = $"inline; filename=\"Invoice-content-preview-location-{locationId}.pdf\"";
             return File(pdf, "application/pdf");
         });
@@ -96,6 +116,7 @@ namespace WorkNest.API.Controllers
         {
             try { return await action(); }
             catch (InvoiceContentMissingException) { return StatusCode(503, ApiResponse.Fail(InvoiceContentMissingException.UserMessage)); }
+            catch (OneBillSwitchUnavailableException ex) { return StatusCode(503, ApiResponse.Fail(ex.Message)); }
             catch (InvoiceContentLocationNotFoundException ex) { return NotFound(ApiResponse.Fail(ex.Message)); }
             catch (InvoiceContentValidationException ex) { return BadRequest(ApiResponse.Fail(ex.Message, ex.Errors)); }
             catch (InvoiceContentConflictException ex) { return Conflict(ApiResponse.Fail(ex.Message)); }

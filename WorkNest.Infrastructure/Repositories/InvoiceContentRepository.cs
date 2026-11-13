@@ -168,6 +168,46 @@ namespace WorkNest.Infrastructure.Repositories
             return await cmd.ExecuteScalarAsync(ct) is string a ? a : null;
         });
 
+        private static async Task<HashSet<string>> LocationColumnsAsync(SqlConnection c, CancellationToken ct)
+        {
+            await using var cmd = Cmd(c, @"SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.WN_Locations')
+                                              AND name IN (N'OneBillEnabled', N'OneBillChangedBy', N'OneBillChangedAt', N'OneBillBillerCode', N'OneBillPrefix');", ct);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (await r.ReadAsync(ct)) set.Add((string)r["name"]);
+            return set;
+        }
+
+        public Task<OneBillSwitchRow> GetOneBillSwitchAsync(int locationId, CancellationToken ct = default) => Run(async c =>
+        {
+            // Column presence is checked first, so the script not being run (or OB_01 missing) never throws.
+            var cols = await LocationColumnsAsync(c, ct);
+            bool available = cols.Contains("OneBillEnabled");
+            string setup = cols.Contains("OneBillBillerCode") && cols.Contains("OneBillPrefix")
+                ? "CASE WHEN NULLIF(LTRIM(RTRIM(OneBillBillerCode)), '') IS NOT NULL AND NULLIF(LTRIM(RTRIM(OneBillPrefix)), '') IS NOT NULL THEN 1 ELSE 0 END"
+                : "0";
+            string sql = "SELECT " + setup + " AS HasSetup, "
+                + (available ? "CAST(OneBillEnabled AS INT)" : "0") + " AS Enabled, "
+                + (available && cols.Contains("OneBillChangedBy") ? "OneBillChangedBy" : "CAST(NULL AS NVARCHAR(256))") + " AS ChangedBy, "
+                + (available && cols.Contains("OneBillChangedAt") ? "OneBillChangedAt" : "CAST(NULL AS DATETIME2)") + " AS ChangedAt "
+                + "FROM dbo.WN_Locations WHERE Id = @id;";
+            await using var cmd = Cmd(c, sql, ct, ("@id", SqlDbType.Int, locationId));
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct)) return new OneBillSwitchRow(available, false, false, null, null);
+            bool hasSetup = Convert.ToInt32(r["HasSetup"]) == 1;
+            // Before OB_08 the prefix decides: on exactly when the biller setup is filled.
+            return new OneBillSwitchRow(available, available ? Convert.ToInt32(r["Enabled"]) == 1 : hasSetup, hasSetup, Str(r, "ChangedBy"), Dt(r, "ChangedAt"));
+        });
+
+        public Task<bool> SetOneBillEnabledAsync(int locationId, bool enabled, string? by, CancellationToken ct = default) => Run(async c =>
+        {
+            var cols = await LocationColumnsAsync(c, ct);
+            if (!cols.Contains("OneBillEnabled") || !cols.Contains("OneBillChangedBy") || !cols.Contains("OneBillChangedAt")) throw new OneBillSwitchUnavailableException();
+            const string sql = @"UPDATE dbo.WN_Locations SET OneBillEnabled = @e, OneBillChangedBy = @by, OneBillChangedAt = DATEADD(HOUR, 5, SYSUTCDATETIME()) WHERE Id = @id;";
+            await using var cmd = Cmd(c, sql, ct, ("@id", SqlDbType.Int, locationId), ("@e", SqlDbType.Bit, enabled), ("@by", SqlDbType.NVarChar, by));
+            return await cmd.ExecuteNonQueryAsync(ct) > 0;
+        });
+
         public Task<InvoiceContentInvoiceRef?> GetInvoiceRefAsync(int invoiceId, CancellationToken ct = default) => Run<InvoiceContentInvoiceRef?>(async c =>
         {
             const string sql = @"
