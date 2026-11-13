@@ -638,10 +638,23 @@ namespace WorkNest.Application.Services
             return (begin, end);
         }
 
-        private static HikEnrollResultDto Fail(Prepared prep, string? error)
+        internal const string TimeoutMessage = "Nobody scanned at the room machine in time. Stand at the machine and press Add again.";
+        internal const string DeviceErrorMessage = "The room machine did not respond. Try again in a minute, or ask the front desk.";
+
+        /// <summary>Plain English for the machine's raw codes ("captureTimeout", "Device Error"); anything else is kept.</summary>
+        internal static string? PlainEnrollError(string? error)
         {
+            if (string.IsNullOrWhiteSpace(error)) return error;
+            if (error.Contains("captureTimeout", StringComparison.OrdinalIgnoreCase)) return TimeoutMessage;
+            if (error.Contains("Device Error", StringComparison.OrdinalIgnoreCase)) return DeviceErrorMessage;
+            return error;
+        }
+
+        private HikEnrollResultDto Fail(Prepared prep, string? error)
+        {
+            if (!string.IsNullOrWhiteSpace(error)) _logger.LogWarning("Enrolment failed for employee #{Emp}: {Raw}", prep.EmployeeNo, error);
             prep.Result.Ok = false;
-            prep.Result.Error = error ?? "Enrollment failed.";
+            prep.Result.Error = PlainEnrollError(error) ?? "Enrollment failed.";
             return prep.Result;
         }
     }

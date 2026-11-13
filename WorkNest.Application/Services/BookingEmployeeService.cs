@@ -338,7 +338,7 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(error)) return type == "face" ? "The face could not be added. Try again." : "The fingerprint could not be added. Try again.";
             if (error.Contains("in time", StringComparison.OrdinalIgnoreCase) && error.Contains("finger", StringComparison.OrdinalIgnoreCase))
                 return "No finger was placed on the machine in time. Try again.";
-            return error;
+            return HikEnrollmentService.PlainEnrollError(error)!;
         }
 
         /// <summary>
