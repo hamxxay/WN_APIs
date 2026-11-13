@@ -1,0 +1,137 @@
+-- ============================================================================================
+-- INVC_01: location-specific invoice content (CMS Administration > Invoice content; used by EVERY invoice PDF).
+-- Run as ONE statement in DBeaver (select all, then Ctrl+Enter), on the test database first, then on the live one.
+-- One transaction: if anything fails, nothing is changed. Safe to run again. Only adds new objects, one nullable column and
+-- seed rows: no existing invoice, amount, procedure or business rule is changed. Times are Pakistan time (UTC+5):
+-- DATEADD(HOUR, 5, SYSUTCDATETIME()), never GETDATE / SYSDATETIME.
+--
+-- Staff (admin: own locations, super admin: all) edit the TEXT inside the existing invoice layout per location: payment
+-- instructions (1Bill line, bank name / account title / account number / IBAN / SWIFT / branch code / receipt contact), the terms
+-- and conditions list, the table headings, and the same for the attached sales-tax invoice. The design, amounts, dates, customer
+-- details and tax values are not configurable. Content is versioned like the lease templates: ONE draft per location; publishing
+-- turns the draft into a new immutable version (the previous one becomes Superseded).
+--
+--   dbo.WN_InvoiceContentVersions (new)     one row per location and version: Status Draft | Published | Superseded, ContentJson
+--                                           (plain text fields as JSON), who / when. A published row never changes (trigger).
+--                                           At most one Draft and one Published row per location (unique filtered indexes).
+--   dbo.WN_InvoiceContentSettings (new)     one row: ActivatedFromInvoiceId = the highest invoice Id when this script was first run.
+--   dbo.WN_Invoices.InvoiceContentVersionId (new, NULL)   the content version an invoice is printed with; FK to the versions table.
+--   Seed: version 1 (Published) for locations 1, 2, 3 and every row of dbo.WN_Locations = EXACTLY what the invoice PDFs print today:
+--         Location 1 (I-8): Bank of Punjab account (+ the 1Bill line when the invoice has a 1Bill number); Location 2 (F-7): 1Bill only;
+--         Location 3: Habib Metro Bank account (commit 6e4ebef); SWIFT code and receipt contact are still "[Location 3 ...]" placeholders that staff replace in the
+--         CMS and publish as version 2. Any other location starts as a copy of Location 1 (what its invoices print today).
+--
+-- Which version an invoice uses: the version stamped in WN_Invoices.InvoiceContentVersionId. NULL on an invoice that existed when this script
+-- was run (Id <= ActivatedFromInvoiceId) = version 1 of the invoice's own LocationId, forever, so downloading an old invoice again never
+-- changes after a publish. A newer invoice is stamped with the published version the first time its PDF is made. The location is the
+-- invoice's WN_Invoices.LocationId (never the centre name).
+-- The API works before this script is run (the PDFs print the same wording as now; the admin endpoints answer 503).
+-- Rollback: INVC_01_ROLLBACK_location_invoice_content.txt (drops everything this script adds). The audit trigger on WN_Invoices logs the stamp
+-- like any other update of an invoice row (one row per invoice, the first time its PDF is made).
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+BEGIN TRY
+    IF OBJECT_ID(N'dbo.WN_Invoices', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_Locations', N'U') IS NULL
+        THROW 50001, N'dbo.WN_Invoices or dbo.WN_Locations is missing: wrong database? Nothing changed.', 1;
+
+    DECLARE @J1 NVARCHAR(MAX) = N'{"oneBillLineWithNumber":"Pay with 1Bill from any bank app, ATM or bank branch using consumer number {OneBillNumber}.","oneBillLineWithoutNumber":"","bankIntro":"Please deposit this payment in the following bank ","bankName":"Bank Of Punjab","accountTitle":"WORKNEST PRIVATE LIMITED","accountNumber":"5310449521900010","iban":"PK24BPUN5310449521900010 ","swiftCode":"BPUNPKKA ","branchCode":"0839 ","receiptLeadIn":"And send the receipt on","receiptContact":"+923201809696","termsHeading":"Terms & Conditions","terms":["Your access will be suspended if dues are not paid by the due date ","WorkNest will charge Provincial Sales Tax (PST) on support services.","Payment is due on or before the due date specified on this invoice.","WorkNest reserves the right to modify pricing and terms with prior notice."],"whtTerm":"If tax is withheld, the invoice will be PKR {Amount}.","whtDepositTerm":"Withholding tax is not applicable on the Security Deposit.","tableHeadDescription":"Description","tableHeadUnitPrice":"Unit Price","tableHeadTotal":"Total","stOneBillLineWithNumber":"","stOneBillLineWithoutNumber":"","stBankIntro":"Please deposit this payment into the following bank account: ","stReceiptLeadIn":"And send the receipt to","stTerms":["Your access will be closed if dues are not paid within 5 days of the due date.","Payment is due on or before the due date specified on this invoice.","@deposit Security deposit is fully refundable upon termination of the agreement, subject to lease terms.","Booking confirmation is subject to space availability at the time of payment.","WorkNest reserves the right to modify pricing and terms with prior notice."],"stTableHeadDescription":"Description","stTableHeadExclusive":"Exclusive Amt","stTableHeadTaxRate":"Tax Rate","stTableHeadTaxAmount":"Tax Amount","stTableHeadLineTotal":"Line Total"}';
+    DECLARE @J2 NVARCHAR(MAX) = N'{"oneBillLineWithNumber":"Please use the 1Bill number to pay: {OneBillNumber} (Pay with 1Bill from any bank app, ATM or bank branch).","oneBillLineWithoutNumber":"Please use the 1Bill number to pay from any bank app, ATM or bank branch.","bankIntro":"","bankName":"","accountTitle":"","accountNumber":"","iban":"","swiftCode":"","branchCode":"","receiptLeadIn":"","receiptContact":"","termsHeading":"Terms & Conditions","terms":["Your access will be suspended if dues are not paid by the due date ","WorkNest will charge Provincial Sales Tax (PST) on support services.","Payment is due on or before the due date specified on this invoice.","WorkNest reserves the right to modify pricing and terms with prior notice."],"whtTerm":"If tax is withheld, the invoice will be PKR {Amount}.","whtDepositTerm":"Withholding tax is not applicable on the Security Deposit.","tableHeadDescription":"Description","tableHeadUnitPrice":"Unit Price","tableHeadTotal":"Total","stOneBillLineWithNumber":"Please use the 1Bill number to pay: {OneBillNumber} (Pay with 1Bill from any bank app, ATM or bank branch).","stOneBillLineWithoutNumber":"Please use the 1Bill number to pay from any bank app, ATM or bank branch.","stBankIntro":"","stReceiptLeadIn":"","stTerms":["Your access will be closed if dues are not paid within 5 days of the due date.","Payment is due on or before the due date specified on this invoice.","@deposit Security deposit is fully refundable upon termination of the agreement, subject to lease terms.","Booking confirmation is subject to space availability at the time of payment.","WorkNest reserves the right to modify pricing and terms with prior notice."],"stTableHeadDescription":"Description","stTableHeadExclusive":"Exclusive Amt","stTableHeadTaxRate":"Tax Rate","stTableHeadTaxAmount":"Tax Amount","stTableHeadLineTotal":"Line Total"}';
+    DECLARE @J3 NVARCHAR(MAX) = N'{"oneBillLineWithNumber":"","oneBillLineWithoutNumber":"","bankIntro":"Please deposit this payment in the following bank account: ","bankName":"HABIB METRO BANK","accountTitle":"SHAZAD ADIL & CO","accountNumber":"6-02-10-20396-333-251261","iban":"PK68MPBL0210403330251261","bankBranch":"ISLAMABAD BRANCH","bankAddress":"COMMERCIAL PLOT # 24, WEST BLUE AREA, F-6/G-6, ISLAMABAD.","swiftCode":"[Location 3 SWIFT code]","branchCode":"10","receiptLeadIn":"And send the receipt to","receiptContact":"[Location 3 contact number]","termsHeading":"Terms & Conditions","terms":["Your access will be suspended if dues are not paid by the due date ","WorkNest will charge Provincial Sales Tax (PST) on support services.","Payment is due on or before the due date specified on this invoice.","WorkNest reserves the right to modify pricing and terms with prior notice."],"whtTerm":"If tax is withheld, the invoice will be PKR {Amount}.","whtDepositTerm":"Withholding tax is not applicable on the Security Deposit.","tableHeadDescription":"Description","tableHeadUnitPrice":"Unit Price","tableHeadTotal":"Total","stOneBillLineWithNumber":"","stOneBillLineWithoutNumber":"","stBankIntro":"Please deposit this payment into the following bank account: ","stReceiptLeadIn":"And send the receipt to","stTerms":["Your access will be closed if dues are not paid within 5 days of the due date.","Payment is due on or before the due date specified on this invoice.","@deposit Security deposit is fully refundable upon termination of the agreement, subject to lease terms.","Booking confirmation is subject to space availability at the time of payment.","WorkNest reserves the right to modify pricing and terms with prior notice."],"stTableHeadDescription":"Description","stTableHeadExclusive":"Exclusive Amt","stTableHeadTaxRate":"Tax Rate","stTableHeadTaxAmount":"Tax Amount","stTableHeadLineTotal":"Line Total"}';
+
+    BEGIN TRANSACTION;
+
+    -- 1. The versions.
+    IF OBJECT_ID(N'dbo.WN_InvoiceContentVersions', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_InvoiceContentVersions (
+            Id           INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_InvoiceContentVersions PRIMARY KEY,
+            LocationId   INT             NOT NULL,
+            VersionNo    INT             NULL,
+            Status       VARCHAR(12)     NOT NULL,
+            ContentJson  NVARCHAR(MAX)   NOT NULL,
+            CreatedAt    DATETIME2(0)    NOT NULL CONSTRAINT DF_WN_InvoiceContentVersions_CreatedAt DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
+            CreatedBy    NVARCHAR(256)   NULL,
+            UpdatedAt    DATETIME2(0)    NULL,
+            UpdatedBy    NVARCHAR(256)   NULL,
+            PublishedAt  DATETIME2(0)    NULL,
+            PublishedBy  NVARCHAR(256)   NULL,
+            CONSTRAINT CK_WN_InvoiceContentVersions_Status CHECK (Status IN (''Draft'', ''Published'', ''Superseded'')),
+            CONSTRAINT CK_WN_InvoiceContentVersions_VersionNo CHECK ((Status = ''Draft'' AND VersionNo IS NULL) OR (Status <> ''Draft'' AND VersionNo >= 1)),
+            CONSTRAINT CK_WN_InvoiceContentVersions_Json CHECK (ISJSON(ContentJson) = 1)
+        );');
+    -- One Draft, one Published and one VersionNo per location.
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_InvoiceContentVersions') AND name = N'UX_WN_InvoiceContentVersions_Draft')
+        EXEC(N'CREATE UNIQUE INDEX UX_WN_InvoiceContentVersions_Draft ON dbo.WN_InvoiceContentVersions (LocationId) WHERE Status = ''Draft'';');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_InvoiceContentVersions') AND name = N'UX_WN_InvoiceContentVersions_Published')
+        EXEC(N'CREATE UNIQUE INDEX UX_WN_InvoiceContentVersions_Published ON dbo.WN_InvoiceContentVersions (LocationId) WHERE Status = ''Published'';');
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_InvoiceContentVersions') AND name = N'UX_WN_InvoiceContentVersions_VersionNo')
+        EXEC(N'CREATE UNIQUE INDEX UX_WN_InvoiceContentVersions_VersionNo ON dbo.WN_InvoiceContentVersions (LocationId, VersionNo) WHERE VersionNo IS NOT NULL;');
+
+    -- 2. A published version is immutable: its content and number never change and it is never deleted (a draft may change and be deleted).
+    --    Draft -> Published (publishing) and Published -> Superseded (a newer version replaced it) are the only status changes.
+    EXEC(N'CREATE OR ALTER TRIGGER dbo.TR_WN_InvoiceContentVersions_Immutable
+    ON dbo.WN_InvoiceContentVersions
+    AFTER UPDATE, DELETE
+    AS
+    BEGIN
+        SET NOCOUNT ON;
+        IF EXISTS (SELECT 1 FROM deleted d WHERE d.Status <> ''Draft'' AND NOT EXISTS (SELECT 1 FROM inserted i WHERE i.Id = d.Id))
+            THROW 50071, N''A published invoice content version cannot be deleted.'', 1;
+        IF EXISTS (SELECT 1 FROM deleted d JOIN inserted i ON i.Id = d.Id
+                    WHERE d.Status <> ''Draft''
+                      AND (i.ContentJson <> d.ContentJson OR i.LocationId <> d.LocationId OR i.VersionNo <> d.VersionNo
+                           OR (d.Status = ''Superseded'' AND i.Status <> ''Superseded'')
+                           OR (d.Status = ''Published'' AND i.Status NOT IN (''Published'', ''Superseded''))))
+            THROW 50072, N''A published invoice content version cannot be changed: save a draft and publish a new version.'', 1;
+    END;');
+
+    -- 3. Where the feature started (which invoices are older than it).
+    IF OBJECT_ID(N'dbo.WN_InvoiceContentSettings', N'U') IS NULL
+        EXEC(N'CREATE TABLE dbo.WN_InvoiceContentSettings (
+            Id                      INT          NOT NULL CONSTRAINT PK_WN_InvoiceContentSettings PRIMARY KEY,
+            ActivatedFromInvoiceId  INT          NOT NULL,
+            ActivatedAt             DATETIME2(0) NOT NULL CONSTRAINT DF_WN_InvoiceContentSettings_ActivatedAt DEFAULT (DATEADD(HOUR, 5, SYSUTCDATETIME())),
+            CONSTRAINT CK_WN_InvoiceContentSettings_OneRow CHECK (Id = 1)
+        );');
+    EXEC(N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_InvoiceContentSettings WHERE Id = 1)
+        INSERT INTO dbo.WN_InvoiceContentSettings (Id, ActivatedFromInvoiceId) SELECT 1, ISNULL(MAX(Id), 0) FROM dbo.WN_Invoices;');
+
+    -- 4. The version an invoice is printed with (NULL = version 1 of its location, for an invoice older than this script).
+    IF COL_LENGTH('dbo.WN_Invoices', 'InvoiceContentVersionId') IS NULL
+        EXEC(N'ALTER TABLE dbo.WN_Invoices ADD InvoiceContentVersionId INT NULL
+               CONSTRAINT FK_WN_Invoices_InvoiceContentVersion FOREIGN KEY REFERENCES dbo.WN_InvoiceContentVersions (Id);');
+
+    -- 5. Seed: version 1 per location (only for a location that has no version yet, so a rerun never touches edited content).
+    DECLARE @Loc INT, @Json NVARCHAR(MAX);
+    DECLARE locs CURSOR LOCAL FAST_FORWARD FOR
+        SELECT LocationId FROM (VALUES (1), (2), (3)) k(LocationId)
+        UNION SELECT Id FROM dbo.WN_Locations
+        ORDER BY 1;
+    OPEN locs;
+    FETCH NEXT FROM locs INTO @Loc;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        SET @Json = CASE @Loc WHEN 2 THEN @J2 WHEN 3 THEN @J3 ELSE @J1 END;
+        EXEC sys.sp_executesql
+            N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_InvoiceContentVersions WHERE LocationId = @Loc)
+                INSERT INTO dbo.WN_InvoiceContentVersions (LocationId, VersionNo, Status, ContentJson, CreatedBy, PublishedAt, PublishedBy)
+                VALUES (@Loc, 1, ''Published'', @Json, N''INVC_01'', DATEADD(HOUR, 5, SYSUTCDATETIME()), N''INVC_01'');',
+            N'@Loc INT, @Json NVARCHAR(MAX)', @Loc = @Loc, @Json = @Json;
+        FETCH NEXT FROM locs INTO @Loc;
+    END
+    CLOSE locs;
+    DEALLOCATE locs;
+
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+-- Result: Has_* should be 1; one Published version 1 per location (Location 3: placeholders until staff publish version 2).
+SELECT CASE WHEN OBJECT_ID(N'dbo.WN_InvoiceContentVersions', N'U') IS NOT NULL THEN 1 ELSE 0 END AS Has_Versions_Table,
+       CASE WHEN COL_LENGTH('dbo.WN_Invoices', 'InvoiceContentVersionId') IS NOT NULL THEN 1 ELSE 0 END AS Has_Invoice_Column,
+       (SELECT ActivatedFromInvoiceId FROM dbo.WN_InvoiceContentSettings WHERE Id = 1) AS ActivatedFromInvoiceId;
+SELECT LocationId, VersionNo, Status, PublishedBy, PublishedAt, LEN(ContentJson) AS ContentLength FROM dbo.WN_InvoiceContentVersions ORDER BY LocationId, VersionNo;

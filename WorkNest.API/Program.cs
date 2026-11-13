@@ -239,8 +239,15 @@ try
     // The CMS address in the e-mail links comes from Approvals:CmsBaseUrl (default https://cms.worknestpk.com).
     builder.Services.AddScoped<IApprovalRepository, WorkNest.Infrastructure.Repositories.ApprovalRepository>();
     builder.Services.AddScoped<ApprovalService>();
+    // Location-specific invoice content (api/admin/invoice-content; used by every invoice PDF): dbo.WN_InvoiceContentVersions +
+    // WN_Invoices.InvoiceContentVersionId (script INVC_01_location_invoice_content). Before the script the PDFs print the built-in wording and the endpoints answer 503.
+    builder.Services.AddScoped<WorkNest.Application.InvoiceContent.IInvoiceContentRepository, WorkNest.Infrastructure.Repositories.InvoiceContentRepository>();
+    builder.Services.AddScoped<WorkNest.Application.InvoiceContent.IInvoiceContentResolver, WorkNest.Application.InvoiceContent.InvoiceContentResolver>();
+    builder.Services.AddScoped<WorkNest.Application.InvoiceContent.InvoiceContentService>();
     // Offers (api/admin/offers, api/offers/running): dbo.WN_Offers + snapshot columns (script OFFER_01_offers); answers "no offer" / 503 before the script.
     builder.Services.AddScoped<IOffersRepository, WorkNest.Infrastructure.Repositories.OffersRepository>();
+    // Discount Caps (api/admin/discount-caps, super admin): dbo.WN_OfferingType.DiscountCap; works before script DISC_01.
+    builder.Services.AddScoped<IDiscountCapsRepository, WorkNest.Infrastructure.Repositories.DiscountCapsRepository>();
     // The bot's branch list (active WN_Locations), shared by all requests: re-read every 10 minutes, 3 s time limit.
     builder.Services.AddSingleton<WhatsAppBranchCache>();
     builder.Services.AddScoped<IGalleryService, GalleryService>();
@@ -293,6 +300,9 @@ try
     builder.Services.AddScoped<IFeeReceiptService, FeeReceiptService>();
     builder.Services.AddScoped<IAmountFieldService, AmountFieldService>();
     builder.Services.AddScoped<IQuotationService, QuotationService>();
+    // Quotation discount approval by the sales manager (script QAPR_01_quotation_approval): old behaviour / 503 before it.
+    builder.Services.AddScoped<IQuotationApprovalRepository, WorkNest.Infrastructure.Repositories.QuotationApprovalRepository>();
+    builder.Services.AddScoped<IQuotationApprovalService, QuotationApprovalService>();
     builder.Services.AddScoped<IAgreementService, AgreementService>();
     builder.Services.AddScoped<ILeaseTemplateService, LeaseTemplateService>();
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();
@@ -365,6 +375,7 @@ try
     builder.Services.AddHostedService<GwnPollingService>();   // GwnPolling switch; Gwn:Enabled
     builder.Services.AddHostedService<WhatsAppFollowUpService>();   // WhatsAppFollowUp switch; WhatsApp:FollowUpQuietSeconds (120) / FollowUpTickSeconds (30)
     builder.Services.AddHostedService<NetworkAlertService>();   // NetworkAlerts switch; NetworkAlerts:DownMinutes (5) / ReminderHours (6) / TickSeconds (60)
+    builder.Services.AddHostedService<QuotationApprovalReminderService>();   // QuotationApprovalReminders switch: 24 h reminders to the sales manager (QAPR_01)
     builder.Services.AddHostedService<ApprovalExpiryService>();   // hourly: expires approvals whose link ran out (APPROVAL_01); quiet before the script
     builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
     builder.Services.AddHostedService<MonthlyFeeReceiptService>();

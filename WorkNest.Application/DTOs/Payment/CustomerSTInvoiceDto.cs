@@ -23,6 +23,12 @@ namespace WorkNest.Application.DTOs.Payment
         public int? LocationId { get; set; }
         public string? OneBillNumber { get; set; }
 
+        /// <summary>
+        /// The location's invoice content this sales-tax invoice is printed with (the same one as its invoice). Null = the built-in
+        /// wording for <see cref="LocationId"/>.
+        /// </summary>
+        public WorkNest.Application.InvoiceContent.InvoiceContentFields? Content { get; set; }
+
         public string TariffHeading { get; set; } = "9805.9200";
         public string TariffLabel { get; set; } = "Business Support Services";
 

@@ -1,0 +1,117 @@
+-- =====================================================================================================================
+-- DISC_01: Discount Caps page (super admin) - who changed a cap and when, and an audit trail of every change.
+--
+-- WHAT THIS SCRIPT DOES, in plain words
+--   1. Adds two empty columns to dbo.WN_OfferingType: UpdatedBy (NVARCHAR(256), the e-mail of the super admin) and UpdatedAt
+--      (DATETIME2, UTC). Existing rows stay NULL ("never changed in the page"). No cap value is changed.
+--   2. Creates / replaces the audit trigger dbo.TR_WN_OfferingType_Audit (same pattern as the other TR_WN_*_Audit triggers):
+--      every insert / update / delete of an offering type is written to WN_AuditLog with the old and new values.
+--
+-- The API works WITHOUT this script (the page then shows no "Last changed" and nothing is audited). Run it to get both.
+--
+-- BEFORE YOU RUN
+--   * Run on the TEST database (SAC400) first, then on live (change the first line to USE [WorkNestAEO];).
+--   * Run the whole file in SSMS / DBeaver (select all, Execute). It is ONE batch (no GO): it either completes or stops safely.
+--   * The first result grid shows the offering types and the current trigger as they are now: save it as your backup.
+--
+-- SAFE TO RUN AGAIN: columns are added only when missing; the trigger is CREATE OR ALTER.
+-- To undo: DROP TRIGGER dbo.TR_WN_OfferingType_Audit; ALTER TABLE dbo.WN_OfferingType DROP COLUMN UpdatedBy, UpdatedAt;
+-- =====================================================================================================================
+USE [SAC400];
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+IF OBJECT_ID(N'dbo.WN_OfferingType', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_AuditLog', N'U') IS NULL
+    THROW 50040, N'DISC_01: dbo.WN_OfferingType / WN_AuditLog is missing: wrong database? Nothing was changed.', 1;
+
+-- BACKUP GRID 1: the offering types as they are now.
+SELECT * FROM dbo.WN_OfferingType ORDER BY LocationId, Id;
+-- BACKUP GRID 2: the trigger as it is now (NULL = none yet).
+SELECT OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_WN_OfferingType_Audit')) AS CurrentTriggerDefinition;
+
+BEGIN TRANSACTION;
+
+IF COL_LENGTH(N'dbo.WN_OfferingType', N'UpdatedBy') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_OfferingType ADD UpdatedBy NVARCHAR(256) NULL;');
+IF COL_LENGTH(N'dbo.WN_OfferingType', N'UpdatedAt') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_OfferingType ADD UpdatedAt DATETIME2 NULL;');
+
+EXEC(N'CREATE OR ALTER TRIGGER dbo.TR_WN_OfferingType_Audit
+ON dbo.WN_OfferingType
+AFTER INSERT, UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM inserted) AND NOT EXISTS (SELECT 1 FROM deleted)
+        RETURN;
+
+    DECLARE @UserId INT = CAST(SESSION_CONTEXT(N''AppUserId'') AS INT);
+    IF @UserId IS NULL SET @UserId = -1;
+
+    DECLARE @UserEmail NVARCHAR(256) = CAST(SESSION_CONTEXT(N''AppUserEmail'') AS NVARCHAR(256));
+    DECLARE @SourceApp NVARCHAR(50) = CAST(SESSION_CONTEXT(N''SourceApp'') AS NVARCHAR(50));
+    DECLARE @EntityName NVARCHAR(128) = N''WN_OfferingType'';
+    DECLARE @SysUtc DATETIME2(3) = SYSUTCDATETIME();
+
+    BEGIN TRY
+        IF EXISTS (SELECT 1 FROM inserted) AND NOT EXISTS (SELECT 1 FROM deleted)
+        BEGIN
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            SELECT @EntityName, CAST(i.[Id] AS NVARCHAR(64)), ''I'', NULL,
+                   (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+                   NULL, NULL, NULL, @UserId, @UserEmail, @SysUtc, @SourceApp
+            FROM inserted i;
+        END
+        ELSE IF EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        BEGIN
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            SELECT @EntityName, CAST(i.[Id] AS NVARCHAR(64)), ''U'',
+                   (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+                   (SELECT i.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER),
+                   NULL, NULL, NULL, @UserId, @UserEmail, @SysUtc, @SourceApp
+            FROM inserted i
+            INNER JOIN deleted d ON i.[Id] = d.[Id];
+        END
+        ELSE IF NOT EXISTS (SELECT 1 FROM inserted) AND EXISTS (SELECT 1 FROM deleted)
+        BEGIN
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            SELECT @EntityName, CAST(d.[Id] AS NVARCHAR(64)), ''D'',
+                   (SELECT d.* FOR JSON PATH, WITHOUT_ARRAY_WRAPPER), NULL,
+                   NULL, NULL, NULL, @UserId, @UserEmail, @SysUtc, @SourceApp
+            FROM deleted d;
+        END
+    END TRY
+    BEGIN CATCH
+        BEGIN TRY
+            INSERT INTO dbo.WN_AuditLog (
+                EntityName, RecordId, Operation, OldValues, NewValues,
+                ErrorMessage, ErrorSeverity, StackTrace, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp
+            )
+            VALUES (@EntityName, ''TRIGGER_ERROR'', ''E'', NULL, NULL, ERROR_MESSAGE(), ''Error'',
+                    CONCAT(''Line: '', ERROR_LINE(), '' State: '', ERROR_STATE(), '' Procedure: '', ERROR_PROCEDURE()),
+                    @UserId, @UserEmail, SYSUTCDATETIME(), @SourceApp);
+        END TRY
+        BEGIN CATCH
+        END CATCH
+    END CATCH
+END');
+
+COMMIT TRANSACTION;
+
+SELECT CASE WHEN COL_LENGTH(N'dbo.WN_OfferingType', N'UpdatedBy') IS NOT NULL THEN 1 ELSE 0 END AS Has_UpdatedBy,
+       CASE WHEN COL_LENGTH(N'dbo.WN_OfferingType', N'UpdatedAt') IS NOT NULL THEN 1 ELSE 0 END AS Has_UpdatedAt,
+       CASE WHEN OBJECT_ID(N'dbo.TR_WN_OfferingType_Audit', N'TR') IS NOT NULL THEN 1 ELSE 0 END AS Audit_Trigger,
+       DB_NAME() AS DatabaseName;

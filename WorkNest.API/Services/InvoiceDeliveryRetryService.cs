@@ -160,7 +160,7 @@ namespace WorkNest.API.Services
                     byte[]? pdfBytes = null;
                     try
                     {
-                        var pdfDto = await BuildPdfDtoAsync(item.InvoiceId, conn);
+                        var pdfDto = await BuildPdfDtoAsync(item.InvoiceId, conn, scope.ServiceProvider.GetService<WorkNest.Application.InvoiceContent.IInvoiceContentResolver>());
                         if (pdfDto != null)
                         {
                             pdfDto.OneBillNumber = oneBillNumber;
@@ -239,7 +239,7 @@ namespace WorkNest.API.Services
             return false;
         }
 
-        private async Task<StatementInvoicePdfDto?> BuildPdfDtoAsync(int id, SqlConnection conn)
+        private async Task<StatementInvoicePdfDto?> BuildPdfDtoAsync(int id, SqlConnection conn, WorkNest.Application.InvoiceContent.IInvoiceContentResolver? invoiceContent = null)
         {
             var dto = new StatementInvoicePdfDto();
             using var cmd = new SqlCommand("dbo.WN_GetStatementInvoicePdfData", conn);
@@ -373,6 +373,9 @@ namespace WorkNest.API.Services
                 }
             }
 
+            // Same resolver as the download / e-mail paths: the invoice's own location and stamped content version.
+            if (invoiceContent != null)
+                dto.Content = (await invoiceContent.ResolveForInvoiceAsync(id, dto.LocationId)).Fields;
             return dto;
         }
 

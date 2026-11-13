@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using WorkNest.Application.InvoiceContent;
 
 namespace WorkNest.Infrastructure.ExternalServices.Pdf
 {
@@ -24,6 +25,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         public string SntnNtnNic { get; set; } = "NTN-4029182-7";
         public string CenterName { get; set; } = "WorkNest - I-8 Executive Center";
         public int? LocationId { get; set; }
+
+        /// <summary>
+        /// The location's invoice content (payment instructions, terms, table headings) the invoice is printed with, resolved by
+        /// <see cref="IInvoiceContentResolver"/> from the invoice's own LocationId and stamped version. Null = the built-in wording of
+        /// <see cref="InvoiceContentDefaults"/> for <see cref="LocationId"/> (what the PDF always printed).
+        /// </summary>
+        public InvoiceContentFields? Content { get; set; }
 
         public decimal PreviousOutstandingBalance { get; set; } = 150000.00m;
         public decimal PaymentReceived { get; set; } = 150000.00m;
@@ -170,6 +178,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 if (data.SalesTaxInvoice.LocationId == null) data.SalesTaxInvoice.LocationId = data.LocationId;
                 if (string.IsNullOrWhiteSpace(data.SalesTaxInvoice.OneBillNumber)) data.SalesTaxInvoice.OneBillNumber = data.OneBillNumber;
                 if (string.IsNullOrWhiteSpace(data.SalesTaxInvoice.CenterName)) data.SalesTaxInvoice.CenterName = data.CenterName;
+                data.SalesTaxInvoice.Content ??= data.Content;   // same location content on the attached sales-tax invoice
 
                 var salesTaxPdf = SalesTaxInvoicePdfGenerator.GeneratePdf(data.SalesTaxInvoice);
                 return new PdfMergeService().MergePdfs(new[] { invoicePdf, salesTaxPdf });
@@ -259,6 +268,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
         #region Page 2 — Invoice
         private static void ComposePage2(ColumnDescriptor col, StatementInvoicePdfDto data)
         {
+            var content = data.Content ?? InvoiceContentDefaults.ForLocation(data.LocationId);
             col.Item().Row(r =>
             {
                 r.RelativeItem().Column(c =>
@@ -310,9 +320,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 table.Header(h =>
                 {
                     foreach (var (title, isRight) in new[] {
-                        ("Description", false),
-                        ("Unit Price", true),
-                        ("Total", true)
+                        (content.Get(InvoiceContentKeys.HeadDescription), false),
+                        (content.Get(InvoiceContentKeys.HeadUnitPrice), true),
+                        (content.Get(InvoiceContentKeys.HeadTotal), true)
                     })
                     {
                         var cell = h.Cell().Border(1).BorderColor("#000000").Background(Colors.White).Padding(6);
@@ -485,57 +495,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
             col.Item().PaddingTop(12).Border(1).BorderColor("#cccccc").Background("#fdfdfd").Padding(8).Column(tc =>
             {
-                tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#000000");
+                tc.Item().Text(content.Get(InvoiceContentKeys.TermsHeading)).Bold().FontSize(9).FontColor("#000000");
                 tc.Spacing(2);
                 int itemNum = 1;
 
-                bool isLocation3 = data.LocationId == 3;
-                bool isLocation2 = data.LocationId == 2
-                    || (data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase)));
-
-                if (isLocation3)
-                {
-                    tc.Item().Text($"{itemNum++}. Please deposit this payment in the following bank account: ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Bank Name: HABIB METRO BANK").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Account Title: SHAZAD ADIL & CO").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Account Number: 6-02-10-20396-333-251261").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("IBAN: PK68MPBL0210403330251261").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Branch: ISLAMABAD BRANCH").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Branch code: 10").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Address: COMMERCIAL PLOT # 24, WEST BLUE AREA, F-6/G-6, ISLAMABAD.").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Swift code: [Location 3 SWIFT code]").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("And send the receipt to [Location 3 contact number]").FontSize(7.5f).FontColor("#000000");
-                }
-                else if (isLocation2)
-                {
-                    if (!string.IsNullOrWhiteSpace(data.OneBillNumber))
-                    {
-                        tc.Item().Text($"{itemNum++}. Please use the 1Bill number to pay: {data.OneBillNumber} (Pay with 1Bill from any bank app, ATM or bank branch).").Bold().FontSize(7.5f).FontColor("#000000");
-                    }
-                    else
-                    {
-                        tc.Item().Text($"{itemNum++}. Please use the 1Bill number to pay from any bank app, ATM or bank branch.").Bold().FontSize(7.5f).FontColor("#000000");
-                    }
-                }
-                else
-                {
-                    if (!string.IsNullOrWhiteSpace(data.OneBillNumber))
-                        tc.Item().Text($"{itemNum++}. Pay with 1Bill from any bank app, ATM or bank branch using consumer number {data.OneBillNumber}.").Bold().FontSize(7.5f).FontColor("#000000");
-
-                    tc.Item().Text($"{itemNum++}. Please deposit this payment in the following bank ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Bank Name: Bank Of Punjab").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Account Title: WORKNEST PRIVATE LIMITED").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Account Number: 5310449521900010").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"IBAN: PK24BPUN5310449521900010 ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Swift code: BPUNPKKA ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Branch code: 0839 ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"And send the receipt on +923201809696").FontSize(7.5f).FontColor("#000000");
-                }
-
-                tc.Item().Text($"{itemNum++}. Your access will be suspended if dues are not paid by the due date ").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. WorkNest will charge Provincial Sales Tax (PST) on support services.").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. Payment is due on or before the due date specified on this invoice.").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(7.5f).FontColor("#000000");
+                // Which wording is printed comes from the location's invoice content (the invoice's own LocationId); the box itself is unchanged.
+                InvoiceContentRenderer.Write(tc, InvoiceContentRenderer.PaymentLines(content, data.OneBillNumber, salesTax: false, ref itemNum));
+                InvoiceContentRenderer.Write(tc, InvoiceContentRenderer.TermLines(content.GetList(InvoiceContentKeys.Terms), hasDeposit: true, ref itemNum));
 
                 decimal invoiceTotal = data.CurrentInvoiceTotal > 0
                     ? data.CurrentInvoiceTotal
@@ -562,11 +528,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 decimal whtInvoiceAmount = grossedUpRentOnly + supportInTotal + pstInTotal + secDeposit;
 
                 // A WHT invoice is already grossed up: these two terms would quote a second gross-up.
-                if (!data.IsWhtInvoice)
-                    tc.Item().Text($"{itemNum++}. If tax is withheld, the invoice will be PKR {whtInvoiceAmount:N0}.").FontSize(7.5f).Bold().FontColor("#000000");
-                if (secDeposit > 0 && !data.IsWhtInvoice)
+                string whtTerm = content.Get(InvoiceContentKeys.WhtTerm);
+                if (!data.IsWhtInvoice && !string.IsNullOrWhiteSpace(whtTerm))
+                    tc.Item().Text($"{itemNum++}. " + whtTerm.Replace(InvoiceContentSchema.AmountToken, $"{whtInvoiceAmount:N0}")).FontSize(7.5f).Bold().FontColor("#000000");
+                string whtDepositTerm = content.Get(InvoiceContentKeys.WhtDepositTerm);
+                if (secDeposit > 0 && !data.IsWhtInvoice && !string.IsNullOrWhiteSpace(whtDepositTerm))
                 {
-                    tc.Item().Text($"{itemNum++}. Withholding tax is not applicable on the Security Deposit.").FontSize(7.5f).Bold().FontColor("#000000");
+                    tc.Item().Text($"{itemNum++}. {whtDepositTerm}").FontSize(7.5f).Bold().FontColor("#000000");
                 }
             });
         }

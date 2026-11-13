@@ -41,10 +41,12 @@ namespace WorkNest.API.Controllers
         private readonly IEmailService _email;
         private readonly IBusinessClock _clock;
         private readonly IOneBillService _oneBill;
+        private readonly WorkNest.Application.InvoiceContent.IInvoiceContentResolver? _invoiceContent;
 
         public InvoiceController(IPaymentService payments, IBookingService bookings, IDbRepository db, IPdfService pdf, IConfiguration config, IEmailService email, IBusinessClock clock,
-            IOneBillService oneBill)
+            IOneBillService oneBill, WorkNest.Application.InvoiceContent.IInvoiceContentResolver? invoiceContent = null)
         {
+            _invoiceContent = invoiceContent;
             _clock = clock;
             _oneBill = oneBill;
             _payments = payments;
@@ -384,6 +386,10 @@ namespace WorkNest.API.Controllers
                     return NotFound(new { isSuccessful = false, message = "Sales Tax Invoice not found." });
                 }
 
+                // The sales-tax invoice prints the same location content as its invoice (resolved from the invoice, not from the link).
+                if (_invoiceContent != null && dto.CustomerInvoiceId > 0)
+                    dto.Content = (await _invoiceContent.ResolveForInvoiceAsync(dto.CustomerInvoiceId, dto.LocationId)).Fields;
+
                 byte[] pdfBytes = _pdf.GenerateSalesTaxInvoicePdf(dto);
 
                 string fileName = $"{dto.STInvoiceNumber}.pdf";
@@ -662,6 +668,9 @@ namespace WorkNest.API.Controllers
             dto.OneBillNumber = await _oneBill.GetNumberAsync(id);
             var pdfOffer = await OfferSnapshotStore.ReadOneAsync(conn, OfferEntity.Invoice, id);
             if (pdfOffer is { HasOffer: true }) { dto.OfferName = pdfOffer.OfferName; dto.OfferDiscountAmount = pdfOffer.OfferDiscountAmount ?? 0m; }
+            // The location's invoice content (and its stamped version) for this invoice: one resolver for every render path.
+            if (_invoiceContent != null)
+                dto.Content = (await _invoiceContent.ResolveForInvoiceAsync(id, dto.LocationId)).Fields;
             return dto;
         }
 

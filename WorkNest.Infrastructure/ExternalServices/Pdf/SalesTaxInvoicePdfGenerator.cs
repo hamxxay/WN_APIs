@@ -4,6 +4,7 @@ using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using WorkNest.Application.DTOs.Payment;
+using WorkNest.Application.InvoiceContent;
 
 namespace WorkNest.Infrastructure.ExternalServices.Pdf
 {
@@ -32,6 +33,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
 
         private static void ComposeBody(ColumnDescriptor col, CustomerSTInvoiceDto data)
         {
+            var content = data.Content ?? InvoiceContentDefaults.ForLocation(data.LocationId);
             // Title Block
             col.Item().Row(r =>
             {
@@ -91,11 +93,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 table.Header(h =>
                 {
                     foreach (var (title, isRight) in new[] {
-                        ("Description", false),
-                        ("Exclusive Amt", true),
-                        ("Tax Rate", true),
-                        ("Tax Amount", true),
-                        ("Line Total", true)
+                        (content.Get(InvoiceContentKeys.StHeadDescription), false),
+                        (content.Get(InvoiceContentKeys.StHeadExclusive), true),
+                        (content.Get(InvoiceContentKeys.StHeadTaxRate), true),
+                        (content.Get(InvoiceContentKeys.StHeadTaxAmount), true),
+                        (content.Get(InvoiceContentKeys.StHeadLineTotal), true)
                     })
                     {
                         var cell = h.Cell().Border(1).BorderColor("#000000").Background(Colors.White).Padding(6);
@@ -149,58 +151,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             decimal depositTotal = data.SecurityDepositAmount ?? 0;
             col.Item().PaddingTop(12).Border(1).BorderColor("#cccccc").Background("#fdfdfd").Padding(8).Column(tc =>
             {
-                tc.Item().Text("Terms & Conditions").Bold().FontSize(9).FontColor("#000000");
+                tc.Item().Text(content.Get(InvoiceContentKeys.TermsHeading)).Bold().FontSize(9).FontColor("#000000");
                 tc.Spacing(2);
                 int itemNum = 1;
 
-                bool isLocation3 = data.LocationId == 3;
-                bool isLocation2 = data.LocationId == 2
-                    || (data.CenterName != null && (data.CenterName.Contains("F-7", StringComparison.OrdinalIgnoreCase) || data.CenterName.Contains("F7", StringComparison.OrdinalIgnoreCase)));
-
-                if (isLocation3)
-                {
-                    tc.Item().Text($"{itemNum++}. Please deposit this payment into the following bank account: ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Bank Name: HABIB METRO BANK").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Account Title: SHAZAD ADIL & CO").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Account Number: 6-02-10-20396-333-251261").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("IBAN: PK68MPBL0210403330251261").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Branch: ISLAMABAD BRANCH").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Branch code: 10").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Address: COMMERCIAL PLOT # 24, WEST BLUE AREA, F-6/G-6, ISLAMABAD.").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Swift code: [Location 3 SWIFT code]").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("And send the receipt to [Location 3 contact number]").FontSize(7.5f).FontColor("#000000");
-                }
-                else if (isLocation2)
-                {
-                    if (!string.IsNullOrWhiteSpace(data.OneBillNumber))
-                    {
-                        tc.Item().Text($"{itemNum++}. Please use the 1Bill number to pay: {data.OneBillNumber} (Pay with 1Bill from any bank app, ATM or bank branch).").Bold().FontSize(7.5f).FontColor("#000000");
-                    }
-                    else
-                    {
-                        tc.Item().Text($"{itemNum++}. Please use the 1Bill number to pay from any bank app, ATM or bank branch.").Bold().FontSize(7.5f).FontColor("#000000");
-                    }
-                }
-                else
-                {
-                    tc.Item().Text($"{itemNum++}. Please deposit this payment into the following bank account: ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Bank Name: Bank Of Punjab").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Account Title: WORKNEST PRIVATE LIMITED").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Account Number: 5310449521900010").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"IBAN: PK24BPUN5310449521900010 ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Swift code: BPUNPKKA ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"Branch code: 0839 ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text($"And send the receipt to +923201809696").FontSize(7.5f).FontColor("#000000");
-                }
-
-                tc.Item().Text($"{itemNum++}. Your access will be closed if dues are not paid within 5 days of the due date.").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. Payment is due on or before the due date specified on this invoice.").FontSize(7.5f).FontColor("#000000");
-                if (depositTotal > 0 || data.SecurityDepositAmount > 0)
-                {
-                    tc.Item().Text($"{itemNum++}. Security deposit is fully refundable upon termination of the agreement, subject to lease terms.").FontSize(7.5f).FontColor("#000000");
-                }
-                tc.Item().Text($"{itemNum++}. Booking confirmation is subject to space availability at the time of payment.").FontSize(7.5f).FontColor("#000000");
-                tc.Item().Text($"{itemNum++}. WorkNest reserves the right to modify pricing and terms with prior notice.").FontSize(7.5f).FontColor("#000000");
+                // Same location content as the invoice this belongs to (one routine for both PDFs).
+                InvoiceContentRenderer.Write(tc, InvoiceContentRenderer.PaymentLines(content, data.OneBillNumber, salesTax: true, ref itemNum));
+                InvoiceContentRenderer.Write(tc, InvoiceContentRenderer.TermLines(content.GetList(InvoiceContentKeys.StTerms), depositTotal > 0 || data.SecurityDepositAmount > 0, ref itemNum));
             });
         }
 

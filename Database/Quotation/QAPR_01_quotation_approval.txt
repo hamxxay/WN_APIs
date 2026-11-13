@@ -1,0 +1,111 @@
+-- =====================================================================================================================
+-- QAPR_01: quotation discount approval by the sales manager.
+--
+-- A quotation with a MANUAL discount (percentage or fixed amount) now carries a "Reason for discount". When a SALES EXECUTIVE sends such
+-- a quotation (send, send-email, version send) it is not sent: it waits for the executive's sales manager (WN_Users.ManagerId, USR_01),
+-- who approves it (optionally lowering / changing the discount within the offering-type cap; the quotation is then sent to the customer)
+-- or sends it back with a note. Every step is written to a history. Automatic Offers (OFFER_01) are not a manual discount.
+--
+--   1. dbo.WN_Quotations gets eight empty columns (existing quotations stay NULL = "never needed approval"):
+--        DiscountReason NVARCHAR(1000), ApprovalStatus VARCHAR(20) ('PendingManager' | 'Approved' | 'SentBack'),
+--        ApprovalManagerUserId INT, ApprovalSubmittedAt DATETIME2, ApprovalDecidedAt DATETIME2, ApprovalDecidedByUserId INT,
+--        ApprovalNote NVARCHAR(1000), LastReminderAt DATETIME2.   (times are UTC)
+--   2. dbo.WN_QuotationHistory (new): one row per step (created, submitted, resubmitted, discount_edited, approved, sent_to_customer,
+--      sent_back, edited). Never deleted by the API. Index on QuotationId.
+--   3. A check on ApprovalStatus (only the three values) and the Quotation Approval Reminders switch in dbo.WN_ServiceSwitches
+--      (on; only when SS_01 has run).
+--
+-- The API works WITHOUT this script (old behaviour: no reason stored, no approval; the Quotation approvals calls answer 503
+-- "Quotation approval is not set up on this server yet."). It notices the script within a minute of it being run, no restart needed.
+-- No stored procedure is changed. Nothing existing is altered or dropped: only added.
+--
+-- BEFORE YOU RUN: run on the TEST database first, then live. Run the whole file in SSMS / DBeaver (select all, Execute): it is ONE batch
+-- (no GO), one transaction: it either completes or changes nothing. Safe to run again (every step checks first).
+-- The first result grid shows what exists now (save it as your backup; nothing is overwritten, so it is for the record).
+-- To undo: DROP TABLE dbo.WN_QuotationHistory; ALTER TABLE dbo.WN_Quotations DROP CONSTRAINT CK_WN_Quotations_ApprovalStatus;
+--          ALTER TABLE dbo.WN_Quotations DROP COLUMN DiscountReason, ApprovalStatus, ApprovalManagerUserId, ApprovalSubmittedAt,
+--          ApprovalDecidedAt, ApprovalDecidedByUserId, ApprovalNote, LastReminderAt;  DELETE FROM dbo.WN_ServiceSwitches WHERE ServiceName = N'QuotationApprovalReminders';
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+IF OBJECT_ID(N'dbo.WN_Quotations', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_Users', N'U') IS NULL
+    THROW 50070, N'QAPR_01: dbo.WN_Quotations / WN_Users is missing: wrong database? Nothing was changed.', 1;
+
+-- Record: which of the new things exist right now (1 = already there).
+SELECT CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'DiscountReason') IS NOT NULL THEN 1 ELSE 0 END           AS Has_DiscountReason,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalStatus') IS NOT NULL THEN 1 ELSE 0 END           AS Has_ApprovalStatus,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalManagerUserId') IS NOT NULL THEN 1 ELSE 0 END    AS Has_ApprovalManagerUserId,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalSubmittedAt') IS NOT NULL THEN 1 ELSE 0 END      AS Has_ApprovalSubmittedAt,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalDecidedAt') IS NOT NULL THEN 1 ELSE 0 END        AS Has_ApprovalDecidedAt,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalDecidedByUserId') IS NOT NULL THEN 1 ELSE 0 END  AS Has_ApprovalDecidedByUserId,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalNote') IS NOT NULL THEN 1 ELSE 0 END             AS Has_ApprovalNote,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'LastReminderAt') IS NOT NULL THEN 1 ELSE 0 END           AS Has_LastReminderAt,
+       CASE WHEN OBJECT_ID(N'dbo.WN_QuotationHistory', N'U') IS NOT NULL THEN 1 ELSE 0 END                   AS Has_WN_QuotationHistory,
+       CASE WHEN OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NOT NULL THEN 1 ELSE 0 END                    AS Has_WN_ServiceSwitches;
+
+-- APPLY START
+BEGIN TRANSACTION;
+
+-- 1. The columns on the quotation (all NULL for existing rows).
+IF COL_LENGTH(N'dbo.WN_Quotations', N'DiscountReason') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD DiscountReason NVARCHAR(1000) NULL;');
+IF COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalStatus') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD ApprovalStatus VARCHAR(20) NULL;');
+IF COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalManagerUserId') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD ApprovalManagerUserId INT NULL;');
+IF COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalSubmittedAt') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD ApprovalSubmittedAt DATETIME2 NULL;');
+IF COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalDecidedAt') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD ApprovalDecidedAt DATETIME2 NULL;');
+IF COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalDecidedByUserId') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD ApprovalDecidedByUserId INT NULL;');
+IF COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalNote') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD ApprovalNote NVARCHAR(1000) NULL;');
+IF COL_LENGTH(N'dbo.WN_Quotations', N'LastReminderAt') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Quotations ADD LastReminderAt DATETIME2 NULL;');
+
+-- Only the three states (a new column is NULL for every existing row, so this cannot fail on existing data).
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_WN_Quotations_ApprovalStatus' AND parent_object_id = OBJECT_ID(N'dbo.WN_Quotations'))
+    EXEC(N'ALTER TABLE dbo.WN_Quotations WITH CHECK ADD CONSTRAINT CK_WN_Quotations_ApprovalStatus
+           CHECK (ApprovalStatus IS NULL OR ApprovalStatus IN (''PendingManager'', ''Approved'', ''SentBack''));');
+
+-- 2. The history.
+IF OBJECT_ID(N'dbo.WN_QuotationHistory', N'U') IS NULL
+    EXEC(N'CREATE TABLE dbo.WN_QuotationHistory (
+        Id            INT IDENTITY(1, 1) NOT NULL CONSTRAINT PK_WN_QuotationHistory PRIMARY KEY,
+        QuotationId   INT            NOT NULL,
+        At            DATETIME2      NOT NULL CONSTRAINT DF_WN_QuotationHistory_At DEFAULT (SYSUTCDATETIME()),
+        ByUserId      INT            NULL,
+        ByName        NVARCHAR(200)  NULL,
+        Action        VARCHAR(30)    NOT NULL,
+        FromDiscount  NVARCHAR(100)  NULL,
+        ToDiscount    NVARCHAR(100)  NULL,
+        Note          NVARCHAR(1000) NULL
+    );');
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_QuotationHistory') AND name = N'IX_WN_QuotationHistory_QuotationId')
+    EXEC(N'CREATE INDEX IX_WN_QuotationHistory_QuotationId ON dbo.WN_QuotationHistory (QuotationId, At);');
+
+-- 3. The reminder switch (on). Needs SS_01; without it the reminder service simply runs (a missing switch means on).
+IF OBJECT_ID(N'dbo.WN_ServiceSwitches', N'U') IS NOT NULL
+    EXEC(N'IF NOT EXISTS (SELECT 1 FROM dbo.WN_ServiceSwitches WHERE ServiceName = N''QuotationApprovalReminders'')
+               INSERT INTO dbo.WN_ServiceSwitches (ServiceName, IsEnabled) VALUES (N''QuotationApprovalReminders'', 1);');
+ELSE
+    PRINT N'dbo.WN_ServiceSwitches is not on this database (SS_01 not run): the reminder switch was not added; the reminders still run.';
+
+COMMIT TRANSACTION;
+-- APPLY END
+
+-- Result: every value should be 1
+SELECT CASE WHEN COL_LENGTH(N'dbo.WN_Quotations', N'DiscountReason') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalStatus') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalManagerUserId') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalSubmittedAt') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalDecidedAt') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalDecidedByUserId') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Quotations', N'ApprovalNote') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Quotations', N'LastReminderAt') IS NOT NULL THEN 1 ELSE 0 END AS Quotation_columns_added,
+       CASE WHEN OBJECT_ID(N'dbo.WN_QuotationHistory', N'U') IS NOT NULL THEN 1 ELSE 0 END      AS History_table_exists,
+       CASE WHEN EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'dbo.WN_QuotationHistory') AND name = N'IX_WN_QuotationHistory_QuotationId') THEN 1 ELSE 0 END AS History_index_exists;

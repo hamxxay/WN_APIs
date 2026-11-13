@@ -39,6 +39,8 @@ namespace WorkNest.Application.DTOs.Quotation
         // WHT is no longer chosen on the quotation: it is chosen on the Initial Invoice Preview (send-initial-invoice).
         public string? Remarks { get; set; }
         public DateTime ValidUntil { get; set; }
+        /// <summary>Reason for the discount (QAPR_01): required, 5..1000 characters, when a manual discount is entered.</summary>
+        public string? DiscountReason { get; set; }
     }
 
     public class QuotationResponse
@@ -127,6 +129,14 @@ namespace WorkNest.Application.DTOs.Quotation
         /// <summary>The offer's / manual discount's part of the first billing cycle's DiscountAmount (null without an offer): what the quotation PDF prints.</summary>
         public decimal? OfferFirstCycleDiscount { get; set; }
         public decimal? ManualFirstCycleDiscount { get; set; }
+
+        // Discount approval (QAPR_01); all null before the script has run. Staff only (cleared for customers).
+        public string? DiscountReason { get; set; }
+        /// <summary>PendingManager | Approved | SentBack; null = never needed approval.</summary>
+        public string? ApprovalStatus { get; set; }
+        public string? ApprovalNote { get; set; }
+        public string? ApprovalManagerName { get; set; }
+        public DateTime? ApprovalSubmittedAt { get; set; }
 
         public bool CanRespond { get; set; }
         /// <summary>Waiting for the customer's answer (Sent / Active) but its last valid day (ValidUntil, Pakistan date) has passed.</summary>

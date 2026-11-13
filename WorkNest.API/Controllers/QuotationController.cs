@@ -9,6 +9,7 @@ using WorkNest.Common.Responses;
 
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
+using WorkNest.Common.Constants;
 
 namespace WorkNest.API.Controllers
 {
@@ -31,6 +32,22 @@ namespace WorkNest.API.Controllers
 
         // Staff = admin / super admin / sales executive / receptionist; customers (role "general") are not staff.
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
+
+        /// <summary>A sales executive: the only role whose send of a discounted quotation waits for the sales manager (QAPR_01).</summary>
+        private bool CallerIsSalesExecutive() =>
+            User.IsInRole(Roles.SalesExecutive) || User.IsInRole("SalesExecutive") || string.Equals(User.GetRole(), Roles.SalesExecutive, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>The held-for-approval answer: 200, nothing was sent to the customer.</summary>
+        private IActionResult HeldForApproval(QuotationApprovalHold hold) =>
+            Ok(ApiResponse.Ok(new { approvalStatus = hold.ApprovalStatus }, hold.Message));
+
+        /// <summary>What a customer may read of a quotation: not while it waits for / was sent back by the sales manager; internal fields removed.</summary>
+        private static bool VisibleToCustomer(QuotationResponse? q)
+        {
+            if (q == null || QuotationApprovalRules.IsHeldBack(q.ApprovalStatus)) return false;
+            QuotationApprovalRules.Redact(q);
+            return true;
+        }
 
         /// <summary>Signed-in user's email from the JWT only (the x-user-email header is no longer trusted).</summary>
         private string? ResolveUserEmail() => User.GetEmail();
@@ -148,7 +165,7 @@ namespace WorkNest.API.Controllers
                 if (customerId <= 0) return Ok(ApiResponse.Ok(new List<object>()));
                 // Only quotations sent to the customer (not Draft / not-yet-sent ones).
                 var (res, _) = await _quotations.GetQuotationsByCustomerPageAsync(customerId, null, null, sentToCustomerOnly: true);
-                return Ok(ApiResponse.Ok(res));
+                return Ok(ApiResponse.Ok(res.Where(VisibleToCustomer).ToList()));
             }
             catch (Exception ex)
             {
@@ -170,6 +187,7 @@ namespace WorkNest.API.Controllers
                 if (limit is > 100) limit = 100;
                 // A customer reading their own list sees only quotations sent to them (same rule as quotation/my).
                 var (res, total) = await _quotations.GetQuotationsByCustomerPageAsync(customerId, page, limit, sentToCustomerOnly: !User.IsStaff());
+                if (!User.IsStaff()) res = res.Where(VisibleToCustomer).ToList();
                 bool paged = limit is > 0;
                 return Ok(new
                 {
@@ -196,6 +214,7 @@ namespace WorkNest.API.Controllers
         {
             var res = await _quotations.GetQuotationByIdAsync(id);
             if (res == null || !await CanSeeCustomerAsync(res.CustomerId)) return NotFound(ApiResponse.Fail("Quotation not found."));
+            if (!User.IsStaff() && !VisibleToCustomer(res)) return NotFound(ApiResponse.Fail("Quotation not found."));
             return Ok(ApiResponse.Ok(res));
         }
 
@@ -244,11 +263,17 @@ namespace WorkNest.API.Controllers
 
         [HttpPost("api/quotation/{id:int}/send-email")]
         [Authorize(Roles = StaffRoles)]
-        public async Task<IActionResult> SendEmail(int id, [FromBody] SendQuotationEmailRequest request)
+        public async Task<IActionResult> SendEmail(int id, [FromBody] SendQuotationEmailRequest request, [FromServices] IQuotationApprovalService approvals)
         {
             try
             {
+                int? actorId = await ResolveActorIdAsync();
+                // A sales executive's discounted quotation goes to the sales manager first (QAPR_01); nothing is e-mailed.
+                var hold = await approvals.HoldForApprovalAsync(id, actorId, CallerIsSalesExecutive());
+                if (hold != null) return HeldForApproval(hold);
+
                 await _quotations.SendQuotationEmailAsync(id, request.Email);
+                await approvals.RecordSentAsync(id, actorId);
                 return Ok(ApiResponse.Ok("Quotation emailed successfully."));
             }
             catch (InvalidOperationException ex)
@@ -290,7 +315,7 @@ namespace WorkNest.API.Controllers
             try
             {
                 var q = await _quotations.GetQuotationByIdAsync(id);
-                if (q == null || q.CustomerId != customerId)
+                if (q == null || q.CustomerId != customerId || QuotationApprovalRules.IsHeldBack(q.ApprovalStatus))
                     return NotFound(ApiResponse.Fail("Quotation not found."));
                 if (q != null && version == 1 && q.Version > 1) version = q.Version;
 
@@ -333,7 +358,7 @@ namespace WorkNest.API.Controllers
             try
             {
                 var q = await _quotations.GetQuotationByIdAsync(id);
-                if (q == null || q.CustomerId != customerId)
+                if (q == null || q.CustomerId != customerId || QuotationApprovalRules.IsHeldBack(q.ApprovalStatus))
                     return NotFound(ApiResponse.Fail("Quotation not found."));
                 if (q != null && version == 1 && q.Version > 1) version = q.Version;
 
@@ -355,13 +380,14 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/quotation/{id:int}/versions")]
         [HttpPost("api/quotations/{id:int}/create-version")]
         [HttpPost("api/quotations/{id:int}/versions")]
-        public async Task<IActionResult> CreateNewVersion(int id)
+        public async Task<IActionResult> CreateNewVersion(int id, [FromServices] IQuotationApprovalService approvals)
         {
             int? actorId = await ResolveActorIdAsync();
 
             try
             {
                 var res = await _quotations.CreateNewVersionAsync(id, actorId);
+                await approvals.RecordNewVersionAsync(id, res.Id, actorId);   // keeps the discount reason; history "edited"
                 return Ok(ApiResponse.Ok(res, "New quotation version created successfully."));
             }
             catch (Exception ex)
@@ -378,6 +404,7 @@ namespace WorkNest.API.Controllers
             var q = await _quotations.GetQuotationByIdAsync(id);
             if (q == null || !await CanSeeCustomerAsync(q.CustomerId)) return NotFound(ApiResponse.Fail("Quotation not found."));
             var res = await _quotations.GetVersionsAsync(id);
+            if (!User.IsStaff()) res = res.Where(VisibleToCustomer).ToList();
             return Ok(ApiResponse.Ok(res));
         }
 
@@ -395,6 +422,7 @@ namespace WorkNest.API.Controllers
                 specificVersion = await _quotations.GetQuotationByIdAsync(version);
             }
             if (specificVersion == null || specificVersion.CustomerId != root.CustomerId) return NotFound(ApiResponse.Fail("Quotation version not found."));
+            if (!User.IsStaff() && !VisibleToCustomer(specificVersion)) return NotFound(ApiResponse.Fail("Quotation version not found."));
             return Ok(ApiResponse.Ok(specificVersion));
         }
 
@@ -424,7 +452,7 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/quotations/{id:int}/send")]
         [HttpPost("api/quotation/{id:int}/versions/{version:int}/send")]
         [HttpPost("api/quotations/{id:int}/versions/{version:int}/send")]
-        public async Task<IActionResult> SendQuotation(int id, [FromRoute] int version = 1)
+        public async Task<IActionResult> SendQuotation(int id, [FromServices] IQuotationApprovalService approvals, [FromRoute] int version = 1)
         {
             int? actorId = await ResolveActorIdAsync();
 
@@ -441,13 +469,34 @@ namespace WorkNest.API.Controllers
                     }
                 }
 
+                // A sales executive's discounted quotation goes to the sales manager first (QAPR_01): 200, nothing is sent yet.
+                var hold = await approvals.HoldForApprovalAsync(targetId, actorId, CallerIsSalesExecutive());
+                if (hold != null) return HeldForApproval(hold);
+
                 await _quotations.SendQuotationAsync(targetId, actorId);
+                await approvals.RecordSentAsync(targetId, actorId);
                 return Ok(ApiResponse.Ok("Quotation sent successfully."));
             }
             catch (Exception ex)
             {
                 return BadRequest(ApiResponse.Fail(ex.Message));
             }
+        }
+
+        /// <summary>
+        /// The quotation's history (created, submitted, discount edited, approved, sent, sent back, edited): [{ at, byName, action,
+        /// fromDiscount, toDiscount, note }]. Super admin / admin / receptionist: any quotation they may see; a sales executive or sales
+        /// manager: only one they made, were asked to approve, or acted on. Empty before the script QAPR_01 has run.
+        /// </summary>
+        [HttpGet("api/quotation/{id:int}/history")]
+        [Authorize(Roles = StaffRoles + ",sales_manager,SalesManager")]
+        [SalesManagerAllowed]
+        public async Task<IActionResult> GetQuotationHistory(int id, [FromServices] IQuotationApprovalService approvals)
+        {
+            bool restricted = CallerIsSalesExecutive() || User.IsSalesManager();
+            var rows = await approvals.GetHistoryAsync(id, await ResolveActorIdAsync(), callerSeesAll: !restricted);
+            if (rows == null) return NotFound(ApiResponse.Fail("Quotation not found."));
+            return Ok(ApiResponse.Ok(rows));
         }
 
         [EnableRateLimiting("pdf")]
@@ -458,7 +507,7 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> GetQuotationPdf(int id)
         {
             var q = await _quotations.GetQuotationByIdAsync(id);
-            if (q == null || !await CanSeeCustomerAsync(q.CustomerId))
+            if (q == null || !await CanSeeCustomerAsync(q.CustomerId) || (!User.IsStaff() && QuotationApprovalRules.IsHeldBack(q.ApprovalStatus)))
                 return NotFound(ApiResponse.Fail("Quotation not found."));
 
             var pdfBytes = _pdf.GenerateQuotationPdf(q);
@@ -483,7 +532,8 @@ namespace WorkNest.API.Controllers
             {
                 specificVersion = await _quotations.GetQuotationByIdAsync(version);
             }
-            if (specificVersion == null || specificVersion.CustomerId != root.CustomerId)
+            if (specificVersion == null || specificVersion.CustomerId != root.CustomerId
+                || (!User.IsStaff() && QuotationApprovalRules.IsHeldBack(specificVersion.ApprovalStatus)))
                 return NotFound(ApiResponse.Fail("Quotation version not found."));
 
             var pdfBytes = _pdf.GenerateQuotationPdf(specificVersion);

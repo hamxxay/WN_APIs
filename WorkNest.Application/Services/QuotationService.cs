@@ -17,14 +17,35 @@ namespace WorkNest.Application.Services
 
         private readonly IBusinessClock _clock;
         private readonly IOffersRepository? _offers;
+        private readonly IQuotationApprovalRepository? _approvals;
 
-        public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf, IBusinessClock clock, IOffersRepository? offers = null)
+        public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf, IBusinessClock clock, IOffersRepository? offers = null,
+            IQuotationApprovalRepository? approvals = null)
         {
+            _approvals = approvals;
             _offers = offers;
             _clock = clock;
             _db = db;
             _email = email;
             _pdf = pdf;
+        }
+
+        /// <summary>True once QAPR_01 has run (never throws: a problem reading it means "not set up", the old behaviour).</summary>
+        private async Task<bool> ApprovalSetUpAsync()
+        {
+            if (_approvals == null) return false;
+            try { return await _approvals.IsSetUpAsync(); } catch (Exception) { return false; }
+        }
+
+        private async Task<string?> UserNameAsync(int? userId)
+        {
+            if (userId is not > 0) return null;
+            try
+            {
+                var u = await _db.GetUserByIdAsync(userId.Value);
+                return u != null && u.TryGetValue("Name", out var n) ? n?.ToString() : null;
+            }
+            catch (Exception) { return null; }
         }
 
         private static DateTime? ParseDateSafely(object? value)
@@ -79,6 +100,11 @@ namespace WorkNest.Application.Services
             // Security Deposit (Months): 0, 1, 2 or 3 only (400 from the controller); checked before anything is read.
             SecurityDepositRules.EnsureValidMonths(request.SecurityDepositMonths);
 
+            // Reason for the discount (QAPR_01): required with a manual discount > 0 (an automatic Offer is not a discount here).
+            // Before the script has run nothing is asked or stored (old behaviour).
+            bool approvalSetUp = await ApprovalSetUpAsync();
+            string? discountReason = approvalSetUp ? QuotationApprovalRules.ValidateReason(QuotationApprovalRules.ManualValueOf(request), request.DiscountReason) : null;
+
             var spaceDetails = await ResolveSpaceDetailsAsync(request.SpaceId);
 
             // No price in the space configuration: a quotation needs one (a base price entered by staff for offices / shared spaces).
@@ -120,16 +146,9 @@ namespace WorkNest.Application.Services
             int resolvedOfferingTypeId = matchedOt != null ? Convert.ToInt32(matchedOt["Id"])
                 : (request.OfferingTypeId is > 0 ? request.OfferingTypeId.Value : (int.TryParse(request.OfferingType, out var reqOtId) && reqOtId > 0 ? reqOtId : 1));
             decimal baseCap = offeringCap ?? 0m;
-            decimal maxDiscountCap = baseCap;
-
-            // The cap protects a floor price per seat: standard rate minus the cap (35,000 - 10% = 31,500).
-            // When the base price is raised above the standard rate, the cap widens so the discounted
-            // price can come down to that same floor (40,000 -> up to 21.25%), never below it.
-            if (offeringCap != null && spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
-            {
-                decimal floorPerSeat = spaceDetails.Monthly * (1 - maxDiscountCap / 100m);
-                maxDiscountCap = Math.Round((perSeatBasePrice - floorPerSeat) / perSeatBasePrice * 100m, 2, MidpointRounding.ToZero);
-            }
+            bool isMeetingRoom = spaceDetails.Category == "MeetingRoom";
+            var limits = QuotationDiscountCap.Compute(baseCap, isMeetingRoom, offeringCap != null ? spaceDetails.Monthly : 0m, perSeatBasePrice, capacity, monthlyBasePrice);
+            decimal maxDiscountCap = limits.MaxPercent;
             string offeringTypeDbValue = resolvedOfferingTypeId.ToString();
 
             // Q10: the cap checks the MANUAL discount only (an offer is never passed in here).
@@ -140,15 +159,8 @@ namespace WorkNest.Application.Services
             }
             else if (discountType == "Fixed" || discountType == "Amount")
             {
-                decimal maxAllowedFixed = Math.Round(monthlyBasePrice * (maxDiscountCap / 100m), 2);
-                // Raised base price: allow exactly (base price - floor) per seat, not the rounded percentage.
-                if (offeringCap != null && spaceDetails.Category != "MeetingRoom" && spaceDetails.Monthly > 0 && perSeatBasePrice > spaceDetails.Monthly)
-                {
-                    decimal floorPerSeat = spaceDetails.Monthly * (1 - baseCap / 100m);
-                    maxAllowedFixed = Math.Round((perSeatBasePrice - floorPerSeat) * capacity, 2);
-                }
-                if (discountValue > maxAllowedFixed)
-                    discountValue = maxAllowedFixed;
+                if (discountValue > limits.MaxFixed)
+                    discountValue = limits.MaxFixed;
             }
 
             // For backward compat: if DiscountType is Percentage, keep discountPercentage
@@ -349,6 +361,25 @@ namespace WorkNest.Application.Services
             // Insert quotation details
             await _db.InsertQuotationDetailsAsync(quotationId, details, createdById);
 
+            // Approval: the reason and the first history line. Never fails the quotation that is already saved.
+            if (approvalSetUp && _approvals != null)
+            {
+                try
+                {
+                    if (discountValue > 0m) await _approvals.SetDiscountReasonAsync(quotationId, discountReason);
+                    await _approvals.AddHistoryAsync(new QuotationHistoryWrite
+                    {
+                        QuotationId = quotationId,
+                        ByUserId = createdById,
+                        ByName = await UserNameAsync(createdById),
+                        Action = QuotationApprovalRules.ActionCreated,
+                        ToDiscount = discountValue > 0m ? QuotationApprovalRules.DiscountLabel(discountType, discountValue) : null,
+                        Note = discountValue > 0m ? discountReason : null
+                    });
+                }
+                catch (Exception) { /* the quotation is saved; the history line is best effort */ }
+            }
+
             var response = await GetQuotationByIdAsync(quotationId);
             return response ?? throw new InvalidOperationException("Failed to retrieve generated quotation.");
         }
@@ -365,6 +396,23 @@ namespace WorkNest.Application.Services
                 dto.ManualDiscountAmount = s.ManualDiscountAmount; dto.FinalMonthlyRent = s.FinalMonthlyRent; dto.FinalSecurityDeposit = s.FinalSecurityDeposit;
             }
             catch (Exception) { /* offers are display data here: a read problem means "no offer shown" */ }
+        }
+
+        /// <summary>The discount reason and approval state (script QAPR_01) onto the response. Never fails the read; nothing before the script.</summary>
+        private async Task ApplyApprovalInfoAsync(QuotationResponse dto)
+        {
+            if (!await ApprovalSetUpAsync()) return;
+            try
+            {
+                var info = await _approvals!.GetInfoAsync(dto.Id);
+                if (info == null) return;
+                dto.DiscountReason = info.DiscountReason;
+                dto.ApprovalStatus = info.ApprovalStatus;
+                dto.ApprovalNote = info.Note;
+                dto.ApprovalManagerName = info.ManagerName;
+                dto.ApprovalSubmittedAt = info.SubmittedAt;
+            }
+            catch (Exception) { /* display data here */ }
         }
 
         public async Task<QuotationResponse?> GetQuotationByIdAsync(int id)
@@ -483,6 +531,7 @@ namespace WorkNest.Application.Services
             dto.WhtRatePercent = dto.SendWhtInvoice ? await _db.ResolveWhtRatePercentAsync(dto.WithholdingTaxRate) : 0m;
 
             await ApplyOfferSnapshotAsync(dto);
+            await ApplyApprovalInfoAsync(dto);
             ChallanCalculationService.ApplyToQuotation(dto);
 
             // Sent and still valid (ValidUntil is the last valid day, a Pakistan date): an expired quotation can no longer
@@ -625,7 +674,9 @@ namespace WorkNest.Application.Services
         /// no status change, so Active stays visible.
         /// </summary>
         private static bool WasSentToCustomer(IDictionary<string, object?> row) =>
-            !string.Equals(row.TryGetValue("Status", out var s) ? s?.ToString()?.Trim() : null, "Draft", StringComparison.OrdinalIgnoreCase);
+            !string.Equals(row.TryGetValue("Status", out var s) ? s?.ToString()?.Trim() : null, "Draft", StringComparison.OrdinalIgnoreCase)
+            // waiting for the sales manager (or sent back to the executive): not sent to the customer (QAPR_01 column; absent before the script)
+            && !QuotationApprovalRules.IsHeldBack(row.TryGetValue("ApprovalStatus", out var a) ? a?.ToString() : null);
 
         /// <summary>
         /// A customer's quotations, newest first. <paramref name="limit"/> null or &lt; 1 = all of them (the old behaviour);
@@ -793,6 +844,78 @@ namespace WorkNest.Application.Services
                 });
             }
             return (list, total);
+        }
+
+        // ---- manager approval: discount edit and cap (same cap logic as create) ----
+
+        private async Task<QuotationDiscountCap.Limits?> CapLimitsAsync(QuotationResponse q)
+        {
+            int? spaceLocationId = await _db.GetSpaceLocationIdAsync(q.SpaceId);
+            var offeringTypes = (await _db.GetOfferingTypesAsync()).ToList();
+            var cap = OfferingTypeLookup.CapOf(OfferingTypeLookup.Find(offeringTypes, q.OfferingTypeId, q.OfferingType, spaceLocationId));
+            if (cap == null) return null;
+            var cfg = await _db.GetSpaceConfigPriceAsync(q.SpaceId);
+            decimal standardMonthly = SpaceConfigPricing.Money(cfg, "PricePerMonth");
+            string kind = q.SpaceTypeName ?? "";
+            bool meeting = kind.Contains("meeting", StringComparison.OrdinalIgnoreCase) || kind.Contains("conference", StringComparison.OrdinalIgnoreCase);
+            int capacity = q.Capacity is > 0 ? q.Capacity.Value : 1;
+            decimal perSeat = q.PerSeatBasePrice is > 0 ? q.PerSeatBasePrice.Value : standardMonthly;
+            decimal monthlyBase = q.MonthlyBasePrice is > 0 ? q.MonthlyBasePrice.Value : perSeat * capacity;
+            return QuotationDiscountCap.Compute(cap.Value, meeting, standardMonthly, perSeat, capacity, monthlyBase);
+        }
+
+        public async Task<decimal?> GetDiscountCapPercentAsync(int quotationId)
+        {
+            var q = await GetQuotationByIdAsync(quotationId);
+            if (q == null) return null;
+            return (await CapLimitsAsync(q))?.MaxPercent;
+        }
+
+        public async Task<(string From, string To, bool Changed)> ApplyDiscountEditAsync(int quotationId, string discountType, decimal discountValue, int? byUserId)
+        {
+            if (_approvals == null || !await ApprovalSetUpAsync()) throw new QuotationApprovalNotSetUpException();
+            var q = await GetQuotationByIdAsync(quotationId) ?? throw new QuotationApprovalNotFoundException();
+            var header = await _db.GetQuotationByIdAsync(quotationId) ?? throw new QuotationApprovalNotFoundException();
+            var (curType, curValue) = QuotationApprovalRules.ManualDiscountOf(header);
+            string type = QuotationApprovalRules.NormalizeType(discountType);
+            string from = QuotationApprovalRules.DiscountLabel(curType, curValue);
+            string to = QuotationApprovalRules.DiscountLabel(type, discountValue);
+            if (discountValue < 0m) throw new QuotationApprovalRuleException("The discount cannot be negative.");
+            if (type == curType && discountValue == curValue) return (from, to, false);
+
+            var limits = await CapLimitsAsync(q) ?? throw new QuotationApprovalRuleException(OfferingTypeLookup.NotSetUpMessage);
+            if (type == "Percentage" && discountValue > limits.MaxPercent)
+                throw new QuotationApprovalRuleException($"The discount can be at most {limits.MaxPercent.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}% for this offering type.");
+            if (type == "Amount" && discountValue > limits.MaxFixed)
+                throw new QuotationApprovalRuleException($"The discount can be at most PKR {limits.MaxFixed.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} for this offering type.");
+
+            int capacity = q.Capacity is > 0 ? q.Capacity.Value : 1;
+            decimal monthlyBase = q.MonthlyBasePrice is > 0 ? q.MonthlyBasePrice.Value : (q.PerSeatBasePrice ?? 0m) * capacity;
+            decimal subtotal = q.SubtotalAmount;
+            decimal discountAmount = type == "Amount" ? Math.Min(discountValue, subtotal) : Math.Round(subtotal * (discountValue / 100m), 2);
+            decimal total = Math.Max(0m, subtotal - discountAmount);
+            decimal pct = type == "Amount" ? 0m : discountValue;
+            decimal deposit = SecurityDepositRules.Amount(q.SecurityDepositMonths, monthlyBase,
+                SecurityDepositRules.DiscountFraction(type, discountValue, monthlyBase));
+
+            // The offer snapshot is kept: the offer itself stays as it was, only the manual part and the final figures are worked out again.
+            OfferSnapshot? snapshot = null;
+            if (q.OfferId is > 0)
+            {
+                var b = OfferPricing.Breakdown(q.OfferDiscountType, q.OfferDiscountValue ?? 0m, q.OfferApplyToDeposit ?? false, monthlyBase, capacity,
+                    OfferPricing.DefaultPerSeatSupportRate, type, discountValue, q.SecurityDepositMonths, deposit);
+                snapshot = new OfferSnapshot
+                {
+                    OfferId = q.OfferId, OfferName = q.OfferName, OfferDiscountType = q.OfferDiscountType, OfferDiscountValue = q.OfferDiscountValue,
+                    OfferApplyTo = q.OfferApplyTo, OfferApplyToDeposit = q.OfferApplyToDeposit,
+                    OfferDiscountAmount = b.OfferDiscountAmount, ManualDiscountAmount = b.ManualDiscountAmount,
+                    FinalMonthlyRent = b.FinalMonthlyRent, FinalSecurityDeposit = b.FinalSecurityDeposit
+                };
+                deposit = b.FinalSecurityDeposit;
+            }
+
+            await _approvals.UpdateDiscountAsync(new QuotationDiscountUpdate(quotationId, type, pct, discountAmount, total, deposit, byUserId, snapshot));
+            return (from, to, true);
         }
 
         public async Task SendQuotationAsync(int quotationId, int? userId)

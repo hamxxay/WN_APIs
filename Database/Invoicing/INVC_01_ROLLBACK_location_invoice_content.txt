@@ -1,0 +1,41 @@
+-- ============================================================================================
+-- INVC_01_ROLLBACK: removes everything INVC_01_location_invoice_content added: the trigger, WN_Invoices.InvoiceContentVersionId,
+-- WN_InvoiceContentVersions and WN_InvoiceContentSettings. No invoice, amount or other column is touched.
+-- After it the invoice PDFs print the built-in wording again (the API falls back to it when the tables are missing) and the admin
+-- endpoints answer 503. Edited versions (version 2 and up, drafts) and the stamps on invoices are LOST: run the SELECT at the end first
+-- and save its result if you may want them back. Safe to run again.
+-- Set @AllowDataLoss to 1 to run it when edited versions (VersionNo > 1) or drafts exist; otherwise it stops and changes nothing.
+-- ============================================================================================
+SET XACT_ABORT ON;
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+DECLARE @AllowDataLoss BIT = 0;
+BEGIN TRY
+    DECLARE @Edited INT = 0, @Stamped INT = 0;
+    IF OBJECT_ID(N'dbo.WN_InvoiceContentVersions', N'U') IS NOT NULL
+        EXEC sys.sp_executesql N'SELECT @n = COUNT(*) FROM dbo.WN_InvoiceContentVersions WHERE VersionNo > 1 OR Status = ''Draft'';', N'@n INT OUTPUT', @n = @Edited OUTPUT;
+    IF COL_LENGTH('dbo.WN_Invoices', 'InvoiceContentVersionId') IS NOT NULL
+        EXEC sys.sp_executesql N'SELECT @n = COUNT(*) FROM dbo.WN_Invoices WHERE InvoiceContentVersionId IS NOT NULL;', N'@n INT OUTPUT', @n = @Stamped OUTPUT;
+    SELECT @Edited AS EditedVersionsAndDrafts, @Stamped AS InvoicesStamped;
+    IF @Edited > 0 AND @AllowDataLoss = 0
+        THROW 50081, N'Edited invoice content versions or drafts exist. Nothing was changed. Save them (SELECT * FROM dbo.WN_InvoiceContentVersions), then set @AllowDataLoss = 1.', 1;
+
+    BEGIN TRANSACTION;
+    IF COL_LENGTH('dbo.WN_Invoices', 'InvoiceContentVersionId') IS NOT NULL
+    BEGIN
+        IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_WN_Invoices_InvoiceContentVersion' AND parent_object_id = OBJECT_ID(N'dbo.WN_Invoices'))
+            EXEC(N'ALTER TABLE dbo.WN_Invoices DROP CONSTRAINT FK_WN_Invoices_InvoiceContentVersion;');
+        EXEC(N'ALTER TABLE dbo.WN_Invoices DROP COLUMN InvoiceContentVersionId;');
+    END
+    IF OBJECT_ID(N'dbo.TR_WN_InvoiceContentVersions_Immutable', N'TR') IS NOT NULL
+        EXEC(N'DROP TRIGGER dbo.TR_WN_InvoiceContentVersions_Immutable;');
+    IF OBJECT_ID(N'dbo.WN_InvoiceContentVersions', N'U') IS NOT NULL EXEC(N'DROP TABLE dbo.WN_InvoiceContentVersions;');
+    IF OBJECT_ID(N'dbo.WN_InvoiceContentSettings', N'U') IS NOT NULL EXEC(N'DROP TABLE dbo.WN_InvoiceContentSettings;');
+    COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
+
+SELECT CASE WHEN OBJECT_ID(N'dbo.WN_InvoiceContentVersions', N'U') IS NULL AND COL_LENGTH('dbo.WN_Invoices', 'InvoiceContentVersionId') IS NULL THEN 1 ELSE 0 END AS Rolled_Back;

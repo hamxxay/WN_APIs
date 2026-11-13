@@ -58,6 +58,7 @@ namespace WorkNest.Application.Services
         public const string NetworkAlerts = "NetworkAlerts";
         public const string ApprovalEmails = "ApprovalEmails";
         public const string TourRequestEmails = "TourRequestEmails";
+        public const string QuotationApprovalReminders = "QuotationApprovalReminders";
 
         /// <summary>The services in the order the CMS lists them.</summary>
         public static readonly IReadOnlyList<BackgroundServiceInfo> All = new[]
@@ -119,6 +120,10 @@ namespace WorkNest.Application.Services
             new BackgroundServiceInfo(TourRequestEmails, "Tour Request Emails",
                 "Every \"New Tour Request\" e-mail to sales, separate from Email Sending: they still go out while Email Sending is off. Off: none are sent or kept; the request itself still appears under Tour Inquiries.",
                 null, true, _ => true),
+            // QuotationApprovalReminderService; seed row in Database/Quotation/QAPR_01_quotation_approval (on).
+            new BackgroundServiceInfo(QuotationApprovalReminders, "Quotation Approval Reminders",
+                "Every hour from 09:00 to 20:00 Pakistan time: reminds a sales manager, in the app and by e-mail, of each quotation discount that has waited 24 hours for their approval (then once a day). Never approves or sends anything.",
+                "QuotationApprovalReminders:Enabled", true, c => NotFalse(c["QuotationApprovalReminders:Enabled"])),
         };
 
         /// <summary>The service with this name (case ignored); null when there is none.</summary>

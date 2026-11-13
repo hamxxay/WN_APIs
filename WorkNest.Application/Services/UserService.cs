@@ -36,7 +36,8 @@ namespace WorkNest.Application.Services
             var (rows, total) = await _db.GetUsersAsync(page, limit, search, locationId);
             var rowList = rows.ToList();
             var managerMap = await _db.GetUserManagerMapAsync(rowList
-                .Where(r => r.TryGetValue("Id", out var v) && v is not null).Select(r => Convert.ToInt32(r["Id"])));
+                .Where(r => r.TryGetValue("Id", out var v) && v is not null).Select(r => Convert.ToInt32(r["Id"])))
+                ?? new Dictionary<int, (int? ManagerId, string? ManagerName)>(); // no manager link (USR_01 not run): none
             var extra = await _db.GetUserLocationsMapAsync(rowList
                 .Where(r => r.TryGetValue("Id", out var v) && v is not null).Select(r => Convert.ToInt32(r["Id"])));
             // Role names shown to people come from dbo.WN_Roles.DisplayName (cached), never from code.
@@ -114,9 +115,12 @@ namespace WorkNest.Application.Services
 
         private async Task<int?> GetManagerIdAsync(int userId)
         {
-            var managerMap = await _db.GetUserManagerMapAsync(new[] { userId });
+            var managerMap = await _db.GetUserManagerMapAsync(new[] { userId }) ?? new Dictionary<int, (int? ManagerId, string? ManagerName)>();
             return managerMap.TryGetValue(userId, out var info) ? info.ManagerId : null;
         }
+
+        /// <summary>Quotation discounts of a sales executive go to their sales manager (QAPR_01), so every executive must have one.</summary>
+        public const string ManagerRequiredMessage = "A sales executive needs a sales manager. Choose one.";
 
         private async Task<string?> ValidateManagerAssignmentAsync(int roleId, int? managerId, IReadOnlyCollection<int> userLocations)
         {
@@ -154,7 +158,7 @@ namespace WorkNest.Application.Services
         {
             var row = await _db.GetUserByIdAsync(id);
             if (row is null) return ApiResponse.Fail("User not found");
-            var managerMap = await _db.GetUserManagerMapAsync(new[] { id });
+            var managerMap = await _db.GetUserManagerMapAsync(new[] { id }) ?? new Dictionary<int, (int? ManagerId, string? ManagerName)>();
             managerMap.TryGetValue(id, out var managerInfo);
             var extra = await _db.GetUserLocationsMapAsync(new[] { id });
             var locations = AllLocations(row, extra);
@@ -210,6 +214,8 @@ namespace WorkNest.Application.Services
             var targetLocationIds = Roles.IsLocationBoundRole(roleId)
                 ? LocationSet(finalLocationId, request.LocationIds)
                 : new List<int>();
+            if (roleId == Roles.SalesExecutiveId && request.ManagerId is not > 0)
+                return ApiResponse.Fail(ManagerRequiredMessage);
             var managerError = await ValidateManagerAssignmentAsync(roleId, request.ManagerId, targetLocationIds);
             if (managerError != null) return ApiResponse.Fail(managerError);
 
@@ -422,6 +428,9 @@ namespace WorkNest.Application.Services
                 if (request.ManagerIdSpecified && targetManagerId != currentManagerId) return ApiResponse.Fail(managerError);
                 targetManagerId = null;
             }
+            // Every sales executive keeps a valid sales manager (also when only their phone is edited).
+            if (effectiveRoleId == Roles.SalesExecutiveId && targetManagerId is not > 0)
+                return ApiResponse.Fail(managerError ?? ManagerRequiredMessage);
             var managerIdSpecified = request.ManagerIdSpecified
                 || (currentManagerId.HasValue && targetManagerId != currentManagerId)
                 || effectiveRoleId != Roles.SalesExecutiveId;
@@ -513,10 +522,18 @@ namespace WorkNest.Application.Services
             else targetLocationIds = currentLocations;
 
             var currentManagerId = await GetManagerIdAsync(id);
-            int? targetManagerId = roleId == Roles.SalesExecutiveId && currentRoleId == Roles.SalesExecutiveId ? currentManagerId : null;
+            int? targetManagerId = request.ManagerIdSpecified
+                ? request.ManagerId
+                : roleId == Roles.SalesExecutiveId && currentRoleId == Roles.SalesExecutiveId ? currentManagerId : null;
             var managerError = await ValidateManagerAssignmentAsync(roleId, targetManagerId, targetLocationIds);
-            if (managerError != null) targetManagerId = null;
-            var managerIdSpecified = roleId != Roles.SalesExecutiveId || targetManagerId != currentManagerId;
+            if (managerError != null)
+            {
+                if (request.ManagerIdSpecified && targetManagerId != currentManagerId) return ApiResponse.Fail(managerError);
+                targetManagerId = null;
+            }
+            if (roleId == Roles.SalesExecutiveId && targetManagerId is not > 0)
+                return ApiResponse.Fail(managerError ?? ManagerRequiredMessage);
+            var managerIdSpecified = request.ManagerIdSpecified || roleId != Roles.SalesExecutiveId || targetManagerId != currentManagerId;
             await _db.SetUserRoleAndLocationAsync(id, roleId, finalLocationId, targetManagerId, managerIdSpecified,
                 targetLocationIds, true, true);
             string? warning = await SaveLocationsAsync(id, roleId, finalLocationId, targetLocationIds, null);
