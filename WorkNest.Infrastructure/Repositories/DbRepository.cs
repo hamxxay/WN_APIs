@@ -736,6 +736,14 @@ SELECT SCOPE_IDENTITY() AS NewId;";
             (source.TryGetValue("SecurityDeposit", out var sd) && sd is not null && sd is not DBNull ? sd : 0m,
              source.TryGetValue("SecurityDepositMonths", out var sm) && sm is not null && sm is not DBNull ? sm : 0);
 
+        /// <summary>@LocationIds of the user procedures (USR_02): NULL for no locations. An empty list must not be sent as ""
+        /// (STRING_SPLIT gives one blank value, which the procedures refuse as error 51010 / 51017).</summary>
+        public static object LocationIdsCsv(IEnumerable<int>? locationIds)
+        {
+            var ids = locationIds?.Where(id => id > 0).Distinct().ToList();
+            return ids is null || ids.Count == 0 ? DBNull.Value : string.Join(",", ids);
+        }
+
         public async Task<IDictionary<string, object?>> CreateQuotationNewVersionAsync(int quotationId, int? createdById)
         {
             await using var c = await Open();
@@ -1077,7 +1085,7 @@ WHERE q.Id = @Id";
             cmd.Parameters.AddWithValue("@LocationId", (object?)locationId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ManagerId", (object?)managerId ?? DBNull.Value);
             cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value =
-                locationIds is null ? DBNull.Value : string.Join(",", locationIds.Distinct());
+                LocationIdsCsv(locationIds);
             await using var r = await cmd.ExecuteReaderAsync();
             if (await r.ReadAsync())
             {
@@ -1125,7 +1133,7 @@ WHERE q.Id = @Id";
                 cmd.Parameters.AddWithValue("@ManagerId", (object?)managerId ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@ManagerIdSpecified", managerIdSpecified);
                 cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value =
-                    locationIds is null ? DBNull.Value : string.Join(",", locationIds.Distinct());
+                    LocationIdsCsv(locationIds);
                 cmd.Parameters.AddWithValue("@LocationIdsSpecified", locationIdsSpecified);
                 cmd.Parameters.AddWithValue("@LocationIdSpecified", locationIdSpecified);
                 await cmd.ExecuteNonQueryAsync();
@@ -1211,7 +1219,7 @@ WHERE q.Id = @Id";
             cmd.Parameters.AddWithValue("@ManagerId", (object?)managerId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@ManagerIdSpecified", managerIdSpecified);
             cmd.Parameters.Add("@LocationIds", SqlDbType.NVarChar, -1).Value =
-                locationIds is null ? DBNull.Value : string.Join(",", locationIds.Distinct());
+                LocationIdsCsv(locationIds);
             cmd.Parameters.AddWithValue("@LocationIdsSpecified", locationIdsSpecified);
             await cmd.ExecuteNonQueryAsync();
         }
