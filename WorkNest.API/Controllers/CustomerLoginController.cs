@@ -12,7 +12,7 @@ namespace WorkNest.API.Controllers
     /// The password is in the response (shown once to staff) and in the customer's email, never in a log.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin")]
+    [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist")]   // the bulk action below stays super admin only
     public class CustomerLoginController : ControllerBase
     {
         private readonly ICustomerLoginService _logins;
@@ -24,6 +24,7 @@ namespace WorkNest.API.Controllers
         /// locations (location-bound admins, RecordScope) or an unknown id.
         /// </summary>
         [HttpPost("api/admin/customers/{customerId:int}/temp-password")]
+        [ReceptionistAllowed]   // front desk: a customer at the desk asks for a new password (own locations only, as below)
         [RecordScope(RecordKind.Customer, "customerId")]
         public async Task<IActionResult> Issue(int customerId)
         {
