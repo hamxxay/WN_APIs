@@ -80,7 +80,7 @@ namespace WorkNest.API.Controllers
         /// <summary>Runs a speed test for the location (where its internet line is on the monitored gateway). { started, message }.</summary>
         [HttpPost("api/reception/network/speedtest")]
         public Task<IActionResult> Speedtest([FromBody] ReceptionSpeedtestRequest? request) =>
-            Run(request?.LocationId, scope => _reception.StartSpeedtestAsync(request?.LocationId ?? 0, scope.Locations, HttpContext.RequestAborted));
+            Run(request?.LocationId, scope => _reception.StartSpeedtestAsync(request?.LocationId ?? 0, request?.Wan, scope.Locations, HttpContext.RequestAborted));
 
         // ---- plumbing -------------------------------------------------------------------------------------------
 

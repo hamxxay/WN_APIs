@@ -247,6 +247,7 @@ namespace WorkNest.Application.Services
             var names = await LocationNamesAsync();
             var ids = locations ?? names.Keys.OrderBy(i => i).ToList();
             List<SpeedtestHistoryItem>? history = null;
+            Dictionary<string, string>? ifnames = null;
             var list = new List<ReceptionNetworkDto>();
             foreach (var id in ids)
             {
@@ -255,28 +256,49 @@ namespace WorkNest.Application.Services
                 var lines = dash.Internet?.Lines ?? new List<NetworkWanDto>();
                 var supported = dash.Available && lines.Any(l => l.Live);
                 var tests = new List<ReceptionSpeedTestDto>();
+                var lineDtos = new List<ReceptionNetworkLineDto>();
                 if (supported)
                 {
                     history ??= await SafeHistoryAsync();
-                    tests = history.Select(h => new ReceptionSpeedTestDto(IsoMs(h.AtMs), h.DownMbps, h.UpMbps, h.PingMs)).ToList();
+                    ifnames ??= await SafeWanIfnamesAsync();
+                    tests = history.Take(10).Select(ToTest).ToList();
+                    foreach (var l in lines.Where(l => l.Live).OrderBy(l => l.Label, StringComparer.OrdinalIgnoreCase))
+                    {
+                        List<ReceptionSpeedTestDto> own;
+                        if (ifnames.TryGetValue(l.Label.ToUpperInvariant(), out var ifn) && ifn != "")
+                            own = history.Where(h => string.Equals(h.Interface, ifn, StringComparison.OrdinalIgnoreCase)).Take(10).Select(ToTest).ToList();
+                        else own = new List<ReceptionSpeedTestDto>(); // the line's port is unknown: never show another line's tests
+                        var lastLine = l.Speedtest != null ? new ReceptionSpeedTestDto(l.Speedtest.At, l.Speedtest.DownMbps, l.Speedtest.UpMbps, l.Speedtest.PingMs)
+                            : own.FirstOrDefault();
+                        lineDtos.Add(new ReceptionNetworkLineDto(l.Label, l.Isp, l.Role, l.Up, l.Live, l.UptimePct, lastLine, own, l.Live && l.Up));
+                    }
                 }
                 var latestLine = lines.Where(l => l.Speedtest != null).OrderByDescending(l => l.Speedtest!.At).FirstOrDefault()?.Speedtest;
                 var last = latestLine != null ? new ReceptionSpeedTestDto(latestLine.At, latestLine.DownMbps, latestLine.UpMbps, latestLine.PingMs)
                     : tests.FirstOrDefault();
                 var online = dash.Available && ((dash.Internet is { LinesTotal: > 0 } net) ? net.LinesUp > 0 : (dash.Devices?.Online ?? 0) > 0);
                 var clients = (dash.Clients?.Total ?? 0) + (dash.Gwn?.Clients?.Total ?? 0);
-                list.Add(new ReceptionNetworkDto(id, name, online, dash.Internet?.UptimePct, null, clients, last, tests, supported));
+                list.Add(new ReceptionNetworkDto(id, name, online, dash.Internet?.UptimePct, null, clients, last, tests, supported, lineDtos));
             }
             return Ok(list);
         }
 
+        private static ReceptionSpeedTestDto ToTest(SpeedtestHistoryItem h) => new(IsoMs(h.AtMs), h.DownMbps, h.UpMbps, h.PingMs);
+
         public async Task<MeetingRoomOutcome> StartSpeedtestAsync(int locationId, IReadOnlyList<int>? locations, CancellationToken ct = default)
+            => await StartSpeedtestAsync(locationId, null, locations, ct);
+
+        public async Task<MeetingRoomOutcome> StartSpeedtestAsync(int locationId, string? wan, IReadOnlyList<int>? locations, CancellationToken ct = default)
         {
             if (locationId <= 0) return Bad("Choose the location.");
             if (locations != null && !locations.Contains(locationId)) return new MeetingRoomOutcome { StatusCode = 403, Message = NotYourLocation };
             var dash = await _network.GetAsync(new NetworkScope(locations, locationId), ct);
             var live = (dash.Internet?.Lines ?? new List<NetworkWanDto>()).Where(l => l.Live && l.Up).ToList();
-            var line = live.FirstOrDefault(l => string.Equals(l.Role, "Primary", StringComparison.OrdinalIgnoreCase)) ?? live.FirstOrDefault();
+            NetworkWanDto? line;
+            if (!string.IsNullOrWhiteSpace(wan))
+                line = live.FirstOrDefault(l => string.Equals(l.Label, wan.Trim(), StringComparison.OrdinalIgnoreCase)); // only a line of THIS location
+            else
+                line = live.FirstOrDefault(l => string.Equals(l.Role, "Primary", StringComparison.OrdinalIgnoreCase)) ?? live.FirstOrDefault();
             if (!dash.Available || line == null)
                 return Ok(new { started = false, message = "A speed test cannot be run for this location (its internet line is not on the monitored gateway, or it is down)." },
                     "A speed test is not available here.");
@@ -301,8 +323,27 @@ namespace WorkNest.Application.Services
 
         private async Task<List<SpeedtestHistoryItem>> SafeHistoryAsync()
         {
-            try { return await _unifi.GetSpeedtestHistoryAsync(10); }
+            try { return await _unifi.GetSpeedtestHistoryAsync(50); } // the archive mixes every line: enough rows for 10 per line
             catch { return new List<SpeedtestHistoryItem>(); } // history is a nicety: the status still shows
+        }
+
+        /// <summary>WAN label (WAN1) -> the gateway interface name (eth8 / ppp0) its tests are recorded under.</summary>
+        private async Task<Dictionary<string, string>> SafeWanIfnamesAsync()
+        {
+            var map = new Dictionary<string, string>();
+            try
+            {
+                var wans = await _unifi.GetWansAsync();
+                if (wans?["wans"] is System.Text.Json.Nodes.JsonArray arr)
+                    foreach (var w in arr)
+                    {
+                        var key = w?["key"]?.GetValue<string>();
+                        var ifn = w?["ifname"]?.GetValue<string>();
+                        if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(ifn)) map[key.ToUpperInvariant()] = ifn;
+                    }
+            }
+            catch { /* no per-line history then */ }
+            return map;
         }
 
         private async Task<Dictionary<int, string>> LocationNamesAsync()

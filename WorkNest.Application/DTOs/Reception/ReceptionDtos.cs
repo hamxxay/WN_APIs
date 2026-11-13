@@ -36,6 +36,8 @@ namespace WorkNest.Application.DTOs.Reception
     public class ReceptionSpeedtestRequest
     {
         public int LocationId { get; set; }
+        /// <summary>Optional line label (WAN1 / WAN2); omitted = the Primary line.</summary>
+        public string? Wan { get; set; }
     }
 
     // ---- Today ----
@@ -69,7 +71,12 @@ namespace WorkNest.Application.DTOs.Reception
     public sealed record ReceptionSpeedTestDto(string? At, double? DownloadMbps, double? UploadMbps, double? PingMs);
 
     public sealed record ReceptionNetworkDto(int LocationId, string? LocationName, bool Online, double? UptimePercent24h, string? LastDownAt,
-        int ClientsNow, ReceptionSpeedTestDto? LastSpeedTest, List<ReceptionSpeedTestDto> SpeedTests, bool SpeedTestSupported);
+        int ClientsNow, ReceptionSpeedTestDto? LastSpeedTest, List<ReceptionSpeedTestDto> SpeedTests, bool SpeedTestSupported,
+        List<ReceptionNetworkLineDto>? Lines = null);
+
+    /// <summary>One internet line (WAN) of a location with its own speed-test history.</summary>
+    public sealed record ReceptionNetworkLineDto(string Label, string? Isp, string? Role, bool Up, bool Live, double? UptimePercent24h,
+        ReceptionSpeedTestDto? LastSpeedTest, List<ReceptionSpeedTestDto> SpeedTests, bool CanTest);
 
     // ---- Repository rows (dbo.WN_Contacts / WN_Bookings / WN_Invoices, read by dbo-less inline SQL) ----
 

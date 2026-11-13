@@ -19,6 +19,7 @@ namespace WorkNest.Application.Interfaces
         Task<MeetingRoomOutcome> CheckOutAsync(int bookingId, IReadOnlyList<int>? locations, int staffUserId);
         Task<MeetingRoomOutcome> GetNetworkAsync(IReadOnlyList<int>? locations, CancellationToken ct = default);
         Task<MeetingRoomOutcome> StartSpeedtestAsync(int locationId, IReadOnlyList<int>? locations, CancellationToken ct = default);
+        Task<MeetingRoomOutcome> StartSpeedtestAsync(int locationId, string? wan, IReadOnlyList<int>? locations, CancellationToken ct = default);
     }
 
     /// <summary>ROLE_01_receptionist has not been run (a column the call needs is missing): answered 503.</summary>
