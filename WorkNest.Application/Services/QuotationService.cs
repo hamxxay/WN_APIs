@@ -95,7 +95,14 @@ namespace WorkNest.Application.Services
             return (hourly, daily, monthly, secDeposit, category, spaceName, spaceCode, capacity, maxDiscountPercent, spaceRow["SpaceTypeName"]?.ToString() ?? "");
         }
 
-        public async Task<QuotationResponse> CreateQuotationAsync(QuotationRequest request, int? createdById)
+        public Task<QuotationResponse> CreateQuotationAsync(QuotationRequest request, int? createdById)
+            => CreateCoreAsync(request, createdById, null);
+
+        /// <summary>A new version of an existing quotation built from the staff form (same number, next version, Draft).</summary>
+        private sealed record VersionTarget(int SourceId, string QuotationNumber, int Version, int SourceSpaceId, decimal? SourcePerSeat,
+            OfferSnapshot? SourceOffer, string? FromDiscount);
+
+        private async Task<QuotationResponse> CreateCoreAsync(QuotationRequest request, int? createdById, VersionTarget? version)
         {
             // Security Deposit (Months): 0, 1, 2 or 3 only (400 from the controller); checked before anything is read.
             SecurityDepositRules.EnsureValidMonths(request.SecurityDepositMonths);
@@ -182,7 +189,26 @@ namespace WorkNest.Application.Services
             // deposit (with the manual mirror above) is reduced too. Staff quotations for private offices / shared spaces only. The
             // snapshot columns are written by InsertQuotationAsync; the deposit stored and printed is the FINAL deposit.
             OfferSnapshot? offerSnapshot = null;
-            if (spaceDetails.Category != "MeetingRoom" && _offers != null)
+            if (version != null)
+            {
+                // A new version keeps the offer of the version it was made from, and only while the space and the base price are
+                // unchanged (rule 9b); it never picks up an offer running today.
+                var src = version.SourceOffer;
+                bool samePlace = request.SpaceId == version.SourceSpaceId
+                    && (version.SourcePerSeat == null || Math.Abs(perSeatBasePrice - version.SourcePerSeat.Value) <= 0.005m);
+                if (src != null && src.HasOffer && samePlace && spaceDetails.Category != "MeetingRoom")
+                {
+                    var b = OfferPricing.Breakdown(src.OfferDiscountType, src.OfferDiscountValue ?? 0m, src.OfferApplyToDeposit ?? false, monthlyBasePrice, capacity,
+                        OfferPricing.DefaultPerSeatSupportRate, discountType, discountValue, securityDepositMonths, securityDeposit);
+                    offerSnapshot = OfferPricing.ToSnapshot(new OfferDto
+                    {
+                        OfferId = src.OfferId!.Value, Name = src.OfferName ?? "", DiscountType = src.OfferDiscountType ?? "PERCENT",
+                        DiscountValue = src.OfferDiscountValue ?? 0m, ApplyTo = src.OfferApplyTo ?? "FIRST_PERIOD", ApplyToDeposit = src.OfferApplyToDeposit ?? false
+                    }, b);
+                    securityDeposit = b.FinalSecurityDeposit;
+                }
+            }
+            else if (spaceDetails.Category != "MeetingRoom" && _offers != null)
             {
                 var running = await _offers.GetRunningAsync(spaceLocationId, _clock.Now);
                 if (running != null)
@@ -312,7 +338,7 @@ namespace WorkNest.Application.Services
             // Generate unique Quotation Number (e.g. WN-QT-YYYYMMDD-XXXXXX)
             string todayStr = _clock.Today.ToString("yyyyMMdd");
             string randomStr = Guid.NewGuid().ToString().Substring(0, 6).ToUpper();
-            string quotationNumber = $"WN-QT-{todayStr}-{randomStr}";
+            string quotationNumber = version?.QuotationNumber ?? $"WN-QT-{todayStr}-{randomStr}";
 
             // Calculate discount and total amounts against office rent subtotal
             decimal discountAmount = (discountType == "Amount" || discountType == "Fixed")
@@ -361,6 +387,13 @@ namespace WorkNest.Application.Services
             // Insert quotation details
             await _db.InsertQuotationDetailsAsync(quotationId, details, createdById);
 
+            if (version != null)
+            {
+                await _db.MarkQuotationAsNewVersionAsync(quotationId, version.Version);
+                await _db.AddQuotationActivityAsync(quotationId, version.Version, "VersionCreated",
+                    $"Version {version.Version} created.", createdById);
+            }
+
             // Approval: the reason and the first history line. Never fails the quotation that is already saved.
             if (approvalSetUp && _approvals != null)
             {
@@ -372,7 +405,8 @@ namespace WorkNest.Application.Services
                         QuotationId = quotationId,
                         ByUserId = createdById,
                         ByName = await UserNameAsync(createdById),
-                        Action = QuotationApprovalRules.ActionCreated,
+                        Action = version != null ? QuotationApprovalRules.ActionEdited : QuotationApprovalRules.ActionCreated,
+                        FromDiscount = version?.FromDiscount,
                         ToDiscount = discountValue > 0m ? QuotationApprovalRules.DiscountLabel(discountType, discountValue) : null,
                         Note = discountValue > 0m ? discountReason : null
                     });
@@ -778,8 +812,27 @@ namespace WorkNest.Application.Services
                 throw new InvalidOperationException(QuotationValidity.ExpiredMessage(validUntil));
         }
 
-        public async Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById)
+        public async Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById, QuotationRequest? request)
         {
+            if (request != null && request.SpaceId > 0)
+            {
+                // Built from the staff form: the edited office, price, discount and reason are what the new version holds.
+                var source = await _db.GetQuotationByIdAsync(quotationId) ?? throw new InvalidOperationException("Source quotation not found.");
+                request.CustomerId = Convert.ToInt32(source["CustomerId"]);   // a version stays with the quotation's customer
+                OfferSnapshot? srcOffer = null;
+                if (_offers != null)
+                {
+                    try { if ((await _offers.GetSnapshotsAsync(OfferEntity.Quotation, new[] { quotationId })).TryGetValue(quotationId, out var s)) srcOffer = s; }
+                    catch (Exception) { srcOffer = null; }
+                }
+                decimal? srcPerSeat = source.TryGetValue("PerSeatBasePrice", out var ps) && ps != null && ps is not DBNull ? Convert.ToDecimal(ps) : null;
+                var (srcType, srcValue) = QuotationApprovalRules.ManualDiscountOf(source);
+                string? from = srcValue > 0m ? QuotationApprovalRules.DiscountLabel(srcType, srcValue) : null;
+                int next = await _db.GetNextQuotationVersionAsync(quotationId);
+                return await CreateCoreAsync(request, createdById, new VersionTarget(quotationId, source["QuotationNumber"]?.ToString() ?? "",
+                    next, Convert.ToInt32(source["SpaceId"]), srcPerSeat, srcOffer, from));
+            }
+
             var resDict = await _db.CreateQuotationNewVersionAsync(quotationId, createdById);
             int newQuotationId = Convert.ToInt32(resDict["NewQuotationId"]);
             var res = await GetQuotationByIdAsync(newQuotationId);

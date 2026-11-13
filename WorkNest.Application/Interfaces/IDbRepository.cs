@@ -163,6 +163,10 @@ namespace WorkNest.Application.Interfaces
         Task<IDictionary<string, object?>> AcceptQuotationAsync(int quotationId, int version, int customerId, string? note, int? userId);
         Task<IDictionary<string, object?>> DeclineQuotationAsync(int quotationId, int version, int customerId, string note, int? userId);
         Task<IDictionary<string, object?>> CreateQuotationNewVersionAsync(int quotationId, int? createdById);
+        /// <summary>The next version number of the quotation number the given quotation belongs to.</summary>
+        Task<int> GetNextQuotationVersionAsync(int quotationId);
+        /// <summary>A quotation just inserted from the staff form becomes version N of its number, as a Draft.</summary>
+        Task MarkQuotationAsNewVersionAsync(int quotationId, int version);
         Task<IEnumerable<IDictionary<string, object?>>> GetQuotationVersionsAsync(int quotationId);
         Task<IEnumerable<IDictionary<string, object?>>> GetQuotationActivitiesAsync(int? quotationId, int limit, IReadOnlyCollection<int>? locationIds = null);
         Task SendQuotationStatusAsync(int quotationId, string status, int? userId);

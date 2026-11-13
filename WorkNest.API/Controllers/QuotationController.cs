@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using WorkNest.Application.DTOs.Lists;
 using WorkNest.Application.DTOs.Quotation;
 using WorkNest.Application.Helpers;
@@ -380,14 +381,18 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/quotation/{id:int}/versions")]
         [HttpPost("api/quotations/{id:int}/create-version")]
         [HttpPost("api/quotations/{id:int}/versions")]
-        public async Task<IActionResult> CreateNewVersion(int id, [FromServices] IQuotationApprovalService approvals)
+        public async Task<IActionResult> CreateNewVersion(int id, [FromServices] IQuotationApprovalService approvals,
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] QuotationRequest? request = null)
         {
             int? actorId = await ResolveActorIdAsync();
 
             try
             {
-                var res = await _quotations.CreateNewVersionAsync(id, actorId);
-                await approvals.RecordNewVersionAsync(id, res.Id, actorId);   // keeps the discount reason; history "edited"
+                // With the staff form (CMS "new version" / "edit the discount and send again") the version is built from the form;
+                // without a body it is a copy of the source version as before.
+                bool fromForm = request != null && request.SpaceId > 0;
+                var res = await _quotations.CreateNewVersionAsync(id, actorId, fromForm ? request : null);
+                if (!fromForm) await approvals.RecordNewVersionAsync(id, res.Id, actorId);   // keeps the discount reason; history "edited"
                 return Ok(ApiResponse.Ok(res, "New quotation version created successfully."));
             }
             catch (Exception ex)

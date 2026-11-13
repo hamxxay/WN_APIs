@@ -18,7 +18,8 @@ namespace WorkNest.Application.Interfaces
         Task SendQuotationEmailAsync(int quotationId, string? overrideEmail);
         Task<QuotationResponse> AcceptQuotationAsync(int quotationId, int version, int customerId, string? note, int? userId);
         Task<QuotationResponse> DeclineQuotationAsync(int quotationId, int version, int customerId, string note, int? userId);
-        Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById);
+        /// <summary>request null = a copy of the source version; with the staff form = the new version is built from the form.</summary>
+        Task<QuotationResponse> CreateNewVersionAsync(int quotationId, int? createdById, QuotationRequest? request = null);
         Task<IEnumerable<QuotationResponse>> GetVersionsAsync(int quotationId);
         /// <param name="locationIds">Only quotations of these locations (location-bound staff); null = all.</param>
         Task<IEnumerable<QuotationActivityDto>> GetActivitiesAsync(int? quotationId, int limit, IReadOnlyCollection<int>? locationIds = null);

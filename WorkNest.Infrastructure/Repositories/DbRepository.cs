@@ -717,12 +717,12 @@ VALUES (@QuotationId, @Version, 'Declined', @Note, @UserId, @CustomerId, SYSUTCD
         /// <summary>The copy a new quotation version is saved with (Draft); it keeps the deposit months and amount.</summary>
         public const string QuotationNewVersionInsertSql = @"
 INSERT INTO dbo.WN_Quotations (
-    QuotationNumber, ValidUntil, CustomerId, SpaceId, StartDateTime, EndDateTime,
+    QuotationNumber, QuotationDate, ValidUntil, CustomerId, SpaceId, StartDateTime, EndDateTime,
     SubtotalAmount, DiscountPercentage, DiscountAmount, TotalAmount, Remarks, Status,
     Version, IsActive, CreatedById, DiscountType, SecurityDeposit, SecurityDepositMonths, FloorId, BillingPeriodMonths
 )
 VALUES (
-    @QuotationNumber, @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
+    @QuotationNumber, CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE), @ValidUntil, @CustomerId, @SpaceId, @StartDateTime, @EndDateTime,
     @SubtotalAmount, @DiscountPercentage, @DiscountAmount, @TotalAmount, @Remarks, 'Draft',
     @Version, 1, @CreatedById, @DiscountType, @SecurityDeposit, @SecurityDepositMonths, @FloorId, @BillingPeriodMonths
 );
@@ -734,7 +734,7 @@ SELECT SCOPE_IDENTITY() AS NewId;";
         /// </summary>
         public static (object Amount, object Months) QuotationVersionDeposit(IDictionary<string, object?> source) =>
             (source.TryGetValue("SecurityDeposit", out var sd) && sd is not null && sd is not DBNull ? sd : 0m,
-             source.TryGetValue("SecurityDepositMonths", out var sm) && sm is not null && sm is not DBNull ? sm : DBNull.Value);
+             source.TryGetValue("SecurityDepositMonths", out var sm) && sm is not null && sm is not DBNull ? sm : 0);
 
         public async Task<IDictionary<string, object?>> CreateQuotationNewVersionAsync(int quotationId, int? createdById)
         {
@@ -814,6 +814,29 @@ VALUES (@QuotationId, @FeeType, @Description, @Quantity, @UnitPrice, @Amount, @C
                 { "QuotationNumber", qNo },
                 { "Status", "Draft" }
             };
+        }
+
+        public async Task<int> GetNextQuotationVersionAsync(int quotationId)
+        {
+            await using var c = await Open();
+            const string sql = @"SELECT ISNULL(MAX(v.Version), 0) + 1 FROM dbo.WN_Quotations q
+JOIN dbo.WN_Quotations v ON v.QuotationNumber = q.QuotationNumber AND v.CustomerId = q.CustomerId
+WHERE q.Id = @Id";
+            await using var cmd = new SqlCommand(sql, c);
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = quotationId;
+            var o = await cmd.ExecuteScalarAsync();
+            int next = o == null || o is DBNull ? 0 : Convert.ToInt32(o);
+            if (next < 2) throw new InvalidOperationException("Source quotation not found.");
+            return next;
+        }
+
+        public async Task MarkQuotationAsNewVersionAsync(int quotationId, int version)
+        {
+            await using var c = await Open();
+            await using var cmd = new SqlCommand("UPDATE dbo.WN_Quotations SET Version = @V, Status = 'Draft', IsActive = 1 WHERE Id = @Id", c);
+            cmd.Parameters.Add("@V", SqlDbType.Int).Value = version;
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = quotationId;
+            await cmd.ExecuteNonQueryAsync();
         }
 
         public async Task<IEnumerable<IDictionary<string, object?>>> GetQuotationVersionsAsync(int quotationId)
