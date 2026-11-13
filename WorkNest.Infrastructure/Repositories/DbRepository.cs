@@ -3396,6 +3396,10 @@ WHERE q.Id = @Id";
                     WHEN 3  THEN DATEFROMPARTS(YEAR(@Today), ((MONTH(@Today) - 1) / 3) * 3 + 1, 1)
                     ELSE @MonthStart END END;
                 DECLARE @PEnd DATE = DATEADD(DAY, 1, @ToP);   -- custom range: the day after its last day; NULL = to date
+                -- Invoiced / Paid / still owed of the period count invoices by their rent period, so the period has an END: the
+                -- whole month / quarter / year (an invoice made early for a later month belongs to that month, not to this one).
+                -- They are compared with the WHOLE previous period, as the CEO and Sales dashboards do.
+                DECLARE @PBillEnd DATE = COALESCE(@PEnd, DATEADD(MONTH, @PMonths, @PStart));
                 -- previous period to date (a custom range: the same number of days just before it)
                 DECLARE @PrevMonthStart DATE = CASE WHEN @FromP IS NULL THEN DATEADD(MONTH, -@PMonths, @PStart)
                                                     ELSE DATEADD(DAY, -(DATEDIFF(DAY, @FromP, @ToP) + 1), @FromP) END;
@@ -3452,13 +3456,13 @@ WHERE q.Id = @Id";
                     (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND DueOn < @Today) AS OverdueCount,
                     -- Invoiced / Paid / still owed of the period: rent and charges only. Security deposits are refundable, not revenue, and
                     -- have their own cards (Security deposits, Security collected), as on the CEO and Sales dashboards.
-                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS InvoicedThisMonth,
-                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PrevMonthStart AND PeriodStart < @PrevEnd) AS InvoicedLastMonth,
-                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
+                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PStart AND PeriodStart < @PBillEnd) AS InvoicedThisMonth,
+                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PrevMonthStart AND PeriodStart < @PStart) AS InvoicedLastMonth,
+                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PStart AND PeriodStart < @PBillEnd AND StatusId IN ({paid})) AS PaidThisPeriod,
                     -- of the period's invoices, what is still owed (same rule as Outstanding: Owed, net of WHT and part payments), its rent share
                     (SELECT ISNULL(SUM(CASE WHEN GrandTotal > 0 THEN (GrandTotal - WhtAmount - PaidTotal) * (GrandTotal - Deposit) / GrandTotal ELSE 0 END), 0)
-                       FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS OutstandingThisPeriod,
-                    (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS OutstandingThisPeriodCount,
+                       FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND PeriodStart < @PBillEnd) AS OutstandingThisPeriod,
+                    (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND PeriodStart < @PBillEnd) AS OutstandingThisPeriodCount,
                     (SELECT COUNT(*) FROM @Live WHERE StatusCode = N'Confirmed' AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
 
                 -- [1] last 12 months (occupancy measured at month end, or now for the current month); a custom range:
