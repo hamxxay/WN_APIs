@@ -79,11 +79,16 @@ namespace WorkNest.API.Controllers
             try
             {
                 var route = await email.SendMailboxTestAsync(mailbox, to, User.GetEmail());
-                return Ok(ApiResponse.Ok(new { route }, $"Test e-mail sent to {to} from {route}. Check the inbox (and spam)."));
+                return Ok(ApiResponse.Ok(new { sent = true, route, reason = (string?)null }, $"Test e-mail sent to {to} from {route}. Check the inbox (and spam)."));
             }
             catch (Exception ex)
             {
-                return BadRequest(ApiResponse.Fail($"The test e-mail was not sent: {ex.GetBaseException().Message}"));
+                // Super admin diagnostics: the mail server's full reason (connection / login / certificate), every inner
+                // exception included. Answered as 200 with sent=false so the friendly-error filter does not replace it.
+                var reasons = new List<string>();
+                for (var e = ex; e != null; e = e.InnerException)
+                    if (!string.IsNullOrWhiteSpace(e.Message) && !reasons.Contains(e.Message)) reasons.Add(e.Message.Trim());
+                return Ok(ApiResponse.Ok(new { sent = false, route = (string?)null, reason = string.Join(" → ", reasons) }, "The test e-mail was not sent."));
             }
         }
 
