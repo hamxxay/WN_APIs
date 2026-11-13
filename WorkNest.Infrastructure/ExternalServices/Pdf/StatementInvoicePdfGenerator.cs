@@ -496,12 +496,14 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 if (isLocation3)
                 {
                     tc.Item().Text($"{itemNum++}. Please deposit this payment in the following bank account: ").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Bank Name: [Location 3 bank name]").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Account Title: [Location 3 account title]").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Account Number: [Location 3 account number]").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("IBAN: [Location 3 IBAN]").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Bank Name: HABIB METRO BANK").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Account Title: SHAZAD ADIL & CO").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Account Number: 6-02-10-20396-333-251261").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("IBAN: PK68MPBL0210403330251261").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Branch: ISLAMABAD BRANCH").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Branch code: 10").FontSize(7.5f).FontColor("#000000");
+                    tc.Item().Text("Address: COMMERCIAL PLOT # 24, WEST BLUE AREA, F-6/G-6, ISLAMABAD.").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text("Swift code: [Location 3 SWIFT code]").FontSize(7.5f).FontColor("#000000");
-                    tc.Item().Text("Branch code: [Location 3 branch code]").FontSize(7.5f).FontColor("#000000");
                     tc.Item().Text("And send the receipt to [Location 3 contact number]").FontSize(7.5f).FontColor("#000000");
                 }
                 else if (isLocation2)
