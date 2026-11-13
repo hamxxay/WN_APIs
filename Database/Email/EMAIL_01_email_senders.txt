@@ -1,0 +1,70 @@
+-- =====================================================================================================================
+-- EMAIL_01: Email Senders page (super admin) - which mailbox sends each e-mail type.
+--
+-- WHAT THIS SCRIPT DOES, in plain words
+--   1. Creates dbo.WN_EmailSenders: one row per e-mail type (TypeKey) with the sending mailbox ('sales' or 'notifications'),
+--      an optional sender display name, and who changed it and when (UpdatedBy / UpdatedAt, UTC).
+--   2. Adds the 18 e-mail types with their default mailbox (customer documents = sales, staff notifications = notifications).
+--      A type that already has a row is left as it is. Passwords are NOT stored here: they stay in the server configuration.
+--
+-- The API works WITHOUT this script (the defaults apply and the page is read-only: "Run EMAIL_01 to change them").
+--
+-- BEFORE YOU RUN
+--   * Run on the TEST database (SAC400) first, then on live (change the first line to USE [WorkNestAEO];).
+--   * Run the whole file in SSMS / DBeaver (select all, Execute). It is ONE batch (no GO): it either completes or stops safely.
+--   * The first result grid shows the current rows (NULL = the table does not exist yet): save it as your backup.
+--
+-- SAFE TO RUN AGAIN: the table is created only when missing; only missing types are added.
+-- To undo: DROP TABLE dbo.WN_EmailSenders;
+-- =====================================================================================================================
+USE [SAC400];
+
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+-- BACKUP GRID 1: the rows as they are now (nothing when the table does not exist yet).
+IF OBJECT_ID(N'dbo.WN_EmailSenders', N'U') IS NOT NULL
+    EXEC(N'SELECT * FROM dbo.WN_EmailSenders ORDER BY TypeKey;');
+ELSE
+    SELECT CAST(NULL AS VARCHAR(40)) AS TypeKey, N'(table does not exist yet)' AS Note;
+
+BEGIN TRANSACTION;
+
+IF OBJECT_ID(N'dbo.WN_EmailSenders', N'U') IS NULL
+    EXEC(N'CREATE TABLE dbo.WN_EmailSenders (
+        TypeKey   VARCHAR(40)   NOT NULL CONSTRAINT PK_WN_EmailSenders PRIMARY KEY,
+        Mailbox   VARCHAR(20)   NOT NULL CONSTRAINT CK_WN_EmailSenders_Mailbox CHECK (Mailbox IN (''sales'', ''notifications'')),
+        FromName  NVARCHAR(100) NULL,
+        UpdatedBy NVARCHAR(256) NULL,
+        UpdatedAt DATETIME2     NULL
+    );');
+
+EXEC(N'INSERT INTO dbo.WN_EmailSenders (TypeKey, Mailbox)
+    SELECT v.TypeKey, v.Mailbox
+    FROM (VALUES
+        (N''quotation'', ''sales''),
+        (N''agreement'', ''sales''),
+        (N''agreement_reminder'', ''sales''),
+        (N''invoice'', ''sales''),
+        (N''booking_confirmation'', ''sales''),
+        (N''surcharge_invoice'', ''sales''),
+        (N''customer_login'', ''sales''),
+        (N''notice_confirmed'', ''sales''),
+        (N''notice_declined'', ''sales''),
+        (N''tour_request'', ''notifications''),
+        (N''notice_request'', ''notifications''),
+        (N''pending_invoices'', ''notifications''),
+        (N''quotation_approval'', ''notifications''),
+        (N''approval_request'', ''notifications''),
+        (N''approval_decision'', ''notifications''),
+        (N''network_alert'', ''notifications''),
+        (N''weekly_report'', ''notifications''),
+        (N''announcement'', ''notifications'')
+    ) AS v (TypeKey, Mailbox)
+    WHERE NOT EXISTS (SELECT 1 FROM dbo.WN_EmailSenders e WHERE e.TypeKey = v.TypeKey);');
+
+COMMIT TRANSACTION;
+
+SELECT TypeKey, Mailbox, FromName, UpdatedBy, UpdatedAt, DB_NAME() AS DatabaseName FROM dbo.WN_EmailSenders ORDER BY Mailbox, TypeKey;

@@ -150,7 +150,7 @@ namespace WorkNest.Application.Services
         {
             try
             {
-                await _email.SendHtmlReportAsync(email, "Your WorkNest login", BuildEmailHtml(info.FirstName ?? info.DisplayName, email, temp));
+                await _email.SendTypedEmailAsync(EmailTypes.CustomerLogin, email, "Your WorkNest login", BuildEmailHtml(info.FirstName ?? info.DisplayName, email, temp), "WorkNest Reports");
                 return true;
             }
             catch (EmailHeldException)

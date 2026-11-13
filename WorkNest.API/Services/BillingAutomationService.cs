@@ -144,7 +144,7 @@ namespace WorkNest.API.Services
                                     <p style='font-size: 13px; color: #64748b;'>Note: Invoices are never sent automatically. Each invoice requires personal inspection before approval.</p>
                                 </div>";
 
-                            await emailService.SendHtmlReportAsync(email, $"[WorkNest Action Required] {loc.Count} Pending Invoices for {loc.LocationName}", html);
+                            await emailService.SendTypedEmailAsync(EmailTypes.PendingInvoices, email, $"[WorkNest Action Required] {loc.Count} Pending Invoices for {loc.LocationName}", html, "WorkNest Billing");
                             _logger.LogInformation("Sent pending invoice reminder to {Email} for {LocationName} ({Count} invoices).", email, loc.LocationName, loc.Count);
                         }
                         catch (Exception ex)

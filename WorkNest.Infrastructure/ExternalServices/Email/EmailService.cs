@@ -20,9 +20,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         private readonly ILogger<EmailService> _logger;
         private readonly IServiceSwitch? _serviceSwitch;
         private readonly IEmailOutbox? _outbox;
+        private readonly IEmailSenderResolver? _senders;
 
-        public EmailService(IConfiguration config, ILogger<EmailService> logger, IServiceSwitch? serviceSwitch = null, IEmailOutbox? outbox = null)
+        public EmailService(IConfiguration config, ILogger<EmailService> logger, IServiceSwitch? serviceSwitch = null, IEmailOutbox? outbox = null, IEmailSenderResolver? senders = null)
         {
+            _senders = senders;
             _config = config;
             _logger = logger;
             _serviceSwitch = serviceSwitch;
@@ -48,7 +50,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         /// and <see cref="EmailHeldException"/> is thrown, so the caller reports it and does not queue its own retry; it goes
         /// out when the switch is on again unless a super admin discards it. Off without SS_02: refused, nothing kept.
         /// </summary>
-        private async Task DeliverAsync(SmtpClient smtp, MailMessage mail, string kind)
+        private async Task DeliverAsync(SmtpClient smtp, MailMessage mail, string kind, bool notifications = false)
         {
             if (await EmailOnAsync())
             {
@@ -60,7 +62,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             int id;
             try
             {
-                id = await _outbox.AddAsync(kind, string.Join(", ", mail.To.Select(a => a.Address)), mail.Subject ?? "", ToJson(mail));
+                id = await _outbox.AddAsync(kind, string.Join(", ", mail.To.Select(a => a.Address)), mail.Subject ?? "", ToJson(mail, notifications));
             }
             catch (EmailOutboxMissingException)
             {
@@ -71,11 +73,12 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             throw new EmailHeldException(id);
         }
 
-        private static string ToJson(MailMessage mail)
+        private static string ToJson(MailMessage mail, bool notifications = false)
         {
             var held = new HeldEmail
             {
                 FromName = mail.From?.DisplayName ?? "",
+                Account = notifications ? NotificationsAccount : "",
                 To = mail.To.Select(a => a.ToString()).ToList(),
                 Cc = mail.CC.Select(a => a.ToString()).ToList(),
                 Bcc = mail.Bcc.Select(a => a.ToString()).ToList(),
@@ -104,7 +107,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
         public async Task SendHeldAsync(string messageJson)
         {
             var held = JsonSerializer.Deserialize<HeldEmail>(messageJson) ?? throw new InvalidOperationException("The held e-mail could not be read.");
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var (fromEmail, password, host, port) = GetEmailSettings(held.Account == NotificationsAccount);
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(password))
                 throw new InvalidOperationException("Email is not set up on the server (Email:FromEmail / Password).");
             if (held.To.Count == 0)
@@ -128,12 +131,38 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             await smtp.SendMailAsync(mail);
         }
 
-        private (string fromEmail, string password, string host, int port) GetEmailSettings()
+        /// <summary>Which mailbox sends an e-mail type (saved choice, else the default) and the saved sender name, if any.</summary>
+        private async Task<Route> RouteAsync(string typeKey)
+        {
+            if (_senders != null)
+            {
+                try { var (m, n) = await _senders.ResolveAsync(typeKey); return new Route(m == EmailMailboxes.Notifications, n); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { /* defaults below */ }
+            }
+            return new Route(EmailTypes.Find(typeKey)?.DefaultMailbox == EmailMailboxes.Notifications, null);
+        }
+
+        private readonly record struct Route(bool Notifications, string? Name)
+        {
+            public string From(string defaultName) => string.IsNullOrWhiteSpace(Name) ? defaultName : Name;
+        }
+
+        public const string NotificationsAccount = "notifications";
+
+        /// <summary>
+        /// The mailbox an e-mail is sent from. Customer documents (quotations, agreements, invoices, booking, login, notice
+        /// decisions) use the main one (Email:FromEmail, sales@). Staff notifications, announcements and approval / network
+        /// e-mails use Email:Notifications:FromEmail + Password (host / port default to the main ones) when both are set,
+        /// otherwise the main mailbox, so nothing stops before the second mailbox exists.
+        /// </summary>
+        private (string fromEmail, string password, string host, int port) GetEmailSettings(bool notifications = false)
         {
             var fromEmail = _config["Email:FromEmail"] ?? string.Empty;
             var password  = _config["Email:Password"] ?? _config["Email:GmailAppPassword"] ?? string.Empty;
             var host      = _config["Email:SmtpHost"] ?? "smtppro.zoho.com";
             var port      = int.TryParse(_config["Email:SmtpPort"], out var p) ? p : 587;
+            if (notifications && EmailMailboxes.NotificationsSettings(_config) is { } n)
+                return (n.FromEmail, n.Password, n.Host, n.Port);
             return (fromEmail, password, host, port);
         }
 
@@ -150,7 +179,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendTourNotificationAsync(string fullName, string email, string phone, string message)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.TourRequest);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
             // Tour requests go to sales: Email:TourRequestsTo, else Email:ToEmail, else sales@worknestpk.com.
             // (An empty setting used to leave no recipient, so no email was sent at all.)
             var toEmail = new[] { _config["Email:TourRequestsTo"], _config["Email:ToEmail"] }
@@ -185,7 +215,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail, "WorkNest Tours"),
+                    From       = new MailAddress(fromEmail, route.From("WorkNest Tours")),
                     Subject    = $"New Tour Request from {fullName} - WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
@@ -208,7 +238,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendQuotationEmailAsync(string email, string customerName, string quotationNumber, byte[]? pdfBytes = null, string? quotationLink = null)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.Quotation);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(email) ||
@@ -235,7 +266,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail, "WorkNest"),
+                    From       = new MailAddress(fromEmail, route.From("WorkNest")),
                     Subject    = $"Your Work-Place Solution - {customerName}",
                     Body       = body,
                     IsBodyHtml = false,
@@ -249,7 +280,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mailMessage, "Quotation e-mail");   // Email Sending off: held in Pending emails
+                await DeliverAsync(smtp, mailMessage, "Quotation e-mail", route.Notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Quotation email sent to {To} via {Host}:{Port}", email, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -264,7 +295,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, decimal currentCycleAmount = 0,
             decimal securityDeposit = 0, decimal taxAmount = 0, decimal discountAmount = 0, byte[]? pdfBytes = null, string? oneBillNumber = null)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.Invoice);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -313,7 +345,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 string docType = challanNumber.StartsWith("INV", StringComparison.OrdinalIgnoreCase) ? "Invoice" : "Challan";
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail, "WorkNest Billing"),
+                    From       = new MailAddress(fromEmail, route.From("WorkNest Billing")),
                     Subject    = $"Your WorkNest {docType} - {challanNumber}",
                     Body       = body,
                     IsBodyHtml = false,
@@ -332,7 +364,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mailMessage, "Invoice / challan e-mail");   // Email Sending off: held in Pending emails
+                await DeliverAsync(smtp, mailMessage, "Invoice / challan e-mail", route.Notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Challan email sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -349,7 +381,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             decimal taxAmount = 0, decimal discountAmount = 0, decimal totalContractAmount = 0,
             DateTime? nextBillDueDate = null, decimal balanceLeft = 0, byte[]? pdfBytes = null)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.BookingConfirmation);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -388,7 +421,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 var mailMessage = new MailMessage
                 {
-                    From       = new MailAddress(fromEmail, "WorkNest Bookings"),
+                    From       = new MailAddress(fromEmail, route.From("WorkNest Bookings")),
                     Subject    = $"Booking Confirmation - {spaceName} | WorkNest",
                     Body       = body,
                     IsBodyHtml = false,
@@ -402,7 +435,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mailMessage, "Booking confirmation e-mail");   // Email Sending off: held in Pending emails
+                await DeliverAsync(smtp, mailMessage, "Booking confirmation e-mail", route.Notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Booking confirmation email sent to {To} via {Host}:{Port}", toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -418,7 +451,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             decimal taxAmount = 0m, decimal grandTotal = 0m, string customerAddress = "",
             DateTime? billingStart = null, DateTime? billingEnd = null, byte[]? pdfBytes = null)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.SurchargeInvoice);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
 
             if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(toEmail) || string.IsNullOrWhiteSpace(password))
             {
@@ -481,7 +515,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 string encInvoiceNumber = WebUtility.HtmlEncode(invoiceNumber ?? "");
 
                 var mail = new MailMessage();
-                mail.From = new MailAddress(fromEmail, "WorkNest Billing");
+                mail.From = new MailAddress(fromEmail, route.From("WorkNest Billing"));
                 mail.To.Add(toEmail);
                 mail.Subject = $"WorkNest Custom Invoice - Capacity Overage Surcharge";
                 mail.IsBodyHtml = true;
@@ -513,7 +547,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mail, "Surcharge invoice e-mail");   // Email Sending off: held in Pending emails
+                await DeliverAsync(smtp, mail, "Surcharge invoice e-mail", route.Notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Custom surcharge invoice email #{InvoiceNumber} with Statement PDF sent successfully to {ToEmail} via {Host}:{Port}.", invoiceNumber, toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -525,7 +559,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendAgreementEmailAsync(string toEmail, string customerName, string quotationNumber, byte[] pdfBytes)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.Agreement);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -544,7 +579,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 string portalLink = WebUtility.HtmlEncode(WorkNest.Application.DTOs.Agreement.AgreementReminderOptions.DefaultPortalUrl);
 
                 using var mail = new MailMessage();
-                mail.From = new MailAddress(fromEmail, "WorkNest Office Spaces");
+                mail.From = new MailAddress(fromEmail, route.From("WorkNest Office Spaces"));
                 mail.To.Add(new MailAddress(toEmail));
                 mail.Subject = $"WorkNest - Coworking Space Use Agreement ({customerName})";
                 mail.IsBodyHtml = true;
@@ -571,7 +606,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mail, "Agreement e-mail");   // Email Sending off: held in Pending emails
+                await DeliverAsync(smtp, mail, "Agreement e-mail", route.Notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Agreement PDF email for quotation #{QuotationNumber} sent successfully to {ToEmail} via {Host}:{Port}.", quotationNumber, toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -583,7 +618,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendAgreementReminderEmailAsync(string toEmail, string customerName, string quotationNumber, string? spaceName, DateTime sentDate, int reminderNumber, string portalUrl, byte[]? pdfBytes = null)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.AgreementReminder);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
 
             // Unlike the other senders this one throws when it cannot send, so the reminder job does not record
             // a reminder that never left (it retries on a later run instead).
@@ -608,7 +644,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                     : "This is a friendly reminder that your WorkNest agreement is waiting for your signature.";
 
                 using var mail = new MailMessage();
-                mail.From = new MailAddress(fromEmail, "WorkNest Office Spaces");
+                mail.From = new MailAddress(fromEmail, route.From("WorkNest Office Spaces"));
                 mail.To.Add(new MailAddress(toEmail));
                 mail.Subject = $"Reminder: Your WorkNest agreement is waiting for your signature ({quotationNumber})";
                 mail.IsBodyHtml = true;
@@ -647,7 +683,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 }
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mail, "Agreement reminder e-mail");   // Email Sending off: held in Pending emails
+                await DeliverAsync(smtp, mail, "Agreement reminder e-mail", route.Notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Agreement reminder #{ReminderNumber} for quotation #{QuotationNumber} sent to {ToEmail} via {Host}:{Port}.", reminderNumber, quotationNumber, toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -659,7 +695,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
         public async Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = await RouteAsync(EmailTypes.Announcement);
+            var (fromEmail, password, host, port) = GetEmailSettings(route.Notifications);
 
             if (string.IsNullOrWhiteSpace(fromEmail) ||
                 string.IsNullOrWhiteSpace(toEmail) ||
@@ -672,7 +709,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             try
             {
                 using var mail = new MailMessage();
-                mail.From = new MailAddress(fromEmail, "WorkNest Operations");
+                mail.From = new MailAddress(fromEmail, route.From("WorkNest Operations"));
                 mail.To.Add(new MailAddress(toEmail));
 
                 bool isAlert = string.Equals(type, "Alert", StringComparison.OrdinalIgnoreCase);
@@ -703,7 +740,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
                 mail.Body = html;
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
-                await DeliverAsync(smtp, mail, "Announcement e-mail");   // Email Sending off: held in Pending emails
+                await DeliverAsync(smtp, mail, "Announcement e-mail", route.Notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Announcement email '{Title}' sent successfully to {ToEmail} via {Host}:{Port}.", title, toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)
@@ -713,17 +750,49 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             }
         }
 
+        public async Task<string> SendMailboxTestAsync(string mailbox, string toEmail, string? sentBy)
+        {
+            bool notifications = string.Equals(mailbox, NotificationsAccount, StringComparison.OrdinalIgnoreCase);
+            var (fromEmail, password, host, port) = GetEmailSettings(notifications);
+            if (notifications && (string.IsNullOrWhiteSpace(_config["Email:Notifications:FromEmail"]) || string.IsNullOrWhiteSpace(_config["Email:Notifications:Password"])))
+                throw new InvalidOperationException("The notifications mailbox is not set up on the server (Email:Notifications:FromEmail / Password), so its e-mails go from the sales mailbox.");
+            if (string.IsNullOrWhiteSpace(fromEmail) || string.IsNullOrWhiteSpace(password))
+                throw new InvalidOperationException("The sales mailbox is not set up on the server (Email:FromEmail / Password).");
+            var route = $"{fromEmail} via {host}:{port}";
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(fromEmail, "WorkNest Test"),
+                Subject = $"WorkNest test e-mail from {fromEmail}",
+                IsBodyHtml = true,
+                BodyEncoding = Encoding.UTF8,
+                Body = $"<p>This is a test e-mail from the <b>{(notifications ? "notifications" : "sales")}</b> mailbox ({System.Web.HttpUtility.HtmlEncode(route)}).</p>"
+                     + $"<p>Sent from the CMS Email Senders page{(string.IsNullOrWhiteSpace(sentBy) ? "" : " by " + System.Web.HttpUtility.HtmlEncode(sentBy))}. If you can read this, the mailbox works.</p>"
+            };
+            mail.To.Add(new MailAddress(toEmail));
+            using var smtp = CreateSmtpClient(fromEmail, password, host, port);
+            await smtp.SendMailAsync(mail);   // a test is never held by Email Sending
+            _logger.LogInformation("[EMAIL] Test e-mail sent to {To} from {Route}.", toEmail, route);
+            return route;
+        }
+
         public Task SendHtmlReportAsync(string toEmail, string subject, string html) =>
             SendHtmlAsync(toEmail, subject, html, "WorkNest Reports", approval: false);
 
         /// <summary>Approvals follow their own switch: Email Sending does not hold them, and the outbox never sends them.</summary>
         public Task SendApprovalEmailAsync(string toEmail, string subject, string html, string fromName) =>
-            SendHtmlAsync(toEmail, subject, html, fromName, approval: true);
+            SendTypedEmailAsync(EmailTypes.ApprovalRequest, toEmail, subject, html, fromName);
 
         /// <summary>Network alerts follow their own switch (the alert job only runs while Network Alerts is on): Email Sending
         /// does not hold them, so an outage e-mail is never left waiting in Pending emails.</summary>
         public Task SendNetworkAlertEmailAsync(string toEmail, string subject, string html) =>
-            SendHtmlAsync(toEmail, subject, html, "WorkNest Network Alerts", approval: false, bypassHold: true);
+            SendTypedEmailAsync(EmailTypes.NetworkAlert, toEmail, subject, html, "WorkNest Network Alerts");
+
+        /// <summary>An HTML e-mail of a known type: its mailbox comes from Email Senders; Approval / BypassHold types keep their own switches.</summary>
+        public Task SendTypedEmailAsync(string typeKey, string toEmail, string subject, string html, string fromName)
+        {
+            var t = EmailTypes.Find(typeKey);
+            return SendHtmlAsync(toEmail, subject, html, fromName, approval: t?.Approval == true, bypassHold: t?.BypassHold == true, typeKey: typeKey);
+        }
 
         private async Task<bool> TourRequestEmailsOnAsync()
         {
@@ -739,9 +808,11 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             catch (Exception) { return true; }
         }
 
-        private async Task SendHtmlAsync(string toEmail, string subject, string html, string fromName, bool approval, bool bypassHold = false)
+        private async Task SendHtmlAsync(string toEmail, string subject, string html, string fromName, bool approval, bool bypassHold = false, string? typeKey = null)
         {
-            var (fromEmail, password, host, port) = GetEmailSettings();
+            var route = typeKey == null ? new Route(false, null) : await RouteAsync(typeKey);   // untyped SendHtmlReportAsync: the main mailbox
+            var notifications = route.Notifications;
+            var (fromEmail, password, host, port) = GetEmailSettings(notifications);
 
             // Throws when it cannot send (like the agreement reminder), so the weekly report job records a failure
             // and the "send now" button can tell the user it did not go out.
@@ -762,7 +833,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
             try
             {
                 using var mail = new MailMessage();
-                mail.From = new MailAddress(fromEmail, fromName);
+                mail.From = new MailAddress(fromEmail, route.From(fromName));
                 mail.To.Add(new MailAddress(toEmail));
                 mail.Subject = subject;
                 mail.IsBodyHtml = true;
@@ -772,7 +843,7 @@ namespace WorkNest.Infrastructure.ExternalServices.Email
 
                 using var smtp = CreateSmtpClient(fromEmail, password, host, port);
                 if (approval || bypassHold) await smtp.SendMailAsync(mail);
-                else await DeliverAsync(smtp, mail, "Report e-mail");   // Email Sending off: held in Pending emails
+                else await DeliverAsync(smtp, mail, "Report e-mail", notifications);   // Email Sending off: held in Pending emails
                 _logger.LogInformation("[EMAIL] Report '{Subject}' sent to {ToEmail} via {Host}:{Port}.", subject, toEmail, host, port);
             }
             catch (Exception ex) when (ex is not EmailHeldException and not EmailSendingOffException)

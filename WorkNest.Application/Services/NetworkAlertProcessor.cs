@@ -141,7 +141,7 @@ namespace WorkNest.Application.Services
             {
                 try
                 {
-                    await _email.SendNetworkAlertEmailAsync(address, subject, html); // own switch: not held by Email Sending
+                    await _email.SendTypedEmailAsync(EmailTypes.NetworkAlert, address, subject, html, "WorkNest Network Alerts"); // own switch: not held by Email Sending
                     ok.Add(address);
                 }
                 catch (EmailHeldException)

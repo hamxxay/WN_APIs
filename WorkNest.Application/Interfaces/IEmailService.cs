@@ -14,6 +14,15 @@ namespace WorkNest.Application.Interfaces
         Task SendAnnouncementEmailAsync(string toEmail, string recipientName, string title, string body, string type);
         /// <summary>Sends a ready-made HTML report (e.g. the weekly super admin report). Throws when the email could not be sent.</summary>
         Task SendHtmlReportAsync(string toEmail, string subject, string html);
+
+        /// <summary>Super admin "Send test e-mail" (Email Senders): sends a short test from the given mailbox ("sales" /
+        /// "notifications") right away (never held, no fallback to the other mailbox). Returns "address via host:port";
+        /// throws with the server's reason when it cannot send.</summary>
+        Task<string> SendMailboxTestAsync(string mailbox, string toEmail, string? sentBy) => throw new NotSupportedException("Test e-mails are not supported here.");
+
+        /// <summary>An HTML e-mail of a known type (see <see cref="WorkNest.Application.Services.EmailTypes"/>): the mailbox that sends it is the
+        /// one chosen on Administration > Email Senders. Approval types follow the Approval Emails switch, network_alert the Network Alerts one.</summary>
+        Task SendTypedEmailAsync(string typeKey, string toEmail, string subject, string html, string fromName) => SendHtmlReportAsync(toEmail, subject, html);
         /// <summary>An Approvals e-mail: sent under <paramref name="fromName"/> and governed by the Approval Emails switch only, not
         /// Email Sending. Switch off: <see cref="EmailSendingOffException"/>, nothing kept. Throws when it could not be sent.</summary>
         Task SendApprovalEmailAsync(string toEmail, string subject, string html, string fromName) => SendHtmlReportAsync(toEmail, subject, html);

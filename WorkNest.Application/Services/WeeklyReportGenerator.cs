@@ -144,7 +144,7 @@ namespace WorkNest.Application.Services
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    await _email.SendHtmlReportAsync(to, report.Subject, report.Html);
+                    await _email.SendTypedEmailAsync(EmailTypes.WeeklyReport, to, report.Subject, report.Html, "WorkNest Reports");
                     result.Recipients.Add(to);
                 }
                 catch (Exception ex)

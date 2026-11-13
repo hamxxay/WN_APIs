@@ -62,7 +62,7 @@ namespace WorkNest.Application.Services
                             </div>";
 
                         // Send email to staff / admin
-                        await _email.SendHtmlReportAsync("admin@worknestpk.com", $"[Notice Request] New leave request for Booking #{bookingId}", html);
+                        await _email.SendTypedEmailAsync(EmailTypes.NoticeRequest, "admin@worknestpk.com", $"[Notice Request] New leave request for Booking #{bookingId}", html, "WorkNest Notices");
                     }
                     catch (Exception ex)
                     {
@@ -164,7 +164,7 @@ namespace WorkNest.Application.Services
                                     <p>Thank you for choosing WorkNest.</p>
                                 </div>";
 
-                            await _email.SendHtmlReportAsync(result.CustomerEmail, $"[WorkNest] Notice Period Confirmed - Exit Date: {result.ExitDate:yyyy-MM-dd}", html);
+                            await _email.SendTypedEmailAsync(EmailTypes.NoticeConfirmed, result.CustomerEmail, $"[WorkNest] Notice Period Confirmed - Exit Date: {result.ExitDate:yyyy-MM-dd}", html, "WorkNest Reports");
                         }
 
                         // Push Notification / In-App Alert
@@ -222,7 +222,7 @@ namespace WorkNest.Application.Services
                                     <p>Please contact your location manager for any questions.</p>
                                 </div>";
 
-                            await _email.SendHtmlReportAsync(email, "[WorkNest] Notice Period Request Declined", html);
+                            await _email.SendTypedEmailAsync(EmailTypes.NoticeDeclined, email, "[WorkNest] Notice Period Request Declined", html, "WorkNest Reports");
                         }
 
                         // Push / In-App Alert

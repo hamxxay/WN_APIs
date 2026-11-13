@@ -116,7 +116,7 @@ namespace WorkNest.Application.Services
         {
             var sent = detail == null
                 ? SendResult.Failed
-                : await SendAsync(link.Approver, ApprovalEmail.ToApprover(BaseUrl, link.Token!, ToMail(detail), link.ExpiresAt), what, id);
+                : await SendAsync(link.Approver, ApprovalEmail.ToApprover(BaseUrl, link.Token!, ToMail(detail), link.ExpiresAt), what, id, EmailTypes.ApprovalRequest);
             if (sent != SendResult.Failed) return ApprovalResult<ApprovalCreated>.Ok(new ApprovalCreated(id, true));
             try { await _repo.ExpireNowAsync(id, CancellationToken.None); }
             catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: could not expire the request after its approver e-mail failed.", id); }
@@ -192,7 +192,7 @@ namespace WorkNest.Application.Services
                     return;
                 }
                 foreach (var p in people)
-                    await SendAsync(p.Email, ApprovalEmail.Assigned(BaseUrl, r, d.DecisionNote), "assigned person", id);
+                    await SendAsync(p.Email, ApprovalEmail.Assigned(BaseUrl, r, d.DecisionNote), "assigned person", id, EmailTypes.ApprovalRequest);
             }
             catch (Exception ex) { _logger.LogError(ex, "Approval {Id}: the decision e-mails could not be prepared.", id); }
         }
@@ -343,10 +343,10 @@ namespace WorkNest.Application.Services
         /// address is skipped; anything else, an <see cref="EmailSendingOffException"/> included (nothing was kept), is Failed.
         /// The link is never logged.
         /// </summary>
-        private async Task<SendResult> SendAsync(string? to, (string Subject, string Html) mail, string what, int requestId)
+        private async Task<SendResult> SendAsync(string? to, (string Subject, string Html) mail, string what, int requestId, string typeKey = EmailTypes.ApprovalDecision)
         {
             if (!ApprovalRules.ValidEmail(to)) { _logger.LogWarning("Approval {Id}: no e-mail address for the {What} e-mail; skipped.", requestId, what); return SendResult.Skipped; }
-            try { await _email.SendApprovalEmailAsync(to!.Trim(), mail.Subject, mail.Html, ApprovalEmail.SenderName); return SendResult.Sent; }
+            try { await _email.SendTypedEmailAsync(typeKey, to!.Trim(), mail.Subject, mail.Html, ApprovalEmail.SenderName); return SendResult.Sent; }
             catch (EmailHeldException)
             {
                 _logger.LogInformation("Approval {Id}: the {What} e-mail is held in Pending emails (Email Sending is off).", requestId, what);

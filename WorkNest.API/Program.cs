@@ -184,6 +184,8 @@ try
     builder.Services.AddScoped<IDbRepository, DbRepository>();
     builder.Services.AddScoped<IJwtService, JwtService>();
     builder.Services.AddScoped<IEncryptionService, EncryptionService>();
+    builder.Services.AddSingleton<IEmailSenderRepository, WorkNest.Infrastructure.Repositories.EmailSenderRepository>();
+    builder.Services.AddSingleton<IEmailSenderResolver, WorkNest.Infrastructure.Repositories.EmailSenderResolver>();
     builder.Services.AddScoped<IEmailService, EmailService>();
     builder.Services.AddScoped<IPdfService, PdfService>();
     builder.Services.AddSingleton<IHtmlToPdfService, HtmlToPdfService>();

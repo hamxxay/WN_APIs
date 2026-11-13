@@ -7,6 +7,8 @@ namespace WorkNest.Application.DTOs.EmailOutbox
     public sealed class HeldEmail
     {
         public string FromName { get; set; } = "";
+        /// <summary>Which mailbox sends it: "notifications" (Email:Notifications, staff notifications) or "" = the main one (sales).</summary>
+        public string Account { get; set; } = "";
         public List<string> To { get; set; } = new();
         public List<string> Cc { get; set; } = new();
         public List<string> Bcc { get; set; } = new();

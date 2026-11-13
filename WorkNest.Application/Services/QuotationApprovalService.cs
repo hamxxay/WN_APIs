@@ -330,7 +330,7 @@ namespace WorkNest.Application.Services
             {
                 var user = await _db.GetUserByIdAsync(toUserId);
                 var to = user != null && user.TryGetValue("Email", out var em) ? em?.ToString() : null;
-                if (!string.IsNullOrWhiteSpace(to)) await _email.SendApprovalEmailAsync(to, subject, html, EmailSenderName);
+                if (!string.IsNullOrWhiteSpace(to)) await _email.SendTypedEmailAsync(EmailTypes.QuotationApproval, to, subject, html, EmailSenderName);
             }
             catch (Exception) { /* switch off / SMTP down: the in-app alert and the Quotation approvals page still show it */ }
         }
