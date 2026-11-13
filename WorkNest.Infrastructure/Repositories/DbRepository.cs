@@ -3420,14 +3420,17 @@ WHERE q.Id = @Id";
                   JOIN dbo.WN_BookingStatuses bs WITH (NOLOCK) ON bs.Id = b.BookingStatusId
                  WHERE ISNULL(b.IsDeleted, 0) = 0 AND bs.Code IN (N'Pending', N'Confirmed');
 
-                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4), Owed BIT, PeriodStart DATETIME NULL);
+                DECLARE @Inv TABLE (Id INT PRIMARY KEY, InvoiceNumber NVARCHAR(50), BookingId INT NULL, UserId INT NULL, IssuedOn DATETIME NULL, DueOn DATE NULL, GrandTotal DECIMAL(18,4), PaidTotal DECIMAL(18,4), StatusId INT, WhtAmount DECIMAL(18,4), Owed BIT, PeriodStart DATETIME NULL,
+                                     Deposit DECIMAL(18,4) NOT NULL DEFAULT 0);   -- the refundable security deposit on the invoice (not revenue; capped at the total)
                 -- Owed = still owed, as the Invoices list works it out from the amounts: not Paid (nothing left after WHT, and
                 -- something paid or a Paid status). A Paid status with nothing paid is still owed.
                 INSERT INTO @Inv
                 SELECT i.Id, i.InvoiceNumber, i.BookingId, i.UserId, i.IssuedOn, i.DueOn, ISNULL(i.GrandTotal, 0), ISNULL(i.PaidTotal, 0), i.StatusId, ISNULL(i.WHTAmount, 0),
                        CASE WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= 0.005
                                  AND (ISNULL(i.PaidTotal, 0) > 0 OR i.StatusId IN ({paid})) THEN 0 ELSE 1 END,
-                       COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn)   -- rent period the invoice is for (Invoiced / Paid / Owed cards of the period)
+                       COALESCE(i.BillingPeriodStart, b.StartOn, i.IssuedOn),  -- rent period the invoice is for (Invoiced / Paid / Owed cards of the period)
+                       CASE WHEN ISNULL(i.SecurityDepositAmount, 0) <= 0 OR ISNULL(i.GrandTotal, 0) <= 0 THEN 0
+                            WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END   -- as the CEO / Sales dashboards
                   FROM dbo.WN_Invoices i WITH (NOLOCK)
                   LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
                   LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
@@ -3447,11 +3450,14 @@ WHERE q.Id = @Id";
                     (SELECT COUNT(*) FROM @Inv WHERE Owed = 1) AS OutstandingCount,
                     (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1 AND DueOn < @Today) AS OverdueAmount,
                     (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND DueOn < @Today) AS OverdueCount,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS InvoicedThisMonth,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE PeriodStart >= @PrevMonthStart AND PeriodStart < @PrevEnd) AS InvoicedLastMonth,
-                    (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
-                    -- of the period's invoices, what is still owed (same rule as Outstanding: Owed, net of WHT and part payments)
-                    (SELECT ISNULL(SUM(GrandTotal - WhtAmount - PaidTotal), 0) FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS OutstandingThisPeriod,
+                    -- Invoiced / Paid / still owed of the period: rent and charges only. Security deposits are refundable, not revenue, and
+                    -- have their own cards (Security deposits, Security collected), as on the CEO and Sales dashboards.
+                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS InvoicedThisMonth,
+                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PrevMonthStart AND PeriodStart < @PrevEnd) AS InvoicedLastMonth,
+                    (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd) AND StatusId IN ({paid})) AS PaidThisPeriod,
+                    -- of the period's invoices, what is still owed (same rule as Outstanding: Owed, net of WHT and part payments), its rent share
+                    (SELECT ISNULL(SUM(CASE WHEN GrandTotal > 0 THEN (GrandTotal - WhtAmount - PaidTotal) * (GrandTotal - Deposit) / GrandTotal ELSE 0 END), 0)
+                       FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS OutstandingThisPeriod,
                     (SELECT COUNT(*) FROM @Inv WHERE Owed = 1 AND PeriodStart >= @PStart AND (@PEnd IS NULL OR PeriodStart < @PEnd)) AS OutstandingThisPeriodCount,
                     (SELECT COUNT(*) FROM @Live WHERE StatusCode = N'Confirmed' AND EndOn >= @Now AND EndOn <= @SoonEnd) AS LeasesEndingSoon;
 
@@ -3469,9 +3475,9 @@ WHERE q.Id = @Id";
                            AND (@PEnd IS NULL OR (nb.CreatedOn >= DATEADD(MINUTE, -@UtcShift, CAST(@PStart AS DATETIME2(0)))
                                                   AND nb.CreatedOn < DATEADD(MINUTE, -@UtcShift, CAST(@PEnd AS DATETIME2(0)))))   -- CreatedOn is UTC
                            AND nb.BookingStatusId NOT IN ({DashboardClosedBookingStatuses})) AS NewBookings,
-                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
-                           AND (@PEnd IS NULL OR (IssuedOn >= @PStart AND IssuedOn < @PEnd))) AS Invoiced,
-                       (SELECT ISNULL(SUM(GrandTotal), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
+                       (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
+                           AND (@PEnd IS NULL OR (IssuedOn >= @PStart AND IssuedOn < @PEnd))) AS Invoiced,   -- without security deposits
+                       (SELECT ISNULL(SUM(GrandTotal - Deposit), 0) FROM @Inv WHERE IssuedOn >= m.MStart AND IssuedOn < DATEADD(MONTH, 1, m.MStart)
                            AND (@PEnd IS NULL OR (IssuedOn >= @PStart AND IssuedOn < @PEnd)) AND StatusId IN ({paid})) AS Paid,
                        (SELECT COUNT(DISTINCT SpaceId) FROM @Live
                          WHERE StartOn <= x.At AND EndOn >= x.At) AS Occupied
