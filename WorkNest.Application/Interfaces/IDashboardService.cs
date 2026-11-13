@@ -19,6 +19,13 @@ namespace WorkNest.Application.Interfaces
         Task<DashboardOccupiedSpacesDto> GetOccupiedSpacesAsync(IReadOnlyCollection<int>? locationIds);
 
         /// <summary>
+        /// The "Security collected" card and its list: security-deposit money actually received in the period (month / quarter /
+        /// year to date, or custom from .. to), with the previous equal period. Bad custom dates: a failed response.
+        /// </summary>
+        /// <param name="locationIds">Locations to total; null = all locations.</param>
+        Task<ApiResponse> GetSecurityCollectedAsync(IReadOnlyCollection<int>? locationIds, string? period, string? from, string? to);
+
+        /// <summary>
         /// Admin sidebar badges: counts of items waiting on staff, keyed by sidebar route ("/admin/bookings" ...).
         /// Machines offline ("/admin/access-dashboard") only when <paramref name="includeMachines"/>.
         /// </summary>

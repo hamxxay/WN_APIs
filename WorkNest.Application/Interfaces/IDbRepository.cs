@@ -312,6 +312,14 @@ namespace WorkNest.Application.Interfaces
         /// </summary>
         /// <param name="locationIds">Locations to list; null = all locations.</param>
         Task<List<List<IDictionary<string, object?>>>> GetDashboardOccupiedSpacesDbAsync(IReadOnlyCollection<int>? locationIds, DateTime businessNow);
+        /// <summary>
+        /// Security-deposit money received (read-only), see <see cref="WorkNest.Application.DTOs.Dashboard.DashboardSecurityCollectedDto"/>:
+        /// [0] one row per receipt / payment with deposit money received in [from, toExclusive) (InPeriod = 1) or in [prevFrom, prevToExclusive)
+        /// (InPeriod = 0), newest first; the service totals them. toExclusive null = no end. Location as the overview's invoices
+        /// (invoice's own location, else its booking's space); null = all locations.
+        /// </summary>
+        Task<List<List<IDictionary<string, object?>>>> GetDashboardSecurityCollectedDbAsync(IReadOnlyCollection<int>? locationIds, DateTime from,
+            DateTime? toExclusive, DateTime prevFrom, DateTime prevToExclusive);
         /// <summary>Admin sidebar "needs action" counts (one row of scalar counts; null = not available).</summary>
         /// <paramref name="locationIds"/>: location-bound staff's locations (every one they are assigned to) for the items that
         /// have a location (via the space); null = all locations.

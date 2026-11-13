@@ -111,6 +111,21 @@ namespace WorkNest.API.Controllers
             Ok(await _dashboard.GetOccupiedSpacesAsync(Scope(locationId, locationIds)));
 
         /// <summary>
+        /// The overview's "Security collected" card and its list: security-deposit money actually received in the period (period =
+        /// month | quarter | year to date | custom with from and to, as the overview), with the previous equal period, one row per
+        /// receipt / payment, newest first. Same roles and location rules as the overview (location-bound staff: their own locations).
+        /// A bad custom range answers 400. Read-only.
+        /// </summary>
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        [HttpGet("api/dashboard/security-collected")]
+        public async Task<IActionResult> SecurityCollected([FromQuery] int? locationId, [FromQuery] string? locationIds, [FromQuery] string? period,
+            [FromQuery] string? from, [FromQuery] string? to)
+        {
+            var result = await _dashboard.GetSecurityCollectedAsync(Scope(locationId, locationIds), period, from, to);
+            return result.IsSuccessful ? Ok(result.Data) : BadRequest(result);
+        }
+
+        /// <summary>
         /// Role-based dashboard sections (same location rules as the overview). Sales executive: sales pipeline,
         /// tour inquiries &amp; follow-ups, renewals and collections. Admin: team &amp; service. Super admin: team &amp;
         /// service, location comparison, staff overview and system health (company-wide).

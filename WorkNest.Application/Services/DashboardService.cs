@@ -221,6 +221,79 @@ namespace WorkNest.Application.Services
             return dto;
         }
 
+        // ---------- Security collected card ----------
+
+        public async Task<ApiResponse> GetSecurityCollectedAsync(IReadOnlyCollection<int>? locationIds, string? period, string? from, string? to)
+        {
+            // The dashboard's period rules (business date): month / quarter / year to date, or a custom range of whole days.
+            if (!MainDashboardPeriod.TryParse(period, from, to, _clock.Today, out var range, out var error))
+                return ApiResponse.Fail(error!);
+            var today = _clock.Today.Date;
+            // The previous equal period, as the Invoiced card compares: a calendar period to date against the same number of days of
+            // the previous one (never into the current one); a custom range against as many days just before it.
+            DateTime prevFrom, prevEnd;
+            if (range.IsCustom)
+            {
+                prevFrom = range.Start.AddDays(-range.Days);
+                prevEnd = range.Start;
+            }
+            else
+            {
+                prevFrom = range.Start.AddMonths(-range.Months);
+                prevEnd = prevFrom.AddDays((today - range.Start).Days + 1);
+                if (prevEnd > range.Start) prevEnd = range.Start;
+            }
+
+            var sets = await _db.GetDashboardSecurityCollectedDbAsync(locationIds, range.Start, range.EndExclusive, prevFrom, prevEnd);
+
+            static object? Val(IDictionary<string, object?> r, string key) => r.TryGetValue(key, out var v) && v is not DBNull ? v : null;
+            static string? Str(IDictionary<string, object?> r, string key) => Val(r, key) is { } v ? Convert.ToString(v) : null;
+            static int? IntOrNull(IDictionary<string, object?> r, string key) => Val(r, key) is { } v ? Convert.ToInt32(v) : null;
+            static decimal Dec(IDictionary<string, object?> r, string key) => Val(r, key) is { } v ? Convert.ToDecimal(v) : 0m;
+            static bool InPeriod(IDictionary<string, object?> r) => Val(r, "InPeriod") is { } v && Convert.ToInt32(v) == 1;
+
+            // One row per receipt / payment of the period or the one before; the card, its comparison and the list all come from them.
+            var all = sets.Count > 0 ? sets[0] : new List<IDictionary<string, object?>>();
+            var current = all.Where(InPeriod).ToList();
+            var previous = all.Where(r => !InPeriod(r)).ToList();
+            var lastDay = range.To ?? today;
+            var dto = new DashboardSecurityCollectedDto
+            {
+                Period = range.Period,
+                From = range.Start.ToString("yyyy-MM-dd"),
+                To = lastDay.ToString("yyyy-MM-dd"),
+                PrevFrom = prevFrom.ToString("yyyy-MM-dd"),
+                PrevTo = prevEnd.AddDays(-1).ToString("yyyy-MM-dd"),
+                Total = Math.Round(current.Sum(r => Dec(r, "Amount")), 2),
+                Payments = current.Count,
+                Customers = current.Select(r => Str(r, "CustomerKey") ?? "").Distinct().Count(),
+                PrevTotal = Math.Round(previous.Sum(r => Dec(r, "Amount")), 2),
+                PrevPayments = previous.Count,
+                GeneratedAt = _clock.Now.ToString("yyyy-MM-ddTHH:mm:ss"),
+                Rows = current.Select(r => new DashboardSecurityCollectedRowDto
+                {
+                    Kind = Str(r, "Kind") ?? "receipt",
+                    RefId = IntOrNull(r, "RefId") ?? 0,
+                    ReceivedOn = Val(r, "ReceivedOn") is DateTime d ? d.ToString("yyyy-MM-dd") : "",
+                    Customer = Str(r, "Customer") ?? "",
+                    Company = Str(r, "Company"),
+                    BookingId = IntOrNull(r, "BookingId"),
+                    Space = Str(r, "Space"),
+                    LocationId = IntOrNull(r, "LocationId"),
+                    Location = Str(r, "Location"),
+                    ReceiptNumber = Str(r, "ReceiptNumber"),
+                    VoucherNumber = Str(r, "VoucherNumber"),
+                    InvoiceId = IntOrNull(r, "InvoiceId"),
+                    InvoiceNumber = Str(r, "InvoiceNumber"),
+                    ChallanNumber = Str(r, "ChallanNumber"),
+                    Amount = Math.Round(Dec(r, "Amount"), 2)
+                })
+                .OrderByDescending(x => x.ReceivedOn, StringComparer.Ordinal).ThenBy(x => x.Kind, StringComparer.Ordinal).ThenByDescending(x => x.RefId)
+                .Take(DashboardSecurityCollectedDto.MaxRows).ToList()
+            };
+            return ApiResponse.Ok(dto);
+        }
+
         // ---------- Overview chart drill-down (DASH_02) ----------
 
         private const int DetailRows = 200;

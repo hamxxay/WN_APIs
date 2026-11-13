@@ -3656,6 +3656,86 @@ WHERE q.Id = @Id";
         }
 
         /// <summary>
+        /// Security-deposit money actually received (read-only; the dashboard's "Security collected" card and its list). Same rule as the CEO
+        /// dashboard's money received (dbo.WN_Ceo_Records_Receipts, RC_06), deposit part only: an active fee receipt (WN_FeeReceipts.Status = 1)
+        /// counts its SecurityDepositAmount (at most its TotalAmount) on its ReceiptDate; a paid payment (WN_Payments.StatusId = 2) counts its
+        /// share of its invoice's deposit (Amount x deposit / GrandTotal) on its Pakistan paid day (PaidOn, else CreatedOn, UTC), unless its
+        /// invoice has an active receipt (counted once, as the receipt). Rows without deposit money are left out. Location as the overview's
+        /// invoices: the invoice's own location, else its booking's space; null = all. [from, toExclusive) and [prevFrom, prevToExclusive) are Pakistan days.
+        /// </summary>
+        public async Task<List<List<IDictionary<string, object?>>>> GetDashboardSecurityCollectedDbAsync(IReadOnlyCollection<int>? locationIds, DateTime from,
+            DateTime? toExclusive, DateTime prevFrom, DateTime prevToExclusive)
+        {
+            var ids = locationIds?.Distinct().ToList();
+            await using var c = await Open();
+            var locExpr = await InvoicesHaveLocationColumnAsync(c) ? "COALESCE(i.LocationId, s.LocationId)" : "s.LocationId";
+            // Location ids are ints from code, never user text.
+            var locFilter = ids is null ? "1 = 1" : $"{locExpr} IN ({(ids.Count == 0 ? "-1" : string.Join(",", ids))})";
+            // One SELECT (CTEs, no temporary tables): every receipt / payment with deposit money in the period or the previous one;
+            // the service totals them, so the card and the list can never disagree.
+            var sql = $@"
+                ;WITH rec AS (
+                    -- active fee receipts: the deposit inside the receipt, on the receipt date
+                    SELECT N'receipt' AS Kind, fr.Id AS RefId, fr.ReceiptDate AS ReceivedOn, CAST(fr.Code AS NVARCHAR(150)) AS ReceiptNumber,
+                           CAST(v.Code AS NVARCHAR(100)) AS VoucherNumber, i.Id AS InvoiceId, CAST(i.InvoiceNumber AS NVARCHAR(100)) AS InvoiceNumber,
+                           b.Id AS BookingId, CAST(b.ChallanNumber AS NVARCHAR(100)) AS ChallanNumber, COALESCE(NULLIF(s.Name, ''), s.Code) AS Space,
+                           {locExpr} AS LocationId, ISNULL(b.UserId, i.UserId) AS UserId, b.CustomerCode, fr.CustomerIdGUID AS CustomerGuid,
+                           CAST(CASE WHEN fr.SecurityDepositAmount > fr.TotalAmount THEN fr.TotalAmount ELSE fr.SecurityDepositAmount END AS DECIMAL(18,4)) AS Amount
+                      FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+                      LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.PublicId = fr.InvoiceIdGUID
+                      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId
+                      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                      LEFT JOIN dbo.Vouchers v WITH (NOLOCK) ON v.Id = fr.VoucherId
+                     WHERE fr.Status = 1 AND ISNULL(fr.SecurityDepositAmount, 0) > 0 AND ISNULL(fr.TotalAmount, 0) > 0
+                       AND (fr.ReceiptDate >= @PrevFrom AND fr.ReceiptDate < @PrevEnd OR fr.ReceiptDate >= @From AND (@To IS NULL OR fr.ReceiptDate < @To))
+                       AND {locFilter}
+                    UNION ALL
+                    -- paid payments (Pakistan day = UTC + the zone's offset): their share of the invoice's deposit
+                    SELECT N'payment', p.Id, pd.PaidDay,
+                           CAST(COALESCE(NULLIF(LTRIM(RTRIM(p.TransactionRef)), N''), NULLIF(LTRIM(RTRIM(p.GatewayRef)), N''), CONCAT(N'Payment #', p.Id)) AS NVARCHAR(150)),
+                           NULL, i.Id, CAST(i.InvoiceNumber AS NVARCHAR(100)), b.Id, CAST(b.ChallanNumber AS NVARCHAR(100)), COALESCE(NULLIF(s.Name, ''), s.Code),
+                           {locExpr}, COALESCE(b.UserId, i.UserId, p.UserIdInt), b.CustomerCode, NULL,
+                           CAST(ISNULL(p.Amount, 0) * (CASE WHEN i.SecurityDepositAmount > i.GrandTotal THEN i.GrandTotal ELSE i.SecurityDepositAmount END) / i.GrandTotal AS DECIMAL(18,4))
+                      FROM dbo.WN_Payments p WITH (NOLOCK)
+                      JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = p.InvoiceId
+                      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = COALESCE(p.BookingIdInt, i.BookingId)
+                      LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
+                     CROSS APPLY (SELECT CAST(DATEADD(MINUTE, @UtcShift, COALESCE(p.PaidOn, p.CreatedOn)) AS DATE) AS PaidDay) pd
+                     WHERE p.StatusId = 2 AND ISNULL(p.Amount, 0) > 0 AND ISNULL(i.SecurityDepositAmount, 0) > 0 AND ISNULL(i.GrandTotal, 0) > 0
+                       AND (pd.PaidDay >= @PrevFrom AND pd.PaidDay < @PrevEnd OR pd.PaidDay >= @From AND (@To IS NULL OR pd.PaidDay < @To))
+                       AND {locFilter}
+                       AND NOT EXISTS (SELECT 1 FROM dbo.WN_FeeReceipts fr WITH (NOLOCK) WHERE fr.Status = 1 AND fr.InvoiceIdGUID = i.PublicId)
+                )
+                -- the customer of a row: the receipt's customer first, else the booking's code, else the user
+                SELECT r.Kind, r.RefId, r.ReceivedOn, r.ReceiptNumber, r.VoucherNumber, r.InvoiceId, r.InvoiceNumber, r.BookingId, r.ChallanNumber, r.Space,
+                       r.LocationId, loc.Name AS Location, r.Amount,
+                       COALESCE(NULLIF(cust.Person, N''), NULLIF(u.Name, N''), NULLIF(u.UserName, N''), NULLIF(cust.Company, N''), NULLIF(u.Email, N''),
+                                CASE WHEN r.UserId IS NOT NULL THEN CONCAT(N'Customer #', r.UserId) ELSE N'Customer' END) AS Customer,
+                       NULLIF(cust.Company, N'') AS Company,
+                       COALESCE(CAST(cust.Id AS NVARCHAR(60)), CONCAT(N'u', r.UserId), CONCAT(N'r', r.Kind, r.RefId)) AS CustomerKey,
+                       CASE WHEN r.ReceivedOn >= @From AND (@To IS NULL OR r.ReceivedOn < @To) THEN 1 ELSE 0 END AS InPeriod
+                  FROM rec r
+                  LEFT JOIN dbo.WN_Locations loc WITH (NOLOCK) ON loc.Id = r.LocationId
+                  LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON u.Id = r.UserId
+                 OUTER APPLY (SELECT TOP 1 cu.Id, NULLIF(LTRIM(RTRIM(CONCAT(cu.FirstName, N' ', cu.LastName))), N'') AS Person, cu.Company
+                                FROM dbo.WN_Customers cu WITH (NOLOCK)
+                               WHERE (r.CustomerGuid IS NOT NULL AND cu.IdGUID = r.CustomerGuid)
+                                  OR (r.CustomerCode IS NOT NULL AND cu.Code = r.CustomerCode)
+                                  OR (r.UserId IS NOT NULL AND cu.UserId = r.UserId)
+                               ORDER BY CASE WHEN r.CustomerGuid IS NOT NULL AND cu.IdGUID = r.CustomerGuid THEN 0
+                                             WHEN r.CustomerCode IS NOT NULL AND cu.Code = r.CustomerCode THEN 1 ELSE 2 END, cu.Id) cust
+                 ORDER BY r.ReceivedOn DESC, r.Kind, r.RefId DESC;";
+            await using var cmd = new SqlCommand(sql, c) { CommandTimeout = 60 };
+            cmd.Parameters.Add("@From", SqlDbType.Date).Value = from.Date;
+            cmd.Parameters.Add("@To", SqlDbType.Date).Value = (object?)toExclusive?.Date ?? DBNull.Value;
+            cmd.Parameters.Add("@PrevFrom", SqlDbType.Date).Value = prevFrom.Date;
+            cmd.Parameters.Add("@PrevEnd", SqlDbType.Date).Value = prevToExclusive.Date;
+            cmd.Parameters.Add("@UtcShift", SqlDbType.Int).Value = (int)_clock.TimeZone.GetUtcOffset(from).TotalMinutes;
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadResultSets(r);
+        }
+
+        /// <summary>
         /// Admin sidebar badges (read-only, polled every 60 s by every open admin tab): one row of scalar counts of
         /// work waiting on staff right now. @Loc limits the counts that have a location (via the space) to that
         /// location; machines stay global; tour inquiries (contacts) follow @branchLocationIds (their branches + those without
