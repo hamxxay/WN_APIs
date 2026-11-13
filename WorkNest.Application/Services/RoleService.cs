@@ -5,8 +5,8 @@ using WorkNest.Common.Responses;
 namespace WorkNest.Application.Services
 {
     /// <summary>
-    /// Roles from dbo.WN_Roles (via dbo.WN_Roles_GetList). The list is cached for 5 minutes (a role row added by a
-    /// database script shows up within that time); while the procedure is missing the answer is re-checked every minute.
+    /// Roles from dbo.WN_Roles (via dbo.WN_Roles_GetList). The list endpoint refreshes on every request; display-name
+    /// lookups use a short-lived cache. While the procedure is missing the answer is re-checked every minute.
     /// </summary>
     public class RoleService : IRoleService
     {
@@ -29,7 +29,7 @@ namespace WorkNest.Application.Services
 
         public async Task<ApiResponse> GetRolesAsync()
         {
-            var roles = await LoadAsync();
+            var roles = await LoadAsync(forceRefresh: true);
             if (roles == null) throw new RolesDatabaseUpdateMissingException();
             return ApiResponse.Ok(roles);
         }
@@ -48,13 +48,13 @@ namespace WorkNest.Application.Services
             }
         }
 
-        private async Task<List<RoleItem>?> LoadAsync()
+        private async Task<List<RoleItem>?> LoadAsync(bool forceRefresh = false)
         {
-            if (Fresh()) return _roles;
+            if (!forceRefresh && Fresh()) return _roles;
             await Lock.WaitAsync();
             try
             {
-                if (Fresh()) return _roles;
+                if (!forceRefresh && Fresh()) return _roles;
                 var rows = await _db.GetRolesAsync();
                 _missing = rows == null;
                 var list = rows?.Select(r => new RoleItem(
