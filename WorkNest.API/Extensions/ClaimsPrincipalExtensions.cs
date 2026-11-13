@@ -100,7 +100,7 @@ namespace WorkNest.API.Extensions
 
         /// <summary>
         /// Branch routing of tour inquiries and complaints: location-bound users see their locations (location_id +
-        /// location_ids) plus the items without a branch; everyone else (super admin, CEO, receptionist) sees everything.
+        /// location_ids) plus the items without a branch; everyone else (super admin, CEO) sees everything.
         /// </summary>
         public static WorkNest.Application.Helpers.BranchScope GetBranchScope(this ClaimsPrincipal user) =>
             user?.Identity?.IsAuthenticated == true && user.IsLocationBoundRole()
@@ -148,6 +148,17 @@ namespace WorkNest.API.Extensions
         {
             if (user?.Identity?.IsAuthenticated != true) return false;
             return user.IsInRole(Roles.NetworkEngineer) || Roles.IsNetworkEngineer(user.GetRole());
+        }
+
+        /// <summary>
+        /// The Receptionist: front-desk staff limited to the locations a Super Admin assigned (location_id + location_ids),
+        /// and only the endpoints marked [ReceptionistAllowed] (ReceptionistAccessFilter answers 403 everywhere else).
+        /// Counts as staff (the staff-only endpoints list the role), but never sees another location's data.
+        /// </summary>
+        public static bool IsReceptionist(this ClaimsPrincipal user)
+        {
+            if (user?.Identity?.IsAuthenticated != true) return false;
+            return user.IsInRole(Roles.Receptionist) || user.IsInRole("Receptionist") || Roles.IsReceptionist(user.GetRole());
         }
 
         /// <summary>

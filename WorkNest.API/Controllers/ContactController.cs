@@ -6,6 +6,7 @@ using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
 using Microsoft.AspNetCore.RateLimiting;
+using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
 {
@@ -22,6 +23,7 @@ namespace WorkNest.API.Controllers
         private const string AdminRoles = "admin,Admin,super_admin,SuperAdmin";
 
         /// <summary>Newest tour inquiries (with locationId / locationName). Location-bound staff: their branches + those without one.</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/contact/recent")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> Recent([FromQuery] int top = 10) =>
@@ -35,6 +37,7 @@ namespace WorkNest.API.Controllers
         /// typed free text; "simple" works too).
         /// Every row has inquiryCategory.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("api/contact")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
@@ -83,6 +86,7 @@ namespace WorkNest.API.Controllers
         /// Set / change an inquiry's branch: { "locationId": 2 }. Location-bound staff: only to one of their own branches
         /// (403) and only inquiries they can see; others: any active location, or null = no branch.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpPatch("api/contact/{publicId:guid}/location")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateLocation(Guid publicId, [FromBody] ContactLocationRequest request)
@@ -122,6 +126,7 @@ namespace WorkNest.API.Controllers
         /// <summary>Feedback on a tour inquiry: not interested (reason, closes it), future prospect (follow-up date,
         /// alerted on that date) or converted into a quotation (quotationId). By Id: only an inquiry the user can see;
         /// ?source=contact|booktour picks the row when an old website booking has the same Id (else 409).</summary>
+        [ReceptionistAllowed]
         [HttpPost("api/contact/{id:int}/feedback")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> Feedback(int id, [FromBody] ContactFeedbackRequest request, [FromQuery] string? source = null)
@@ -131,6 +136,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>Same as above, by the inquiry's public id (the way the CMS and the app address an inquiry).</summary>
+        [ReceptionistAllowed]
         [HttpPost("api/contact/{publicId:guid}/feedback")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> FeedbackByGuid(Guid publicId, [FromBody] ContactFeedbackRequest request)
@@ -149,6 +155,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>Status by Id: only an inquiry the user can see; ?source=contact|booktour as for feedback.</summary>
+        [ReceptionistAllowed]
         [HttpPatch("api/contact/{id:int}/status")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatus(int id, [FromBody] ContactStatusUpdateRequest request, [FromQuery] string? source = null)
@@ -157,6 +164,7 @@ namespace WorkNest.API.Controllers
             return error ?? StatusResult(await _contacts.UpdateContactStatusAsync(match!.Id, request.StatusId, await ActorIdAsync(), match.Source));
         }
 
+        [ReceptionistAllowed]
         [HttpPatch("api/contact/{publicId:guid}/status")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> UpdateStatusByGuid(Guid publicId, [FromBody] ContactStatusUpdateRequest request)

@@ -39,6 +39,12 @@ namespace WorkNest.Application.DTOs.Complaint
     /// <summary>Complaint entered by staff on the Complaints page.</summary>
     public class ComplaintCreateRequest
     {
+        /// <summary>
+        /// A customer account (WN_Users.Id) the complaint is for (front desk "Add complaint"): their name, phone and e-mail fill
+        /// whatever of CustomerName / PhoneNumber / Email is left empty. Location-bound staff: a customer of their locations
+        /// (404 otherwise). Not stored on its own: WN_Complaints keeps the name, phone and e-mail.
+        /// </summary>
+        public int? CustomerId { get; set; }
         public string? CustomerName { get; set; }
         public string? PhoneNumber { get; set; }
         public string? Email { get; set; }

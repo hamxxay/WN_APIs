@@ -28,6 +28,12 @@ namespace WorkNest.Common.Constants
         /// a Super Admin assigns. Only a Super Admin gives this role.
         /// </summary>
         public const string NetworkEngineer = "network_engineer";
+        /// <summary>
+        /// Front-desk staff, tied to the locations a Super Admin assigns (like an Access Officer): tours, complaints, WhatsApp
+        /// replies, meeting-room bookings, customer lookup, desk payments, fingerprint / face access and network status
+        /// (api/reception/* plus the endpoints marked [ReceptionistAllowed]). Script ROLE_01_receptionist adds the WN_Roles row.
+        /// </summary>
+        public const string Receptionist   = "receptionist";
 
         public const int SuperAdminId     = 1;
         public const int AdminId          = 2;
@@ -37,6 +43,7 @@ namespace WorkNest.Common.Constants
         public const int SalesManagerId   = 18;
         public const int AccessOfficerId  = 19;
         public const int NetworkEngineerId = 20;
+        public const int ReceptionistId   = 21;
 
         public static readonly Dictionary<int, string> RoleMap = new()
         {
@@ -48,6 +55,7 @@ namespace WorkNest.Common.Constants
             { SalesManagerId,   SalesManager   },
             { AccessOfficerId,  AccessOfficer  },
             { NetworkEngineerId, NetworkEngineer },
+            { ReceptionistId,   Receptionist   },
         };
 
         public static readonly Dictionary<string, int> ReverseMap = new(System.StringComparer.OrdinalIgnoreCase)
@@ -73,6 +81,7 @@ namespace WorkNest.Common.Constants
             { NetworkEngineer,          NetworkEngineerId },
             { "networkengineer",        NetworkEngineerId },
             { "network engineer",       NetworkEngineerId },
+            { Receptionist,             ReceptionistId   },
         };
 
         /// <summary>Maps a role string (or integer string) to RoleId integer.</summary>
@@ -124,7 +133,7 @@ namespace WorkNest.Common.Constants
         /// (WN_Users.LocationId plus WN_UserLocations); Super Admins and the CEO cover every location.
         /// </summary>
         public static bool IsLocationBoundRole(int? roleId) =>
-            roleId == SalesExecutiveId || roleId == AdminId || roleId == SalesManagerId || roleId == AccessOfficerId || roleId == NetworkEngineerId;
+            roleId == SalesExecutiveId || roleId == AdminId || roleId == SalesManagerId || roleId == AccessOfficerId || roleId == NetworkEngineerId || roleId == ReceptionistId;
 
         /// <summary>
         /// admin, sales_executive, sales_manager, access_officer and network_engineer are limited to their assigned location(s); super_admin
@@ -135,7 +144,8 @@ namespace WorkNest.Common.Constants
             || string.Equals(role, Admin, System.StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, SalesManager, System.StringComparison.OrdinalIgnoreCase)
             || string.Equals(role, AccessOfficer, System.StringComparison.OrdinalIgnoreCase)
-            || string.Equals(role, NetworkEngineer, System.StringComparison.OrdinalIgnoreCase);
+            || string.Equals(role, NetworkEngineer, System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(role, Receptionist, System.StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Returns true if the role is SuperAdmin.</summary>
         public static bool IsSuperAdmin(int? roleId) =>
@@ -176,5 +186,13 @@ namespace WorkNest.Common.Constants
         /// <summary>Returns true if the role string is network_engineer.</summary>
         public static bool IsNetworkEngineer(string? role) =>
             string.Equals(role, NetworkEngineer, System.StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Returns true if the role is Receptionist (front desk, own locations).</summary>
+        public static bool IsReceptionist(int? roleId) =>
+            roleId == ReceptionistId;
+
+        /// <summary>Returns true if the role string is receptionist.</summary>
+        public static bool IsReceptionist(string? role) =>
+            string.Equals(role, Receptionist, System.StringComparison.OrdinalIgnoreCase);
     }
 }

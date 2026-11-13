@@ -40,6 +40,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>A one-time code for the signed-in user: 200 data { code, expiresInSeconds, target }.</summary>
+        [ReceptionistAllowed]
         [HttpPost("api/auth/handoff")]
         [CeoAllowed] // every staff role opens the CMS from worknestpk.com
         [SalesManagerAllowed]

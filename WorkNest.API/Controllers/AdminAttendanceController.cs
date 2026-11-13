@@ -33,10 +33,16 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>Customers with attendance on, with employees, or with a booking active in the last 2 months (attendance on first), [{ customerId, customerName, enabled, employeeCount }].</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/admin/attendance/customers")]
         public Task<IActionResult> Customers() =>
             AttendanceController.Guarded(async () =>
-                Ok(ApiResponse.Ok(await _attendance.GetCustomersAsync(User.ScopedLocationIds(null)))));
+                {
+                    var customers = await _attendance.GetCustomersAsync(User.ScopedLocationIds(null));
+                    // The receptionist only sees the customers who have attendance turned on.
+                    if (User.IsReceptionist()) customers = customers.Where(c => c.Enabled).ToList();
+                    return Ok(ApiResponse.Ok(customers));
+                });
 
         /// <summary>Turns attendance on / off for the customer; returns the customer's AttendanceStatus.</summary>
         [HttpPut("api/admin/customers/{customerId:int}/attendance")]
@@ -48,26 +54,31 @@ namespace WorkNest.API.Controllers
                 return AttendanceController.ToResult(await _attendance.SetEnabledAsync(customerId, input.Enabled, User.GetEmail()));
             });
 
+        [ReceptionistAllowed]
         [HttpGet("api/admin/customers/{customerId:int}/attendance/status")]
         public Task<IActionResult> Status(int customerId) =>
             ForCustomer(customerId, c => Task.FromResult(AttendanceOutcome.Ok(
                 new AttendanceStatusDto { Enabled = c.Enabled, CustomerId = c.CustomerId, CustomerName = c.CustomerName })));
 
         /// <summary>The customer's daily report (also when attendance is off), same parameters as the customer's own.</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/admin/attendance/report")]
         [RecordScope(RecordKind.Customer, "customerId", FromQuery = true)]
         public Task<IActionResult> Report([FromQuery] int customerId, [FromQuery] string? from, [FromQuery] string? to, [FromQuery] int? personId) =>
             ForCustomer(customerId, c => _attendance.GetReportAsync(c, from, to, personId));
 
+        [ReceptionistAllowed]
         [HttpGet("api/admin/customers/{customerId:int}/attendance/shifts")]
         public Task<IActionResult> Shifts(int customerId) =>
             ForCustomer(customerId, async c => AttendanceOutcome.Ok(await _attendance.GetShiftsAsync(c.CustomerId)));
 
         /// <summary>Holidays of a year; without year all of them.</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/admin/customers/{customerId:int}/attendance/holidays")]
         public Task<IActionResult> Holidays(int customerId, [FromQuery] int? year) =>
             ForCustomer(customerId, async c => AttendanceOutcome.Ok(await _attendance.GetHolidaysAsync(c.CustomerId, year)));
 
+        [ReceptionistAllowed]
         [HttpGet("api/admin/customers/{customerId:int}/attendance/employees")]
         public Task<IActionResult> Employees(int customerId) =>
             ForCustomer(customerId, async c => AttendanceOutcome.Ok(await _attendance.GetEmployeesAsync(c.CustomerId)));
@@ -77,6 +88,8 @@ namespace WorkNest.API.Controllers
             {
                 var customer = customerId > 0 ? await _attendance.GetCustomerAsync(customerId) : null;
                 if (customer == null) return NotFound(ApiResponse.Fail("Customer not found."));
+                if (User.IsReceptionist() && !customer.Enabled)
+                    return StatusCode(StatusCodes.Status403Forbidden, ApiResponse.Fail("Attendance is not turned on for this customer."));
                 return AttendanceController.ToResult(await action(customer));
             });
     }

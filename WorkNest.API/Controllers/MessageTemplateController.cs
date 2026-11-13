@@ -33,6 +33,7 @@ namespace WorkNest.API.Controllers
         public MessageTemplateController(IMessageTemplateService templates) => _templates = templates;
 
         /// <summary>{ key, template, defaultTemplate, placeholders: [{ name, description }], updatedOn, updatedBy, needsDatabaseUpdate }.</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/message-templates/{key}")]
         [Authorize(Roles = ViewerRoles)]
         [SalesManagerAllowed]
@@ -61,6 +62,7 @@ namespace WorkNest.API.Controllers
         /// url = https://wa.me/&lt;phone&gt;?text=... Same visibility as the Tour Inquiries list: location-bound staff see
         /// their branches plus the inquiries without one; 404 when the user can't see it.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("api/contact/{publicId:guid}/whatsapp-message")]
         [Authorize(Roles = ViewerRoles)]
         [SalesManagerAllowed]

@@ -204,6 +204,7 @@ namespace WorkNest.API.Controllers
             return RefusedResult(result) ?? Ok(result);
         }
 
+        [ReceptionistAllowed]
         [HttpGet("api/auth/me")]
         [AllowWhilePasswordChangeRequired]
         [CeoAllowed] // the CEO's own profile
@@ -225,6 +226,7 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        [ReceptionistAllowed]
         [HttpPut("api/auth/me")]
         [CeoAllowed] // own name / phone only (the app's and CMS's profile screen)
         [SalesManagerAllowed]

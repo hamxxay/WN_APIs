@@ -4,13 +4,14 @@ using WorkNest.Application.DTOs.WhatsApp;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
 {
     /// <summary>
     /// WhatsApp Inbox page: conversations with customers, staff replies and broadcasts. Every staff role may read the
     /// conversations (and edit a contact's name / tags / notes); only admins and super admins send anything (reply,
-    /// new conversation, broadcast).
+    /// new conversation, broadcast); the receptionist may only reply in an existing conversation.
     /// </summary>
     [ApiController]
     [Authorize(Roles = StaffRoles)]
@@ -19,6 +20,8 @@ namespace WorkNest.API.Controllers
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
         /// <summary>Who may send messages from the inbox (on top of StaffRoles). Sales executives read only.</summary>
         private const string SendRoles = "admin,Admin,super_admin,SuperAdmin";
+        /// <summary>Who may reply in an existing conversation: the senders plus the receptionist (who cannot start a conversation or broadcast).</summary>
+        private const string ReplyRoles = SendRoles + ",receptionist,Receptionist";
         private readonly IWhatsAppInboxService _inbox;
         private readonly IDbRepository _db;
 
@@ -28,6 +31,7 @@ namespace WorkNest.API.Controllers
             _db = db;
         }
 
+        [ReceptionistAllowed]
         [HttpGet("api/whatsapp/conversations")]
         public async Task<IActionResult> Conversations([FromQuery] int page = 1, [FromQuery] int limit = 30, [FromQuery] string? search = null)
         {
@@ -36,6 +40,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>Messages, oldest first. Without beforeId the newest page is returned and the conversation is marked read.</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/whatsapp/conversations/{id:int}/messages")]
         public async Task<IActionResult> Messages(int id, [FromQuery] long? beforeId = null, [FromQuery] int limit = 50)
         {
@@ -43,8 +48,9 @@ namespace WorkNest.API.Controllers
             return messages == null ? NotFound(ApiResponse.Fail("Conversation not found.")) : Ok(ApiResponse.Ok(messages));
         }
 
+        [ReceptionistAllowed]
         [HttpPost("api/whatsapp/conversations/{id:int}/messages")]
-        [Authorize(Roles = SendRoles)]
+        [Authorize(Roles = ReplyRoles)]
         public async Task<IActionResult> Reply(int id, [FromBody] WhatsAppSendMessageRequest request)
         {
             var result = await _inbox.ReplyAsync(id, request.Message, await ActorIdAsync());

@@ -80,6 +80,7 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        [ReceptionistAllowed]
         [HttpPost("api/mobile/device-token")]
         [CeoAllowed] // the app registers the push token for every signed-in user, the CEO too
         [SalesManagerAllowed] // and the Sales Manager

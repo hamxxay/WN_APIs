@@ -20,7 +20,7 @@ namespace WorkNest.API.Controllers
     /// requests), so clients must just allow a long request.
     /// </summary>
     [ApiController]
-    [Authorize(Roles = "access_officer,super_admin,SuperAdmin")]
+    [Authorize(Roles = "access_officer,super_admin,SuperAdmin,receptionist,Receptionist")]
     [AccessOfficerAllowed]
     public class AccessOfficerController : ControllerBase
     {
@@ -36,6 +36,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>The person with this CNIC / passport number and every booked space of the caller's locations they are on.</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/access-officer/lookup")]
         public Task<IActionResult> Lookup([FromQuery] string? cnic) =>
             Run(scope => _access.LookupAsync(cnic, scope));
@@ -44,6 +45,7 @@ namespace WorkNest.API.Controllers
         /// Employees tab: everyone on the caller's rooms with what is enrolled. filter = needs (default) | enrolled | all,
         /// search = name / ID / phone / email / customer / room. Access Officer: own locations; super admin: all.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("api/access-officer/employees")]
         public Task<IActionResult> Employees([FromQuery] string? filter, [FromQuery] string? search) =>
             Run(scope => _access.ListEmployeesAsync(filter, search, scope));
@@ -54,16 +56,19 @@ namespace WorkNest.API.Controllers
             Run(scope => _access.AddToRoomAsync(request, scope));
 
         /// <summary>kind = face | fingerprint: capture on the room machine, copied to every Entrance machine.</summary>
+        [ReceptionistAllowed]
         [HttpPost("api/access-officer/enroll/{kind}")]
         public Task<IActionResult> Enroll(string kind, [FromBody] AccessOfficerEnrollRequest? request) =>
             Run(scope => _access.EnrollAsync(kind, request, scope));
 
         /// <summary>Door access off (room + Entrance machines); the person stays on the booking.</summary>
+        [ReceptionistAllowed]
         [HttpPost("api/access-officer/remove-access")]
         public Task<IActionResult> RemoveAccess([FromBody] AccessOfficerPersonRequest? request) =>
             Run(scope => _access.SetAccessAsync(request, false, scope));
 
         /// <summary>Door access on again.</summary>
+        [ReceptionistAllowed]
         [HttpPost("api/access-officer/restore-access")]
         public Task<IActionResult> RestoreAccess([FromBody] AccessOfficerPersonRequest? request) =>
             Run(scope => _access.SetAccessAsync(request, true, scope));

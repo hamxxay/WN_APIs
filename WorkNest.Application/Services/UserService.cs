@@ -19,6 +19,7 @@ namespace WorkNest.Application.Services
         private const string SalesManagerLocationRequired = "A Sales Manager needs at least one location.";
         private const string AccessOfficerLocationRequired = "An Access Officer needs at least one location.";
         private const string NetworkEngineerLocationRequired = "A Network Engineer needs at least one location.";
+        private const string ReceptionistLocationRequired = "A Receptionist needs at least one location.";
 
         /// <summary>
         /// Roles that only work at their locations and must be given one (nothing is saved without it): a Sales Manager
@@ -29,6 +30,7 @@ namespace WorkNest.Application.Services
             Roles.IsSalesManager(roleId) ? SalesManagerLocationRequired
             : Roles.IsAccessOfficer(roleId) ? AccessOfficerLocationRequired
             : Roles.IsNetworkEngineer(roleId) ? NetworkEngineerLocationRequired
+            : Roles.IsReceptionist(roleId) ? ReceptionistLocationRequired
             : null;
 
         public async Task<(IEnumerable<object> Items, int Total)> GetUsersAsync(int page, int limit, string? search, int? locationId = null)

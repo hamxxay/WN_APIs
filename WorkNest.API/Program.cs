@@ -44,6 +44,7 @@ try
     // SalesManagerAccessFilter: likewise a Sales Manager gets 403 on every endpoint not marked [SalesManagerAllowed].
     // AccessOfficerAccessFilter: and an Access Officer on every endpoint not marked [AccessOfficerAllowed].
     // NetworkEngineerAccessFilter: and a Network Engineer on every endpoint not marked [NetworkEngineerAllowed].
+    // ReceptionistAccessFilter: and a Receptionist on every endpoint not marked [ReceptionistAllowed].
     builder.Services.AddControllers(o =>
         {
             o.Filters.Add<WorkNest.API.Filters.FriendlyErrorResultFilter>();
@@ -52,6 +53,7 @@ try
             o.Filters.Add<WorkNest.API.Filters.SalesManagerAccessFilter>();
             o.Filters.Add<WorkNest.API.Filters.AccessOfficerAccessFilter>();
             o.Filters.Add<WorkNest.API.Filters.NetworkEngineerAccessFilter>();
+            o.Filters.Add<WorkNest.API.Filters.ReceptionistAccessFilter>();
         })
         .AddJsonOptions(o =>
         {
@@ -272,6 +274,9 @@ try
     // access itself reuses the attendants, customer-employees and Hikvision enrolment services below.
     builder.Services.AddScoped<IAccessOfficerRepository, WorkNest.Infrastructure.Repositories.AccessOfficerRepository>();
     builder.Services.AddScoped<IAccessOfficerService, AccessOfficerService>();
+    // Front desk (api/reception/*): dbo.WN_Contacts / WN_Bookings columns from script ROLE_01_receptionist (checked at run time).
+    builder.Services.AddScoped<IReceptionRepository, WorkNest.Infrastructure.Repositories.ReceptionRepository>();
+    builder.Services.AddScoped<IReceptionService, ReceptionService>();
     // Admin list filters + Excel export (status / date range / location on api/booking, quotation, invoice, payment,
     // customer and their .../statuses): new procedures of script LST_01_list_filters, used only when a filter is chosen.
     builder.Services.AddScoped<IListFilterRepository, WorkNest.Infrastructure.Repositories.ListFilterRepository>();

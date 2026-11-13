@@ -5,12 +5,14 @@ using WorkNest.Application.Helpers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 using WorkNest.API.Extensions;
+using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
 {
     /// <summary>Complaints page: complaints from the WhatsApp chatbot and entered by staff.</summary>
     [ApiController]
     [Authorize(Roles = StaffRoles)]
+    [ReceptionistAllowed]
     public class ComplaintController : ControllerBase
     {
         private const string StaffRoles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive";
@@ -47,6 +49,10 @@ namespace WorkNest.API.Controllers
         [HttpPost("api/complaints")]
         public async Task<IActionResult> Create([FromBody] ComplaintCreateRequest request)
         {
+            // A customer picked for the complaint must be one the staff member may see (the id is in the body, not the route).
+            if (request.CustomerId is > 0
+                && !await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Customer, request.CustomerId.Value.ToString()))
+                return NotFound(ApiResponse.Fail("Customer not found."));
             var scope = User.GetBranchScope();
             var branch = await _complaints.ChooseBranchAsync(request.LocationId, request.Branch, scope);
             if (branch.IsError) return StatusCode(branch.ErrorStatus, ApiResponse.Fail(branch.Error!));

@@ -86,6 +86,7 @@ namespace WorkNest.API.Controllers
         // (issue date, both included): only then the LST_01 procedure is used; without them the list is read as before.
         // The CMS Invoices page sends the current month by default. Before LST_01 has run the filtered list is read from
         // the old procedure and filtered in the API (ListFilterService), so that page keeps working.
+        [ReceptionistAllowed]
         [HttpGet("api/invoice")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> List(
@@ -168,6 +169,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>Choices of the Invoices list Status filter (the statuses the list shows), [{ value, label }].</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/invoice/statuses")]
         [Authorize(Roles = StaffRoles)]
         public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
@@ -229,6 +231,7 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [ReceptionistAllowed]
         [HttpGet("api/customer/{customerId:int}/invoices")]
         [Authorize(Roles = StaffRoles)]
         [HttpGet("api/customers/{customerId:int}/invoices")]
@@ -262,6 +265,7 @@ namespace WorkNest.API.Controllers
         }
 
         [EnableRateLimiting("pdf")]
+        [ReceptionistAllowed]
         [HttpGet("WorkNest/api/invoice/{id:int}/pdf")]
         [HttpGet("WorkNest/api/invoice/{id:int}/statement-pdf")]
         [HttpGet("WorkNest/api/invoice/{id:int}/download")]
@@ -683,6 +687,7 @@ namespace WorkNest.API.Controllers
             return dto;
         }
 
+        [ReceptionistAllowed]
         [HttpGet("api/invoice/{id:int}")]
         [Authorize]
         public async Task<IActionResult> GetDetails(int id)
@@ -847,6 +852,7 @@ namespace WorkNest.API.Controllers
         // Record Payment on Invoices & Billing (cash, cheque, bank transfer; part or full). dbo.WN_RecordInvoicePayment
         // (INV_FIX_A) updates PaidTotal + status, re-activates the booking's access cards and writes the WN_Payments row.
         // [RecordScope] on the class keeps location-bound staff to invoices of their locations ("id").
+        [ReceptionistAllowed]
         [HttpPost("api/invoice/{id:int}/record-payment")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> RecordPayment(int id, [FromBody] RecordPaymentDto req)
@@ -1327,6 +1333,7 @@ namespace WorkNest.API.Controllers
         }
 
         [EnableRateLimiting("pdf")]
+        [ReceptionistAllowed]
         [HttpPost("api/invoice/{id:int}/send-email")]
         [Authorize(Roles = StaffRoles)]
         public async Task<IActionResult> SendInvoiceEmail(int id, [FromQuery] bool force = false)

@@ -178,6 +178,7 @@ namespace WorkNest.API.Controllers
         /// Only routes the caller's role can open are returned; machines offline is admin / super admin only.
         /// Super admins see every location; location-bound roles every location they are assigned to where the data has one.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("api/admin/nav-badges")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,receptionist,Receptionist,sales_executive,SalesExecutive")]
         public async Task<IActionResult> NavBadges()

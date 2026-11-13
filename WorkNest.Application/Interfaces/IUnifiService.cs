@@ -41,6 +41,8 @@ namespace WorkNest.Application.Interfaces
         Task<JsonObject> GetTopUsageAsync(int days);
         Task<JsonObject> StartSpeedtestAsync(string? wan);
         Task<JsonObject> GetSpeedtestStatusAsync();
+        /// <summary>The latest speed tests of the main console (90-day archive), newest first: { at (epoch ms), down, up (Mbps), ping (ms), wan (interface) }.</summary>
+        Task<List<SpeedtestHistoryItem>> GetSpeedtestHistoryAsync(int count);
         Task<JsonObject> GetWanTrafficAsync(int rangeHours);
         Task<JsonObject> GetConfigAsync();
         /// <summary>Rename a client (empty name removes the alias). Null when the MAC is invalid.</summary>
@@ -89,4 +91,6 @@ namespace WorkNest.Application.Interfaces
         /// <param name="usage">The dashboard's period for the top data users; null = today.</param>
         Task<NetworkDashboardDto> GetNetworkSectionAsync(IReadOnlyCollection<string> siteIds, TimeSpan clientsWait, NetworkUsageRange? usage = null);
     }
+    /// <summary>One archived speed test (times as epoch milliseconds, speeds Mbps, ping ms); null = not reported.</summary>
+    public sealed record SpeedtestHistoryItem(double AtMs, double? DownMbps, double? UpMbps, double? PingMs, string? Interface);
 }

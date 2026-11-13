@@ -46,6 +46,16 @@ namespace WorkNest.Application.Services
         {
             var error = Validate(request.Category, request.Description);
             if (error != null) return ApiResponse.Fail(error);
+            // A chosen customer account fills the contact details the desk left empty.
+            if (request.CustomerId is > 0)
+            {
+                var customer = await _db.GetUserByIdAsync(request.CustomerId.Value);
+                if (customer == null) return ApiResponse.Fail("Customer not found.");
+                string? Field(string key) => customer.TryGetValue(key, out var v) && v is not null and not DBNull ? Clean(v.ToString()) : null;
+                if (string.IsNullOrWhiteSpace(request.CustomerName)) request.CustomerName = Field("Name");
+                if (string.IsNullOrWhiteSpace(request.PhoneNumber)) request.PhoneNumber = Field("PhoneNumber");
+                if (string.IsNullOrWhiteSpace(request.Email)) request.Email = Field("Email");
+            }
             if (request.CustomerName is { Length: > 200 }) return ApiResponse.Fail("The customer name can be at most 200 characters.");
             if (request.Email is { Length: > 256 }) return ApiResponse.Fail("The email can be at most 256 characters.");
             var phoneError = Phone.Validate(request.PhoneNumber);

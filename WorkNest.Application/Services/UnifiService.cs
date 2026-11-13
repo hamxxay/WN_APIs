@@ -1181,6 +1181,19 @@ namespace WorkNest.Application.Services
 
         private async Task<List<JsonElement>> SpeedtestArchive() => (await SpeedtestReport()).Rows;
 
+        public async Task<List<SpeedtestHistoryItem>> GetSpeedtestHistoryAsync(int count)
+        {
+            var rows = await SpeedtestArchive();
+            double? Pos(double? v) => v is > 0 ? Round2(v) : null;
+            return rows
+                .Select(t => new SpeedtestHistoryItem(D(P(t, "time")) ?? 0, Pos(D(P(t, "xput_download"))), Pos(D(P(t, "xput_upload"))),
+                    Pos(D(P(t, "latency"))), Str(P(t, "interface_name"))))
+                .Where(t => t.AtMs > 0 && (t.DownMbps != null || t.UpMbps != null))
+                .OrderByDescending(t => t.AtMs)
+                .Take(Math.Clamp(count, 1, 50))
+                .ToList();
+        }
+
         public async Task<JsonObject> GetWanTrafficAsync(int rangeHours)
         {
             var gw = await GatewayDevice();

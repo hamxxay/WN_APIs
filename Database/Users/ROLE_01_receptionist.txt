@@ -1,0 +1,96 @@
+-- =====================================================================================================================
+-- ROLE_01: the Receptionist role (receptionist, RoleId 21 = Roles.ReceptionistId in the API) and what the front desk needs.
+--
+-- A Receptionist signs in to the CMS / app and works only at the location(s) a Super Admin assigns (WN_Users.LocationId plus
+-- WN_UserLocations, like an Access Officer): Today, tour inquiries (also added by hand), complaints, WhatsApp replies,
+-- meeting-room bookings with check-in / check-out, customer lookup, desk payments, fingerprint / face access and network status.
+--
+--   1. dbo.WN_Roles gets the row (21, 'receptionist', 'Receptionist', active). dbo.WN_Roles.Id is not an identity column, so the
+--      id is given explicitly (existing ids: 1, 2, 14, 16, 17, 18, 19, 20). Nothing else in the role table is touched.
+--   2. dbo.WN_Bookings gets four empty columns for the meeting-room desk (existing rows stay NULL = never checked in):
+--        MeetingCheckedInAt DATETIME2, MeetingCheckedInById INT, MeetingCheckedOutAt DATETIME2, MeetingCheckedOutById INT.
+--   3. dbo.WN_Contacts gets four empty columns for a tour inquiry added by hand (website inquiries stay NULL):
+--        PreferredDate DATE, PreferredTime NVARCHAR(20), Company NVARCHAR(200), SpaceType NVARCHAR(100).
+--
+-- The API works WITHOUT this script: a user with RoleId 21 is already a Receptionist for it, tour inquiries added by hand keep
+-- their details in the message, "Today" lists the tours that came in today instead of those with a preferred date of today, and
+-- meeting-room check-in / check-out answer 503 "Reception is not set up on this server yet." It notices the new columns within a
+-- minute of the script being run. RoleService caches the role list for up to 5 minutes (it already shows 'Receptionist' before
+-- the row exists); restart the API after running this if the role does not show in the CMS user screens straight away.
+-- No stored procedure is changed. Nothing existing is altered or dropped: only added.
+--
+-- BEFORE YOU RUN: run on the TEST database first, then live. Run the whole file in SSMS / DBeaver (select all, Execute): it is ONE
+-- batch (no GO), one transaction: it either completes or changes nothing. Safe to run again (every step checks first).
+-- The first result grids show what exists now (save them as your backup; nothing is overwritten, so it is for the record).
+-- To undo: ALTER TABLE dbo.WN_Bookings DROP COLUMN MeetingCheckedInAt, MeetingCheckedInById, MeetingCheckedOutAt, MeetingCheckedOutById;
+--          ALTER TABLE dbo.WN_Contacts DROP COLUMN PreferredDate, PreferredTime, Company, SpaceType;
+--          (first make sure no user has RoleId 21) DELETE FROM dbo.WN_Roles WHERE Id = 21 AND RoleName = N'receptionist';
+-- =====================================================================================================================
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+SET ANSI_NULLS ON;
+SET QUOTED_IDENTIFIER ON;
+
+IF OBJECT_ID(N'dbo.WN_Roles', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_Bookings', N'U') IS NULL OR OBJECT_ID(N'dbo.WN_Contacts', N'U') IS NULL
+    THROW 50080, N'ROLE_01: dbo.WN_Roles / WN_Bookings / WN_Contacts is missing: wrong database? Nothing was changed.', 1;
+
+-- Another role already uses id 21 under a different name: stop rather than clash.
+IF EXISTS (SELECT 1 FROM dbo.WN_Roles WHERE Id = 21 AND RoleName <> N'receptionist')
+    THROW 50081, N'ROLE_01: RoleId 21 is already used by another role. Nothing was changed. Send the backup grid to the developer.', 1;
+
+-- Backup 1: the roles as they are now
+SELECT r.Id, r.RoleName, r.DisplayName, r.IsActive, r.CreatedAt FROM dbo.WN_Roles r ORDER BY r.Id;
+
+-- Backup 2: which of the new columns exist right now (1 = already there)
+SELECT CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedInAt') IS NOT NULL THEN 1 ELSE 0 END    AS Has_MeetingCheckedInAt,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedInById') IS NOT NULL THEN 1 ELSE 0 END  AS Has_MeetingCheckedInById,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedOutAt') IS NOT NULL THEN 1 ELSE 0 END   AS Has_MeetingCheckedOutAt,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedOutById') IS NOT NULL THEN 1 ELSE 0 END AS Has_MeetingCheckedOutById,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Contacts', N'PreferredDate') IS NOT NULL THEN 1 ELSE 0 END         AS Has_PreferredDate,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Contacts', N'PreferredTime') IS NOT NULL THEN 1 ELSE 0 END         AS Has_PreferredTime,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Contacts', N'Company') IS NOT NULL THEN 1 ELSE 0 END               AS Has_Company,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Contacts', N'SpaceType') IS NOT NULL THEN 1 ELSE 0 END             AS Has_SpaceType;
+
+-- APPLY START
+BEGIN TRANSACTION;
+
+-- 1. The role row (Id is not an identity column).
+IF NOT EXISTS (SELECT 1 FROM dbo.WN_Roles WITH (UPDLOCK, HOLDLOCK) WHERE Id = 21 OR RoleName = N'receptionist')
+    INSERT INTO dbo.WN_Roles (Id, RoleName, DisplayName, IsActive, CreatedAt)
+    VALUES (21, N'receptionist', N'Receptionist', 1, SYSUTCDATETIME());
+ELSE
+    UPDATE dbo.WN_Roles SET IsActive = 1 WHERE (Id = 21 OR RoleName = N'receptionist') AND IsActive = 0;
+
+-- 2. Meeting-room check-in / check-out (all NULL for existing rows).
+IF COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedInAt') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Bookings ADD MeetingCheckedInAt DATETIME2 NULL;');
+IF COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedInById') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Bookings ADD MeetingCheckedInById INT NULL;');
+IF COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedOutAt') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Bookings ADD MeetingCheckedOutAt DATETIME2 NULL;');
+IF COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedOutById') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Bookings ADD MeetingCheckedOutById INT NULL;');
+
+-- 3. Tour inquiry added by hand (all NULL for existing rows).
+IF COL_LENGTH(N'dbo.WN_Contacts', N'PreferredDate') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Contacts ADD PreferredDate DATE NULL;');
+IF COL_LENGTH(N'dbo.WN_Contacts', N'PreferredTime') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Contacts ADD PreferredTime NVARCHAR(20) NULL;');
+IF COL_LENGTH(N'dbo.WN_Contacts', N'Company') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Contacts ADD Company NVARCHAR(200) NULL;');
+IF COL_LENGTH(N'dbo.WN_Contacts', N'SpaceType') IS NULL
+    EXEC(N'ALTER TABLE dbo.WN_Contacts ADD SpaceType NVARCHAR(100) NULL;');
+
+COMMIT TRANSACTION;
+-- APPLY END
+
+-- Result: every value should be 1
+SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_Roles WHERE Id = 21 AND RoleName = N'receptionist' AND IsActive = 1) THEN 1 ELSE 0 END AS Role_row_present,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedInAt') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedInById') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedOutAt') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Bookings', N'MeetingCheckedOutById') IS NOT NULL THEN 1 ELSE 0 END AS Meeting_check_in_columns_added,
+       CASE WHEN COL_LENGTH(N'dbo.WN_Contacts', N'PreferredDate') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Contacts', N'PreferredTime') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Contacts', N'Company') IS NOT NULL
+             AND COL_LENGTH(N'dbo.WN_Contacts', N'SpaceType') IS NOT NULL THEN 1 ELSE 0 END AS Tour_columns_added;

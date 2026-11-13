@@ -3,7 +3,7 @@ namespace WorkNest.Application.Helpers
     /// <summary>
     /// SEC_LOC_02 (Database/Security/SEC_LOC_02_lists): the location-scoped list procedures (challan search, recent
     /// bookings, customer search, memberships, security deposit report). A procedure takes @LocationIds as a CSV:
-    /// null = every location (super admin, CEO, receptionist: the same rows as the old procedure).
+    /// null = every location (super admin, CEO: the same rows as the old procedure).
     /// </summary>
     public static class LocationScopeLists
     {

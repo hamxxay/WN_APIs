@@ -47,6 +47,7 @@ namespace WorkNest.API.Controllers
         /// Add attendant to a customer (upsert into WN_Persons, link to WN_CustomerAttendants).
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpPost("api/attendants")]
         public async Task<IActionResult> AddAttendant([FromBody] CreateAttendantRequest request)
         {
@@ -77,6 +78,7 @@ namespace WorkNest.API.Controllers
         /// Update contact details for an existing person.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpPut("api/attendants/{personId}")]
         public async Task<IActionResult> UpdateAttendant(int personId, [FromBody] UpdateAttendantRequest request)
         {
@@ -94,6 +96,7 @@ namespace WorkNest.API.Controllers
         /// Get all active attendants for a given customer.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpGet("api/customers/{customerId}/attendants")]
         public async Task<IActionResult> GetCustomerAttendants(int customerId)
         {
@@ -113,6 +116,7 @@ namespace WorkNest.API.Controllers
         /// Get active booked spaces/rooms for a customer.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpGet("api/customers/{customerId}/active-spaces")]
         public async Task<IActionResult> GetCustomerActiveSpaces(int customerId)
         {
@@ -124,6 +128,7 @@ namespace WorkNest.API.Controllers
         /// Get attendants currently assigned to a specific booking detail.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpGet("api/bookings/{bookingDetailId}/attendants")]
         public async Task<IActionResult> GetBookingAttendants(int bookingDetailId)
         {
@@ -135,6 +140,7 @@ namespace WorkNest.API.Controllers
         /// Check room capacity and estimated surcharge before committing an assignment.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpGet("api/bookings/{bookingDetailId}/capacity-check")]
         public async Task<IActionResult> CheckCapacity(int bookingDetailId)
         {
@@ -148,6 +154,7 @@ namespace WorkNest.API.Controllers
         /// Assign an existing attendant to a booking detail.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpPost("api/bookings/{bookingDetailId}/attendants")]
         public async Task<IActionResult> AssignToBooking(int bookingDetailId, [FromBody] AssignBookingAttendantRequest request)
         {
@@ -205,6 +212,7 @@ namespace WorkNest.API.Controllers
         /// Sales executive: the room is full, so ask an admin to approve adding this person (over-capacity, billed).
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpPost("api/bookings/{bookingDetailId}/capacity-requests")]
         public async Task<IActionResult> RequestOverCapacity(int bookingDetailId, [FromBody] CreateCapacityRequestBody body)
         {
@@ -305,6 +313,7 @@ namespace WorkNest.API.Controllers
         /// Same flow as a customer removing an employee from their booking.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpDelete("api/bookings/{bookingDetailId}/attendants/{personId}")]
         public async Task<IActionResult> SoftRemoveFromBooking(int bookingDetailId, int personId)
         {
@@ -316,11 +325,15 @@ namespace WorkNest.API.Controllers
         /// Toggle access status (single attendant or batch for entire customer/booking).
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpPatch("api/access-status")]
         public async Task<IActionResult> ToggleAccessStatus([FromBody] ToggleAccessStatusRequest request)
         {
             if (request == null || request.BookingDetailId <= 0 || request.CustomerId <= 0)
                 return BadRequest("BookingDetailId and CustomerId are required.");
+            // Batch Space Access (no person = everyone on the booked space) is not for the receptionist.
+            if (User.IsReceptionist() && !request.PersonId.HasValue)
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Switching access for the whole space is not available to the Receptionist." });
             // Location-bound staff: only booked spaces of their own locations (the id is in the body, not the route).
             if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.BookingDetail, request.BookingDetailId.ToString()))
                 return NotFound(new { message = "Booking not found." });
@@ -355,6 +368,7 @@ namespace WorkNest.API.Controllers
         /// face / card with the reason while the room machine is offline or missing.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpGet("api/bookings/{bookingDetailId}/room-machine")]
         public async Task<IActionResult> GetRoomMachine(int bookingDetailId)
         {
@@ -367,6 +381,7 @@ namespace WorkNest.API.Controllers
         /// then the template is copied to the other selected machines.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpPost("api/bookings/{bookingDetailId}/attendants/{personId}/hik/fingerprint")]
         public async Task<IActionResult> EnrollFingerprint(int bookingDetailId, int personId, [FromBody] HikEnrollRequest request)
         {
@@ -391,6 +406,7 @@ namespace WorkNest.API.Controllers
         /// then the photo is uploaded to the other selected machines.
         /// </summary>
         [Authorize]
+        [ReceptionistAllowed]
         [HttpPost("api/bookings/{bookingDetailId}/attendants/{personId}/hik/face")]
         public async Task<IActionResult> EnrollFace(int bookingDetailId, int personId, [FromBody] HikEnrollRequest request)
         {
@@ -401,6 +417,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Challan-based access suspension for the booking behind a booked space (overdue unpaid challan).
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("api/bookings/{bookingDetailId}/access-suspension")]
         public async Task<IActionResult> GetAccessSuspension(int bookingDetailId)
         {

@@ -8,6 +8,7 @@ using WorkNest.API.Extensions;
 using WorkNest.Application.DTOs.FeeReceipt;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
+using WorkNest.API.Filters;
 
 namespace WorkNest.API.Controllers
 {
@@ -72,6 +73,7 @@ namespace WorkNest.API.Controllers
         /// Invoices that can take a receipt: not cancelled, with a balance left (unpaid, overdue or part-paid), with their
         /// amount paid so far, balance and whether they can be paid in parts.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("unpaid-invoices")]
         public async Task<IActionResult> GetUnpaidInvoices(
             [FromQuery] string? search = null,
@@ -86,6 +88,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Returns Cash and Bank accounts from AccountsCOA, optionally filtered by invoice CompanyId.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("accounts")]
         public async Task<IActionResult> GetAccounts([FromQuery] int? companyId = null)
         {
@@ -97,6 +100,7 @@ namespace WorkNest.API.Controllers
         /// Create a fee receipt for an invoice: the whole balance (PaymentMode Full, the default) or a part of it (Partial
         /// with Amount). The invoice becomes Paid when nothing is left, else Partial.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] FeeReceiptCreateDto request)
         {
@@ -136,6 +140,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Paginated list of fee receipts with optional search, location, and status filters.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet]
         public async Task<IActionResult> GetList(
             [FromQuery] int page = 1,
@@ -152,6 +157,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Gets a fee receipt by integer Id. 404 when it does not exist or is outside the caller's locations.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("{id:int}")]
         public async Task<IActionResult> GetById(int id)
         {
@@ -162,6 +168,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Gets a fee receipt by GUID.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("guid/{guid:guid}")]
         public async Task<IActionResult> GetByGuid(Guid guid)
         {

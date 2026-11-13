@@ -2,9 +2,9 @@ namespace WorkNest.Application.Helpers
 {
     /// <summary>
     /// Branch routing (BR_01_branch_routing): which tour inquiries and complaints a staff member sees, and which branch
-    /// (dbo.WN_Locations) they may give one. Location-bound staff (admin, sales executive, sales manager, access officer)
-    /// see the items of their own locations plus every item without a branch; everyone else (super admin, CEO,
-    /// receptionist) sees everything. Items without a branch stay visible to everyone until staff set one.
+    /// (dbo.WN_Locations) they may give one. Location-bound staff (admin, sales executive, sales manager, access officer,
+    /// receptionist) see the items of their own locations plus every item without a branch; everyone else (super admin, CEO)
+    /// sees everything. Items without a branch stay visible to everyone until staff set one.
     /// </summary>
     public sealed class BranchScope
     {

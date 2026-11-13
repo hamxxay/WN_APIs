@@ -48,6 +48,7 @@ namespace WorkNest.API.Controllers
         // and the answer also carries total (for paging); without them the list is read exactly as before.
         // Location-bound staff always get the LST_01 list limited to their locations (customers of their locations:
         // their user account or a booking there), with or without a filter.
+        [ReceptionistAllowed]
         [HttpGet("api/customer")]
         public async Task<IActionResult> List(
             [FromServices] IListFilterService lists,
@@ -75,6 +76,7 @@ namespace WorkNest.API.Controllers
         }
 
         /// <summary>Choices of the Customers list Status filter (active / inactive), [{ value, label }].</summary>
+        [ReceptionistAllowed]
         [HttpGet("api/customer/statuses")]
         public Task<IActionResult> ListStatuses([FromServices] IListFilterService lists) =>
             ListFilterResults.StatusOptionsAsync(lists, ListFilterRules.Customers);
@@ -84,6 +86,7 @@ namespace WorkNest.API.Controllers
         /// customers with no location yet (no located account, no booking; open to every branch, as the customer record
         /// is), via SEC_LOC_02 dbo.WN_Customers_SearchScoped (503 until that script has run).
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("api/customer/search")]
         public async Task<IActionResult> Search([FromQuery] string q, [FromServices] IDbRepository db)
         {
@@ -98,6 +101,7 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        [ReceptionistAllowed]
         [HttpGet("api/customer/{id}")]
         public async Task<IActionResult> GetById(string id) =>
             Ok(await WithLoginAsync(await _customers.GetCustomerByIdAsync(id)));
@@ -107,6 +111,7 @@ namespace WorkNest.API.Controllers
         /// security deposits and an activity timeline (quotations and invoices have their own endpoints). Location-bound
         /// staff get 404 for a customer of other locations (RecordScope on the class); 503 until CD_01 has run.
         /// </summary>
+        [ReceptionistAllowed]
         [HttpGet("api/customer/{id:int}/overview")]
         public async Task<IActionResult> Overview(int id)
         {

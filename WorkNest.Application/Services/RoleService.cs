@@ -66,6 +66,10 @@ namespace WorkNest.Application.Services
                 {
                     list.Add(new RoleItem(Roles.NetworkEngineerId, Roles.NetworkEngineer, "Network Engineer"));
                 }
+                if (list != null && !list.Any(r => r.Id == Roles.ReceptionistId || string.Equals(r.RoleName, Roles.Receptionist, StringComparison.OrdinalIgnoreCase)))
+                {
+                    list.Add(new RoleItem(Roles.ReceptionistId, Roles.Receptionist, "Receptionist")); // until ROLE_01 adds the row
+                }
                 _roles = list?.OrderBy(r => r.Id).ToList();
                 _loadedAt = DateTime.UtcNow;
                 return _roles;

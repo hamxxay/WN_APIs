@@ -99,6 +99,7 @@ namespace WorkNest.API.Controllers
             return null;
         }
 
+        [ReceptionistAllowed]
         [HttpGet]
         public async Task<IActionResult> GetList(
             [FromQuery] int page = 1,
@@ -109,6 +110,7 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        [ReceptionistAllowed]
         [HttpGet("{id:guid}")]
         public async Task<IActionResult> GetById(Guid id)
         {
