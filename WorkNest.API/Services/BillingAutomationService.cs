@@ -21,10 +21,13 @@ namespace WorkNest.API.Services
         private readonly ServiceSwitchGate _gate; // on/off switch (api/admin/services): off skips the cycle's work
 
         private readonly IServiceProvider _serviceProvider;
+        /// <summary>The staff CMS the e-mail's button opens (Approvals:CmsBaseUrl, default https://cms.worknestpk.com).</summary>
+        private readonly string _cmsBaseUrl;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _remindersSentToday = new();
 
         public BillingAutomationService(ILogger<BillingAutomationService> logger, IConfiguration configuration, IServiceSwitch serviceSwitch, IServiceProvider serviceProvider)
         {
+            _cmsBaseUrl = WorkNest.Application.Services.ApprovalEmail.BaseUrl(configuration["Approvals:CmsBaseUrl"]);
             _logger = logger;
             _gate = new ServiceSwitchGate(serviceSwitch, BackgroundServiceCatalog.BillingAutomation, logger);
             _connectionString = configuration.GetConnectionString("DefaultConnection") 
@@ -139,7 +142,7 @@ namespace WorkNest.API.Services
                                     <p style='color: #b91c1c; font-weight: bold;'>Approval deadline: {deadlineDay}th of this month. Invoices must be inspected and approved individually before delivery.</p>
                                     <p>Please log in to the WorkNest portal and open the approval queue:</p>
                                     <div style='margin: 25px 0;'>
-                                        <a href='https://worknest.vercel.app/admin/invoice-approvals' style='background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;'>Open Approval Queue</a>
+                                        <a href='{_cmsBaseUrl}/admin/invoice-approvals' style='background: #2563eb; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block;'>Open Approval Queue</a>
                                     </div>
                                     <p style='font-size: 13px; color: #64748b;'>Note: Invoices are never sent automatically. Each invoice requires personal inspection before approval.</p>
                                 </div>";
