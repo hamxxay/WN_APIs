@@ -377,6 +377,9 @@ try
     builder.Services.AddHostedService<WeeklyReportService>();   // Reports:Weekly (Monday 09:00 Pakistan time by default)
     builder.Services.AddMemoryCache();
     builder.Services.AddHttpClient();
+    // Google's Firebase signing keys: IPv4 first + short timeouts (a hung download used to block every sign-in).
+    builder.Services.AddHttpClient(WorkNest.API.Security.FirebaseTokenVerifier.HttpClientName)
+        .ConfigurePrimaryHttpMessageHandler(WorkNest.API.Security.FirebaseTokenVerifier.CreateKeysHandler);
     builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();
     builder.Services.AddHostedService<UnifiPollingService>();
     builder.Services.AddHostedService<GwnPollingService>();   // GwnPolling switch; Gwn:Enabled
