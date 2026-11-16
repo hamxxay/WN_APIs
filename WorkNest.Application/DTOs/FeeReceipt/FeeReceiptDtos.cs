@@ -17,11 +17,22 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public string? DepositorCnic { get; set; }
         /// <summary>
         /// "Full" (default): the invoice's whole remaining balance, worked out by the database at the moment of saving.
-        /// "Partial": <see cref="Amount"/> (more than 0, at most the balance, 2 decimals). Not for withholding-tax invoices.
+        /// "Partial": one head of the invoice (<see cref="ChargeTypeId"/>), its whole unpaid amount (FR_05). Not for
+        /// withholding-tax invoices.
         /// </summary>
         public string? PaymentMode { get; set; }
-        /// <summary>Amount received, for a Partial payment (ignored for Full).</summary>
+        /// <summary>
+        /// Partial only: the head's unpaid amount the page showed. Optional; when sent, the database refuses the receipt if
+        /// the head's unpaid amount has changed since (the page was out of date). Ignored for Full.
+        /// </summary>
         public decimal? Amount { get; set; }
+        /// <summary>
+        /// "Receipt For" (Partial, required): a WN_ChargeTypes receipt head from GET api/fee-receipts/charge-types
+        /// (Room Rent, Security Deposit, Other Charges). Ignored for Full.
+        /// </summary>
+        public int? ChargeTypeId { get; set; }
+        /// <summary>What the other charges were: required when <see cref="ChargeTypeId"/> is Other Charges, at most 200 characters.</summary>
+        public string? OtherDescription { get; set; }
 
         public Guid GetResolvedInvoiceIdGuid() => InvoiceIdGUID;
 
@@ -90,6 +101,28 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public bool AllowPartial { get; set; }
         /// <summary>A custom invoice (InvoiceTypeId 7, script CI_01).</summary>
         public bool IsCustom { get; set; }
+    }
+
+    /// <summary>A "Receipt For" option (dbo.WN_FeeReceipts_GetChargeTypes, FR_05).</summary>
+    public class FeeReceiptChargeTypeDto
+    {
+        public int ChargeTypeId { get; set; }
+        /// <summary>WN_ChargeTypes.Code: Rent | SecurityDeposit | Other.</summary>
+        public string Code { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+    }
+
+    /// <summary>One head of an invoice (dbo.WN_FeeReceipts_GetInvoiceHeads, FR_05): what it asks, what is paid, what is left.</summary>
+    public class FeeReceiptInvoiceHeadDto
+    {
+        public int ChargeTypeId { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public decimal Due { get; set; }
+        public decimal Paid { get; set; }
+        public decimal Unpaid { get; set; }
+        /// <summary>A receipt can be made for this head: something is unpaid and the invoice is not a withholding-tax invoice.</summary>
+        public bool CanReceive { get; set; }
     }
 
     public class FeeReceiptAccountDto
@@ -168,6 +201,11 @@ namespace WorkNest.Application.DTOs.FeeReceipt
         public DateTime? BillingMonth { get; set; }
         public int MonthNo { get; set; } = 1;
         public int MonthCount { get; set; } = 1;
+        // FR_05 "Receipt For". Null before the database update FR_05.
+        public int? ChargeTypeId { get; set; }
+        /// <summary>Room Rent | Security Deposit | Other Charges (WN_ChargeTypes.DisplayName).</summary>
+        public string? ChargeTypeName { get; set; }
+        public string? OtherDescription { get; set; }
     }
 
     /// <summary>How a fee receipt call ended; the controller maps it to the HTTP status.</summary>

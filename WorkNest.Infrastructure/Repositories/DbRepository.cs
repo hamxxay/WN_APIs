@@ -7934,7 +7934,32 @@ END";
             return (Convert.ToInt32(r["InvoiceTypeId"]), Convert.ToDecimal(r["Balance"]));
         }
 
-        public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null)
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptChargeTypesDbAsync()
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_GetChargeTypes", c);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await ReadAll(r);
+        }
+
+        public async Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptInvoiceHeadsDbAsync(Guid invoiceIdGuid, string? allowedLocationIds)
+        {
+            await using var c = await Open();
+            await using var cmd = SP("dbo.WN_FeeReceipts_GetInvoiceHeads", c);
+            cmd.Parameters.Add("@InvoiceIdGUID", SqlDbType.UniqueIdentifier).Value = invoiceIdGuid;
+            cmd.Parameters.AddWithValue("@AllowedLocationIds", (object?)allowedLocationIds ?? DBNull.Value);
+            try
+            {
+                await using var r = await cmd.ExecuteReaderAsync();
+                return await ReadAll(r);
+            }
+            catch (SqlException ex) when (ex.Number == 50000)
+            {
+                throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(ex.Message, ex.State, ex);
+            }
+        }
+
+        public async Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null, int? chargeTypeId = null, string? otherDescription = null)
         {
             await using var c = await Open();
             await using var cmd = SP("dbo.WN_FeeReceipts_Insert", c);
@@ -7955,6 +7980,12 @@ END";
                 p.Scale = 2;
                 p.Value = amount.Value;
             }
+            // FR_05: sent only for a receipt for one head, so a full payment also works with the procedure from before FR_05.
+            if (chargeTypeId.HasValue)
+            {
+                cmd.Parameters.Add("@ChargeTypeId", SqlDbType.TinyInt).Value = (byte)chargeTypeId.Value;
+                cmd.Parameters.Add("@OtherDescription", SqlDbType.NVarChar, 200).Value = (object?)otherDescription ?? DBNull.Value;
+            }
             try
             {
                 await using var r = await cmd.ExecuteReaderAsync();
@@ -7963,6 +7994,12 @@ END";
             catch (SqlException ex) when (ex.Number == 50000)
             {
                 throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(ex.Message, ex.State, ex);
+            }
+            catch (SqlException ex) when (chargeTypeId.HasValue && (ex.Number == 8144 || ex.Number == 8145))
+            {
+                // The procedure has no @ChargeTypeId yet: never save a head receipt as something else.
+                throw new WorkNest.Application.DTOs.FeeReceipt.FeeReceiptRuleException(
+                    "Receipts for one part of an invoice need the database update FR_05. Ask the WorkNest team to run it, or record the full balance.", 1, ex);
             }
             catch (SqlException ex) when (amount.HasValue && (ex.Number == 8144 || ex.Number == 8145))
             {

@@ -10,6 +10,8 @@ namespace WorkNest.Application.Interfaces
     {
         Task<ApiResponse> GetUnpaidInvoicesAsync(string? search, int? locationId, List<int>? allowedLocationIds, int top = 200);
         Task<ApiResponse> GetAccountsAsync(int? companyId);
+        Task<ApiResponse> GetChargeTypesAsync();
+        Task<FeeReceiptResult> GetInvoiceHeadsAsync(Guid invoiceGuid, List<int>? allowedLocationIds);
         Task<FeeReceiptResult> CreateReceiptAsync(FeeReceiptCreateDto dto, int createdById, List<int>? allowedLocationIds, bool isSuperAdmin);
         Task<FeeReceiptResult> VoidReceiptAsync(FeeReceiptVoidDto dto, int updatedById, List<int>? allowedLocationIds);
         Task<ApiResponse> GetListAsync(int page, int limit, string? search, int? locationId, byte? status, List<int>? allowedLocationIds);

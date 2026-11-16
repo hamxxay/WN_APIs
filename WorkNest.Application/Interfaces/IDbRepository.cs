@@ -606,7 +606,11 @@ namespace WorkNest.Application.Interfaces
         /// null when there is no such invoice. Used to keep custom invoices (InvoiceTypeId 7) to full payments.
         /// </summary>
         Task<(int InvoiceTypeId, decimal Balance)?> GetFeeReceiptInvoiceBalanceDbAsync(Guid invoiceIdGuid);
-        Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null);
+        Task<IDictionary<string, object?>?> InsertFeeReceiptDbAsync(Guid invoiceIdGuid, int cashInHandAccountId, string paymentType, DateTime receiptDate, string? remarks, string depositorName, string depositorCnic, int createdById, string? allowedLocationIds, decimal? amount = null, int? chargeTypeId = null, string? otherDescription = null);
+        /// <summary>FR_05: dbo.WN_FeeReceipts_GetChargeTypes, the "Receipt For" options.</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptChargeTypesDbAsync();
+        /// <summary>FR_05: dbo.WN_FeeReceipts_GetInvoiceHeads. Throws FeeReceiptRuleException (state 2 not found, 3 other location).</summary>
+        Task<IEnumerable<IDictionary<string, object?>>> GetFeeReceiptInvoiceHeadsDbAsync(Guid invoiceIdGuid, string? allowedLocationIds);
         /// <summary>Voids the receipt and the later monthly receipts of its invoice (RC_02); VoidedCount is null before RC_02.</summary>
         Task<(bool IsSuccessful, string Message, int? ReceiptId, bool InvoiceRestored, bool AccessCardsNeedReview, int? VoidedCount)> VoidFeeReceiptDbAsync(int? receiptId, Guid? receiptGuid, string voidReason, int updatedById, string? allowedLocationIds);
 

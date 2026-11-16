@@ -54,6 +54,29 @@ namespace WorkNest.Application.Services
             return ApiResponse.Ok(items);
         }
 
+        /// <summary>FR_05: the "Receipt For" options (Room Rent, Security Deposit, Other Charges), from dbo.WN_ChargeTypes.</summary>
+        public async Task<ApiResponse> GetChargeTypesAsync()
+        {
+            var rows = await _db.GetFeeReceiptChargeTypesDbAsync();
+            return ApiResponse.Ok(rows.Select(MapToChargeTypeDto).ToList());
+        }
+
+        /// <summary>FR_05: the heads of one invoice with what is due, paid and unpaid.</summary>
+        public async Task<FeeReceiptResult> GetInvoiceHeadsAsync(Guid invoiceGuid, List<int>? allowedLocationIds)
+        {
+            if (invoiceGuid == Guid.Empty)
+                return BadRequest("A valid invoice must be selected.");
+            try
+            {
+                var rows = await _db.GetFeeReceiptInvoiceHeadsDbAsync(invoiceGuid, ToCsv(allowedLocationIds));
+                return FeeReceiptResult.Ok(ApiResponse.Ok(rows.Select(MapToInvoiceHeadDto).ToList()));
+            }
+            catch (FeeReceiptRuleException ex)
+            {
+                return FeeReceiptResult.Fail(ex.Outcome, ex.Message);
+            }
+        }
+
         public async Task<FeeReceiptResult> CreateReceiptAsync(FeeReceiptCreateDto dto, int createdById, List<int>? allowedLocationIds, bool isSuperAdmin)
         {
             var invoiceGuid = dto.GetResolvedInvoiceIdGuid();
@@ -95,14 +118,12 @@ namespace WorkNest.Application.Services
                     return BadRequest(DepositorCnicFormatMessage);
             }
 
-            var (amount, amountError) = ResolveAmount(dto.PaymentMode, dto.Amount);
-            if (amountError != null)
-                return BadRequest(amountError);
+            var (payment, paymentError) = ResolvePayment(dto.PaymentMode, dto.Amount, dto.ChargeTypeId, dto.OtherDescription);
+            if (paymentError != null || payment == null)
+                return BadRequest(paymentError ?? "Invalid payment.");
 
-            // Withholding-tax invoices must be paid in full in one receipt. Full mode already
-            // takes the whole balance (worked out by the database when saving); a part payment must be exactly the balance.
-            if (amount.HasValue && await _db.GetFeeReceiptInvoiceBalanceDbAsync(invoiceGuid) is { } invoice
-                && invoice.InvoiceTypeId == 6 && Math.Round(amount.Value, 2) != Math.Round(invoice.Balance, 2))
+            // Withholding-tax invoices must be paid in full in one receipt (Full mode); the database checks it too.
+            if (payment.ChargeTypeId.HasValue && await _db.GetFeeReceiptInvoiceBalanceDbAsync(invoiceGuid) is { InvoiceTypeId: 6 })
                 return BadRequest("Withholding-tax invoices can only be paid in full, in one receipt.");
 
             string? allowedCsv = isSuperAdmin ? null : ToCsv(allowedLocationIds);
@@ -119,7 +140,9 @@ namespace WorkNest.Application.Services
                     depositorCnic,
                     createdById,
                     allowedCsv,
-                    amount);
+                    payment.Amount,
+                    payment.ChargeTypeId,
+                    payment.OtherDescription);
 
                 if (row == null)
                     throw new InvalidOperationException("WN_FeeReceipts_Insert returned no receipt row.");
@@ -218,27 +241,40 @@ namespace WorkNest.Application.Services
         public static string CustomInvoiceFullPaymentMessage(decimal balance) =>
             $"A custom invoice must be paid in full: PKR {Math.Round(balance, 2).ToString("N2", System.Globalization.CultureInfo.InvariantCulture)}.";
 
+        public const int MaxOtherDescriptionLength = 200;   // WN_FeeReceipts.OtherDescription NVARCHAR(200)
+
+        /// <summary>What a receipt request asks for, checked (see <see cref="ResolvePayment"/>).</summary>
+        public sealed record ReceiptPayment(decimal? Amount, int? ChargeTypeId, string? OtherDescription);
+
         /// <summary>
-        /// The amount to send for a receipt: null for Full (the database takes the whole balance at the moment of saving,
-        /// never a figure the browser had), the amount for Partial. Partial: more than 0, at most 2 decimals; the upper
-        /// limit (the balance) is checked by the database. Returns an error message instead when the request is wrong.
+        /// FR_05. Full: nothing is sent (the database takes the whole balance at the moment of saving, never a figure the
+        /// browser had). Partial: one head of the invoice ("Receipt For", required); the database takes that head's whole
+        /// unpaid amount, refuses a head already received, and needs a description for Other Charges. An amount, when sent,
+        /// is only the figure the page showed: the database refuses the receipt if it is no longer the head's unpaid amount.
+        /// Returns an error message instead when the request is wrong.
         /// </summary>
-        public static (decimal? Amount, string? Error) ResolveAmount(string? paymentMode, decimal? amount)
+        public static (ReceiptPayment? Payment, string? Error) ResolvePayment(string? paymentMode, decimal? amount, int? chargeTypeId, string? otherDescription)
         {
             var mode = string.IsNullOrWhiteSpace(paymentMode) ? FullMode : paymentMode.Trim();
             if (string.Equals(mode, FullMode, StringComparison.OrdinalIgnoreCase))
-                return (null, null);
+                return (new ReceiptPayment(null, null, null), null);
             if (!string.Equals(mode, PartialMode, StringComparison.OrdinalIgnoreCase))
                 return (null, "Payment mode must be Full or Partial.");
-            if (amount is not { } a)
-                return (null, "Enter the amount received for a partial payment.");
-            if (a <= 0)
-                return (null, "The amount received must be more than zero.");
-            if (a > MaxAmount)
-                return (null, "The amount received is too large.");
-            if (decimal.Round(a, 2) != a)
-                return (null, "The amount received can have at most 2 decimals.");
-            return (a, null);
+            if (chargeTypeId is not > 0 || chargeTypeId > byte.MaxValue)
+                return (null, "Choose what this receipt is for (Receipt For): Room Rent, Security Deposit or Other Charges.");
+            if (amount is { } a)
+            {
+                if (a <= 0)
+                    return (null, "The amount received must be more than zero.");
+                if (a > MaxAmount)
+                    return (null, "The amount received is too large.");
+                if (decimal.Round(a, 2) != a)
+                    return (null, "The amount received can have at most 2 decimals.");
+            }
+            var description = string.IsNullOrWhiteSpace(otherDescription) ? null : otherDescription.Trim();
+            if (description is { Length: > MaxOtherDescriptionLength })
+                return (null, $"The description of the other charges can be at most {MaxOtherDescriptionLength} characters.");
+            return (new ReceiptPayment(amount, chargeTypeId, description), null);
         }
 
         /// <summary>NULL = every location; otherwise the caller's ids (the controller sends -1 for "none", which matches nothing).</summary>
@@ -404,7 +440,32 @@ namespace WorkNest.Application.Services
                 InvoicePaymentStatus = GetStringOrNull(r, "InvoicePaymentStatus"),
                 BillingMonth = GetDateTimeOrNull(r, "BillingMonth"),
                 MonthNo = Math.Max(1, GetInt(r, "MonthNo", 1)),
-                MonthCount = Math.Max(1, GetInt(r, "MonthCount", 1))
+                MonthCount = Math.Max(1, GetInt(r, "MonthCount", 1)),
+                ChargeTypeId = GetIntOrNull(r, "ChargeTypeId"),
+                ChargeTypeName = GetStringOrNull(r, "ChargeTypeName"),
+                OtherDescription = GetStringOrNull(r, "OtherDescription")
+            };
+        }
+
+        public static FeeReceiptChargeTypeDto MapToChargeTypeDto(IDictionary<string, object?> r) => new()
+        {
+            ChargeTypeId = GetInt(r, "ChargeTypeId"),
+            Code = GetString(r, "Code"),
+            DisplayName = GetString(r, "DisplayName")
+        };
+
+        public static FeeReceiptInvoiceHeadDto MapToInvoiceHeadDto(IDictionary<string, object?> r)
+        {
+            var unpaid = Math.Round(GetDecimal(r, "Unpaid"), 2);
+            return new FeeReceiptInvoiceHeadDto
+            {
+                ChargeTypeId = GetInt(r, "ChargeTypeId"),
+                Code = GetString(r, "Code"),
+                DisplayName = GetString(r, "DisplayName"),
+                Due = Math.Round(GetDecimal(r, "Due"), 2),
+                Paid = Math.Round(GetDecimal(r, "Paid"), 2),
+                Unpaid = unpaid,
+                CanReceive = unpaid > 0 && !GetBool(r, "IsWhtInvoice")
             };
         }
 

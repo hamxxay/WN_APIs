@@ -96,9 +96,21 @@ namespace WorkNest.API.Controllers
             return Ok(result);
         }
 
+        /// <summary>FR_05: the "Receipt For" options (Room Rent, Security Deposit, Other Charges), from dbo.WN_ChargeTypes.</summary>
+        [ReceptionistAllowed]
+        [HttpGet("charge-types")]
+        public async Task<IActionResult> GetChargeTypes() => Ok(await _service.GetChargeTypesAsync());
+
+        /// <summary>FR_05: the heads of an invoice with what is due, paid and unpaid (only heads with an unpaid amount can be received).</summary>
+        [ReceptionistAllowed]
+        [HttpGet("invoice-heads/{invoiceGuid:guid}")]
+        public async Task<IActionResult> GetInvoiceHeads(Guid invoiceGuid) =>
+            ToActionResult(await _service.GetInvoiceHeadsAsync(invoiceGuid, ResolveAllowedLocations()));
+
         /// <summary>
-        /// Create a fee receipt for an invoice: the whole balance (PaymentMode Full, the default) or a part of it (Partial
-        /// with Amount). The invoice becomes Paid when nothing is left, else Partial.
+        /// Create a fee receipt for an invoice: the whole balance (PaymentMode Full, the default) or one head of it
+        /// (Partial with ChargeTypeId, that head's whole unpaid amount; OtherDescription for Other Charges). The invoice
+        /// becomes Paid when nothing is left, else Partial.
         /// </summary>
         [ReceptionistAllowed]
         [HttpPost]
