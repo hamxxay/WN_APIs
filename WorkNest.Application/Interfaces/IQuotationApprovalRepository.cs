@@ -21,6 +21,9 @@ namespace WorkNest.Application.Interfaces
 
         Task SetDiscountReasonAsync(int quotationId, string? reason, CancellationToken ct = default);
 
+        /// <summary>NotSubmitted, only while the quotation has no approval state yet. False = it already had one.</summary>
+        Task<bool> MarkNotSubmittedAsync(int quotationId, CancellationToken ct = default);
+
         /// <summary>PendingManager for this manager (not when it already is). False = it was already waiting.</summary>
         Task<bool> SubmitAsync(int quotationId, int managerUserId, DateTime nowUtc, CancellationToken ct = default);
 

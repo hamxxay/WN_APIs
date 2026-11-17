@@ -104,6 +104,15 @@ namespace WorkNest.Infrastructure.Repositories
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
+        public async Task<bool> MarkNotSubmittedAsync(int quotationId, CancellationToken ct = default)
+        {
+            await using var c = await OpenAsync(ct);
+            await using var cmd = new SqlCommand("UPDATE dbo.WN_Quotations SET ApprovalStatus = 'NotSubmitted' WHERE Id = @Id AND ApprovalStatus IS NULL", c)
+                { CommandTimeout = CommandTimeoutSeconds };
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = quotationId;
+            return await cmd.ExecuteNonQueryAsync(ct) > 0;
+        }
+
         public async Task<bool> SubmitAsync(int quotationId, int managerUserId, DateTime nowUtc, CancellationToken ct = default)
         {
             await using var c = await OpenAsync(ct);
@@ -167,7 +176,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<IReadOnlyList<QuotationApprovalInfo>> ListAsync(int? managerUserId, bool pendingOnly, IReadOnlyCollection<int>? locationIds, CancellationToken ct = default)
         {
-            var where = new List<string> { "q.ApprovalStatus IS NOT NULL" };
+            var where = new List<string> { "q.ApprovalStatus IS NOT NULL", "q.ApprovalStatus <> 'NotSubmitted'" };   // not sent to a manager yet: not in their lists
             if (pendingOnly) where.Add("q.ApprovalStatus = 'PendingManager'");
             if (managerUserId.HasValue) where.Add("q.ApprovalManagerUserId = @M");
             // location ids are ints from the caller's claims, never text

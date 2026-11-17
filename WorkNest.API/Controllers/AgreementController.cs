@@ -61,20 +61,54 @@ namespace WorkNest.API.Controllers
             return known.Any(e => string.Equals(e?.Trim(), wanted, StringComparison.OrdinalIgnoreCase)) ? null : OverrideEmailNotAllowed;
         }
 
-        private int? ResolveActorId()
+        /// <summary>
+        /// The signed-in user's WN_Users.Id: the numeric id claim when the token carries one, else looked up by the token's
+        /// e-mail (current tokens carry the public id and e-mail, not the numeric id; agreements were saved with no sender).
+        /// </summary>
+        private async Task<int?> ResolveActorIdAsync()
         {
             var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                        ?? User.FindFirst("id")?.Value
                        ?? User.FindFirst("sub")?.Value;
-
             if (int.TryParse(idClaim, out var id)) return id;
-            return null;
+
+            var email = User.GetEmail();
+            if (string.IsNullOrWhiteSpace(email)) return null;
+            try
+            {
+                var db = HttpContext.RequestServices.GetService(typeof(IDbRepository)) as IDbRepository;
+                if (db == null) return null;
+                var (userId, _) = await db.GetUserIdByEmailAsync(email);
+                return userId is > 0 ? userId : null;
+            }
+            catch (Exception) { return null; }
+        }
+
+        private bool CallerIsSalesExecutive() =>
+            User.IsInRole(WorkNest.Common.Constants.Roles.SalesExecutive) || User.IsInRole("SalesExecutive")
+            || string.Equals(User.GetRole(), WorkNest.Common.Constants.Roles.SalesExecutive, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Can the caller send this quotation's agreement now? Asked when "Send agreement" is clicked, so a sales executive
+        /// whose discount the sales manager has not approved is told at once (the send itself checks again).
+        /// </summary>
+        [HttpGet("can-send/{quotationId:int}")]
+        [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")]
+        public async Task<IActionResult> CanSendAgreement(int quotationId, [FromServices] IQuotationApprovalService approvals)
+        {
+            if (quotationId <= 0)
+                return BadRequest(new { isSuccessful = false, message = "Valid QuotationId is required." });
+            if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Quotation, quotationId.ToString()))
+                return NotFound(new { isSuccessful = false, message = "Quotation not found." });
+            var reason = await approvals.AgreementBlockReasonAsync(quotationId, await ResolveActorIdAsync(), CallerIsSalesExecutive());
+            return Ok(new { isSuccessful = true, data = new { canSend = reason == null, message = reason } });
         }
 
         [EnableRateLimiting("pdf")]
         [HttpPost("send")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // staff only
-        public async Task<IActionResult> SendAgreement([FromBody] SendAgreementRequest request, [FromServices] IQuotationApprovalService approvals)
+        public async Task<IActionResult> SendAgreement([FromBody] SendAgreementRequest request, [FromServices] IQuotationApprovalService approvals,
+            [FromServices] IQuotationService quotations)
         {
             try
             {
@@ -95,16 +129,23 @@ namespace WorkNest.API.Controllers
                 if (phoneError != null)
                     return BadRequest(new { isSuccessful = false, message = phoneError });
 
-                int? actorId = ResolveActorId();
+                int? actorId = await ResolveActorIdAsync();
 
                 // Discount approval (QAPR_01) cannot be got round by sending the agreement instead of the quotation: a manual
                 // discount waiting for / sent back by the sales manager, or a sales executive's discount the manager has not
                 // approved, stops the agreement (nothing is generated or e-mailed).
-                bool isSalesExecutive = User.IsInRole(WorkNest.Common.Constants.Roles.SalesExecutive) || User.IsInRole("SalesExecutive")
-                    || string.Equals(User.GetRole(), WorkNest.Common.Constants.Roles.SalesExecutive, StringComparison.OrdinalIgnoreCase);
-                var approvalBlock = await approvals.AgreementBlockReasonAsync(request.QuotationId, actorId, isSalesExecutive);
+                var approvalBlock = await approvals.AgreementBlockReasonAsync(request.QuotationId, actorId, CallerIsSalesExecutive());
                 if (approvalBlock != null)
                     return BadRequest(new { isSuccessful = false, message = approvalBlock });
+
+                // A sales executive cannot lower the rent in the agreement below the quotation's (approved) figure: that would be
+                // a discount nobody approved. A whole-term offer sets the fee itself (AgreementService), so it is not checked here.
+                if (CallerIsSalesExecutive() && await quotations.GetQuotationByIdAsync(request.QuotationId) is { } quote
+                    && !string.Equals(quote.OfferApplyTo, WorkNest.Application.Services.OfferPricing.WholeTerm, StringComparison.OrdinalIgnoreCase)
+                    && WorkNest.Application.Helpers.QuotationApprovalRules.AgreementFeeFloor(quote.MonthlyRent, quote.DiscountType, quote.DiscountPercentage,
+                           quote.DiscountValue, quote.BillingPeriodMonths) is decimal floor
+                    && request.FeeAmount < floor - 1m)
+                    return BadRequest(new { isSuccessful = false, message = WorkNest.Application.Helpers.QuotationApprovalRules.AgreementFeeTooLowMessage(floor, quote.BillingPeriodMonths) });
 
                 var result = await _agreement.SendAgreementAsync(request, actorId);
 
@@ -184,7 +225,7 @@ namespace WorkNest.API.Controllers
                 if (string.IsNullOrWhiteSpace(existing.SignedPdfPath))
                     return BadRequest(new { isSuccessful = false, message = "Upload the signed agreement first — a booking is only created once the signed copy is on file." });
 
-                int? actorId = ResolveActorId();
+                int? actorId = await ResolveActorIdAsync();
                 var result = await _agreement.MarkAgreementSignedAsync(id, actorId, req?.Note, existing.SignedDate ?? _clock.Today);
 
                 return Ok(new
@@ -364,7 +405,7 @@ namespace WorkNest.API.Controllers
                 await StoreSignedPdfBytesAsync(id, signedPdf);
 
                 // 5. Evidence, activity and booking
-                var result = await _agreement.CompleteESignatureAsync(evidence, ResolveActorId());
+                var result = await _agreement.CompleteESignatureAsync(evidence, await ResolveActorIdAsync());
                 return Ok(new
                 {
                     isSuccessful = true,
@@ -502,7 +543,7 @@ namespace WorkNest.API.Controllers
                 }
 
                 // 2. Mark signed + create the booking, dated on the agreement
-                int? actorId = ResolveActorId();
+                int? actorId = await ResolveActorIdAsync();
                 var result = await _agreement.MarkAgreementSignedAsync(id, actorId, note, date);
 
                 return Ok(new

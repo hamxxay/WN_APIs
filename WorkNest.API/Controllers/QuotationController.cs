@@ -111,6 +111,13 @@ namespace WorkNest.API.Controllers
             try
             {
                 var res = await _quotations.CreateQuotationAsync(request, actorId);
+                // A sales executive's discount stays hidden from the customer until the sales manager approves it.
+                var approvals = HttpContext.RequestServices.GetService(typeof(IQuotationApprovalService)) as IQuotationApprovalService;
+                if (approvals != null && res != null)
+                {
+                    await approvals.MarkNotSubmittedIfDiscountedAsync(res.Id, CallerIsSalesExecutive());
+                    if (CallerIsSalesExecutive() && await _quotations.GetQuotationByIdAsync(res.Id) is { } fresh) res = fresh;
+                }
                 return Ok(ApiResponse.Ok(res, "Quotation generated successfully."));
             }
             catch (Exception ex)
@@ -393,6 +400,7 @@ namespace WorkNest.API.Controllers
                 bool fromForm = request != null && request.SpaceId > 0;
                 var res = await _quotations.CreateNewVersionAsync(id, actorId, fromForm ? request : null);
                 if (!fromForm) await approvals.RecordNewVersionAsync(id, res.Id, actorId);   // keeps the discount reason; history "edited"
+                await approvals.MarkNotSubmittedIfDiscountedAsync(res.Id, CallerIsSalesExecutive());   // the new version's discount needs approval again
                 return Ok(ApiResponse.Ok(res, "New quotation version created successfully."));
             }
             catch (Exception ex)

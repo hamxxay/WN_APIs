@@ -15,6 +15,9 @@ namespace WorkNest.Application.Helpers
         public const string PendingManager = "PendingManager";
         public const string Approved = "Approved";
         public const string SentBack = "SentBack";
+        /// <summary>A sales executive's discounted quotation not sent to the sales manager yet (set when it is created): the
+        /// customer cannot see or accept it and no agreement can be sent; "Send" routes it to the manager.</summary>
+        public const string NotSubmitted = "NotSubmitted";
 
         // History actions (WN_QuotationHistory.Action).
         public const string ActionCreated = "created";
@@ -38,6 +41,29 @@ namespace WorkNest.Application.Helpers
         public const string NoteRequiredMessage = "Enter a note for the sales executive.";
         public const string NoteTooLongMessage = "The note can be at most 1000 characters.";
         public const string NotYoursMessage = "This quotation was not sent to you for approval.";
+
+        /// <summary>
+        /// The lowest recurring fee a sales executive may put in an agreement: the quotation's monthly rent after its own
+        /// (approved) manual discount, for one billing cycle. Null when the quotation has no monthly rent (e.g. a meeting room):
+        /// no floor. A lower fee would be a discount nobody approved.
+        /// </summary>
+        public static decimal? AgreementFeeFloor(decimal monthlyRent, string? discountType, decimal discountPercentage, decimal discountValue, int billingMonths)
+        {
+            if (monthlyRent <= 0m) return null;
+            decimal monthly = IsFixed(discountType)
+                ? monthlyRent - Math.Max(0m, discountValue)
+                : monthlyRent * (1m - Math.Clamp(discountPercentage, 0m, 100m) / 100m);
+            return Math.Round(Math.Max(0m, monthly) * Math.Max(1, billingMonths), 2);
+        }
+
+        public static string AgreementFeeTooLowMessage(decimal floor, int billingMonths) =>
+            "The recurring fee cannot be lower than PKR " + floor.ToString("N2", CultureInfo.InvariantCulture)
+            + $" (the quotation's rent after its discount, for {Math.Max(1, billingMonths)} month(s)). "
+            + "A lower fee needs a discount on the quotation, approved by your sales manager.";
+
+        /// <summary>A discounted quotation its sales executive has not sent to the sales manager yet.</summary>
+        public const string AgreementNotSubmittedMessage =
+            "This quotation's discount has not been sent to the sales manager for approval yet. Send the quotation first; the agreement can be sent once the discount is approved.";
 
         /// <summary>The agreement of a quotation still with / returned by the sales manager cannot be sent.</summary>
         public const string AgreementHeldMessage =
@@ -113,7 +139,8 @@ namespace WorkNest.Application.Helpers
         /// <summary>A quotation still waiting for / returned by the sales manager is not the customer's to see.</summary>
         public static bool IsHeldBack(string? approvalStatus) =>
             string.Equals(approvalStatus, PendingManager, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(approvalStatus, SentBack, StringComparison.OrdinalIgnoreCase);
+            || string.Equals(approvalStatus, SentBack, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(approvalStatus, NotSubmitted, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Internal fields (reason, approval note, manager) are for staff only: cleared on what a customer reads.</summary>
         public static void Redact(QuotationResponse q)

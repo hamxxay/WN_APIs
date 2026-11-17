@@ -102,6 +102,20 @@ namespace WorkNest.Application.Services
             return Hold(managerName);
         }
 
+        public async Task MarkNotSubmittedIfDiscountedAsync(int quotationId, bool actorIsSalesExecutive, CancellationToken ct = default)
+        {
+            if (!actorIsSalesExecutive || quotationId <= 0) return;
+            try
+            {
+                if (!await SetUpAsync(ct)) return;
+                var header = await _db.GetQuotationByIdAsync(quotationId);
+                if (header != null && QuotationApprovalRules.HasManualDiscount(header))
+                    await _repo.MarkNotSubmittedAsync(quotationId, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception) { /* the quotation is saved; it is still checked when it is sent */ }
+        }
+
         public async Task<string?> AgreementBlockReasonAsync(int quotationId, int? actorUserId, bool actorIsSalesExecutive, CancellationToken ct = default)
         {
             if (!await SetUpAsync(ct)) return null;                // before QAPR_01: old behaviour
@@ -111,7 +125,10 @@ namespace WorkNest.Application.Services
 
             var info = await _repo.GetInfoAsync(quotationId, ct);
             var status = info?.ApprovalStatus;
-            if (QuotationApprovalRules.IsHeldBack(status)) return QuotationApprovalRules.AgreementHeldMessage;
+            if (string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase) && !actorIsSalesExecutive)
+                return QuotationApprovalRules.AgreementNotSubmittedMessage;
+            if (QuotationApprovalRules.IsHeldBack(status) && !string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase))
+                return QuotationApprovalRules.AgreementHeldMessage;
             if (!actorIsSalesExecutive || string.Equals(status, QuotationApprovalRules.Approved, StringComparison.OrdinalIgnoreCase)) return null;
 
             string? managerName = null;

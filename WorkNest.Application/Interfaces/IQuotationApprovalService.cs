@@ -15,6 +15,13 @@ namespace WorkNest.Application.Interfaces
         /// sent back by the sales manager, or a sales executive's discount the manager has not approved. Sending the agreement
         /// must not get round the discount approval.
         /// </summary>
+        /// <summary>
+        /// After a sales executive creates a quotation (or a new version) with a manual discount: NotSubmitted, so the customer
+        /// cannot see or accept the unapproved discount and no agreement can be sent until the sales manager approves it.
+        /// Never fails the quotation that was saved.
+        /// </summary>
+        Task MarkNotSubmittedIfDiscountedAsync(int quotationId, bool actorIsSalesExecutive, CancellationToken ct = default);
+
         Task<string?> AgreementBlockReasonAsync(int quotationId, int? actorUserId, bool actorIsSalesExecutive, CancellationToken ct = default);
 
         /// <summary>History line "sent_to_customer" after a send went through (never fails the send).</summary>

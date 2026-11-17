@@ -197,6 +197,17 @@ namespace WorkNest.Application.Services
                     {
                         await _email.SendAgreementEmailAsync(recipientEmail, customerDisplay, qNum, mergedPdf);
                     }
+                    catch (EmailHeldException held)
+                    {
+                        // Email Sending is off: the e-mail waits in Pending emails and goes out when it is switched on again.
+                        // Not a failure, so the agreement stays "AgreementSent" (live 17 Nov: logged as failed by mistake).
+                        try
+                        {
+                            await _db.AddQuotationActivityAsync(q.Id, q.Version, "AgreementEmailHeld",
+                                $"Agreement email to {recipientEmail} is waiting in Pending emails (#{held.OutboxId}): Email Sending is off. It goes out when Email Sending is switched on, unless it is discarded.", userId);
+                        }
+                        catch { /* logging must never break the request */ }
+                    }
                     catch (Exception ex)
                     {
                         // Make the failure visible: agreement shows "EmailFailed" in the admin list and the
