@@ -102,6 +102,29 @@ namespace WorkNest.Application.Services
             return Hold(managerName);
         }
 
+        public async Task<string?> AgreementBlockReasonAsync(int quotationId, int? actorUserId, bool actorIsSalesExecutive, CancellationToken ct = default)
+        {
+            if (!await SetUpAsync(ct)) return null;                // before QAPR_01: old behaviour
+
+            var header = await _db.GetQuotationByIdAsync(quotationId);
+            if (header == null || !QuotationApprovalRules.HasManualDiscount(header)) return null;   // no manual discount: nothing to approve
+
+            var info = await _repo.GetInfoAsync(quotationId, ct);
+            var status = info?.ApprovalStatus;
+            if (QuotationApprovalRules.IsHeldBack(status)) return QuotationApprovalRules.AgreementHeldMessage;
+            if (!actorIsSalesExecutive || string.Equals(status, QuotationApprovalRules.Approved, StringComparison.OrdinalIgnoreCase)) return null;
+
+            string? managerName = null;
+            if (actorUserId is > 0)
+            {
+                var map = await _db.GetUserManagerMapAsync(new[] { actorUserId.Value });
+                if (map != null && map.TryGetValue(actorUserId.Value, out var mgr))
+                    managerName = mgr.ManagerName ?? await NameOfAsync(mgr.ManagerId);
+            }
+            var (type, value) = QuotationApprovalRules.ManualDiscountOf(header);
+            return QuotationApprovalRules.AgreementNeedsApprovalMessage(QuotationApprovalRules.DiscountLabel(type, value), managerName);
+        }
+
         private static QuotationApprovalHold Hold(string? managerName) => new()
         {
             Message = QuotationApprovalRules.SentToManagerMessage(managerName),

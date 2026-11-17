@@ -39,6 +39,16 @@ namespace WorkNest.Application.Helpers
         public const string NoteTooLongMessage = "The note can be at most 1000 characters.";
         public const string NotYoursMessage = "This quotation was not sent to you for approval.";
 
+        /// <summary>The agreement of a quotation still with / returned by the sales manager cannot be sent.</summary>
+        public const string AgreementHeldMessage =
+            "This quotation's discount is waiting for the sales manager's approval (or was sent back). The agreement can be sent once it is approved.";
+
+        /// <summary>A sales executive's agreement for a discounted quotation the sales manager has not approved.</summary>
+        public static string AgreementNeedsApprovalMessage(string discount, string? managerName) =>
+            $"This quotation has a {discount} discount that the sales manager has not approved yet. Send the quotation first: it goes to "
+            + (string.IsNullOrWhiteSpace(managerName) ? "your sales manager" : managerName.Trim())
+            + " for approval, and the agreement can be sent once it is approved.";
+
         public static string SentToManagerMessage(string? managerName) =>
             string.IsNullOrWhiteSpace(managerName)
                 ? "Sent to your sales manager for approval."

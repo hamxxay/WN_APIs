@@ -74,7 +74,7 @@ namespace WorkNest.API.Controllers
         [EnableRateLimiting("pdf")]
         [HttpPost("send")]
         [Authorize(Roles = "admin,Admin,super_admin,SuperAdmin,sales_executive,SalesExecutive")] // staff only
-        public async Task<IActionResult> SendAgreement([FromBody] SendAgreementRequest request)
+        public async Task<IActionResult> SendAgreement([FromBody] SendAgreementRequest request, [FromServices] IQuotationApprovalService approvals)
         {
             try
             {
@@ -96,6 +96,16 @@ namespace WorkNest.API.Controllers
                     return BadRequest(new { isSuccessful = false, message = phoneError });
 
                 int? actorId = ResolveActorId();
+
+                // Discount approval (QAPR_01) cannot be got round by sending the agreement instead of the quotation: a manual
+                // discount waiting for / sent back by the sales manager, or a sales executive's discount the manager has not
+                // approved, stops the agreement (nothing is generated or e-mailed).
+                bool isSalesExecutive = User.IsInRole(WorkNest.Common.Constants.Roles.SalesExecutive) || User.IsInRole("SalesExecutive")
+                    || string.Equals(User.GetRole(), WorkNest.Common.Constants.Roles.SalesExecutive, StringComparison.OrdinalIgnoreCase);
+                var approvalBlock = await approvals.AgreementBlockReasonAsync(request.QuotationId, actorId, isSalesExecutive);
+                if (approvalBlock != null)
+                    return BadRequest(new { isSuccessful = false, message = approvalBlock });
+
                 var result = await _agreement.SendAgreementAsync(request, actorId);
 
                 return Ok(new

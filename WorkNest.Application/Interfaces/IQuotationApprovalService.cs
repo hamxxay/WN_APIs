@@ -10,6 +10,12 @@ namespace WorkNest.Application.Interfaces
         /// says what to tell the executive. Throws <see cref="InvalidOperationException"/> (400) for an executive without a sales manager.
         /// </summary>
         Task<QuotationApprovalHold?> HoldForApprovalAsync(int quotationId, int? actorUserId, bool actorIsSalesExecutive, CancellationToken ct = default);
+        /// <summary>
+        /// Why the lease agreement of this quotation cannot be sent yet (null = it can): a manual discount still waiting for /
+        /// sent back by the sales manager, or a sales executive's discount the manager has not approved. Sending the agreement
+        /// must not get round the discount approval.
+        /// </summary>
+        Task<string?> AgreementBlockReasonAsync(int quotationId, int? actorUserId, bool actorIsSalesExecutive, CancellationToken ct = default);
 
         /// <summary>History line "sent_to_customer" after a send went through (never fails the send).</summary>
         Task RecordSentAsync(int quotationId, int? actorUserId, CancellationToken ct = default);
