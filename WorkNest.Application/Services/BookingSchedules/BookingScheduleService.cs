@@ -2,7 +2,7 @@ using System.Text.Json;
 using WorkNest.Application.DTOs.RentSchedule;
 using WorkNest.Application.Interfaces;
 
-namespace WorkNest.Application.Services.RentSchedule
+namespace WorkNest.Application.Services.BookingSchedules
 {
     /// <summary><see cref="IBookingScheduleService"/> over <see cref="IRentScheduleBookingRepository"/> (script CQ_01_rent_schedule).</summary>
     public sealed class BookingScheduleService : IBookingScheduleService

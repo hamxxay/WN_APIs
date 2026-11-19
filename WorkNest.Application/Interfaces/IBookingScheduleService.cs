@@ -1,5 +1,5 @@
 using WorkNest.Application.DTOs.RentSchedule;
-using WorkNest.Application.Services.RentSchedule;
+using WorkNest.Application.Services.BookingSchedules;
 
 namespace WorkNest.Application.Interfaces
 {

@@ -1,7 +1,7 @@
 using System.Globalization;
 using WorkNest.Application.DTOs.RentSchedule;
 
-namespace WorkNest.Application.Services.RentSchedule
+namespace WorkNest.Application.Services.BookingSchedules
 {
     /// <summary>A month already billed on an invoice of the booking (WN_Invoices), as the schedule shows it (locked).</summary>
     public sealed class InvoicedPeriod

@@ -3,7 +3,7 @@ using Microsoft.Data.SqlClient;
 using WorkNest.API.Controllers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
-using WorkNest.Application.Services.RentSchedule;
+using WorkNest.Application.Services.BookingSchedules;
 using WorkNest.Infrastructure.Repositories;
 
 namespace WorkNest.API.Services

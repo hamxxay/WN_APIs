@@ -4,7 +4,7 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using WorkNest.Application.DTOs.RentSchedule;
 using WorkNest.Application.Interfaces;
-using WorkNest.Application.Services.RentSchedule;
+using WorkNest.Application.Services.BookingSchedules;
 
 namespace WorkNest.Infrastructure.Repositories
 {
