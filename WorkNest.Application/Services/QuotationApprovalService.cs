@@ -30,10 +30,12 @@ namespace WorkNest.Application.Services
         private readonly IAnnouncementService _announcements;
         private readonly IEmailService _email;
         private readonly IConfiguration? _config;
+        private readonly IRentScheduleRepository? _schedules;
 
         public QuotationApprovalService(IQuotationApprovalRepository repo, IQuotationService quotations, IDbRepository db,
-            IAnnouncementService announcements, IEmailService email, IConfiguration? config = null)
+            IAnnouncementService announcements, IEmailService email, IConfiguration? config = null, IRentScheduleRepository? schedules = null)
         {
+            _schedules = schedules;
             _repo = repo;
             _quotations = quotations;
             _db = db;
@@ -52,6 +54,26 @@ namespace WorkNest.Application.Services
             if (!await SetUpAsync(ct)) throw new QuotationApprovalNotSetUpException();
         }
 
+        /// <summary>True when the quotation has a rent schedule (CQ_01): such a quotation of a sales executive always needs the manager, discount or not.</summary>
+        private async Task<bool> HasScheduleAsync(int quotationId, CancellationToken ct)
+        {
+            if (_schedules == null) return false;
+            try { return await _schedules.IsSetUpAsync(ct) && (await _schedules.GetQuotationRowsAsync(quotationId, ct)).Count > 0; }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception) { return false; }
+        }
+
+        /// <summary>True once CQ_01 has run: only then does EVERY sales executive quotation need the manager (before it, only discounted ones, as always).</summary>
+        private async Task<bool> ScheduleSetUpAsync(CancellationToken ct)
+        {
+            if (_schedules == null) return false;
+            try { return await _schedules.IsSetUpAsync(ct); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception) { return false; }
+        }
+
+        private static bool IsHeldStatus(string? status) => QuotationApprovalRules.IsHeldBack(status);
+
         private async Task<string?> NameOfAsync(int? userId)
         {
             if (userId is not > 0) return null;
@@ -67,10 +89,13 @@ namespace WorkNest.Application.Services
             if (!await SetUpAsync(ct)) return null;                // before QAPR_01: old behaviour
 
             var header = await _db.GetQuotationByIdAsync(quotationId);
-            if (header == null || !QuotationApprovalRules.HasManualDiscount(header)) return null;   // an Offer alone is not a discount here
+            if (header == null) return null;
 
             var info = await _repo.GetInfoAsync(quotationId, ct);
             if (string.Equals(info?.ApprovalStatus, QuotationApprovalRules.Approved, StringComparison.OrdinalIgnoreCase)) return null;   // the manager already approved it
+            // Held (NotSubmitted / SentBack / PendingManager), or it has a discount / table: to the manager. An older quotation with no
+            // approval state, no discount and no table (sent before this rule) is sent as before.
+            if (!IsHeldStatus(info?.ApprovalStatus) && !QuotationApprovalRules.HasManualDiscount(header) && !await HasScheduleAsync(quotationId, ct)) return null;
 
             if (actorUserId is not > 0)
                 throw new InvalidOperationException("Your account could not be verified. Sign in again.");
@@ -108,8 +133,10 @@ namespace WorkNest.Application.Services
             try
             {
                 if (!await SetUpAsync(ct)) return;
-                var header = await _db.GetQuotationByIdAsync(quotationId);
-                if (header != null && QuotationApprovalRules.HasManualDiscount(header))
+                // With CQ_01 every quotation a sales executive makes waits for the sales manager; before it, only discounted ones (old rule).
+                bool all = await ScheduleSetUpAsync(ct);
+                var header = all ? null : await _db.GetQuotationByIdAsync(quotationId);
+                if (all || (header != null && QuotationApprovalRules.HasManualDiscount(header)))
                     await _repo.MarkNotSubmittedAsync(quotationId, ct);
             }
             catch (OperationCanceledException) { throw; }
@@ -121,15 +148,19 @@ namespace WorkNest.Application.Services
             if (!await SetUpAsync(ct)) return null;                // before QAPR_01: old behaviour
 
             var header = await _db.GetQuotationByIdAsync(quotationId);
-            if (header == null || !QuotationApprovalRules.HasManualDiscount(header)) return null;   // no manual discount: nothing to approve
+            bool hasSchedule = header != null && await HasScheduleAsync(quotationId, ct);
+            if (header == null) return null;
 
             var info = await _repo.GetInfoAsync(quotationId, ct);
             var status = info?.ApprovalStatus;
-            if (string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase) && !actorIsSalesExecutive)
+            if (string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase) && !actorIsSalesExecutive
+                && (hasSchedule || QuotationApprovalRules.HasManualDiscount(header) || await ScheduleSetUpAsync(ct)))
                 return QuotationApprovalRules.AgreementNotSubmittedMessage;
             if (QuotationApprovalRules.IsHeldBack(status) && !string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase))
                 return QuotationApprovalRules.AgreementHeldMessage;
             if (!actorIsSalesExecutive || string.Equals(status, QuotationApprovalRules.Approved, StringComparison.OrdinalIgnoreCase)) return null;
+            // an older quotation with no approval state, no discount and no table is not blocked (old behaviour)
+            if (!QuotationApprovalRules.HasManualDiscount(header) && !hasSchedule && !string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase)) return null;
 
             string? managerName = null;
             if (actorUserId is > 0)
@@ -138,7 +169,9 @@ namespace WorkNest.Application.Services
                 if (map != null && map.TryGetValue(actorUserId.Value, out var mgr))
                     managerName = mgr.ManagerName ?? await NameOfAsync(mgr.ManagerId);
             }
+            if (hasSchedule) return QuotationApprovalRules.AgreementScheduleNeedsApprovalMessage(managerName);
             var (type, value) = QuotationApprovalRules.ManualDiscountOf(header);
+            if (value <= 0m) return QuotationApprovalRules.AgreementQuotationNeedsApprovalMessage(managerName);
             return QuotationApprovalRules.AgreementNeedsApprovalMessage(QuotationApprovalRules.DiscountLabel(type, value), managerName);
         }
 
@@ -244,6 +277,7 @@ namespace WorkNest.Application.Services
             row.DiscountReason = info.DiscountReason;
             row.SubmittedAt = info.SubmittedAt;
             row.ApprovalStatus = info.ApprovalStatus;
+            if (row is QuotationApprovalDetailDto withSchedule) withSchedule.Schedule = q.Schedule;
             return row;
         }
 
@@ -262,6 +296,23 @@ namespace WorkNest.Application.Services
             string note = QuotationApprovalRules.Clean(request.Note);
             if (note.Length > QuotationApprovalRules.NoteMaxLength) throw new QuotationApprovalRuleException(QuotationApprovalRules.NoteTooLongMessage);
             string? byName = await NameOfAsync(caller.UserId);
+
+            // 0. The manager's optional edit of the rent schedule (rows only: a quotation with a table has no single discount to edit).
+            if (request.Schedule != null)
+            {
+                if (request.DiscountValue.HasValue || !string.IsNullOrWhiteSpace(request.DiscountType))
+                    throw new QuotationApprovalRuleException("This quotation has a rent schedule: change the discount in the schedule rows.");
+                var (scheduleChanged, summary) = await _quotations.ApplyScheduleEditAsync(quotationId, request.Schedule, caller.UserId);
+                if (scheduleChanged)
+                    await _repo.AddHistoryAsync(new QuotationHistoryWrite
+                    {
+                        QuotationId = quotationId, ByUserId = caller.UserId, ByName = byName,
+                        Action = RentSchedule.ActionScheduleEdited, Note = summary
+                    }, ct);
+            }
+
+            // The table as it will be sent (edited or not) must be within the whole-contract discount cap.
+            await _quotations.EnsureScheduleWithinCapAsync(quotationId);
 
             // 1. The optional edit of the discount (within the offering-type cap), before anything is decided.
             if (request.DiscountValue.HasValue || !string.IsNullOrWhiteSpace(request.DiscountType))
@@ -388,7 +439,9 @@ namespace WorkNest.Application.Services
                 string number = q.QuotationNumber ?? $"#{quotationId}";
                 string exec = info?.ExecutiveName ?? await NameOfAsync(executiveUserId) ?? "A sales executive";
                 string title = reminder ? $"Reminder: quotation {number} is waiting for your approval" : $"Quotation {number} needs your approval";
-                string body = $"{exec} asked for a {label} discount for {q.CustomerName} ({q.SpaceName}, {q.LocationName}). Reason: {info?.DiscountReason}";
+                string body = value > 0m
+                    ? $"{exec} asked for a {label} discount for {q.CustomerName} ({q.SpaceName}, {q.LocationName}). Reason: {info?.DiscountReason}"
+                    : $"{exec} asked you to approve the rent schedule of the quotation for {q.CustomerName} ({q.SpaceName}, {q.LocationName}).";
                 string html = $"<div style='font-family:Arial,sans-serif;max-width:600px'><h2>{E(title)}</h2>" +
                               $"<p>{E(exec)} wants to send quotation <strong>{E(number)}</strong> to {E(q.CustomerName)} " +
                               $"({E(q.SpaceName)}, {E(q.LocationName)}) with a discount of <strong>{E(label)}</strong>.</p>" +

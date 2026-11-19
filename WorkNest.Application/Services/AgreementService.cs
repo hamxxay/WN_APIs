@@ -59,7 +59,9 @@ namespace WorkNest.Application.Services
             return raw;
         }
 
-        private static void ValidateAgreementData(SendAgreementRequest request)
+        private const string RecurringFeeRequiredMessage = "Valid recurring fee amount is required.";
+
+        private static void ValidateAgreementData(SendAgreementRequest request, bool feeRequired = true)
         {
             if (request == null)
                 throw new ArgumentNullException(nameof(request));
@@ -84,8 +86,8 @@ namespace WorkNest.Application.Services
             if (string.IsNullOrWhiteSpace(request.Address))
                 throw new InvalidOperationException("Customer Address is required.");
 
-            if (request.FeeAmount <= 0)
-                throw new InvalidOperationException("Valid recurring fee amount is required.");
+            if (feeRequired && request.FeeAmount <= 0)
+                throw new InvalidOperationException(RecurringFeeRequiredMessage);
 
             if (!request.ContractStartDate.HasValue || !request.ContractEndDate.HasValue)
                 throw new InvalidOperationException("Contract start and end dates are required.");
@@ -93,10 +95,17 @@ namespace WorkNest.Application.Services
 
         public async Task<(byte[] PdfBytes, AgreementResponseDto Agreement)> GenerateLeaseAgreementAsync(GenerateLeaseAgreementRequest request, int? userId)
         {
-            ValidateAgreementData(request);
+            // The recurring fee is checked once the quotation is read: a quotation with a rent schedule has no fee box (the table is the fee).
+            ValidateAgreementData(request, feeRequired: false);
 
             var q = await _quotations.GetQuotationByIdAsync(request.QuotationId)
                 ?? throw new InvalidOperationException($"Quotation #{request.QuotationId} not found.");
+
+            request.Schedule = q.Schedule;
+            if (q.Schedule != null)
+                request.FeeAmount = Math.Max(0m, q.Schedule.Totals.Total - q.Schedule.Totals.SecurityDeposit);   // rent after discount + tax, deposits left out
+            else if (request.FeeAmount <= 0)
+                throw new InvalidOperationException(RecurringFeeRequiredMessage);
 
             string templateName = !string.IsNullOrWhiteSpace(request.TemplateName) ? request.TemplateName : "StandardLeaseAgreement";
             var activeTemplate = await _templateService.GetActiveTemplateAsync(templateName)

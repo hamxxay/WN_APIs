@@ -140,7 +140,7 @@ namespace WorkNest.API.Controllers
 
                 // A sales executive cannot lower the rent in the agreement below the quotation's (approved) figure: that would be
                 // a discount nobody approved. A whole-term offer sets the fee itself (AgreementService), so it is not checked here.
-                if (CallerIsSalesExecutive() && await quotations.GetQuotationByIdAsync(request.QuotationId) is { } quote
+                if (CallerIsSalesExecutive() && await quotations.GetQuotationByIdAsync(request.QuotationId) is { Schedule: null } quote   // a quotation with a rent schedule has no fee box, so no floor
                     && !string.Equals(quote.OfferApplyTo, WorkNest.Application.Services.OfferPricing.WholeTerm, StringComparison.OrdinalIgnoreCase)
                     && WorkNest.Application.Helpers.QuotationApprovalRules.AgreementFeeFloor(quote.MonthlyRent, quote.DiscountType, quote.DiscountPercentage,
                            quote.DiscountValue, quote.BillingPeriodMonths) is decimal floor

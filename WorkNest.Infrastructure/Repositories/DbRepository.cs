@@ -516,6 +516,14 @@ namespace WorkNest.Infrastructure.Repositories
             if (result.TryGetValue("BookingId", out var bIdObj) && bIdObj != null && Convert.ToInt32(bIdObj) > 0 && quotation != null)
             {
                 int bookingId = Convert.ToInt32(bIdObj);
+                // Rent schedule: the quotation's table (if it has one) becomes the booking's (CQ_01; nothing happens without the tables or rows).
+                // The booking already exists (the procedure committed), so a failure cannot undo it: try twice, and if it still fails the invoice paths
+                // heal it before billing (EnsureBookingScheduleFromQuotationAsync) and fail loudly if they cannot, so a booking never bills from contract totals.
+                for (int attempt = 1; attempt <= 2; attempt++)
+                {
+                    try { await RentScheduleBookingRepository.CopyQuotationScheduleToBookingAsync(c, quotationId, bookingId); break; }
+                    catch (Exception ex) { Console.WriteLine($"[RentSchedule] copy quotation {quotationId} -> booking {bookingId} failed (attempt {attempt}): {ex.Message}"); }
+                }
                 
                 int capacity = quotation.TryGetValue("Capacity", out var capObj) && capObj != null ? Convert.ToInt32(capObj) : 1;
                 decimal perSeatPrice = quotation.TryGetValue("PerSeatBasePrice", out var psObj) && psObj != null ? Convert.ToDecimal(psObj) : 0m;

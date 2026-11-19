@@ -24,6 +24,8 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                 ChallanFieldBuilder.BuildForQuotation(q);
             }
 
+            if (q.Schedule is { Rows.Count: > 0 }) return GenerateScheduledQuotationPdf(q);
+
             string spaceType = q.SpaceType;
             if (string.IsNullOrWhiteSpace(spaceType)) spaceType = "MeetingRoom";
 
@@ -521,6 +523,78 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                         });
                     });
 
+                    page.Footer().Element(ComposeFooter);
+                });
+            }).GeneratePdf();
+        }
+
+        /// <summary>A quotation with a rent schedule (script CQ_01): the month-by-month table replaces the single first-cycle summary.</summary>
+        private byte[] GenerateScheduledQuotationPdf(QuotationResponse q)
+        {
+            var sched = q.Schedule!;
+            return Document.Create(container =>
+            {
+                container.Page(page =>
+                {
+                    page.Size(PageSizes.A4.Landscape());
+                    page.Margin(36);
+                    page.DefaultTextStyle(x => x.FontSize(10).FontFamily("Arial"));
+                    page.Header().Element(ComposeHeader);
+                    page.Content().Column(col =>
+                    {
+                        col.Spacing(10);
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("QUOTATION").FontSize(18).Bold().FontColor("#1a1a2e");
+                                c.Item().Text($"# {q.QuotationNumber}").FontSize(11).FontColor("#555555");
+                            });
+                            row.ConstantItem(180).Column(c =>
+                            {
+                                c.Item().AlignRight().Text($"Date: {q.QuotationDate:dd MMM yyyy}").FontColor("#555555");
+                                c.Item().AlignRight().Text($"Valid Until: {q.ValidUntil:dd MMM yyyy}").FontColor("#555555");
+                            });
+                        });
+                        col.Item().LineHorizontal(1).LineColor("#e0e0e0");
+                        col.Item().Row(row =>
+                        {
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("Customer Details").FontSize(9).Bold();
+                                c.Item().Text($"Attn: {q.CustomerName ?? "-"}");
+                                if (!string.IsNullOrWhiteSpace(q.CustomerCompany)) c.Item().Text($"Customer Name: {q.CustomerCompany}");
+                                if (!string.IsNullOrWhiteSpace(q.CustomerAddress)) c.Item().Text($"Address: {q.CustomerAddress}").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("Quotation For").FontSize(9).Bold();
+                                c.Item().Text(q.SpaceName ?? q.SpaceCode ?? "-");
+                                c.Item().Text(q.SpaceTypeName ?? "-").FontColor("#555555");
+                                c.Item().Text(q.LocationName ?? "-").FontColor("#555555");
+                            });
+                            row.RelativeItem().Column(c =>
+                            {
+                                c.Item().Text("PERIOD").FontSize(9).Bold();
+                                c.Item().Text($"From: {q.StartDateTime:dd MMM yyyy}");
+                                c.Item().Text($"To:   {q.EndDateTime:dd MMM yyyy}");
+                            });
+                        });
+                        col.Item().Text("Rent Schedule (PKR)").Bold().FontSize(11);
+                        col.Item().Element(c => RentScheduleTable.Compose(c, sched, 8.5f));
+                        col.Item().Text("The monthly rent includes support service charges. Sales tax is charged on the support service charges only. Security deposit is fully refundable upon termination of the agreement, subject to its terms.")
+                            .FontSize(8).FontColor("#495057");
+                        if (!string.IsNullOrWhiteSpace(q.Remarks))
+                        {
+                            col.Item().Background("#f5f5f5").Padding(8).Column(c =>
+                            {
+                                c.Item().Text("Remarks").Bold().FontSize(9);
+                                c.Item().Text(q.Remarks);
+                            });
+                        }
+                        col.Item().Text("This quotation is valid until the date specified above. Booking confirmation is subject to space availability. WorkNest reserves the right to modify pricing and terms with prior notice.")
+                            .FontSize(8).FontColor("#495057");
+                    });
                     page.Footer().Element(ComposeFooter);
                 });
             }).GeneratePdf();

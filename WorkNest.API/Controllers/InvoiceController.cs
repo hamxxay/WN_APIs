@@ -28,7 +28,7 @@ namespace WorkNest.API.Controllers
     [Authorize]
     [ValidateLocationScope]
     [RecordScope(RecordKind.Invoice, "id", "publicId")] // location-bound staff: only invoices of their locations
-    public class InvoiceController : ControllerBase
+    public partial class InvoiceController : ControllerBase
     {
         /// <summary>Every invoice is due this many days after its invoice date (the invoice date is the day it is issued).</summary>
         public const int InvoiceDueDays = 7;
@@ -1930,6 +1930,10 @@ namespace WorkNest.API.Controllers
 
                 var calc = WorkNest.Application.Services.InvoiceCalculationEngine.CalculateInvoice(calcReq, _clock.Today);
 
+                // Rent schedule (CQ_01): a booking with a table is invoiced from the rows of its first-invoice period.
+                var scheduleSource = await TryScheduleFirstInvoiceAsync(bookingId, calc.IsMeetingRoom);
+                if (scheduleSource != null) { WorkNest.API.Services.RentScheduleInvoiceShape.ApplyToCalc(calc, scheduleSource); bookingOffer = null; }
+
                 DateTime periodStart = calc.BillingPeriodStart;
                 DateTime periodEnd = calc.BillingPeriodEnd;
                 decimal grossAdvanceRent = calc.Rent;
@@ -2212,6 +2216,7 @@ namespace WorkNest.API.Controllers
                     });
                 }
 
+                if (scheduleSource != null) return await CreateFirstInvoiceFromScheduleAsync(dto, bookingId, scheduleSource);
                 return await CreateCustomInvoice(dto);
             }
             catch (Exception ex)
@@ -2596,6 +2601,13 @@ namespace WorkNest.API.Controllers
                                      spaceName.Contains("Meeting", StringComparison.OrdinalIgnoreCase) ||
                                      spaceName.Contains("Conference", StringComparison.OrdinalIgnoreCase) ||
                                      (billingMonths <= 0 && startOn.HasValue && endOn.HasValue && (endOn.Value - startOn.Value).TotalDays < 20);
+
+                // Rent schedule (CQ_01): a booking with a table bills its next un-invoiced row.
+                if (!isMeetingRoom)
+                {
+                    var scheduled = await TryGenerateNextFromScheduleAsync(bookingId, userId, spaceName, secMonths);
+                    if (scheduled != null) return scheduled;
+                }
 
                 DateTime periodStart = _clock.Today;
                 using (var lastEndCmd = new SqlCommand("dbo.WN_GetBookingLastInvoicePeriodEnd", conn))

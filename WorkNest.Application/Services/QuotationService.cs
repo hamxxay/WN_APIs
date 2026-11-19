@@ -18,10 +18,12 @@ namespace WorkNest.Application.Services
         private readonly IBusinessClock _clock;
         private readonly IOffersRepository? _offers;
         private readonly IQuotationApprovalRepository? _approvals;
+        private readonly IRentScheduleRepository? _schedules;
 
         public QuotationService(IDbRepository db, IEmailService email, IPdfService pdf, IBusinessClock clock, IOffersRepository? offers = null,
-            IQuotationApprovalRepository? approvals = null)
+            IQuotationApprovalRepository? approvals = null, IRentScheduleRepository? schedules = null)
         {
+            _schedules = schedules;
             _approvals = approvals;
             _offers = offers;
             _clock = clock;
@@ -36,6 +38,15 @@ namespace WorkNest.Application.Services
             if (_approvals == null) return false;
             try { return await _approvals.IsSetUpAsync(); } catch (Exception) { return false; }
         }
+
+        /// <summary>True once CQ_01 has run (never throws: a problem reading it means "not set up", the old behaviour).</summary>
+        private async Task<bool> ScheduleSetUpAsync()
+        {
+            if (_schedules == null) return false;
+            try { return await _schedules.IsSetUpAsync(); } catch (Exception) { return false; }
+        }
+
+        public Task<bool> IsRentScheduleSetUpAsync() => ScheduleSetUpAsync();
 
         private async Task<string?> UserNameAsync(int? userId)
         {
@@ -102,16 +113,14 @@ namespace WorkNest.Application.Services
         private sealed record VersionTarget(int SourceId, string QuotationNumber, int Version, int SourceSpaceId, decimal? SourcePerSeat,
             OfferSnapshot? SourceOffer, string? FromDiscount);
 
-        private async Task<QuotationResponse> CreateCoreAsync(QuotationRequest request, int? createdById, VersionTarget? version)
+        private sealed record Pricing(
+            (decimal Hourly, decimal Daily, decimal Monthly, decimal SecurityDeposit, string Category, string SpaceName, string SpaceCode, int Capacity, decimal MaxDiscountPercent, string SpaceTypeName) Space,
+            decimal PerSeatBasePrice, int Capacity, decimal MonthlyBasePrice, string DiscountType, decimal DiscountValue, int? SpaceLocationId,
+            decimal MaxDiscountCap, string OfferingTypeDbValue, decimal DiscountPercentage, int SecurityDepositMonths, decimal SecurityDeposit);
+
+        /// <summary>The space, price, capped discount and deposit a quotation form works out to (shared by the quotation and the rent schedule preview).</summary>
+        private async Task<Pricing> ResolvePricingAsync(QuotationRequest request)
         {
-            // Security Deposit (Months): 0, 1, 2 or 3 only (400 from the controller); checked before anything is read.
-            SecurityDepositRules.EnsureValidMonths(request.SecurityDepositMonths);
-
-            // Reason for the discount (QAPR_01): required with a manual discount > 0 (an automatic Offer is not a discount here).
-            // Before the script has run nothing is asked or stored (old behaviour).
-            bool approvalSetUp = await ApprovalSetUpAsync();
-            string? discountReason = approvalSetUp ? QuotationApprovalRules.ValidateReason(QuotationApprovalRules.ManualValueOf(request), request.DiscountReason) : null;
-
             var spaceDetails = await ResolveSpaceDetailsAsync(request.SpaceId);
 
             // No price in the space configuration: a quotation needs one (a base price entered by staff for offices / shared spaces).
@@ -173,9 +182,6 @@ namespace WorkNest.Application.Services
             // For backward compat: if DiscountType is Percentage, keep discountPercentage
             decimal discountPercentage = (discountType == "Percentage" || discountType == "Percent") ? discountValue : 0;
 
-            decimal subtotal = 0;
-            var details = new List<QuotationDetailDto>();
-
             // Security deposit: months for the space kind (private 0-3, default 2; shared / meeting room 0) and the amount
             // = months x monthly rent x (1 - the rent's discount; a fixed amount as its share of one month's rent).
             // SecurityDepositOverride is no longer used (kept on the request so older clients still bind).
@@ -184,12 +190,181 @@ namespace WorkNest.Application.Services
             decimal securityDeposit = SecurityDepositRules.Amount(securityDepositMonths, monthlyBasePrice,
                 SecurityDepositRules.DiscountFraction(discountType, discountValue, monthlyBasePrice));
 
+            return new Pricing(spaceDetails, perSeatBasePrice, capacity, monthlyBasePrice, discountType, discountValue, spaceLocationId,
+                maxDiscountCap, offeringTypeDbValue, discountPercentage, securityDepositMonths, securityDeposit);
+        }
+
+        /// <summary>The month-by-month table for a form: the user's rows (validated) or the default table built from the form's discount and deposit.</summary>
+        private async Task<RentScheduleDto> BuildScheduleAsync(QuotationRequest request, Pricing pr, IReadOnlyList<ScheduleInputRow>? rows)
+        {
+            var periods = RentSchedule.BuildPeriods(request.StartDateTime, request.EndDateTime);
+            var (taxPct, taxApplicable) = await _db.GetSupportTaxRateAsync(null, request.SpaceId);
+            var inputs = new RentSchedule.Inputs(pr.PerSeatBasePrice, pr.Capacity, RentSchedule.DefaultSupportRate, taxApplicable ? taxPct : 0m);
+            var input = rows == null
+                ? RentSchedule.DefaultRows(periods, pr.DiscountType, pr.DiscountValue, pr.SecurityDeposit)
+                : RentSchedule.ValidateRows(periods, rows, request.SecurityDepositOverride ?? pr.SecurityDeposit);   // clients send the override when the user changes the total
+            var computed = RentSchedule.Compute(periods, inputs, input, pr.SecurityDeposit);
+            ApplyDiscountCap(computed, pr.MaxDiscountCap);
+            return computed;
+        }
+
+        /// <summary>
+        /// The whole-contract discount cap: total rent at the base price x cap % = the most the table may take off in total
+        /// (e.g. 15% cap, 2,100,000 rent for the year: at most 315,000 off, spread over the months any way).
+        /// </summary>
+        public static void ApplyDiscountCap(RentScheduleDto schedule, decimal capPercent)
+        {
+            decimal cap = Math.Max(0m, capPercent);
+            decimal max = Math.Round(schedule.Totals.MonthlyRent * cap / 100m, 2);
+            schedule.MaxDiscountPercent = cap;
+            schedule.MaxDiscountAmount = max;
+            schedule.OverDiscountCap = schedule.Totals.DiscountAmount > max + 0.01m;
+        }
+
+        /// <summary>The cap % of a saved quotation with a table: its offering type's cap, widened for a raised base price as on create. Null = no cap.</summary>
+        private async Task<decimal?> StoredCapPercentAsync(QuotationResponse q)
+        {
+            if (q.Schedule == null || q.MaxDiscountPercent is not decimal offeringCap || offeringCap <= 0m) return null;
+            decimal standardPerSeat = 0m;
+            try { standardPerSeat = (await ResolveSpaceDetailsAsync(q.SpaceId)).Monthly; } catch (Exception) { /* no space row: the plain cap */ }
+            return QuotationDiscountCap.Compute(offeringCap, false, standardPerSeat, q.Schedule.PerSeatPrice, q.Schedule.Seats,
+                q.Schedule.PerSeatPrice * q.Schedule.Seats).MaxPercent;
+        }
+
+        public static string DiscountCapMessage(RentScheduleDto schedule) =>
+            string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "The table's discounts come to PKR {0:N0}, more than the {1:0.##}% cap for this space (at most PKR {2:N0} over the whole contract). Lower the discounts.",
+                schedule.Totals.DiscountAmount, schedule.MaxDiscountPercent ?? 0m, schedule.MaxDiscountAmount ?? 0m);
+
+        public async Task<RentScheduleDto> PreviewScheduleAsync(SchedulePreviewRequest request)
+        {
+            if (!await ScheduleSetUpAsync()) throw new RentScheduleNotSetUpException();
+            SecurityDepositRules.EnsureValidMonths(request.SecurityDepositMonths);
+            var pr = await ResolvePricingAsync(request);
+            if (pr.Space.Category == "MeetingRoom") throw new ArgumentException("A meeting room has no rent schedule.");
+            return await BuildScheduleAsync(request, pr, request.Rows);
+        }
+
+        /// <summary>The stored table of a quotation onto the response, and the table's totals onto the header figures (null schedule = an old quotation).</summary>
+        private async Task ApplyScheduleAsync(QuotationResponse dto)
+        {
+            if (!await ScheduleSetUpAsync()) return;
+            try
+            {
+                var rows = await _schedules!.GetQuotationRowsAsync(dto.Id);
+                if (rows.Count == 0) return;
+                var inputs = new RentSchedule.Inputs(dto.PerSeatBasePrice ?? 0m, dto.Capacity is > 0 ? dto.Capacity.Value : 1,
+                    RentSchedule.DefaultSupportRate, dto.AppliedTaxPercentage);
+                var first = RentSchedule.FromStored(rows, inputs, 0m);
+                var sched = RentSchedule.FromStored(rows, inputs, first.Totals.SecurityDeposit);
+                var t = sched.Totals;
+                dto.Schedule = sched;
+                try { if (await StoredCapPercentAsync(dto) is decimal capPct) ApplyDiscountCap(sched, capPct); }
+                catch (Exception) { /* display only: the edit checks the cap again */ }
+                dto.SubtotalAmount = t.MonthlyRent;
+                dto.TotalContractAmount = t.MonthlyRent;
+                dto.DiscountType = RentSchedule.Amount;
+                dto.DiscountPercentage = 0m;
+                dto.DiscountValue = t.DiscountAmount;
+                dto.DiscountAmount = t.DiscountAmount;
+                dto.SecurityDeposit = t.SecurityDeposit;
+                dto.SupportChargeAmount = sched.Rows.Sum(r => r.ServiceCharge);
+                dto.TaxAmount = t.Tax;
+                dto.TaxAmountOnContract = t.Tax;
+                dto.TaxAmountOnAdvanceRent = sched.Rows[0].Tax;
+                dto.TotalAmount = t.Total;
+                dto.TotalPayable = t.Total;
+                // the table replaces offers: nothing of an offer is shown
+                dto.OfferId = null; dto.OfferName = null; dto.OfferDiscountType = null; dto.OfferDiscountValue = null; dto.OfferApplyTo = null;
+                dto.OfferApplyToDeposit = null; dto.OfferDiscountAmount = null; dto.ManualDiscountAmount = null; dto.FinalMonthlyRent = null;
+                dto.FinalSecurityDeposit = null; dto.OfferFirstCycleDiscount = null; dto.ManualFirstCycleDiscount = null;
+            }
+            catch (Exception) { /* display data here: a read problem shows the quotation without its table */ }
+        }
+
+        public async Task EnsureScheduleWithinCapAsync(int quotationId)
+        {
+            if (!await ScheduleSetUpAsync()) return;
+            var q = await GetQuotationByIdAsync(quotationId);
+            if (q?.Schedule is { OverDiscountCap: true } sched)
+                throw new QuotationApprovalRuleException(DiscountCapMessage(sched));
+        }
+
+        public async Task<(bool Changed, string Summary)> ApplyScheduleEditAsync(int quotationId, IReadOnlyList<ScheduleInputRow> rows, int? byUserId)
+        {
+            if (!await ScheduleSetUpAsync()) throw new RentScheduleNotSetUpException();
+            var q = await GetQuotationByIdAsync(quotationId) ?? throw new QuotationApprovalNotFoundException();
+            if (q.Schedule == null) throw new QuotationApprovalRuleException("This quotation has no rent schedule.");
+            if (RentSchedule.IsLockedStatus(q.Status)) throw new QuotationApprovalRuleException(RentSchedule.LockedMessage);
+
+            var stored = await _schedules!.GetQuotationRowsAsync(quotationId);
+            var periods = RentSchedule.PeriodsOf(stored);
+            List<ScheduleInputRow> valid;
+            try { valid = RentSchedule.ValidateRows(periods, rows); }
+            catch (ArgumentException ex) { throw new QuotationApprovalRuleException(ex.Message); }
+
+            string summary = RentSchedule.DescribeChanges(RentSchedule.InputsOf(q.Schedule), valid);
+            if (summary.Length == 0) return (false, string.Empty);
+
+            var inputs = new RentSchedule.Inputs(q.Schedule.PerSeatPrice, q.Schedule.Seats, q.Schedule.SupportRate, q.Schedule.TaxPercent);
+            var computed = RentSchedule.Compute(periods, inputs, valid, q.Schedule.DefaultSecurityDeposit);
+            // The sales manager is held to the same whole-contract cap as the executive.
+            if (await StoredCapPercentAsync(q) is decimal capPct)
+            {
+                ApplyDiscountCap(computed, capPct);
+                if (computed.OverDiscountCap) throw new QuotationApprovalRuleException(DiscountCapMessage(computed));
+            }
+            var t = computed.Totals;
+            await _schedules.ReplaceQuotationRowsAsync(quotationId, RentSchedule.ToStored(computed),
+                new QuotationScheduleHeader(t.MonthlyRent, t.DiscountAmount, t.SecurityDeposit, t.Total));
+            return (true, summary);
+        }
+
+        private async Task<QuotationResponse> CreateCoreAsync(QuotationRequest request, int? createdById, VersionTarget? version)
+        {
+            // Security Deposit (Months): 0, 1, 2 or 3 only (400 from the controller); checked before anything is read.
+            SecurityDepositRules.EnsureValidMonths(request.SecurityDepositMonths);
+
+            // Reason for the discount (QAPR_01): required with a manual discount > 0 (an automatic Offer is not a discount here).
+            // Before the script has run nothing is asked or stored (old behaviour).
+            bool approvalSetUp = await ApprovalSetUpAsync();
+            string? discountReason = approvalSetUp ? QuotationApprovalRules.ValidateReason(QuotationApprovalRules.ManualValueOf(request), request.DiscountReason) : null;
+
+            var pr = await ResolvePricingAsync(request);
+            var spaceDetails = pr.Space;
+            decimal perSeatBasePrice = pr.PerSeatBasePrice;
+            int capacity = pr.Capacity;
+            decimal monthlyBasePrice = pr.MonthlyBasePrice;
+            var discountType = pr.DiscountType;
+            var discountValue = pr.DiscountValue;
+            int? spaceLocationId = pr.SpaceLocationId;
+            decimal maxDiscountCap = pr.MaxDiscountCap;
+            string offeringTypeDbValue = pr.OfferingTypeDbValue;
+            decimal discountPercentage = pr.DiscountPercentage;
+            int securityDepositMonths = pr.SecurityDepositMonths;
+            decimal securityDeposit = pr.SecurityDeposit;
+
+            // Rent schedule (CQ_01): a private office / shared space quotation gets the month-by-month table (the user's rows, or the
+            // default one built from the form). It replaces offers and the single manual discount. Meeting rooms and servers without the script: as before.
+            RentScheduleDto? schedule = null;
+            if (spaceDetails.Category != "MeetingRoom" && await ScheduleSetUpAsync())
+            {
+                schedule = await BuildScheduleAsync(request, pr, request.Schedule);
+                if (schedule.OverDiscountCap) throw new ArgumentException(DiscountCapMessage(schedule));
+                // a discount anywhere in the table needs the reason too (same rules as the form's discount)
+                if (approvalSetUp && schedule.Totals.DiscountAmount > 0m && QuotationApprovalRules.ManualValueOf(request) <= 0m)
+                    discountReason = QuotationApprovalRules.ValidateReason(1m, request.DiscountReason);
+            }
+
+            decimal subtotal = 0;
+            var details = new List<QuotationDetailDto>();
+
             // Offers: the offer running NOW (IBusinessClock, Pakistan time) for the space's location, never anything the client sent. It
             // discounts room rent only (monthly rent less the service charge) on top of the manual discount; with "apply to deposit" the
             // deposit (with the manual mirror above) is reduced too. Staff quotations for private offices / shared spaces only. The
             // snapshot columns are written by InsertQuotationAsync; the deposit stored and printed is the FINAL deposit.
             OfferSnapshot? offerSnapshot = null;
-            if (version != null)
+            if (version != null && schedule == null)
             {
                 // A new version keeps the offer of the version it was made from, and only while the space and the base price are
                 // unchanged (rule 9b); it never picks up an offer running today.
@@ -208,7 +383,7 @@ namespace WorkNest.Application.Services
                     securityDeposit = b.FinalSecurityDeposit;
                 }
             }
-            else if (spaceDetails.Category != "MeetingRoom" && _offers != null)
+            else if (spaceDetails.Category != "MeetingRoom" && _offers != null && schedule == null)
             {
                 var running = await _offers.GetRunningAsync(spaceLocationId, _clock.Now);
                 if (running != null)
@@ -335,6 +510,38 @@ namespace WorkNest.Application.Services
                 }
             }
 
+            // The table's totals are what the header stores (lists / dashboards): the discount becomes one Amount (the table's total).
+            string storedDiscountType = discountType;
+            decimal storedDiscountValue = discountValue;
+            decimal storedDiscountPercentage = discountPercentage;
+            if (schedule != null)
+            {
+                var t = schedule.Totals;
+                subtotal = t.MonthlyRent;
+                securityDeposit = t.SecurityDeposit;
+                storedDiscountType = RentSchedule.Amount;
+                storedDiscountValue = t.DiscountAmount;
+                storedDiscountPercentage = 0m;
+                details.Clear();
+                details.Add(new QuotationDetailDto
+                {
+                    FeeType = "RoomRent",
+                    Description = lineItemDescription,
+                    Quantity = schedule.Rows.Count,
+                    UnitPrice = Math.Round(t.MonthlyRent / schedule.Rows.Count, 2, MidpointRounding.AwayFromZero),
+                    Amount = t.MonthlyRent
+                });
+                if (t.SecurityDeposit > 0m)
+                    details.Add(new QuotationDetailDto
+                    {
+                        FeeType = "SecurityDeposit",
+                        Description = securityDepositMonths > 0 ? SecurityDepositRules.QuotationLineDescription(securityDepositMonths) : "Security Deposit (Refundable)",
+                        Quantity = securityDepositMonths > 0 ? securityDepositMonths : 1,
+                        UnitPrice = Math.Round(t.SecurityDeposit / (securityDepositMonths > 0 ? securityDepositMonths : 1), 2, MidpointRounding.AwayFromZero),
+                        Amount = t.SecurityDeposit
+                    });
+            }
+
             // Generate unique Quotation Number (e.g. WN-QT-YYYYMMDD-XXXXXX)
             string todayStr = _clock.Today.ToString("yyyyMMdd");
             string randomStr = Guid.NewGuid().ToString().Substring(0, 6).ToUpper();
@@ -359,11 +566,11 @@ namespace WorkNest.Application.Services
                 request.StartDateTime,
                 request.EndDateTime,
                 subtotal,
-                discountPercentage,
+                storedDiscountPercentage,
                 request.Remarks,
                 createdById,
-                discountType,
-                discountValue,
+                storedDiscountType,
+                storedDiscountValue,
                 null,   // SecurityDepositOverride is ignored: the amount below is worked out from the months
                 request.FloorId,
                 billingPeriodMonths,
@@ -386,6 +593,16 @@ namespace WorkNest.Application.Services
 
             // Insert quotation details
             await _db.InsertQuotationDetailsAsync(quotationId, details, createdById);
+            if (schedule != null)
+            {
+                try { await _schedules!.ReplaceQuotationRowsAsync(quotationId, RentSchedule.ToStored(schedule), null); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // never leave a quotation with table-style totals and no rows
+                    try { await _schedules!.VoidQuotationAsync(quotationId); } catch (Exception) { }
+                    throw new InvalidOperationException("The rent schedule could not be saved, so the quotation was not created. Please try again.");
+                }
+            }
 
             if (version != null)
             {
@@ -399,7 +616,7 @@ namespace WorkNest.Application.Services
             {
                 try
                 {
-                    if (discountValue > 0m) await _approvals.SetDiscountReasonAsync(quotationId, discountReason);
+                    if (discountValue > 0m || discountReason != null) await _approvals.SetDiscountReasonAsync(quotationId, discountReason);
                     await _approvals.AddHistoryAsync(new QuotationHistoryWrite
                     {
                         QuotationId = quotationId,
@@ -567,6 +784,7 @@ namespace WorkNest.Application.Services
             await ApplyOfferSnapshotAsync(dto);
             await ApplyApprovalInfoAsync(dto);
             ChallanCalculationService.ApplyToQuotation(dto);
+            await ApplyScheduleAsync(dto);
 
             // Sent and still valid (ValidUntil is the last valid day, a Pakistan date): an expired quotation can no longer
             // be accepted or declined; IsExpired tells the customer why.
@@ -835,6 +1053,8 @@ namespace WorkNest.Application.Services
 
             var resDict = await _db.CreateQuotationNewVersionAsync(quotationId, createdById);
             int newQuotationId = Convert.ToInt32(resDict["NewQuotationId"]);
+            if (await ScheduleSetUpAsync())
+                await _schedules!.CopyQuotationRowsAsync(quotationId, newQuotationId);   // the new version starts with the source's table
             var res = await GetQuotationByIdAsync(newQuotationId);
             return res ?? throw new InvalidOperationException("Failed to load newly created quotation version.");
         }

@@ -126,6 +126,34 @@ namespace WorkNest.API.Controllers
             }
         }
 
+        /// <summary>
+        /// The rent schedule (month-by-month table) for the staff form: without rows the default table built from the form, with rows the
+        /// user's values applied and checked (400 with the reason). 503 before the script CQ_01 has run. Staff and the sales manager.
+        /// </summary>
+        [HttpPost("api/quotation/schedule-preview")]
+        [Authorize(Roles = StaffRoles + ",sales_manager,SalesManager")]
+        [SalesManagerAllowed]
+        public async Task<IActionResult> SchedulePreview([FromBody] SchedulePreviewRequest request)
+        {
+            if (request == null) return BadRequest(ApiResponse.Fail("The request is empty."));
+            // Location-bound staff: only spaces of the locations they are assigned to (same rule as creating a quotation).
+            if (User.IsLocationBoundRole()
+                && await _db.GetSpaceLocationIdAsync(request.SpaceId) is int spaceLocationId && !User.GetLocationIds().Contains(spaceLocationId))
+                return BadRequest(ApiResponse.Fail("You can only create quotations for the locations you're assigned to."));
+            try
+            {
+                return Ok(ApiResponse.Ok(await _quotations.PreviewScheduleAsync(request)));
+            }
+            catch (RentScheduleNotSetUpException ex)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, ApiResponse.Fail(ex.Message));
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+            {
+                return BadRequest(ApiResponse.Fail(ex.Message));
+            }
+        }
+
         [AllowAnonymous]
         [HttpGet("api/quotation/offering-types")]
         [HttpGet("api/offering-types")]
