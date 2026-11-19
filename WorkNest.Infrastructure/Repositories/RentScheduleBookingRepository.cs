@@ -98,7 +98,9 @@ namespace WorkNest.Infrastructure.Repositories
                         SpaceName = Str(V("SpaceName")),
                         SpaceTypeName = Str(V("SpaceTypeName")),
                         CategoryCode = Str(V("CategoryCode")),
-                        CustomerName = Str(V("CustomerName"))
+                        CustomerName = Str(V("CustomerName")),
+                        RentAccountId = Int(V("RentAccountId")), SecurityReceivedId = Int(V("SecurityReceivedId")),
+                        ServicesIncomeId = Int(V("ServicesIncomeId")), SalesTaxId = Int(V("SalesTaxId")), AccountReceivableId = Int(V("AccountReceivableId"))
                     };
                 }
             }

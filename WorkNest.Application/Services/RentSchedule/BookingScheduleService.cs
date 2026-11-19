@@ -252,7 +252,7 @@ namespace WorkNest.Application.Services.RentSchedule
             var next = BookingScheduleMath.NextUninvoiced(rows);
             if (next == null) return (true, null);
             var group = new List<BookingScheduleRow> { next };
-            return (true, new ScheduleInvoiceSource { Booking = info, Rows = group, Figures = BookingScheduleMath.Figures(group) });
+            return (true, new ScheduleInvoiceSource { Booking = info, Rows = group, Figures = BookingScheduleMath.Figures(group), AnyRowInvoiced = rows.Any(r => r.Locked) });
         }
 
         public Task<bool> MarkInvoicedAsync(int bookingId, IReadOnlyCollection<int> rowNos, int invoiceId, CancellationToken ct = default) =>

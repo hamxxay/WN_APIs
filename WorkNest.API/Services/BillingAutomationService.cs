@@ -200,6 +200,11 @@ namespace WorkNest.API.Services
 
             _logger.LogInformation("Found {Count} active booking(s) due for billing processing.", dueBookings.Count);
 
+            // Rent schedule (CQ_01): a booking with a table bills its next un-invoiced row instead of dbo.WN_Invoice_CreateRecurring.
+            using var scheduleScope = _serviceProvider.CreateScope();
+            var scheduleService = scheduleScope.ServiceProvider.GetService<IBookingScheduleService>();
+            var scheduleClock = scheduleScope.ServiceProvider.GetService<IBusinessClock>();
+
             foreach (var b in dueBookings)
             {
                 if (stoppingToken.IsCancellationRequested) break;
@@ -246,6 +251,12 @@ namespace WorkNest.API.Services
                     }
                     try
                     {
+                    if (scheduleService != null && scheduleClock != null)
+                    {
+                        var scheduled = await RentScheduleJobInvoicer.TryBillNextRowAsync(conn, _connectionString, scheduleService, b.BookingId, scheduleClock.Today, _logger, stoppingToken);
+                        if (scheduled != RentScheduleJobOutcome.NotScheduled) continue;   // billed (or nothing to bill) from the table
+                    }
+
                     // Step 2: Idempotent Duplicate Invoice Check
                     bool invoiceExists = false;
                     using (var checkCmd = new SqlCommand("dbo.WN_Invoice_CheckExistingBillingPeriod", conn))

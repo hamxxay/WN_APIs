@@ -12,6 +12,8 @@ namespace WorkNest.Application.Interfaces
         public BookingBillingInfo Booking { get; init; } = new();
         public List<BookingScheduleRow> Rows { get; init; } = new();
         public ScheduleInvoiceFigures Figures { get; init; } = new();
+        /// <summary>True when any month of the booking's table is invoiced already (the first invoice has been made).</summary>
+        public bool AnyRowInvoiced { get; init; }
     }
 
     /// <summary>

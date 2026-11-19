@@ -27,6 +27,12 @@ namespace WorkNest.Application.Interfaces
         public string? CustomerName { get; set; }
         public int? LocationId { get; set; }
         public string? LocationName { get; set; }
+        // ledger accounts of the booking (as the invoices pass them)
+        public int? RentAccountId { get; set; }
+        public int? SecurityReceivedId { get; set; }
+        public int? ServicesIncomeId { get; set; }
+        public int? SalesTaxId { get; set; }
+        public int? AccountReceivableId { get; set; }
 
         /// <summary>Meeting / conference rooms have no schedule (same test as the invoice code).</summary>
         public bool IsMeetingRoom =>
