@@ -71,6 +71,8 @@ namespace WorkNest.Application.DTOs.Quotation
     public sealed class QuotationApprovalDetailDto : QuotationApprovalRowDto
     {
         public List<QuotationHistoryEntryDto> History { get; set; } = new();
+        /// <summary>The quotation's rent schedule (script CQ_01); null for an old quotation.</summary>
+        public RentScheduleDto? Schedule { get; set; }
     }
 
     public sealed class ApproveQuotationRequest
@@ -79,6 +81,8 @@ namespace WorkNest.Application.DTOs.Quotation
         public string? DiscountType { get; set; }
         public decimal? DiscountValue { get; set; }
         public string? Note { get; set; }
+        /// <summary>The manager's edit of the rent schedule before approving (only while PendingManager); null = approve the table as it is.</summary>
+        public List<ScheduleInputRow>? Schedule { get; set; }
     }
 
     public sealed class SendBackQuotationRequest

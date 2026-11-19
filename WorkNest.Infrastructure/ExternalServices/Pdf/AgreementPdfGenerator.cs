@@ -79,7 +79,9 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
             {
                 new("Customer Entity Type", req.EntityType, "Agreement Status", "Standard Issued"),
                 new("Commencement Date", startDateStr, "Expiration Date", endDateStr, Highlight1: true),
-                new("Recurring Fee Amount", $"PKR {req.FeeAmount:N0}", "Billing Frequency", billingPeriodStr, Highlight1: true)
+                req.Schedule is { Rows.Count: > 0 } sched
+                    ? new("Rent Schedule", $"Month-by-month, {sched.Rows.Count} row(s): see the table below", "Billing Frequency", billingPeriodStr, Highlight1: true)
+                    : new("Recurring Fee Amount", $"PKR {req.FeeAmount:N0}", "Billing Frequency", billingPeriodStr, Highlight1: true)
             };
             string? deposit = SecurityDepositText(req.SecurityDeposit, securityDepositMonths);
             if (deposit != null) rows.Add(new(SecurityDepositLabel, deposit));
@@ -315,6 +317,13 @@ namespace WorkNest.Infrastructure.ExternalServices.Pdf
                             foreach (var row in scheduleRows)
                                 AddRow(row.Label1, row.Value1, row.Label2, row.Value2, row.Highlight1, row.Highlight2);
                         });
+
+                        // Rent schedule (a quotation with a table): replaces the single recurring fee
+                        if (req.Schedule is { Rows.Count: > 0 } rentSchedule)
+                        {
+                            col.Item().Text("RENT SCHEDULE (PKR)").Bold().FontSize(9.5f).FontColor("#0f172a");
+                            col.Item().Element(c => RentScheduleTable.Compose(c, rentSchedule, 7.5f));
+                        }
 
                         // Core Acknowledgement Note
                         col.Item().Background("#eff6ff").Border(1).BorderColor("#bfdbfe").Padding(8).Column(ac =>

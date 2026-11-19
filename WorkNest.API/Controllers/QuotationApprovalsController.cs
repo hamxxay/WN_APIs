@@ -87,6 +87,7 @@ namespace WorkNest.API.Controllers
                 return Ok(await action(caller));
             }
             catch (QuotationApprovalNotSetUpException ex) { return Status(StatusCodes.Status503ServiceUnavailable, ex.Message); }
+            catch (RentScheduleNotSetUpException ex) { return Status(StatusCodes.Status503ServiceUnavailable, ex.Message); }
             catch (QuotationApprovalNotFoundException ex) { return NotFound(ApiResponse.Fail(ex.Message)); }
             catch (QuotationApprovalForbiddenException ex) { return Status(StatusCodes.Status403Forbidden, ex.Message); }
             catch (QuotationApprovalRuleException ex) { return BadRequest(ApiResponse.Fail(ex.Message)); }

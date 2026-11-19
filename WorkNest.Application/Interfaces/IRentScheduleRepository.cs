@@ -47,3 +47,12 @@ namespace WorkNest.Application.Interfaces
         Task CopyQuotationRowsAsync(int sourceQuotationId, int newQuotationId, CancellationToken ct = default);
     }
 }
+
+namespace WorkNest.Application.Interfaces
+{
+    /// <summary>The script CQ_01 has not run: the schedule preview / booking schedule calls answer 503 with <see cref="Helpers.RentSchedule.NotSetUpMessage"/>.</summary>
+    public sealed class RentScheduleNotSetUpException : Exception
+    {
+        public RentScheduleNotSetUpException() : base(Helpers.RentSchedule.NotSetUpMessage) { }
+    }
+}

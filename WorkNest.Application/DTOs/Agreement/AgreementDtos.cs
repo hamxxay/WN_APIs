@@ -8,6 +8,10 @@ namespace WorkNest.Application.DTOs.Agreement
         [System.Text.Json.Serialization.JsonIgnore]
         public string? OfferNote { get; set; }
 
+        /// <summary>Server-set from the quotation (never read from the body): its rent schedule, printed on page 1 instead of the "Recurring Fee Amount" row.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public WorkNest.Application.DTOs.Quotation.RentScheduleDto? Schedule { get; set; }
+
         public int QuotationId { get; set; }
         public string EntityType { get; set; } = "Individual"; // "Individual", "Company", "AOP"
         public string? FullName { get; set; }
