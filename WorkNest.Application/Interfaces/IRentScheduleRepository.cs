@@ -43,6 +43,9 @@ namespace WorkNest.Application.Interfaces
         /// <summary>Replaces a quotation's rows (all or nothing); with <paramref name="header"/> the quotation's totals are updated in the same transaction.</summary>
         Task ReplaceQuotationRowsAsync(int quotationId, IReadOnlyList<StoredScheduleRow> rows, QuotationScheduleHeader? header, CancellationToken ct = default);
 
+        /// <summary>Takes a just-created quotation out of use (inactive) when its table could not be saved, so no quotation is left with table-style totals and no rows.</summary>
+        Task VoidQuotationAsync(int quotationId, CancellationToken ct = default);
+
         /// <summary>Copies the rows of one quotation onto another (a body-less new version). No rows = nothing copied.</summary>
         Task CopyQuotationRowsAsync(int sourceQuotationId, int newQuotationId, CancellationToken ct = default);
     }

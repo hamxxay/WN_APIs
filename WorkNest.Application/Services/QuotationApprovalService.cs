@@ -63,6 +63,17 @@ namespace WorkNest.Application.Services
             catch (Exception) { return false; }
         }
 
+        /// <summary>True once CQ_01 has run: only then does EVERY sales executive quotation need the manager (before it, only discounted ones, as always).</summary>
+        private async Task<bool> ScheduleSetUpAsync(CancellationToken ct)
+        {
+            if (_schedules == null) return false;
+            try { return await _schedules.IsSetUpAsync(ct); }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception) { return false; }
+        }
+
+        private static bool IsHeldStatus(string? status) => QuotationApprovalRules.IsHeldBack(status);
+
         private async Task<string?> NameOfAsync(int? userId)
         {
             if (userId is not > 0) return null;
@@ -78,10 +89,13 @@ namespace WorkNest.Application.Services
             if (!await SetUpAsync(ct)) return null;                // before QAPR_01: old behaviour
 
             var header = await _db.GetQuotationByIdAsync(quotationId);
-            if (header == null) return null;   // every sales executive quotation needs the manager, discount or not
+            if (header == null) return null;
 
             var info = await _repo.GetInfoAsync(quotationId, ct);
             if (string.Equals(info?.ApprovalStatus, QuotationApprovalRules.Approved, StringComparison.OrdinalIgnoreCase)) return null;   // the manager already approved it
+            // Held (NotSubmitted / SentBack / PendingManager), or it has a discount / table: to the manager. An older quotation with no
+            // approval state, no discount and no table (sent before this rule) is sent as before.
+            if (!IsHeldStatus(info?.ApprovalStatus) && !QuotationApprovalRules.HasManualDiscount(header) && !await HasScheduleAsync(quotationId, ct)) return null;
 
             if (actorUserId is not > 0)
                 throw new InvalidOperationException("Your account could not be verified. Sign in again.");
@@ -119,8 +133,11 @@ namespace WorkNest.Application.Services
             try
             {
                 if (!await SetUpAsync(ct)) return;
-                // every quotation a sales executive makes waits for the sales manager (discount, table or neither)
-                await _repo.MarkNotSubmittedAsync(quotationId, ct);
+                // With CQ_01 every quotation a sales executive makes waits for the sales manager; before it, only discounted ones (old rule).
+                bool all = await ScheduleSetUpAsync(ct);
+                var header = all ? null : await _db.GetQuotationByIdAsync(quotationId);
+                if (all || (header != null && QuotationApprovalRules.HasManualDiscount(header)))
+                    await _repo.MarkNotSubmittedAsync(quotationId, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception) { /* the quotation is saved; it is still checked when it is sent */ }
@@ -136,11 +153,14 @@ namespace WorkNest.Application.Services
 
             var info = await _repo.GetInfoAsync(quotationId, ct);
             var status = info?.ApprovalStatus;
-            if (string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase) && !actorIsSalesExecutive)
+            if (string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase) && !actorIsSalesExecutive
+                && (hasSchedule || QuotationApprovalRules.HasManualDiscount(header) || await ScheduleSetUpAsync(ct)))
                 return QuotationApprovalRules.AgreementNotSubmittedMessage;
             if (QuotationApprovalRules.IsHeldBack(status) && !string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase))
                 return QuotationApprovalRules.AgreementHeldMessage;
             if (!actorIsSalesExecutive || string.Equals(status, QuotationApprovalRules.Approved, StringComparison.OrdinalIgnoreCase)) return null;
+            // an older quotation with no approval state, no discount and no table is not blocked (old behaviour)
+            if (!QuotationApprovalRules.HasManualDiscount(header) && !hasSchedule && !string.Equals(status, QuotationApprovalRules.NotSubmitted, StringComparison.OrdinalIgnoreCase)) return null;
 
             string? managerName = null;
             if (actorUserId is > 0)

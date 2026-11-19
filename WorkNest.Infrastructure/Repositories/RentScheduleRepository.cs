@@ -115,6 +115,14 @@ namespace WorkNest.Infrastructure.Repositories
             await tx.CommitAsync(ct);
         }
 
+        public async Task VoidQuotationAsync(int quotationId, CancellationToken ct = default)
+        {
+            await using var c = await OpenAsync(ct);
+            await using var cmd = new SqlCommand("UPDATE dbo.WN_Quotations SET IsActive = 0, Status = N'Inactive' WHERE Id = @Id", c) { CommandTimeout = CommandTimeoutSeconds };
+            cmd.Parameters.Add("@Id", SqlDbType.Int).Value = quotationId;
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
         public async Task CopyQuotationRowsAsync(int sourceQuotationId, int newQuotationId, CancellationToken ct = default)
         {
             await using var c = await OpenAsync(ct);

@@ -202,7 +202,7 @@ namespace WorkNest.Application.Services
             var inputs = new RentSchedule.Inputs(pr.PerSeatBasePrice, pr.Capacity, RentSchedule.DefaultSupportRate, taxApplicable ? taxPct : 0m);
             var input = rows == null
                 ? RentSchedule.DefaultRows(periods, pr.DiscountType, pr.DiscountValue, pr.SecurityDeposit)
-                : RentSchedule.ValidateRows(periods, rows, request.SecurityDepositOverride);
+                : RentSchedule.ValidateRows(periods, rows, request.SecurityDepositOverride ?? pr.SecurityDeposit);   // clients send the override when the user changes the total
             return RentSchedule.Compute(periods, inputs, input, pr.SecurityDeposit);
         }
 
@@ -302,7 +302,12 @@ namespace WorkNest.Application.Services
             // default one built from the form). It replaces offers and the single manual discount. Meeting rooms and servers without the script: as before.
             RentScheduleDto? schedule = null;
             if (spaceDetails.Category != "MeetingRoom" && await ScheduleSetUpAsync())
+            {
                 schedule = await BuildScheduleAsync(request, pr, request.Schedule);
+                // a discount anywhere in the table needs the reason too (same rules as the form's discount)
+                if (approvalSetUp && schedule.Totals.DiscountAmount > 0m && QuotationApprovalRules.ManualValueOf(request) <= 0m)
+                    discountReason = QuotationApprovalRules.ValidateReason(1m, request.DiscountReason);
+            }
 
             decimal subtotal = 0;
             var details = new List<QuotationDetailDto>();
@@ -541,7 +546,16 @@ namespace WorkNest.Application.Services
 
             // Insert quotation details
             await _db.InsertQuotationDetailsAsync(quotationId, details, createdById);
-            if (schedule != null) await _schedules!.ReplaceQuotationRowsAsync(quotationId, RentSchedule.ToStored(schedule), null);
+            if (schedule != null)
+            {
+                try { await _schedules!.ReplaceQuotationRowsAsync(quotationId, RentSchedule.ToStored(schedule), null); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // never leave a quotation with table-style totals and no rows
+                    try { await _schedules!.VoidQuotationAsync(quotationId); } catch (Exception) { }
+                    throw new InvalidOperationException("The rent schedule could not be saved, so the quotation was not created. Please try again.");
+                }
+            }
 
             if (version != null)
             {
@@ -555,7 +569,7 @@ namespace WorkNest.Application.Services
             {
                 try
                 {
-                    if (discountValue > 0m) await _approvals.SetDiscountReasonAsync(quotationId, discountReason);
+                    if (discountValue > 0m || discountReason != null) await _approvals.SetDiscountReasonAsync(quotationId, discountReason);
                     await _approvals.AddHistoryAsync(new QuotationHistoryWrite
                     {
                         QuotationId = quotationId,
