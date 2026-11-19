@@ -81,6 +81,12 @@ namespace WorkNest.Application.Helpers
             + (string.IsNullOrWhiteSpace(managerName) ? "your sales manager" : managerName.Trim())
             + " for approval, and the agreement can be sent once it is approved.";
 
+        /// <summary>A sales executive's agreement for a quotation (no discount, no table) the sales manager has not approved.</summary>
+        public static string AgreementQuotationNeedsApprovalMessage(string? managerName) =>
+            "This quotation has not been approved by the sales manager yet. Send the quotation first: it goes to "
+            + (string.IsNullOrWhiteSpace(managerName) ? "your sales manager" : managerName.Trim())
+            + " for approval, and the agreement can be sent once it is approved.";
+
         public static string SentToManagerMessage(string? managerName) =>
             string.IsNullOrWhiteSpace(managerName)
                 ? "Sent to your sales manager for approval."

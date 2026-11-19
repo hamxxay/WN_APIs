@@ -78,8 +78,7 @@ namespace WorkNest.Application.Services
             if (!await SetUpAsync(ct)) return null;                // before QAPR_01: old behaviour
 
             var header = await _db.GetQuotationByIdAsync(quotationId);
-            // an Offer alone is not a discount here; a quotation with a rent schedule always needs the manager
-            if (header == null || !(QuotationApprovalRules.HasManualDiscount(header) || await HasScheduleAsync(quotationId, ct))) return null;
+            if (header == null) return null;   // every sales executive quotation needs the manager, discount or not
 
             var info = await _repo.GetInfoAsync(quotationId, ct);
             if (string.Equals(info?.ApprovalStatus, QuotationApprovalRules.Approved, StringComparison.OrdinalIgnoreCase)) return null;   // the manager already approved it
@@ -120,9 +119,8 @@ namespace WorkNest.Application.Services
             try
             {
                 if (!await SetUpAsync(ct)) return;
-                var header = await _db.GetQuotationByIdAsync(quotationId);
-                if (header != null && (QuotationApprovalRules.HasManualDiscount(header) || await HasScheduleAsync(quotationId, ct)))
-                    await _repo.MarkNotSubmittedAsync(quotationId, ct);
+                // every quotation a sales executive makes waits for the sales manager (discount, table or neither)
+                await _repo.MarkNotSubmittedAsync(quotationId, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception) { /* the quotation is saved; it is still checked when it is sent */ }
@@ -134,7 +132,7 @@ namespace WorkNest.Application.Services
 
             var header = await _db.GetQuotationByIdAsync(quotationId);
             bool hasSchedule = header != null && await HasScheduleAsync(quotationId, ct);
-            if (header == null || !(QuotationApprovalRules.HasManualDiscount(header) || hasSchedule)) return null;   // no manual discount / table: nothing to approve
+            if (header == null) return null;
 
             var info = await _repo.GetInfoAsync(quotationId, ct);
             var status = info?.ApprovalStatus;
@@ -153,6 +151,7 @@ namespace WorkNest.Application.Services
             }
             if (hasSchedule) return QuotationApprovalRules.AgreementScheduleNeedsApprovalMessage(managerName);
             var (type, value) = QuotationApprovalRules.ManualDiscountOf(header);
+            if (value <= 0m) return QuotationApprovalRules.AgreementQuotationNeedsApprovalMessage(managerName);
             return QuotationApprovalRules.AgreementNeedsApprovalMessage(QuotationApprovalRules.DiscountLabel(type, value), managerName);
         }
 
