@@ -41,6 +41,8 @@ namespace WorkNest.Application.DTOs.Kyc
         public string? Company { get; set; }
         public string Email { get; set; } = string.Empty;
         public string? PhoneNumber { get; set; }
+        /// <summary>KYC_01: the offices / spaces of the customer's active bookings ("Office 304, Office 306"); null before KYC_01 or with none.</summary>
+        public string? Offices { get; set; }
         public string Category { get; set; } = CustomerCategory.Individual;
         public int TotalActiveDocs { get; set; }
         public int VerifiedDocsCount { get; set; }

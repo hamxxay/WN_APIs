@@ -7792,6 +7792,7 @@ END";
                     Company = company,
                     Email = r.GetString(r.GetOrdinal("Email")),
                     PhoneNumber = r.IsDBNull(r.GetOrdinal("PhoneNumber")) ? null : r.GetString(r.GetOrdinal("PhoneNumber")),
+                    Offices = HasColumn(r, "Offices") && !r.IsDBNull(r.GetOrdinal("Offices")) ? r.GetString(r.GetOrdinal("Offices")) : null,   // KYC_01
                     Category = category,
                     TotalActiveDocs = totalDocs,
                     VerifiedDocsCount = verifiedDocs,
