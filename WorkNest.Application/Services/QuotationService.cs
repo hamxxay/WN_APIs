@@ -221,6 +221,16 @@ namespace WorkNest.Application.Services
             schedule.OverDiscountCap = schedule.Totals.DiscountAmount > max + 0.01m;
         }
 
+        /// <summary>The cap % of a saved quotation with a table: its offering type's cap, widened for a raised base price as on create. Null = no cap.</summary>
+        private async Task<decimal?> StoredCapPercentAsync(QuotationResponse q)
+        {
+            if (q.Schedule == null || q.MaxDiscountPercent is not decimal offeringCap || offeringCap <= 0m) return null;
+            decimal standardPerSeat = 0m;
+            try { standardPerSeat = (await ResolveSpaceDetailsAsync(q.SpaceId)).Monthly; } catch (Exception) { /* no space row: the plain cap */ }
+            return QuotationDiscountCap.Compute(offeringCap, false, standardPerSeat, q.Schedule.PerSeatPrice, q.Schedule.Seats,
+                q.Schedule.PerSeatPrice * q.Schedule.Seats).MaxPercent;
+        }
+
         public static string DiscountCapMessage(RentScheduleDto schedule) =>
             string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 "The table's discounts come to PKR {0:N0}, more than the {1:0.##}% cap for this space (at most PKR {2:N0} over the whole contract). Lower the discounts.",
@@ -249,6 +259,8 @@ namespace WorkNest.Application.Services
                 var sched = RentSchedule.FromStored(rows, inputs, first.Totals.SecurityDeposit);
                 var t = sched.Totals;
                 dto.Schedule = sched;
+                try { if (await StoredCapPercentAsync(dto) is decimal capPct) ApplyDiscountCap(sched, capPct); }
+                catch (Exception) { /* display only: the edit checks the cap again */ }
                 dto.SubtotalAmount = t.MonthlyRent;
                 dto.TotalContractAmount = t.MonthlyRent;
                 dto.DiscountType = RentSchedule.Amount;
@@ -289,13 +301,9 @@ namespace WorkNest.Application.Services
             var inputs = new RentSchedule.Inputs(q.Schedule.PerSeatPrice, q.Schedule.Seats, q.Schedule.SupportRate, q.Schedule.TaxPercent);
             var computed = RentSchedule.Compute(periods, inputs, valid, q.Schedule.DefaultSecurityDeposit);
             // The sales manager is held to the same whole-contract cap as the executive.
-            if (q.MaxDiscountPercent is decimal offeringCap && offeringCap > 0m)
+            if (await StoredCapPercentAsync(q) is decimal capPct)
             {
-                decimal standardPerSeat = 0m;
-                try { standardPerSeat = (await ResolveSpaceDetailsAsync(q.SpaceId)).Monthly; } catch (Exception) { /* no space row: the plain cap */ }
-                var limits = QuotationDiscountCap.Compute(offeringCap, false, standardPerSeat, q.Schedule.PerSeatPrice, q.Schedule.Seats,
-                    q.Schedule.PerSeatPrice * q.Schedule.Seats);
-                ApplyDiscountCap(computed, limits.MaxPercent);
+                ApplyDiscountCap(computed, capPct);
                 if (computed.OverDiscountCap) throw new QuotationApprovalRuleException(DiscountCapMessage(computed));
             }
             var t = computed.Totals;
