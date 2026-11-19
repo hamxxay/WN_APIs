@@ -95,8 +95,8 @@ namespace WorkNest.Application.Services.BookingSchedules
         }
 
         /// <summary>
-        /// roomRent = max(0, monthlyRent - serviceCharge). Discount: Percentage = round2(roomRent x v / 100); Amount = min(v, roomRent);
-        /// the service charge is never discounted. rentAfterDiscount = monthlyRent - discount; tax = round2(serviceCharge x taxPercent / 100);
+        /// roomRent = max(0, monthlyRent - serviceCharge) (shown only). Discount on the whole monthly rent, as invoices and quotation
+        /// tables do (RentSchedule.Compute): Percentage = round2(monthlyRent x v / 100); Amount = min(v, monthlyRent). rentAfterDiscount = monthlyRent - discount; tax = round2(serviceCharge x taxPercent / 100);
         /// total = rentAfterDiscount + tax + deposit.
         /// </summary>
         public static void Recompute(BookingScheduleRow row, decimal taxPercent)
@@ -105,8 +105,8 @@ namespace WorkNest.Application.Services.BookingSchedules
             var type = NormalizeDiscountType(row.DiscountType) ?? Amount;
             decimal v = Math.Max(0m, row.DiscountValue);
             decimal discount = type == Percentage
-                ? Round2(roomRent * Math.Min(v, 100m) / 100m)
-                : Round2(Math.Min(v, roomRent));
+                ? Round2(row.MonthlyRent * Math.Min(v, 100m) / 100m)
+                : Round2(Math.Min(v, row.MonthlyRent));
             row.DiscountType = type;
             row.RoomRent = roomRent;
             row.DiscountAmount = discount;
@@ -364,7 +364,7 @@ namespace WorkNest.Application.Services.BookingSchedules
         /// One projected month priced like today's recurring invoice (GenerateNextInvoiceCoreAsync / WN_Invoice_CreateRecurring):
         /// gross = round2(monthly x fraction); a percentage discount = round2(gross x % / 100) (of the whole rent, service charge included);
         /// a flat amount discount is per month = amount x fraction, never above the gross; service charge = rate x seats x fraction.
-        /// The discount is stored as an Amount, so the table's "percentage of room rent" rule cannot change what is billed.
+        /// The discount is stored as an Amount equal to what today's invoice takes off.
         /// </summary>
         public static BookingScheduleRow BuildProjectedRow(int rowNo, DateTime start, DateTime end, decimal fraction, BookingProjectionInput p)
         {
@@ -372,8 +372,6 @@ namespace WorkNest.Application.Services.BookingSchedules
             decimal discount = 0m;
             if (p.DiscountPercentage > 0) discount = Round2(rent * (p.DiscountPercentage / 100m));
             else if (p.DiscountAmount > 0) discount = Round2(Math.Min(p.DiscountAmount * fraction, rent));
-            decimal roomRent = Math.Max(0m, rent - service);
-            if (discount > roomRent) discount = roomRent;   // the service charge is never discounted in the table
             var row = new BookingScheduleRow
             {
                 RowNo = rowNo, PeriodStart = start.Date, PeriodEnd = end.Date, MonthFraction = fraction, IsShort = fraction < 1m,
