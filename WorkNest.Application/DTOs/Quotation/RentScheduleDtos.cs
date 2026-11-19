@@ -59,6 +59,14 @@ namespace WorkNest.Application.DTOs.Quotation
         public int Seats { get; set; }
         public decimal PerSeatPrice { get; set; }
         public decimal DefaultSecurityDeposit { get; set; }
+        /// <summary>The discount cap of the whole contract: the offering type's cap % (widened for a raised base price) of the table's
+        /// total rent. The table's total discount (total rent - total rent after discount) may not be more. Null = not checked (no cap).</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public decimal? MaxDiscountPercent { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public decimal? MaxDiscountAmount { get; set; }
+        /// <summary>True when the table's total discount is above <see cref="MaxDiscountAmount"/> (the quotation cannot be saved).</summary>
+        public bool OverDiscountCap { get; set; }
     }
 
     /// <summary>POST api/quotation/schedule-preview: the staff form's fields plus optional user rows.</summary>

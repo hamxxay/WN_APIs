@@ -203,8 +203,28 @@ namespace WorkNest.Application.Services
             var input = rows == null
                 ? RentSchedule.DefaultRows(periods, pr.DiscountType, pr.DiscountValue, pr.SecurityDeposit)
                 : RentSchedule.ValidateRows(periods, rows, request.SecurityDepositOverride ?? pr.SecurityDeposit);   // clients send the override when the user changes the total
-            return RentSchedule.Compute(periods, inputs, input, pr.SecurityDeposit);
+            var computed = RentSchedule.Compute(periods, inputs, input, pr.SecurityDeposit);
+            ApplyDiscountCap(computed, pr.MaxDiscountCap);
+            return computed;
         }
+
+        /// <summary>
+        /// The whole-contract discount cap: total rent at the base price x cap % = the most the table may take off in total
+        /// (e.g. 15% cap, 2,100,000 rent for the year: at most 315,000 off, spread over the months any way).
+        /// </summary>
+        public static void ApplyDiscountCap(RentScheduleDto schedule, decimal capPercent)
+        {
+            decimal cap = Math.Max(0m, capPercent);
+            decimal max = Math.Round(schedule.Totals.MonthlyRent * cap / 100m, 2);
+            schedule.MaxDiscountPercent = cap;
+            schedule.MaxDiscountAmount = max;
+            schedule.OverDiscountCap = schedule.Totals.DiscountAmount > max + 0.01m;
+        }
+
+        public static string DiscountCapMessage(RentScheduleDto schedule) =>
+            string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "The table's discounts come to PKR {0:N0}, more than the {1:0.##}% cap for this space (at most PKR {2:N0} over the whole contract). Lower the discounts.",
+                schedule.Totals.DiscountAmount, schedule.MaxDiscountPercent ?? 0m, schedule.MaxDiscountAmount ?? 0m);
 
         public async Task<RentScheduleDto> PreviewScheduleAsync(SchedulePreviewRequest request)
         {
@@ -268,6 +288,16 @@ namespace WorkNest.Application.Services
 
             var inputs = new RentSchedule.Inputs(q.Schedule.PerSeatPrice, q.Schedule.Seats, q.Schedule.SupportRate, q.Schedule.TaxPercent);
             var computed = RentSchedule.Compute(periods, inputs, valid, q.Schedule.DefaultSecurityDeposit);
+            // The sales manager is held to the same whole-contract cap as the executive.
+            if (q.MaxDiscountPercent is decimal offeringCap && offeringCap > 0m)
+            {
+                decimal standardPerSeat = 0m;
+                try { standardPerSeat = (await ResolveSpaceDetailsAsync(q.SpaceId)).Monthly; } catch (Exception) { /* no space row: the plain cap */ }
+                var limits = QuotationDiscountCap.Compute(offeringCap, false, standardPerSeat, q.Schedule.PerSeatPrice, q.Schedule.Seats,
+                    q.Schedule.PerSeatPrice * q.Schedule.Seats);
+                ApplyDiscountCap(computed, limits.MaxPercent);
+                if (computed.OverDiscountCap) throw new QuotationApprovalRuleException(DiscountCapMessage(computed));
+            }
             var t = computed.Totals;
             await _schedules.ReplaceQuotationRowsAsync(quotationId, RentSchedule.ToStored(computed),
                 new QuotationScheduleHeader(t.MonthlyRent, t.DiscountAmount, t.SecurityDeposit, t.Total));
@@ -304,6 +334,7 @@ namespace WorkNest.Application.Services
             if (spaceDetails.Category != "MeetingRoom" && await ScheduleSetUpAsync())
             {
                 schedule = await BuildScheduleAsync(request, pr, request.Schedule);
+                if (schedule.OverDiscountCap) throw new ArgumentException(DiscountCapMessage(schedule));
                 // a discount anywhere in the table needs the reason too (same rules as the form's discount)
                 if (approvalSetUp && schedule.Totals.DiscountAmount > 0m && QuotationApprovalRules.ManualValueOf(request) <= 0m)
                     discountReason = QuotationApprovalRules.ValidateReason(1m, request.DiscountReason);
