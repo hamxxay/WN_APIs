@@ -176,6 +176,16 @@ namespace WorkNest.Application.Services.BookingSchedules
             return list.Select(c => Fill(new BookingScheduleChangeRowDto(), c)).ToList();
         }
 
+        public async Task<IReadOnlyList<BookingScheduleListItem>> ListBookingsAsync(BookingScheduleCaller caller, string? search, bool activeOnly, CancellationToken ct = default)
+        {
+            await EnsureSetUpAsync(ct);
+            // Location-bound staff (the sales manager included) see their own locations only; no location = nothing.
+            IReadOnlyCollection<int>? locations = caller.IsSuperAdmin ? null : (caller.LocationIds ?? (IReadOnlyCollection<int>)Array.Empty<int>());
+            var term = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+            if (term is { Length: > 100 }) term = term[..100];
+            return await _repo.ListBookingsAsync(term, locations, activeOnly, ct);
+        }
+
         public async Task<BookingScheduleChangeDetailDto> GetChangeAsync(BookingScheduleCaller caller, int changeId, CancellationToken ct = default)
         {
             await EnsureSetUpAsync(ct);

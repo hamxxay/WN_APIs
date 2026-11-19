@@ -398,6 +398,62 @@ namespace WorkNest.Infrastructure.Repositories
             return list;
         }
 
+        public async Task<IReadOnlyList<BookingScheduleListItem>> ListBookingsAsync(string? search, IReadOnlyCollection<int>? locationIds, bool activeOnly, CancellationToken ct = default)
+        {
+            var list = new List<BookingScheduleListItem>();
+            if (locationIds is { Count: 0 }) return list;
+            var where = new List<string>
+            {
+                "ISNULL(b.IsDeleted, 0) = 0",
+                "b.StartOn IS NOT NULL AND b.EndOn IS NOT NULL",
+                "ISNULL(LTRIM(RTRIM(os.Description)), '') NOT IN ('Rejected', 'Cancelled')",
+                "ISNULL(st.Name, '') NOT LIKE '%Meeting%' AND ISNULL(st.Name, '') NOT LIKE '%Conference%'",
+                "ISNULL(sp.Name, '') NOT LIKE '%Meeting%' AND ISNULL(sp.Name, '') NOT LIKE '%Conference%'"
+            };
+            if (activeOnly) where.Add("CAST(b.EndOn AS DATE) >= CAST(GETDATE() AS DATE)");
+            if (locationIds != null)
+                where.Add("sp.LocationId IN (" + string.Join(",", locationIds.Select(i => i.ToString(CultureInfo.InvariantCulture))) + ")");
+            if (search != null)
+                where.Add("(cust.CustomerName LIKE @q OR b.CustomerCode LIKE @q OR sp.Name LIKE @q OR l.Name LIKE @q OR CAST(b.Id AS VARCHAR(12)) = @id)");
+            string sql = @"
+                SELECT TOP 500 b.Id, cust.CustomerName, b.CustomerCode, sp.Name AS SpaceName, st.Name AS SpaceTypeName, sp.LocationId, l.Name AS LocationName,
+                       b.StartOn, b.EndOn, LTRIM(RTRIM(os.Description)) AS StatusName,
+                       CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_BookingSchedule bs WITH (NOLOCK) WHERE bs.BookingId = b.Id) THEN 1 ELSE 0 END AS HasSchedule,
+                       CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_BookingScheduleChanges ch WITH (NOLOCK) WHERE ch.BookingId = b.Id AND ch.Status = 'Pending') THEN 1 ELSE 0 END AS HasPending
+                FROM dbo.WN_Bookings b WITH (NOLOCK)
+                JOIN dbo.WN_Spaces sp WITH (NOLOCK) ON sp.Id = b.SpaceId
+                LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = sp.SpaceTypeId
+                LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = sp.LocationId
+                LEFT JOIN dbo.OrderStatus os WITH (NOLOCK) ON os.Id = b.BookingStatusId
+                OUTER APPLY (
+                    SELECT TOP 1 ISNULL(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(ISNULL(cu.FirstName, '') + ' ' + ISNULL(cu.LastName, ''))), '')) AS CustomerName
+                    FROM dbo.WN_Customers cu WITH (NOLOCK)
+                    WHERE (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND cu.Code = b.CustomerCode) OR cu.UserId = b.UserId
+                    ORDER BY CASE WHEN b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode THEN 0 ELSE 1 END, cu.Id
+                ) cust
+                WHERE " + string.Join(" AND ", where) + @"
+                ORDER BY CASE WHEN CAST(b.EndOn AS DATE) >= CAST(GETDATE() AS DATE) THEN 0 ELSE 1 END, b.StartOn DESC, b.Id DESC";
+            await using var c = await OpenAsync(ct);
+            await using var cmd = new SqlCommand(sql, c) { CommandTimeout = CommandTimeoutSeconds };
+            if (search != null)
+            {
+                cmd.Parameters.Add("@q", SqlDbType.NVarChar, 120).Value = "%" + search.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%";
+                cmd.Parameters.Add("@id", SqlDbType.VarChar, 12).Value = search.Length <= 12 ? search : "";
+            }
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                list.Add(new BookingScheduleListItem
+                {
+                    BookingId = Convert.ToInt32(r["Id"]), CustomerName = Str(r["CustomerName"]), CustomerCode = Str(r["CustomerCode"]),
+                    SpaceName = Str(r["SpaceName"]), SpaceTypeName = Str(r["SpaceTypeName"]), LocationId = Int(r["LocationId"]), LocationName = Str(r["LocationName"]),
+                    StartOn = r["StartOn"] is DateTime so ? so : null, EndOn = r["EndOn"] is DateTime eo ? eo : null, Status = Str(r["StatusName"]),
+                    HasSchedule = Convert.ToInt32(r["HasSchedule"]) == 1, HasPendingChange = Convert.ToInt32(r["HasPending"]) == 1
+                });
+            }
+            return list;
+        }
+
         public async Task<int?> InsertChangeAsync(int bookingId, int requestedById, string rowsJson, CancellationToken ct = default)
         {
             const string sql = @"

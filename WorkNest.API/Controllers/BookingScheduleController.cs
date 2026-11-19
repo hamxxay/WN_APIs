@@ -38,6 +38,22 @@ namespace WorkNest.API.Controllers
         public Task<IActionResult> Get(int id, CancellationToken ct = default) =>
             Run(async () => ApiResponse.Ok(await _schedule.GetAsync(id, ct)));
 
+        /// <summary>
+        /// ?search=&amp;active=true (default) | false: the monthly-space bookings whose rent schedule the caller may open, read-only for the sales
+        /// manager. Location-bound staff (the sales manager included) only get their own locations; super admin every location.
+        /// [ { bookingId, customerName, customerCode, spaceName, spaceTypeName, locationId, locationName, startOn, endOn, status, hasSchedule, hasPendingChange } ].
+        /// </summary>
+        [HttpGet("api/booking-schedules")]
+        [Authorize(Roles = StaffRoles)]
+        [SalesManagerAllowed]
+        public Task<IActionResult> List([FromQuery] string? search = null, [FromQuery] bool active = true, CancellationToken ct = default) =>
+            Run(async () =>
+            {
+                var caller = await BookingScheduleCallerResolver.ResolveAsync(User, _db);
+                if (caller == null) throw new BookingScheduleForbiddenException("The signed-in account could not be verified.");
+                return ApiResponse.Ok(await _schedule.ListBookingsAsync(caller, search, active, ct));
+            });
+
         /// <summary>Body { rows: [{ rowNo, discountType, discountValue, securityDeposit }] }. Admin / super admin: saved (the booking then bills from the table). Sales executive: { pendingApproval: true }.</summary>
         [HttpPut("api/booking/{id:int}/schedule")]
         [Authorize(Roles = EditRoles)]

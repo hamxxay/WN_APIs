@@ -36,6 +36,8 @@ namespace WorkNest.Application.Interfaces
         Task<SaveBookingScheduleResult> SaveAsync(BookingScheduleCaller caller, int bookingId, IReadOnlyList<BookingScheduleInputRow>? rows, CancellationToken ct = default);
 
         Task<IReadOnlyList<BookingScheduleChangeRowDto>> ListChangesAsync(BookingScheduleCaller caller, bool pendingOnly, CancellationToken ct = default);
+        /// <summary>The bookings whose table the caller may open: super admin every location, everyone else their own locations.</summary>
+        Task<IReadOnlyList<BookingScheduleListItem>> ListBookingsAsync(BookingScheduleCaller caller, string? search, bool activeOnly, CancellationToken ct = default);
         Task<BookingScheduleChangeDetailDto> GetChangeAsync(BookingScheduleCaller caller, int changeId, CancellationToken ct = default);
         Task<(string Message, BookingScheduleChangeDetailDto Detail)> ApproveAsync(BookingScheduleCaller caller, int changeId, IReadOnlyList<BookingScheduleInputRow>? editedRows, string? note, CancellationToken ct = default);
         Task<BookingScheduleChangeDetailDto> SendBackAsync(BookingScheduleCaller caller, int changeId, string? note, CancellationToken ct = default);

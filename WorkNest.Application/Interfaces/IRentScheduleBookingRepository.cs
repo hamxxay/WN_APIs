@@ -108,6 +108,9 @@ namespace WorkNest.Application.Interfaces
         Task<BookingScheduleChange?> GetChangeAsync(int changeId, CancellationToken ct = default);
         /// <summary>Changes for the queue: a manager (<paramref name="managerUserId"/> set) sees those of their executives and of their locations; null = everything.</summary>
         Task<IReadOnlyList<BookingScheduleChange>> ListChangesAsync(bool pendingOnly, int? managerUserId, IReadOnlyCollection<int>? locationIds, CancellationToken ct = default);
+        /// <summary>Monthly-space bookings (no meeting / conference rooms, not rejected / cancelled / deleted), newest first, at most 500.
+        /// <paramref name="locationIds"/> null = every location; empty = none. <paramref name="activeOnly"/>: contracts not ended yet.</summary>
+        Task<IReadOnlyList<BookingScheduleListItem>> ListBookingsAsync(string? search, IReadOnlyCollection<int>? locationIds, bool activeOnly, CancellationToken ct = default);
         /// <summary>Adds a Pending change; returns null when the booking already has one (one pending change per booking).</summary>
         Task<int?> InsertChangeAsync(int bookingId, int requestedById, string rowsJson, CancellationToken ct = default);
         /// <summary>Decides a Pending change (Approved / SentBack); false when it is no longer Pending.</summary>

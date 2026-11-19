@@ -132,4 +132,24 @@ namespace WorkNest.Application.DTOs.RentSchedule
         public BookingScheduleView? Requested { get; set; }
         public string? Problem { get; set; }
     }
+
+    /// <summary>A row of GET api/booking-schedules: a monthly-space booking whose rent schedule can be opened (read-only for the sales manager).</summary>
+    public sealed class BookingScheduleListItem
+    {
+        public int BookingId { get; set; }
+        public string? CustomerName { get; set; }
+        public string? CustomerCode { get; set; }
+        public string? SpaceName { get; set; }
+        public string? SpaceTypeName { get; set; }
+        public int? LocationId { get; set; }
+        public string? LocationName { get; set; }
+        [System.Text.Json.Serialization.JsonConverter(typeof(ScheduleDateJsonConverter))]
+        public DateTime? StartOn { get; set; }
+        [System.Text.Json.Serialization.JsonConverter(typeof(ScheduleDateJsonConverter))]
+        public DateTime? EndOn { get; set; }
+        public string? Status { get; set; }
+        /// <summary>True when the booking has its own saved table (otherwise the table shown is built from its invoices and price).</summary>
+        public bool HasSchedule { get; set; }
+        public bool HasPendingChange { get; set; }
+    }
 }
