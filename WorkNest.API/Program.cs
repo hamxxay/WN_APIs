@@ -310,6 +310,7 @@ try
     // Quotation discount approval by the sales manager (script QAPR_01_quotation_approval): old behaviour / 503 before it.
     builder.Services.AddScoped<IQuotationApprovalRepository, WorkNest.Infrastructure.Repositories.QuotationApprovalRepository>();
     builder.Services.AddScoped<IQuotationApprovalService, QuotationApprovalService>();
+    builder.Services.AddScoped<IRentScheduleRepository, WorkNest.Infrastructure.Repositories.RentScheduleRepository>();   // rent schedule (script CQ_01)
     builder.Services.AddScoped<IAgreementService, AgreementService>();
     builder.Services.AddScoped<ILeaseTemplateService, LeaseTemplateService>();
     builder.Services.AddScoped<IAccessCardService, AccessCardService>();

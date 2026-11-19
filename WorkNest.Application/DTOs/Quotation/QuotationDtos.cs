@@ -41,6 +41,8 @@ namespace WorkNest.Application.DTOs.Quotation
         public DateTime ValidUntil { get; set; }
         /// <summary>Reason for the discount (QAPR_01): required, 5..1000 characters, when a manual discount is entered.</summary>
         public string? DiscountReason { get; set; }
+        /// <summary>The rent schedule the user filled / edited (script CQ_01). Null = the server's default table built from the fields above.</summary>
+        public List<ScheduleInputRow>? Schedule { get; set; }
     }
 
     public class QuotationResponse
@@ -137,6 +139,9 @@ namespace WorkNest.Application.DTOs.Quotation
         public string? ApprovalNote { get; set; }
         public string? ApprovalManagerName { get; set; }
         public DateTime? ApprovalSubmittedAt { get; set; }
+
+        /// <summary>The month-by-month rent schedule (script CQ_01); null = an old quotation (or the script has not run).</summary>
+        public RentScheduleDto? Schedule { get; set; }
 
         public bool CanRespond { get; set; }
         /// <summary>Waiting for the customer's answer (Sent / Active) but its last valid day (ValidUntil, Pakistan date) has passed.</summary>
