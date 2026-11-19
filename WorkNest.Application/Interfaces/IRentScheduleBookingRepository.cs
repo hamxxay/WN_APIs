@@ -81,6 +81,15 @@ namespace WorkNest.Application.Interfaces
         /// <summary>The booking's stored rows in row order (Locked / InvoiceId / InvoiceNumber filled for invoiced rows); empty = no table.</summary>
         Task<IReadOnlyList<BookingScheduleRow>> GetRowsAsync(int bookingId, CancellationToken ct = default);
 
+        /// <summary>The live invoice (not cancelled / deleted, any type but surcharge / custom-replace) that already covers exactly this period of the booking; null when none.</summary>
+        Task<int?> FindLiveInvoiceForPeriodAsync(int bookingId, DateTime start, DateTime end, CancellationToken ct = default);
+
+        /// <summary>
+        /// Heals a booking whose conversion could not copy the quotation's rows: when the booking has none but its quotation has, copies them now.
+        /// Throws when the copy fails (the invoice paths then fail loudly instead of billing from the old engine). Returns the rows copied.
+        /// </summary>
+        Task<int> EnsureBookingScheduleFromQuotationAsync(int bookingId, CancellationToken ct = default);
+
         Task<bool> HasRowsAsync(int bookingId, CancellationToken ct = default);
 
         /// <summary>Inserts the rows that are not stored yet and updates the un-invoiced stored ones (never an invoiced row), in one transaction.</summary>

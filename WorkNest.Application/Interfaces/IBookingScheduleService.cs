@@ -3,6 +3,13 @@ using WorkNest.Application.Services.BookingSchedules;
 
 namespace WorkNest.Application.Interfaces
 {
+    /// <summary>The per-booking billing lock (implemented in the API: a session application lock), taken while a table is saved so a save cannot race an invoice being built.</summary>
+    public interface IRentScheduleGate
+    {
+        /// <summary>Disposable that releases the lock; throws <see cref="BookingScheduleConflictException"/> when another path holds it.</summary>
+        Task<IAsyncDisposable> AcquireAsync(int bookingId, CancellationToken ct = default);
+    }
+
     /// <summary>Who is calling (resolved by the controller from the JWT). A manager covers their own locations / executives; a super admin everything.</summary>
     public sealed record BookingScheduleCaller(int UserId, bool IsSuperAdmin, bool IsAdmin, bool IsSalesExecutive, bool IsSalesManager, IReadOnlyList<int>? LocationIds);
 
@@ -41,6 +48,9 @@ namespace WorkNest.Application.Interfaces
 
         /// <summary>The next un-invoiced row of a booking that has rows (null when none / no table). <paramref name="hasSchedule"/> tells "no more months" from "no table".</summary>
         Task<(bool HasSchedule, ScheduleInvoiceSource? Next)> GetNextInvoiceSourceAsync(int bookingId, CancellationToken ct = default);
+
+        /// <summary>The live invoice that already covers exactly this period of the booking (null when none).</summary>
+        Task<int?> FindLiveInvoiceForPeriodAsync(int bookingId, DateTime start, DateTime end, CancellationToken ct = default);
 
         /// <summary>Stores the invoice on the rows (never a row that is already invoiced); false when a row was taken meanwhile.</summary>
         Task<bool> MarkInvoicedAsync(int bookingId, IReadOnlyCollection<int> rowNos, int invoiceId, CancellationToken ct = default);

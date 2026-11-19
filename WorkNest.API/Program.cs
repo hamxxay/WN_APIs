@@ -313,6 +313,7 @@ try
     builder.Services.AddScoped<IRentScheduleRepository, WorkNest.Infrastructure.Repositories.RentScheduleRepository>();   // rent schedule (script CQ_01)
     // Rent schedule of bookings (script CQ_01_rent_schedule): old behaviour / 503 before it.
     builder.Services.AddScoped<IRentScheduleBookingRepository, WorkNest.Infrastructure.Repositories.RentScheduleBookingRepository>();
+    builder.Services.AddScoped<IRentScheduleGate, WorkNest.API.Services.RentScheduleGate>();
     builder.Services.AddScoped<IBookingScheduleService, WorkNest.Application.Services.BookingSchedules.BookingScheduleService>();
     builder.Services.AddScoped<IAgreementService, AgreementService>();
     builder.Services.AddScoped<ILeaseTemplateService, LeaseTemplateService>();

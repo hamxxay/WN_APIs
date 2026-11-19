@@ -32,17 +32,43 @@ namespace WorkNest.API.Controllers
             var fresh = await svc.GetFirstInvoiceSourceAsync(bookingId);
             if (fresh == null || !fresh.Figures.RowNos.SequenceEqual(src.Figures.RowNos) || fresh.Figures.GrandTotal != src.Figures.GrandTotal)
                 return Conflict(new { isSuccessful = false, message = "The rent schedule changed while the invoice was being prepared. Open the first invoice again." });
-            var result = await CreateCustomInvoice(dto);
-            await MarkScheduleRowsAsync(svc, bookingId, src, result);
-            return result;
+            return await CreateAndLinkAsync(svc, dto, bookingId, src);
         }
 
-        private static async Task MarkScheduleRowsAsync(IBookingScheduleService svc, int bookingId, ScheduleInvoiceSource src, IActionResult result)
+        /// <summary>
+        /// Creates the invoice and stores it on the rows. If the period already has a live invoice (an earlier create whose link failed) that invoice is
+        /// linked instead and nothing is created. If the link fails after the create it is retried through the period lookup; if that fails too the
+        /// answer is an error (500), never a 200 that would let the next call bill the month again.
+        /// </summary>
+        private async Task<IActionResult> CreateAndLinkAsync(IBookingScheduleService svc, CreateCustomInvoiceDto dto, int bookingId, ScheduleInvoiceSource src)
         {
+            var f = src.Figures;
+            var existing = await svc.FindLiveInvoiceForPeriodAsync(bookingId, f.PeriodStart, f.PeriodEnd);
+            if (existing != null)
+            {
+                if (!await svc.MarkInvoicedAsync(bookingId, f.RowNos, existing.Value))
+                    return StatusCode(500, new { isSuccessful = false, message = $"Invoice {existing} already covers this period but could not be linked to the rent schedule. Nothing new was created." });
+                return Ok(new { isSuccessful = true, message = "This period was already invoiced; the invoice is now linked to the rent schedule.", invoiceId = existing.Value });
+            }
+
+            var result = await CreateCustomInvoice(dto);
             var invoiceId = RentScheduleInvoiceShape.InvoiceIdOf(result);
-            if (invoiceId == null) return;
-            if (!await svc.MarkInvoicedAsync(bookingId, src.Figures.RowNos, invoiceId.Value))
-                Console.WriteLine($"[RentSchedule] invoice {invoiceId} for booking {bookingId} was created but rows {string.Join(",", src.Figures.RowNos)} could not be linked to it.");
+            if (invoiceId == null) return result;
+            bool linked = false;
+            try { linked = await svc.MarkInvoicedAsync(bookingId, f.RowNos, invoiceId.Value); } catch (Exception ex) { Console.WriteLine($"[RentSchedule] link failed: {ex.Message}"); }
+            if (!linked)
+            {
+                try
+                {
+                    var found = await svc.FindLiveInvoiceForPeriodAsync(bookingId, f.PeriodStart, f.PeriodEnd) ?? invoiceId;
+                    linked = await svc.MarkInvoicedAsync(bookingId, f.RowNos, found.Value);
+                }
+                catch (Exception ex) { Console.WriteLine($"[RentSchedule] link retry failed: {ex.Message}"); }
+            }
+            if (!linked)
+                return StatusCode(500, new { isSuccessful = false, invoiceId = invoiceId.Value,
+                    message = $"Invoice {invoiceId} was created but could not be linked to the rent schedule rows. Do not create it again: calling generate next invoice again links it." });
+            return result;
         }
 
         /// <summary>
@@ -64,9 +90,7 @@ namespace WorkNest.API.Controllers
             if (!next.AnyRowInvoiced)
                 return BadRequest(new { isSuccessful = false, message = "Send the first invoice first: the rent schedule has no invoiced month yet." });
             var dto = RentScheduleInvoiceShape.NextInvoiceDto(next, bookingId, userId, spaceName, secMonths, _clock.Today, InvoiceDueDays);
-            var result = await CreateCustomInvoice(dto);
-            await MarkScheduleRowsAsync(svc, bookingId, next, result);
-            return result;
+            return await CreateAndLinkAsync(svc, dto, bookingId, next);
         }
     }
 }

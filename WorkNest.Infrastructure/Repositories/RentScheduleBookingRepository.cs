@@ -179,6 +179,42 @@ namespace WorkNest.Infrastructure.Repositories
             return list;
         }
 
+        public async Task<int?> FindLiveInvoiceForPeriodAsync(int bookingId, DateTime start, DateTime end, CancellationToken ct = default)
+        {
+            await using var c = await OpenAsync(ct);
+            return await FindLiveInvoiceForPeriodAsync(c, bookingId, start, end, ct);
+        }
+
+        /// <summary>Invoices made by CreateCustomInvoice have IsCustom = 0 (WN_Invoices_Insert never sets it), so the same filter as the billing job's duplicate check finds them.</summary>
+        public static async Task<int?> FindLiveInvoiceForPeriodAsync(SqlConnection c, int bookingId, DateTime start, DateTime end, CancellationToken ct = default)
+        {
+            await using var cmd = new SqlCommand(@"SELECT TOP 1 i.Id FROM dbo.WN_Invoices i WITH (NOLOCK)
+                WHERE i.BookingId = @b AND CAST(i.BillingPeriodStart AS DATE) = @s AND CAST(i.BillingPeriodEnd AS DATE) = @e
+                  AND ISNULL(i.InvoiceTypeId, 1) NOT IN (5, 7) AND ISNULL(i.IsCustom, 0) = 0 AND ISNULL(i.StatusId, 0) NOT IN (5, 40, 86)
+                ORDER BY i.Id DESC", c) { CommandTimeout = CommandTimeoutSeconds };
+            cmd.Parameters.AddWithValue("@b", bookingId);
+            cmd.Parameters.Add("@s", SqlDbType.Date).Value = start.Date;
+            cmd.Parameters.Add("@e", SqlDbType.Date).Value = end.Date;
+            var v = await cmd.ExecuteScalarAsync(ct);
+            return v is null or DBNull ? null : Convert.ToInt32(v);
+        }
+
+        public async Task<int> EnsureBookingScheduleFromQuotationAsync(int bookingId, CancellationToken ct = default)
+        {
+            await using var c = await OpenAsync(ct);
+            int quotationId;
+            await using (var cmd = new SqlCommand(@"SELECT TOP 1 q.Id FROM dbo.WN_Quotations q WITH (NOLOCK)
+                WHERE q.BookingId = @b AND EXISTS (SELECT 1 FROM dbo.WN_QuotationSchedule s WITH (NOLOCK) WHERE s.QuotationId = q.Id)
+                ORDER BY q.Id DESC", c) { CommandTimeout = CommandTimeoutSeconds })
+            {
+                cmd.Parameters.AddWithValue("@b", bookingId);
+                var v = await cmd.ExecuteScalarAsync(ct);
+                if (v is null or DBNull) return 0;
+                quotationId = Convert.ToInt32(v);
+            }
+            return await CopyQuotationScheduleToBookingAsync(c, quotationId, bookingId, ct);
+        }
+
         public async Task<bool> HasRowsAsync(int bookingId, CancellationToken ct = default)
         {
             await using var c = await OpenAsync(ct);
@@ -318,7 +354,7 @@ namespace WorkNest.Infrastructure.Repositories
 
         private static BookingScheduleChange MapChange(SqlDataReader r) => new()
         {
-            Id = Convert.ToInt32(r["Id"]), BookingId = Convert.ToInt32(r["BookingId"]), RequestedById = Convert.ToInt32(r["RequestedById"]),
+            Id = Convert.ToInt32(r["Id"]), BookingId = Convert.ToInt32(r["BookingId"]), RequestedById = Int(r["RequestedById"]) ?? 0,
             RequestedByName = Str(r["RequestedByName"]), RequestedByManagerId = Int(r["RequestedByManagerId"]),
             RequestedAt = Utc(r["RequestedAt"]) ?? DateTime.UtcNow, Status = Str(r["Status"]) ?? "Pending", RowsJson = Str(r["RowsJson"]) ?? "[]",
             DecidedById = Int(r["DecidedById"]), DecidedByName = Str(r["DecidedByName"]), DecidedAt = Utc(r["DecidedAt"]), Note = Str(r["Note"]),

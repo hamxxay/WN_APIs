@@ -20,7 +20,21 @@ namespace WorkNest.Application.Services.BookingSchedules
 
         private readonly IRentScheduleBookingRepository _repo;
 
-        public BookingScheduleService(IRentScheduleBookingRepository repo) { _repo = repo; }
+        private readonly IRentScheduleGate? _gate;
+
+        public BookingScheduleService(IRentScheduleBookingRepository repo, IRentScheduleGate? gate = null) { _repo = repo; _gate = gate; }
+
+        private async Task<IAsyncDisposable?> LockAsync(int bookingId, CancellationToken ct) =>
+            _gate == null ? null : await _gate.AcquireAsync(bookingId, ct);
+
+        /// <summary>The stored rows; a booking without any first gets its quotation's rows copied if the conversion could not (throws if that fails).</summary>
+        private async Task<IReadOnlyList<BookingScheduleRow>> StoredRowsAsync(int bookingId, CancellationToken ct)
+        {
+            var rows = await _repo.GetRowsAsync(bookingId, ct);
+            if (rows.Count > 0) return rows;
+            if (await _repo.EnsureBookingScheduleFromQuotationAsync(bookingId, ct) > 0) return await _repo.GetRowsAsync(bookingId, ct);
+            return rows;
+        }
 
         public async Task<bool> IsSetUpAsync(CancellationToken ct = default)
         {
@@ -40,7 +54,7 @@ namespace WorkNest.Application.Services.BookingSchedules
         {
             var info = await _repo.GetBillingInfoAsync(bookingId, ct) ?? throw new BookingScheduleNotFoundException();
             if (info.IsMeetingRoom) throw new BookingScheduleRuleException(MonthlySpacesOnly);
-            var stored = await _repo.GetRowsAsync(bookingId, ct);
+            var stored = await StoredRowsAsync(bookingId, ct);
             if (stored.Count > 0) return new Loaded(info, true, stored.ToList());
 
             if (info.StartOn is null || info.EndOn is null)
@@ -107,15 +121,21 @@ namespace WorkNest.Application.Services.BookingSchedules
             if (!caller.IsAdmin && !caller.IsSuperAdmin && !caller.IsSalesExecutive)
                 throw new BookingScheduleForbiddenException("You cannot change a booking's rent schedule.");
 
+            if (caller.IsAdmin || caller.IsSuperAdmin)
+            {
+                await using (await LockAsync(bookingId, ct) ?? NoLock.Instance)
+                {
+                    var locked = await LoadAsync(bookingId, ct);   // under the lock: no invoice is being built from rows we are about to change
+                    var (savedRows, saveError) = BookingScheduleMath.Apply(locked.Rows, rows, locked.Info.TaxPercent);
+                    if (savedRows == null) throw new BookingScheduleRuleException(saveError!);
+                    await _repo.SaveRowsAsync(bookingId, savedRows, ct);
+                }
+                return new SaveBookingScheduleResult { PendingApproval = false, Schedule = await GetAsync(bookingId, ct) };
+            }
+
             var l = await LoadAsync(bookingId, ct);
             var (applied, error) = BookingScheduleMath.Apply(l.Rows, rows, l.Info.TaxPercent);
             if (applied == null) throw new BookingScheduleRuleException(error!);
-
-            if (caller.IsAdmin || caller.IsSuperAdmin)
-            {
-                await _repo.SaveRowsAsync(bookingId, applied, ct);
-                return new SaveBookingScheduleResult { PendingApproval = false, Schedule = await GetAsync(bookingId, ct) };
-            }
 
             // Sales executive: a pending change for the sales manager (one per booking). Only the input values are kept.
             if (await _repo.GetPendingChangeAsync(bookingId, ct) != null)
@@ -194,18 +214,21 @@ namespace WorkNest.Application.Services.BookingSchedules
             if (cleanNote.Length > NoteMaxLength) throw new BookingScheduleRuleException($"The note is limited to {NoteMaxLength} characters.");
 
             IReadOnlyList<BookingScheduleInputRow> inputs = editedRows is { Count: > 0 } ? editedRows : ParseRows(change.RowsJson);
-            var l = await LoadAsync(change.BookingId, ct);
-            var (applied, error) = BookingScheduleMath.Apply(l.Rows, inputs, l.Info.TaxPercent);
-            if (applied == null) throw new BookingScheduleRuleException(error!);
-
-            // Decide first (only a Pending change can be), then write the table.
             string json = JsonSerializer.Serialize(inputs.OrderBy(r => r.RowNo).Select(r => new BookingScheduleInputRow
             {
                 RowNo = r.RowNo, DiscountType = BookingScheduleMath.NormalizeDiscountType(r.DiscountType), DiscountValue = r.DiscountValue, SecurityDeposit = r.SecurityDeposit
             }), Json);
-            if (!await _repo.DecideChangeAsync(changeId, Approved, caller.UserId, cleanNote.Length > 0 ? cleanNote : null, json, ct))
-                throw new BookingScheduleRuleException(NotPendingMessage);
-            await _repo.SaveRowsAsync(change.BookingId, applied, ct);
+            await using (await LockAsync(change.BookingId, ct) ?? NoLock.Instance)
+            {
+                var l = await LoadAsync(change.BookingId, ct);
+                var (applied, error) = BookingScheduleMath.Apply(l.Rows, inputs, l.Info.TaxPercent);
+                if (applied == null) throw new BookingScheduleRuleException(error!);
+
+                // Write the table first, then mark the change Approved: a failed save leaves the change Pending, never "Approved" with nothing applied.
+                await _repo.SaveRowsAsync(change.BookingId, applied, ct);
+                if (!await _repo.DecideChangeAsync(changeId, Approved, caller.UserId, cleanNote.Length > 0 ? cleanNote : null, json, ct))
+                    throw new BookingScheduleRuleException(NotPendingMessage);
+            }
 
             var fresh = await _repo.GetChangeAsync(changeId, ct) ?? change;
             return ("Approved. The booking now bills from this rent schedule.", await BuildDetailAsync(fresh, ct));
@@ -226,6 +249,12 @@ namespace WorkNest.Application.Services.BookingSchedules
             return await BuildDetailAsync(fresh, ct);
         }
 
+        private sealed class NoLock : IAsyncDisposable
+        {
+            public static readonly NoLock Instance = new();
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+
         private static string CleanNote(string? note) => (note ?? "").Trim();
 
         // ---- invoicing -----------------------------------------------------------------------------------------------------------
@@ -233,7 +262,7 @@ namespace WorkNest.Application.Services.BookingSchedules
         public async Task<ScheduleInvoiceSource?> GetFirstInvoiceSourceAsync(int bookingId, CancellationToken ct = default)
         {
             if (!await IsSetUpAsync(ct)) return null;
-            var rows = await _repo.GetRowsAsync(bookingId, ct);
+            var rows = await StoredRowsAsync(bookingId, ct);
             if (rows.Count == 0) return null;
             var info = await _repo.GetBillingInfoAsync(bookingId, ct);
             if (info?.StartOn == null || info.IsMeetingRoom) return null;
@@ -245,7 +274,7 @@ namespace WorkNest.Application.Services.BookingSchedules
         public async Task<(bool HasSchedule, ScheduleInvoiceSource? Next)> GetNextInvoiceSourceAsync(int bookingId, CancellationToken ct = default)
         {
             if (!await IsSetUpAsync(ct)) return (false, null);
-            var rows = (await _repo.GetRowsAsync(bookingId, ct)).ToList();
+            var rows = (await StoredRowsAsync(bookingId, ct)).ToList();
             if (rows.Count == 0) return (false, null);
             var info = await _repo.GetBillingInfoAsync(bookingId, ct);
             if (info == null || info.IsMeetingRoom) return (false, null);
@@ -254,6 +283,9 @@ namespace WorkNest.Application.Services.BookingSchedules
             var group = new List<BookingScheduleRow> { next };
             return (true, new ScheduleInvoiceSource { Booking = info, Rows = group, Figures = BookingScheduleMath.Figures(group), AnyRowInvoiced = rows.Any(r => r.Locked) });
         }
+
+        public Task<int?> FindLiveInvoiceForPeriodAsync(int bookingId, DateTime start, DateTime end, CancellationToken ct = default) =>
+            _repo.FindLiveInvoiceForPeriodAsync(bookingId, start, end, ct);
 
         public Task<bool> MarkInvoicedAsync(int bookingId, IReadOnlyCollection<int> rowNos, int invoiceId, CancellationToken ct = default) =>
             _repo.MarkRowsInvoicedAsync(bookingId, rowNos, invoiceId, ct);

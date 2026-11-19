@@ -65,6 +65,20 @@ namespace WorkNest.API.Services
         }
     }
 
+    /// <summary><see cref="IRentScheduleGate"/> over <see cref="RentScheduleLock"/>.</summary>
+    public sealed class RentScheduleGate : IRentScheduleGate
+    {
+        private readonly string _connectionString;
+        public RentScheduleGate(Microsoft.Extensions.Configuration.IConfiguration configuration)
+        {
+            _connectionString = configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("DefaultConnection string is missing.");
+        }
+
+        public async Task<IAsyncDisposable> AcquireAsync(int bookingId, CancellationToken ct = default) =>
+            await RentScheduleLock.AcquireAsync(_connectionString, bookingId, 20000, ct)
+            ?? throw new BookingScheduleConflictException("This booking is being invoiced right now - try again in a moment.");
+    }
+
     /// <summary>Shapes an invoice from schedule rows the way the existing invoice paths shape theirs.</summary>
     public static class RentScheduleInvoiceShape
     {
