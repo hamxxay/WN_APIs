@@ -1932,7 +1932,7 @@ namespace WorkNest.API.Controllers
 
                 // Rent schedule (CQ_01): a booking with a table is invoiced from the rows of its first-invoice period.
                 var scheduleSource = await TryScheduleFirstInvoiceAsync(bookingId, calc.IsMeetingRoom);
-                if (scheduleSource != null) { ApplyScheduleToCalc(calc, scheduleSource); bookingOffer = null; }
+                if (scheduleSource != null) { WorkNest.API.Services.RentScheduleInvoiceShape.ApplyToCalc(calc, scheduleSource); bookingOffer = null; }
 
                 DateTime periodStart = calc.BillingPeriodStart;
                 DateTime periodEnd = calc.BillingPeriodEnd;

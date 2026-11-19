@@ -22,29 +22,6 @@ namespace WorkNest.API.Controllers
             return svc == null ? null : await svc.GetFirstInvoiceSourceAsync(bookingId);
         }
 
-        /// <summary>Overwrites the engine's figures with the rows' sums, so the preview, the lines and the invoice all follow the table.</summary>
-        private static void ApplyScheduleToCalc(InvoiceCalculationResult calc, ScheduleInvoiceSource src)
-        {
-            var f = src.Figures;
-            calc.IsProrated = false;
-            calc.ProratedDays = 0;
-            calc.BillingPeriodStart = f.PeriodStart;
-            calc.BillingPeriodEnd = f.PeriodEnd;
-            calc.BillingPeriodMonths = f.Months;
-            calc.Rent = f.Rent;
-            calc.Discount = f.Discount;
-            calc.ManualDiscount = f.Discount;
-            calc.OfferDiscount = 0m;
-            calc.ServiceCharge = f.ServiceCharge;
-            calc.Tax = f.Tax;
-            calc.DepositBase = f.Deposit;
-            calc.DepositDiscount = 0m;
-            calc.DepositAfterDiscount = f.Deposit;
-            calc.DepositInstallments = 1;
-            calc.DepositFirstInstallment = f.Deposit;
-            calc.GrandTotal = f.GrandTotal;
-        }
-
         /// <summary>CreateCustomInvoice for a first invoice made from rows: under the lock, after checking the rows are still the ones it was figured from, then the rows get the invoice.</summary>
         private async Task<IActionResult> CreateFirstInvoiceFromScheduleAsync(CreateCustomInvoiceDto dto, int bookingId, ScheduleInvoiceSource src)
         {

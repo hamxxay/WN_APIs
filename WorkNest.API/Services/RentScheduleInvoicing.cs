@@ -2,6 +2,7 @@ using System.Data;
 using Microsoft.Data.SqlClient;
 using WorkNest.API.Controllers;
 using WorkNest.Application.Interfaces;
+using WorkNest.Application.Services;
 using WorkNest.Application.Services.RentSchedule;
 using WorkNest.Infrastructure.Repositories;
 
@@ -123,6 +124,29 @@ namespace WorkNest.API.Services
                     Quantity = 1, UnitPrice = 0m, DiscountAmount = 0m, TaxRate = 0m, ChargeTypeId = 1
                 });
             return dto;
+        }
+
+        /// <summary>Overwrites the engine's figures with the rows' sums, so the preview, the lines and the invoice all follow the table.</summary>
+        public static void ApplyToCalc(InvoiceCalculationResult calc, ScheduleInvoiceSource src)
+        {
+            var f = src.Figures;
+            calc.IsProrated = false;
+            calc.ProratedDays = 0;
+            calc.BillingPeriodStart = f.PeriodStart;
+            calc.BillingPeriodEnd = f.PeriodEnd;
+            calc.BillingPeriodMonths = f.Months;
+            calc.Rent = f.Rent;
+            calc.Discount = f.Discount;
+            calc.ManualDiscount = f.Discount;
+            calc.OfferDiscount = 0m;
+            calc.ServiceCharge = f.ServiceCharge;
+            calc.Tax = f.Tax;
+            calc.DepositBase = f.Deposit;
+            calc.DepositDiscount = 0m;
+            calc.DepositAfterDiscount = f.Deposit;
+            calc.DepositInstallments = 1;
+            calc.DepositFirstInstallment = f.Deposit;
+            calc.GrandTotal = f.GrandTotal;
         }
 
         /// <summary>The invoice id of a CreateCustomInvoice answer (200 with { invoiceId }); null for any failure.</summary>
