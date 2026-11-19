@@ -38,6 +38,8 @@ namespace WorkNest.Application.Interfaces
         /// <summary>The table for the staff form (default rows, or the user's rows validated). <see cref="RentScheduleNotSetUpException"/> before the script; ArgumentException (400) for bad input.</summary>
         Task<WorkNest.Application.DTOs.Quotation.RentScheduleDto> PreviewScheduleAsync(WorkNest.Application.DTOs.Quotation.SchedulePreviewRequest request);
         /// <summary>The sales manager's edit of the table before approving: validated against the quoted months, refused once the quotation was sent. Returns the plain-English list of changes (empty = none).</summary>
+        /// <summary>Throws (rule error) when the quotation's saved rent schedule is over its whole-contract discount cap.</summary>
+        Task EnsureScheduleWithinCapAsync(int quotationId);
         Task<(bool Changed, string Summary)> ApplyScheduleEditAsync(int quotationId, IReadOnlyList<WorkNest.Application.DTOs.Quotation.ScheduleInputRow> rows, int? byUserId);
         Task<IEnumerable<OfferingTypeDto>> GetOfferingTypesAsync(bool? activeOnly = null, int? locationId = null);
     }

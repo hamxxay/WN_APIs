@@ -311,6 +311,9 @@ namespace WorkNest.Application.Services
                     }, ct);
             }
 
+            // The table as it will be sent (edited or not) must be within the whole-contract discount cap.
+            await _quotations.EnsureScheduleWithinCapAsync(quotationId);
+
             // 1. The optional edit of the discount (within the offering-type cap), before anything is decided.
             if (request.DiscountValue.HasValue || !string.IsNullOrWhiteSpace(request.DiscountType))
             {

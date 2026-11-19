@@ -282,6 +282,14 @@ namespace WorkNest.Application.Services
             catch (Exception) { /* display data here: a read problem shows the quotation without its table */ }
         }
 
+        public async Task EnsureScheduleWithinCapAsync(int quotationId)
+        {
+            if (!await ScheduleSetUpAsync()) return;
+            var q = await GetQuotationByIdAsync(quotationId);
+            if (q?.Schedule is { OverDiscountCap: true } sched)
+                throw new QuotationApprovalRuleException(DiscountCapMessage(sched));
+        }
+
         public async Task<(bool Changed, string Summary)> ApplyScheduleEditAsync(int quotationId, IReadOnlyList<ScheduleInputRow> rows, int? byUserId)
         {
             if (!await ScheduleSetUpAsync()) throw new RentScheduleNotSetUpException();
