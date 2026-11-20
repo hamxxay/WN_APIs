@@ -1,0 +1,552 @@
+-- ============================================================================================
+-- SDA_01: Adjust Security Deposit Against Invoice.
+-- Only ADDS objects (WN_SDA_* procs/function, 2 new tables). No existing table, procedure, function or API is changed.
+-- Safe to run again (CREATE OR ALTER / IF NOT EXISTS). Run on the test database first.
+--
+-- Model
+--   dbo.WN_SecurityDepositAdjustments  one row per request: Pending -> Approved | Rejected. Approving posts everything.
+--   dbo.WN_SecurityDepositMovements    deposit history, never overwritten. MovementType 'Adjustment' = negative row linked
+--                                      to the invoice that was paid from the deposit; 'TopUpRestore' = positive row linked
+--                                      to the top-up invoice once that invoice is paid (history only, see below).
+--   dbo.WN_SDA_Received(@BookingId)    deposit actually received = per invoice, deposit share of the CASH paid
+--                                      (paid in proportion, as RC_06 does; money paid by an adjustment is not cash).
+--   dbo.WN_SDA_Available(@BookingId)   received + sum of 'Adjustment' movements (negative). A paid top-up invoice raises
+--                                      "received", so the deposit is restored with no hook into WN_FeeReceipts_Insert.
+--                                      'TopUpRestore' rows are written by WN_SDA_SyncRestores for history only and are NOT
+--                                      added again (that would count the restore twice).
+--   WN_SecurityDeposits is not touched (WN_Invoices_Insert re-points it; the wrapper below puts it back).
+-- On approval (one transaction): negative movement, fee receipt 'Security deposit adjustment' + invoice Paid,
+--   GL voucher (type 27): Dr SecurityReceived, Cr AccountReceivable (+ Dr WHT account for WHT invoices, as every receipt does),
+--   CustomerLedger credit, top-up invoice (deposit line only, no tax) via WN_Invoices_Insert, audit rows.
+-- Errors: RAISERROR(...,16,state): 1 = rule broken (400), 2 = not found (404), 3 = outside the caller's locations (403).
+-- ============================================================================================
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
+GO
+
+IF OBJECT_ID(N'dbo.WN_SecurityDepositAdjustments', N'U') IS NULL
+CREATE TABLE dbo.WN_SecurityDepositAdjustments (
+    Id                 INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_WN_SecurityDepositAdjustments PRIMARY KEY,
+    PublicId           UNIQUEIDENTIFIER  NOT NULL CONSTRAINT DF_WN_SDA_PublicId DEFAULT (NEWID()),
+    BookingId          INT               NOT NULL,
+    InvoiceId          INT               NOT NULL,           -- the invoice paid from the deposit
+    InvoiceNumber      NVARCHAR(50)      NULL,
+    Amount             DECIMAL(18,2)     NOT NULL,           -- net amount of the invoice (WHT excluded)
+    TopUpDueOn         DATE              NOT NULL,
+    Status             NVARCHAR(20)      NOT NULL CONSTRAINT DF_WN_SDA_Status DEFAULT ('Pending'), -- Pending, Approved, Rejected
+    LocationId         INT               NULL,
+    Remarks            NVARCHAR(500)     NULL,
+    RequestedById      INT               NOT NULL,
+    RequestedOn        DATETIME2(0)      NOT NULL CONSTRAINT DF_WN_SDA_RequestedOn DEFAULT (CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))),
+    DecidedById        INT               NULL,
+    DecidedOn          DATETIME2(0)      NULL,
+    DecisionNote       NVARCHAR(500)     NULL,
+    TopUpInvoiceId     INT               NULL,
+    TopUpInvoiceNumber NVARCHAR(50)      NULL,
+    FeeReceiptId       INT               NULL,
+    VoucherId          INT               NULL,
+    CONSTRAINT CK_WN_SDA_Status CHECK (Status IN ('Pending','Approved','Rejected'))
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_WN_SDA_OpenPerInvoice')
+    CREATE UNIQUE INDEX UX_WN_SDA_OpenPerInvoice ON dbo.WN_SecurityDepositAdjustments (InvoiceId) WHERE Status IN ('Pending','Approved');
+GO
+IF OBJECT_ID(N'dbo.WN_SecurityDepositMovements', N'U') IS NULL
+CREATE TABLE dbo.WN_SecurityDepositMovements (
+    Id           INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_WN_SecurityDepositMovements PRIMARY KEY,
+    BookingId    INT           NOT NULL,
+    AdjustmentId INT           NOT NULL,
+    InvoiceId    INT           NOT NULL,   -- Adjustment: the invoice paid from the deposit. TopUpRestore: the top-up invoice.
+    MovementType NVARCHAR(20)  NOT NULL,   -- Adjustment | TopUpRestore
+    Amount       DECIMAL(18,2) NOT NULL,   -- negative for Adjustment, positive for TopUpRestore
+    Notes        NVARCHAR(500) NULL,
+    CreatedOn    DATETIME2(0)  NOT NULL CONSTRAINT DF_WN_SDM_CreatedOn DEFAULT (CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(0))),
+    CreatedById  INT           NULL,
+    CONSTRAINT CK_WN_SDM_Type CHECK (MovementType IN ('Adjustment','TopUpRestore'))
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_WN_SDM_OnePerType')
+    CREATE UNIQUE INDEX UX_WN_SDM_OnePerType ON dbo.WN_SecurityDepositMovements (AdjustmentId, MovementType);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_WN_SDM_Booking')
+    CREATE INDEX IX_WN_SDM_Booking ON dbo.WN_SecurityDepositMovements (BookingId, MovementType) INCLUDE (Amount);
+GO
+
+-- --------------------------------------------------------------------------------------------
+-- Deposit actually received for a booking.
+-- --------------------------------------------------------------------------------------------
+CREATE OR ALTER FUNCTION dbo.WN_SDA_Received (@BookingId INT)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    DECLARE @PaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 2);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5);
+    DECLARE @R DECIMAL(18,2);
+
+    SELECT @R = ISNULL(SUM(CASE WHEN x.Net > 0 THEN ROUND(i.SecurityDepositAmount * (CASE WHEN x.Cash > x.Net THEN x.Net ELSE x.Cash END) / x.Net, 2) ELSE 0 END), 0)
+    FROM dbo.WN_Invoices i WITH (NOLOCK)
+    OUTER APPLY (SELECT SUM(fr.TotalAmount) AS Adj
+                   FROM dbo.WN_FeeReceipts fr WITH (NOLOCK)
+                  WHERE fr.InvoiceIdGUID = i.PublicId AND fr.Status = 1
+                    AND fr.PaymentType = 'Security deposit adjustment') a
+    CROSS APPLY (SELECT ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0), 2) AS Net,
+                        ROUND(CASE WHEN ISNULL(i.PaidTotal, 0) = 0 AND i.StatusId IN (2, @PaidId)
+                                   THEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0)      -- older Paid rows carry no PaidTotal
+                                   WHEN ISNULL(i.PaidTotal, 0) - ISNULL(a.Adj, 0) < 0 THEN 0
+                                   ELSE ISNULL(i.PaidTotal, 0) - ISNULL(a.Adj, 0) END, 2) AS Cash) x
+    WHERE i.BookingId = @BookingId
+      AND ISNULL(i.SecurityDepositAmount, 0) > 0
+      AND ISNULL(i.StatusId, 0) NOT IN (5, 40, @CancelledId);
+
+    RETURN @R;
+END
+GO
+
+CREATE OR ALTER FUNCTION dbo.WN_SDA_Available (@BookingId INT)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    RETURN dbo.WN_SDA_Received(@BookingId)
+         + ISNULL((SELECT SUM(m.Amount) FROM dbo.WN_SecurityDepositMovements m WITH (NOLOCK)
+                    WHERE m.BookingId = @BookingId AND m.MovementType = 'Adjustment'), 0);
+END
+GO
+
+-- --------------------------------------------------------------------------------------------
+-- History rows: a positive 'TopUpRestore' for every approved adjustment whose top-up invoice is Paid. Idempotent.
+-- --------------------------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.WN_SDA_SyncRestores @BookingId INT = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @PaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 2);
+    INSERT INTO dbo.WN_SecurityDepositMovements (BookingId, AdjustmentId, InvoiceId, MovementType, Amount, Notes, CreatedById)
+    SELECT a.BookingId, a.Id, a.TopUpInvoiceId, 'TopUpRestore', a.Amount,
+           CONCAT('Top-up invoice ', a.TopUpInvoiceNumber, ' paid; deposit restored after adjustment against ', a.InvoiceNumber), a.DecidedById
+      FROM dbo.WN_SecurityDepositAdjustments a
+      JOIN dbo.WN_Invoices t ON t.Id = a.TopUpInvoiceId
+     WHERE a.Status = 'Approved' AND (@BookingId IS NULL OR a.BookingId = @BookingId)
+       AND t.StatusId IN (2, @PaidId)
+       AND NOT EXISTS (SELECT 1 FROM dbo.WN_SecurityDepositMovements m WHERE m.AdjustmentId = a.Id AND m.MovementType = 'TopUpRestore');
+END
+GO
+
+-- --------------------------------------------------------------------------------------------
+-- Form context: deposit figures, the booking's unpaid invoices that can be paid from the deposit, notice end date.
+-- Result sets: [0] summary, [1] unpaid invoices, [2] movements history, [3] requests.
+-- --------------------------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.WN_SDA_Context
+    @BookingId          INT,
+    @AllowedLocationIds NVARCHAR(MAX) = NULL      -- NULL = every location
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT) FROM STRING_SPLIT(@AllowedLocationIds, ',') WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+    DECLARE @LocationId INT, @CustomerCode NVARCHAR(50);
+    SELECT @LocationId = s.LocationId, @CustomerCode = b.CustomerCode
+      FROM dbo.WN_Bookings b WITH (NOLOCK) LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId WHERE b.Id = @BookingId;
+    IF NOT EXISTS (SELECT 1 FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @BookingId) RAISERROR('Booking not found.', 16, 2);
+    IF @AllowedLocationIds IS NOT NULL AND (@LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @AllowedLocs WHERE LocId = @LocationId))
+        RAISERROR('You are not authorized for bookings outside your assigned location(s).', 16, 3);
+
+    EXEC dbo.WN_SDA_SyncRestores @BookingId = @BookingId;
+
+    DECLARE @Received DECIMAL(18,2) = dbo.WN_SDA_Received(@BookingId);
+    DECLARE @Available DECIMAL(18,2) = dbo.WN_SDA_Available(@BookingId);
+    DECLARE @PendingTotal DECIMAL(18,2) = ISNULL((SELECT SUM(Amount) FROM dbo.WN_SecurityDepositAdjustments WHERE BookingId = @BookingId AND Status = 'Pending'), 0);
+    DECLARE @ExitDate DATE = (SELECT TOP 1 np.ExitDate FROM dbo.WN_NoticePeriods np WITH (NOLOCK)
+                               WHERE np.BookingId = @BookingId AND np.Status IN ('Requested', 'Issued') AND np.ExitDate IS NOT NULL ORDER BY np.Id DESC);
+
+    SELECT @BookingId AS BookingId, @LocationId AS LocationId, @CustomerCode AS CustomerCode,
+           @Received AS DepositReceived, @Received - @Available AS DepositAdjusted, @Available AS DepositAvailable,
+           @PendingTotal AS PendingRequests, @Available - @PendingTotal AS DepositFree, @ExitDate AS NoticeEndDate;
+
+    DECLARE @UnPaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), 1);
+    DECLARE @PartialId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 3);
+    DECLARE @OverdueId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id), 4);
+
+    SELECT i.Id AS InvoiceId, i.PublicId, i.InvoiceNumber, i.IssuedOn, i.DueOn, i.BillingPeriodStart, i.BillingPeriodEnd,
+           i.GrandTotal, ISNULL(i.WHTAmount, 0) AS WHTAmount, ISNULL(i.PaidTotal, 0) AS PaidTotal,
+           ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) AS NetAmount,
+           i.StatusId, os.Description AS StatusDescription,
+           CAST(CASE WHEN i.WHTAmount > 0 OR i.InvoiceTypeId = 6 THEN 1 ELSE 0 END AS BIT) AS IsWht,
+           CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_SecurityDepositAdjustments a WHERE a.InvoiceId = i.Id AND a.Status IN ('Pending','Approved')) THEN 1 ELSE 0 END AS BIT) AS HasOpenRequest,
+           CAST(CASE WHEN ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) <= @Available - @PendingTotal THEN 1 ELSE 0 END AS BIT) AS Covered
+      FROM dbo.WN_Invoices i WITH (NOLOCK)
+      LEFT JOIN dbo.OrderStatus os WITH (NOLOCK) ON os.Id = i.StatusId
+     WHERE i.BookingId = @BookingId
+       AND i.StatusId IN (1, 3, 4, @UnPaidId, @PartialId, @OverdueId)
+       AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus <> 'PendingApproval')
+       AND NOT EXISTS (SELECT 1 FROM dbo.WN_SecurityDepositAdjustments a WHERE a.TopUpInvoiceId = i.Id)   -- a top-up is paid in cash
+       AND ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) > 0
+     ORDER BY i.DueOn, i.Id;
+
+    SELECT m.Id, m.AdjustmentId, m.InvoiceId, i.InvoiceNumber, m.MovementType, m.Amount, m.Notes, m.CreatedOn
+      FROM dbo.WN_SecurityDepositMovements m WITH (NOLOCK) LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = m.InvoiceId
+     WHERE m.BookingId = @BookingId ORDER BY m.Id DESC;
+
+    EXEC dbo.WN_SDA_Requests_List @BookingId = @BookingId, @Status = NULL, @AllowedLocationIds = @AllowedLocationIds;
+END
+GO
+
+CREATE OR ALTER PROCEDURE dbo.WN_SDA_Requests_List
+    @BookingId          INT = NULL,
+    @Status             NVARCHAR(20) = NULL,
+    @AllowedLocationIds NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+    IF @AllowedLocationIds IS NOT NULL
+        INSERT INTO @AllowedLocs SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT) FROM STRING_SPLIT(@AllowedLocationIds, ',') WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+    SELECT a.Id, a.PublicId, a.BookingId, a.InvoiceId, a.InvoiceNumber, a.Amount, a.TopUpDueOn, a.Status, a.LocationId, a.Remarks,
+           a.RequestedById, ru.Name AS RequestedByName, a.RequestedOn, a.DecidedById, du.Name AS DecidedByName, a.DecidedOn, a.DecisionNote,
+           a.TopUpInvoiceId, a.TopUpInvoiceNumber, a.FeeReceiptId, a.VoucherId,
+           b.CustomerCode, c.Company AS CustomerCompany
+      FROM dbo.WN_SecurityDepositAdjustments a WITH (NOLOCK)
+      LEFT JOIN dbo.WN_Users ru WITH (NOLOCK) ON ru.Id = a.RequestedById
+      LEFT JOIN dbo.WN_Users du WITH (NOLOCK) ON du.Id = a.DecidedById
+      LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = a.BookingId
+      LEFT JOIN dbo.WN_Customers c WITH (NOLOCK) ON c.Code = b.CustomerCode
+     WHERE (@BookingId IS NULL OR a.BookingId = @BookingId)
+       AND (@Status IS NULL OR a.Status = @Status)
+       AND (@AllowedLocationIds IS NULL OR a.LocationId IN (SELECT LocId FROM @AllowedLocs))
+     ORDER BY a.Id DESC;
+END
+GO
+
+-- --------------------------------------------------------------------------------------------
+-- A request (sales executive / admin). Posts nothing.
+-- --------------------------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.WN_SDA_Request_Create
+    @BookingId          INT,
+    @InvoiceId          INT,
+    @TopUpDueOn         DATE,
+    @Remarks            NVARCHAR(500) = NULL,
+    @RequestedById      INT,
+    @AllowedLocationIds NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+        IF @AllowedLocationIds IS NOT NULL
+            INSERT INTO @AllowedLocs SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT) FROM STRING_SPLIT(@AllowedLocationIds, ',') WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+        DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+        DECLARE @UnPaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), 1);
+        DECLARE @PartialId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 3);
+        DECLARE @OverdueId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id), 4);
+
+        IF @TopUpDueOn IS NULL RAISERROR('The top-up due date is required.', 16, 1);
+        IF @TopUpDueOn < @Today RAISERROR('The top-up due date cannot be in the past.', 16, 1);
+
+        DECLARE @LocationId INT, @InvNo NVARCHAR(50), @Status INT, @Net DECIMAL(18,2), @Appr NVARCHAR(50), @InvBooking INT;
+        SELECT @InvBooking = i.BookingId, @InvNo = i.InvoiceNumber, @Status = i.StatusId, @Appr = i.ApprovalStatus,
+               @Net = ROUND(ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2)
+          FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK) WHERE i.Id = @InvoiceId;
+        IF @InvNo IS NULL RAISERROR('Invoice not found.', 16, 2);
+        IF @InvBooking IS NULL OR @InvBooking <> @BookingId RAISERROR('The invoice does not belong to this booking.', 16, 1);
+        SELECT @LocationId = s.LocationId FROM dbo.WN_Bookings b WITH (NOLOCK) LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId WHERE b.Id = @BookingId;
+        IF @AllowedLocationIds IS NOT NULL AND (@LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @AllowedLocs WHERE LocId = @LocationId))
+            RAISERROR('You are not authorized for bookings outside your assigned location(s).', 16, 3);
+        IF @Status NOT IN (1, 3, 4, @UnPaidId, @PartialId, @OverdueId) RAISERROR('Only an unpaid invoice can be paid from the security deposit.', 16, 1);
+        IF ISNULL(@Appr, '') = 'PendingApproval' RAISERROR('This invoice is awaiting approval and cannot be paid yet.', 16, 1);
+        IF EXISTS (SELECT 1 FROM dbo.WN_SecurityDepositAdjustments WHERE TopUpInvoiceId = @InvoiceId)
+            RAISERROR('A security deposit top-up invoice must be paid in cash, not from the deposit.', 16, 1);
+        IF @Net <= 0 RAISERROR('This invoice has nothing left to pay.', 16, 1);
+        IF EXISTS (SELECT 1 FROM dbo.WN_SecurityDepositAdjustments WHERE InvoiceId = @InvoiceId AND Status IN ('Pending','Approved'))
+            RAISERROR('There is already a security deposit adjustment for this invoice.', 16, 1);
+
+        DECLARE @Free DECIMAL(18,2) = dbo.WN_SDA_Available(@BookingId)
+            - ISNULL((SELECT SUM(Amount) FROM dbo.WN_SecurityDepositAdjustments WHERE BookingId = @BookingId AND Status = 'Pending'), 0);
+        IF @Free < @Net
+        BEGIN
+            DECLARE @M NVARCHAR(400) = N'The deposit available is PKR ' + CONVERT(NVARCHAR(40), CAST(@Free AS MONEY), 1)
+                + N', less than the invoice net amount of PKR ' + CONVERT(NVARCHAR(40), CAST(@Net AS MONEY), 1) + N'. Collect the rest with a normal cash receipt.';
+            RAISERROR(@M, 16, 1);
+        END;
+
+        -- Exit: the top-up must fall due on or before the notice end date.
+        DECLARE @ExitDate DATE = (SELECT TOP 1 np.ExitDate FROM dbo.WN_NoticePeriods np WITH (NOLOCK)
+                                   WHERE np.BookingId = @BookingId AND np.Status IN ('Requested', 'Issued') AND np.ExitDate IS NOT NULL ORDER BY np.Id DESC);
+        IF @ExitDate IS NOT NULL AND @TopUpDueOn > @ExitDate
+        BEGIN
+            DECLARE @M2 NVARCHAR(300) = N'The booking is in its notice period: the top-up due date must be on or before the notice end date ' + CONVERT(NVARCHAR(10), @ExitDate, 23) + N'.';
+            RAISERROR(@M2, 16, 1);
+        END;
+
+        INSERT INTO dbo.WN_SecurityDepositAdjustments (BookingId, InvoiceId, InvoiceNumber, Amount, TopUpDueOn, LocationId, Remarks, RequestedById)
+        VALUES (@BookingId, @InvoiceId, @InvNo, @Net, @TopUpDueOn, @LocationId, NULLIF(LTRIM(RTRIM(@Remarks)), ''), @RequestedById);
+        EXEC dbo.WN_SDA_Requests_List @BookingId = @BookingId, @Status = 'Pending', @AllowedLocationIds = NULL;
+    END TRY
+    BEGIN CATCH
+        THROW;
+    END CATCH;
+END
+GO
+
+-- --------------------------------------------------------------------------------------------
+-- Decision (admin / super admin). Reject = status only. Approve = the whole posting, in one transaction.
+-- --------------------------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.WN_SDA_Request_Decide
+    @Id                 INT,
+    @Approve            BIT,
+    @DecidedById        INT,
+    @Note               NVARCHAR(500) = NULL,
+    @AllowedLocationIds NVARCHAR(MAX) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        DECLARE @AllowedLocs TABLE (LocId INT PRIMARY KEY);
+        IF @AllowedLocationIds IS NOT NULL
+            INSERT INTO @AllowedLocs SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(value)) AS INT) FROM STRING_SPLIT(@AllowedLocationIds, ',') WHERE TRY_CAST(LTRIM(RTRIM(value)) AS INT) > 0;
+
+        DECLARE @Today DATE = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATE);
+        DECLARE @Now DATETIME2(3) = CAST(SYSDATETIMEOFFSET() AT TIME ZONE 'Pakistan Standard Time' AS DATETIME2(3));
+        DECLARE @PaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 2);
+        DECLARE @UnPaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Un Paid' ORDER BY Id), 1);
+        DECLARE @PartialId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Partial' ORDER BY Id), 3);
+        DECLARE @OverdueId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Challan Expire' ORDER BY Id), 4);
+
+        DECLARE @BookingId INT, @InvoiceId INT, @Amount DECIMAL(18,2), @TopUpDueOn DATE, @ReqStatus NVARCHAR(20), @LocationId INT;
+        SELECT @BookingId = BookingId, @InvoiceId = InvoiceId, @Amount = Amount, @TopUpDueOn = TopUpDueOn, @ReqStatus = Status, @LocationId = LocationId
+          FROM dbo.WN_SecurityDepositAdjustments WITH (UPDLOCK, HOLDLOCK) WHERE Id = @Id;
+        IF @BookingId IS NULL RAISERROR('Request not found.', 16, 2);
+        IF @AllowedLocationIds IS NOT NULL AND (@LocationId IS NULL OR NOT EXISTS (SELECT 1 FROM @AllowedLocs WHERE LocId = @LocationId))
+            RAISERROR('You are not authorized for bookings outside your assigned location(s).', 16, 3);
+        IF @ReqStatus <> 'Pending' RAISERROR('This request has already been decided.', 16, 1);
+
+        DECLARE @DecidedByEmail NVARCHAR(256) = (SELECT Email FROM dbo.WN_Users WITH (NOLOCK) WHERE Id = @DecidedById);
+
+        IF @Approve = 0
+        BEGIN
+            UPDATE dbo.WN_SecurityDepositAdjustments
+               SET Status = 'Rejected', DecidedById = @DecidedById, DecidedOn = @Now, DecisionNote = NULLIF(LTRIM(RTRIM(@Note)), '')
+             WHERE Id = @Id;
+            INSERT INTO dbo.WN_AuditLog (EntityName, RecordId, Operation, OldValues, NewValues, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp)
+            VALUES (N'WN_SecurityDepositAdjustments', CAST(@Id AS NVARCHAR(64)), 'U', N'{"Status":"Pending"}',
+                    CONCAT(N'{"Status":"Rejected","Note":"', REPLACE(ISNULL(@Note, N''), N'"', N''''), N'"}'), @DecidedById, @DecidedByEmail, @Now, N'WebAPI');
+            COMMIT TRANSACTION;
+            SELECT @Id AS Id, N'Rejected' AS Status;
+            RETURN;
+        END;
+
+        -- ---- re-validate against today's figures ----
+        DECLARE @InvGuid UNIQUEIDENTIFIER, @InvNo NVARCHAR(50), @InvStatus INT, @Grand DECIMAL(18,4), @Wht DECIMAL(18,4), @Paid DECIMAL(18,4),
+                @InvType INT, @Rent DECIMAL(18,4), @Serv DECIMAL(18,4), @Tax DECIMAL(18,4), @SecAmt DECIMAL(18,2), @UserId INT, @InvCust NVARCHAR(50),
+                @InvAR INT, @InvSec INT, @BillEnd DATETIME2, @Appr NVARCHAR(50);
+        SELECT @InvGuid = i.PublicId, @InvNo = i.InvoiceNumber, @InvStatus = i.StatusId, @Grand = ISNULL(i.GrandTotal, 0), @Wht = ISNULL(i.WHTAmount, 0),
+               @Paid = ISNULL(i.PaidTotal, 0), @InvType = ISNULL(i.InvoiceTypeId, 1), @Rent = ISNULL(i.RoomRentExclTax, 0), @Serv = ISNULL(i.ServiceCharges, 0),
+               @Tax = ISNULL(i.TaxOnServiceCharges, 0), @SecAmt = ISNULL(i.SecurityDepositAmount, 0), @UserId = i.UserId,
+               @InvCust = NULLIF(LTRIM(RTRIM(i.CustomerCode)), ''), @InvAR = i.AccountReceivableId, @InvSec = i.SecurityReceivedId,
+               @BillEnd = i.BillingPeriodEnd, @Appr = i.ApprovalStatus
+          FROM dbo.WN_Invoices i WITH (UPDLOCK, HOLDLOCK) WHERE i.Id = @InvoiceId;
+        IF @InvGuid IS NULL RAISERROR('Invoice not found.', 16, 2);
+        IF @InvStatus NOT IN (1, 3, 4, @UnPaidId, @PartialId, @OverdueId) RAISERROR('The invoice is no longer unpaid.', 16, 1);
+        IF ISNULL(@Appr, '') = 'PendingApproval' RAISERROR('This invoice is awaiting approval and cannot be paid yet.', 16, 1);
+        IF ROUND(@Grand - @Wht - @Paid, 2) <> @Amount
+            RAISERROR('The invoice balance changed since the request was made. Reject this request and raise a new one.', 16, 1);
+        DECLARE @Avail DECIMAL(18,2) = dbo.WN_SDA_Available(@BookingId);
+        IF @Avail < @Amount
+        BEGIN
+            DECLARE @M NVARCHAR(300) = N'The deposit available is now PKR ' + CONVERT(NVARCHAR(40), CAST(@Avail AS MONEY), 1) + N', less than PKR ' + CONVERT(NVARCHAR(40), CAST(@Amount AS MONEY), 1) + N'.';
+            RAISERROR(@M, 16, 1);
+        END;
+        IF @TopUpDueOn < @Today SET @TopUpDueOn = @Today;   -- approved late: the top-up cannot start overdue
+
+        DECLARE @ExitDate DATE = (SELECT TOP 1 np.ExitDate FROM dbo.WN_NoticePeriods np WITH (NOLOCK)
+                                   WHERE np.BookingId = @BookingId AND np.Status IN ('Requested', 'Issued') AND np.ExitDate IS NOT NULL ORDER BY np.Id DESC);
+        IF @ExitDate IS NOT NULL AND @TopUpDueOn > @ExitDate
+            RAISERROR('The top-up due date is after the notice end date. Reject this request and raise a new one.', 16, 1);
+
+        -- ---- booking / customer / location ----
+        DECLARE @SpaceId INT, @SpaceTypeId INT, @BkCust NVARCHAR(50), @BkUser INT, @WhtTaxId INT, @CompanyId INT, @BranchId INT;
+        SELECT @SpaceId = b.SpaceId, @BkCust = NULLIF(LTRIM(RTRIM(b.CustomerCode)), ''), @BkUser = b.UserId, @WhtTaxId = TRY_CAST(b.WHTaxId AS INT)
+          FROM dbo.WN_Bookings b WITH (NOLOCK) WHERE b.Id = @BookingId;
+        SELECT @SpaceTypeId = s.SpaceTypeId, @LocationId = COALESCE(s.LocationId, @LocationId) FROM dbo.WN_Spaces s WITH (NOLOCK) WHERE s.Id = @SpaceId;
+        SELECT @CompanyId = l.CompanyId, @BranchId = l.BranchId FROM dbo.WN_Locations l WITH (NOLOCK) WHERE l.Id = @LocationId;
+        IF @LocationId IS NULL OR @CompanyId IS NULL OR @BranchId IS NULL RAISERROR('Unable to resolve the location, company or branch of the booking.', 16, 1);
+        DECLARE @CustomerCode NVARCHAR(50) = COALESCE(@BkCust, @InvCust);
+
+        -- ---- GL accounts: space type -> space -> invoice -> WN_ChargeTypeAccountMapping of the booking's location ----
+        DECLARE @ARAcc INT, @SecAcc INT, @WhtAcc INT;
+        SELECT @ARAcc = COALESCE(NULLIF(st.AccountReceivableId, 0), NULLIF(s.AccountReceivableId, 0), NULLIF(@InvAR, 0)),
+               @SecAcc = COALESCE(NULLIF(st.SecurityReceivedId, 0), NULLIF(s.SecurityReceivedId, 0), NULLIF(s.SecurityRecivedId, 0), NULLIF(@InvSec, 0))
+          FROM dbo.WN_Spaces s WITH (NOLOCK) LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId WHERE s.Id = @SpaceId;
+        IF @ARAcc IS NULL
+            SELECT TOP 1 @ARAcc = NULLIF(m.AccountReceivableId, 0) FROM dbo.WN_ChargeTypeAccountMapping m WITH (NOLOCK)
+             WHERE m.LocationId = @LocationId AND m.ChargeTypeId = 1 AND m.EffectiveFrom <= @Today AND (m.EffectiveTo IS NULL OR m.EffectiveTo >= @Today) ORDER BY m.EffectiveFrom DESC;
+        IF @SecAcc IS NULL
+            SELECT TOP 1 @SecAcc = NULLIF(m.SecurityReceivedId, 0) FROM dbo.WN_ChargeTypeAccountMapping m WITH (NOLOCK)
+             WHERE m.LocationId = @LocationId AND m.ChargeTypeId = 2 AND m.EffectiveFrom <= @Today AND (m.EffectiveTo IS NULL OR m.EffectiveTo >= @Today) ORDER BY m.EffectiveFrom DESC;
+        IF @ARAcc IS NULL RAISERROR('Cannot resolve the Accounts Receivable GL account for this booking''s location.', 16, 1);
+        IF @SecAcc IS NULL RAISERROR('Cannot resolve the Security Received GL account for this booking''s location.', 16, 1);
+
+        DECLARE @IsWht BIT = CASE WHEN @InvType = 6 OR @Wht > 0 THEN 1 ELSE 0 END;
+        IF @IsWht = 1 AND @Wht > 0
+        BEGIN
+            IF @WhtTaxId > 0 SELECT TOP 1 @WhtAcc = NULLIF(WHAccountId, 0) FROM dbo.WN_WHTaxRate WITH (NOLOCK) WHERE Id = @WhtTaxId;
+            IF @WhtAcc IS NULL SELECT TOP 1 @WhtAcc = NULLIF(WHAccountId, 0) FROM dbo.WN_WHTaxRate WITH (NOLOCK) WHERE WHAccountId > 0 ORDER BY Id;
+            IF @WhtAcc IS NULL RAISERROR('No WHT GL account is mapped for this WHT invoice.', 16, 1);
+        END;
+
+        DECLARE @CustVendorId INT;
+        IF @CustomerCode IS NOT NULL SELECT TOP 1 @CustVendorId = Id FROM dbo.CustomersVendors WITH (NOLOCK) WHERE Code = @CustomerCode ORDER BY Id DESC;
+        IF @CustVendorId IS NULL AND COALESCE(@UserId, @BkUser) IS NOT NULL
+            SELECT TOP 1 @CustVendorId = cv.Id FROM dbo.CustomersVendors cv WITH (NOLOCK) JOIN dbo.WN_Users u WITH (NOLOCK) ON cv.Email = u.Email
+             WHERE u.Id = COALESCE(@UserId, @BkUser) AND cv.Email IS NOT NULL AND cv.Email <> '' ORDER BY cv.Id DESC;
+        IF @CustVendorId IS NULL RAISERROR('The customer has no customer ledger account (CustomersVendors) to post to.', 16, 1);
+
+        -- (a) negative movement, linked to the invoice
+        INSERT INTO dbo.WN_SecurityDepositMovements (BookingId, AdjustmentId, InvoiceId, MovementType, Amount, Notes, CreatedById)
+        VALUES (@BookingId, @Id, @InvoiceId, 'Adjustment', -@Amount, CONCAT('Invoice ', @InvNo, ' paid from the security deposit'), @DecidedById);
+
+        -- (b) the invoice is Paid: a fee receipt of kind 'Security deposit adjustment'
+        DECLARE @Prefix VARCHAR(40) = 'FR-' + CAST(@CompanyId AS VARCHAR(10)) + '-' + CAST(@BranchId AS VARCHAR(10)) + '-' + CAST(YEAR(@Today) AS VARCHAR(4)) + '-';
+        DECLARE @NextSeq INT, @Code VARCHAR(50), @ReceiptId INT, @MonthNo INT;
+        SELECT @NextSeq = ISNULL(MAX(TRY_CAST(SUBSTRING(fr.Code, LEN(@Prefix) + 1, 20) AS INT)), 0) + 1 FROM dbo.WN_FeeReceipts fr WITH (UPDLOCK, HOLDLOCK) WHERE fr.Code LIKE @Prefix + '%';
+        SET @Code = @Prefix + RIGHT('00000' + CAST(@NextSeq AS VARCHAR(10)), CASE WHEN @NextSeq > 99999 THEN LEN(CAST(@NextSeq AS VARCHAR(10))) ELSE 5 END);
+        SELECT @MonthNo = ISNULL(MAX(MonthNo), 0) + 1 FROM dbo.WN_FeeReceipts WITH (NOLOCK) WHERE InvoiceIdGUID = @InvGuid AND Status = 1;
+        DECLARE @CustGuid UNIQUEIDENTIFIER;
+        SELECT TOP 1 @CustGuid = c.IdGUID FROM dbo.WN_Customers c WITH (NOLOCK) WHERE c.Code = @CustomerCode ORDER BY c.Id;
+        IF @CustGuid IS NULL SELECT TOP 1 @CustGuid = c.IdGUID FROM dbo.WN_Customers c WITH (NOLOCK) WHERE c.UserId = COALESCE(@UserId, @BkUser) ORDER BY c.Id;
+
+        INSERT INTO dbo.WN_FeeReceipts (IdGUID, Code, CustomerIdGUID, InvoiceIdGUID, InvoiceTypeId, TotalAmount, RoomRentExclTax, ServiceCharges, TaxOnServiceCharges,
+               WHTAmount, SecurityDepositAmount, MonthNo, MonthCount, CashInHandAccountId, PaymentType, BranchId, CompanyId, FeeStatus, Status, ReceiptDate, CreatedOn,
+               CreatedById, Remarks, InvoiceTotal, PreviousPaid, BalanceAfter)
+        VALUES (NEWID(), @Code, @CustGuid, @InvGuid, @InvType, @Amount, @Rent, @Serv, @Tax, @Wht, @SecAmt, @MonthNo, @MonthNo, @SecAcc,
+                'Security deposit adjustment', @BranchId, @CompanyId, 1, 1, @Today, SYSDATETIME(), @DecidedById,
+                CONCAT('Paid from the security deposit (adjustment #', @Id, ')'), @Amount + @Paid, @Paid, 0);
+        SET @ReceiptId = CAST(SCOPE_IDENTITY() AS INT);
+
+        UPDATE dbo.WN_Invoices SET PaidTotal = @Paid + @Amount, StatusId = @PaidId WHERE Id = @InvoiceId;
+        UPDATE dbo.WN_AccessCards SET Status = 1, EndDate = ISNULL(@BillEnd, EndDate), UpdatedOn = SYSDATETIME() WHERE BookingId = @BookingId;
+
+        -- (c) GL: Dr SecurityReceived (+ Dr WHT for WHT invoices), Cr AccountReceivable, Cr CustomerLedger
+        DECLARE @Gross DECIMAL(18,4) = @Amount + CASE WHEN @IsWht = 1 THEN @Wht ELSE 0 END;
+        DECLARE @DebitSum DECIMAL(18,4) = @Amount + CASE WHEN @IsWht = 1 THEN @Wht ELSE 0 END;
+        IF ABS(@DebitSum - @Gross) > 0.005 RAISERROR('The adjustment voucher does not balance.', 16, 1);
+
+        DECLARE @GLName NVARCHAR(255);
+        SELECT TOP 1 @GLName = CASE WHEN c.Company IS NOT NULL AND LTRIM(RTRIM(c.Company)) <> '' THEN LTRIM(RTRIM(c.Company))
+                                    ELSE NULLIF(LTRIM(RTRIM(CONCAT_WS(' ', NULLIF(LTRIM(RTRIM(c.FirstName)), ''), NULLIF(LTRIM(RTRIM(c.LastName)), '')))), '') END
+          FROM dbo.WN_Customers c WITH (NOLOCK) WHERE c.Code = @CustomerCode;
+        DECLARE @TAR NVARCHAR(150), @TSec NVARCHAR(150), @TWht NVARCHAR(150);
+        SELECT @TAR = MAX(CASE WHEN Id = @ARAcc THEN NULLIF(LTRIM(RTRIM(Description)), '') END),
+               @TSec = MAX(CASE WHEN Id = @SecAcc THEN NULLIF(LTRIM(RTRIM(Description)), '') END),
+               @TWht = MAX(CASE WHEN Id = @WhtAcc THEN NULLIF(LTRIM(RTRIM(Description)), '') END)
+          FROM dbo.AccountsCOA WITH (NOLOCK) WHERE Id IN (@ARAcc, @SecAcc, @WhtAcc);
+        DECLARE @DescAR VARCHAR(500) = LEFT(CONCAT_WS(' - ', @TAR, 'Accounts Receivable', @InvNo, @Code, @CustomerCode, @GLName), 500);
+        DECLARE @DescSec VARCHAR(500) = LEFT(CONCAT_WS(' - ', @TSec, 'Security Received (adjusted against invoice)', @InvNo, @Code, @CustomerCode, @GLName), 500);
+        DECLARE @DescWht VARCHAR(500) = LEFT(CONCAT_WS(' - ', @TWht, 'Withholding Tax Deducted', @InvNo, @Code, @CustomerCode, @GLName), 500);
+        DECLARE @DescCL VARCHAR(500) = LEFT(CONCAT_WS(' - ', @TAR, 'Accounts Receivable', @Code), 500);
+
+        DECLARE @VT TABLE (Id INT, Code VARCHAR(50));
+        DECLARE @VoucherId INT, @ShortGuid VARCHAR(50) = CONVERT(VARCHAR(50), NEWID());
+        DECLARE @TransDate DATETIME = @Now;
+        INSERT INTO @VT (Id, Code)
+        EXEC dbo.Vouchers_Insert @TypeId = 27, @TransDate = @TransDate, @TotalAmount = @Gross, @CompanyId = @CompanyId, @CreatedById = @DecidedById,
+             @ShortGUID = @ShortGuid, @RefNo = @Code, @RefId = @ReceiptId, @BranchId = @BranchId, @FundMangId = NULL,
+             @CreatedByBranchId = @BranchId, @CreatedByCompanyId = @CompanyId;
+        SELECT TOP 1 @VoucherId = Id FROM @VT;
+        IF @VoucherId IS NULL OR @VoucherId <= 0 RAISERROR('Failed to create the voucher.', 16, 1);
+        UPDATE dbo.Vouchers SET Status = 1 WHERE Id = @VoucherId;
+        UPDATE dbo.WN_FeeReceipts SET VoucherId = @VoucherId WHERE Id = @ReceiptId;
+
+        EXEC dbo.Ledgers_Insert @VoucherId = @VoucherId, @AccountId = @SecAcc, @Description = @DescSec, @ProjectId = NULL, @Debit = @Amount, @Credit = 0.0000, @VehicleId = NULL, @ConstructionProjectActiveId = NULL;
+        IF @IsWht = 1 AND @Wht > 0
+            EXEC dbo.Ledgers_Insert @VoucherId = @VoucherId, @AccountId = @WhtAcc, @Description = @DescWht, @ProjectId = NULL, @Debit = @Wht, @Credit = 0.0000, @VehicleId = NULL, @ConstructionProjectActiveId = NULL;
+        EXEC dbo.Ledgers_Insert @VoucherId = @VoucherId, @AccountId = @ARAcc, @Description = @DescAR, @ProjectId = NULL, @Debit = 0.0000, @Credit = @Gross, @VehicleId = NULL, @ConstructionProjectActiveId = NULL;
+
+        DECLARE @CLGuid VARCHAR(50) = CONVERT(VARCHAR(50), NEWID());
+        EXEC dbo.CustomerLedger_Insert @Description = @DescCL, @Debit = 0.0000, @Credit = @Gross, @LedgerDate = @TransDate, @CustomerVendorId = @CustVendorId,
+             @AccountId = @SecAcc, @Status = 1, @CreatedById = @DecidedById, @ShortGUID = @CLGuid, @CompanyId = @CompanyId, @RefNo = @Code, @RefId = @ReceiptId,
+             @TypeId = 27, @CreatedByBranchId = @BranchId, @CreatedByCompanyId = @CompanyId, @BranchId = @BranchId;
+        UPDATE dbo.CustomerLedger SET Status = 1 WHERE ShortGUID = @CLGuid;
+
+        -- (d) top-up invoice: security deposit line only, no tax. WN_Invoices_Insert re-points / may raise the booking's
+        --     WN_SecurityDeposits row, so that row is put back exactly as it was.
+        DECLARE @Snap TABLE (Id INT PRIMARY KEY, Amount DECIMAL(18,4), RefId INT, RefNo VARCHAR(50), CustomerId VARCHAR(50));
+        INSERT INTO @Snap SELECT Id, Amount, RefId, RefNo, CustomerId FROM dbo.WN_SecurityDeposits WHERE BookingId = @BookingId;
+
+        DECLARE @TopId INT, @TopNo NVARCHAR(50), @TopPub UNIQUEIDENTIFIER, @TopVoucher INT;
+        DECLARE @TopNotes NVARCHAR(MAX) = CONCAT(N'Security deposit top-up for invoice ', @InvNo, N' (adjustment #', @Id, N'). Restores the deposit used to pay that invoice.');
+        DECLARE @Issued DATETIME = @Now;
+        EXEC dbo.WN_Invoices_Insert
+            @UserId = @UserId, @BookingId = @BookingId, @IssuedOn = @Issued, @DueOn = @TopUpDueOn,
+            @SubTotal = 0, @DiscountTotal = 0, @TaxTotal = 0, @GrandTotal = @Amount, @Notes = @TopNotes, @InvoiceTypeId = 1,
+            @SecurityDepositAmount = @Amount, @CreatedById = @DecidedById, @SyncCustomerVendor = 0,
+            @RoomRentExclTax = 0, @ServiceCharges = 0, @TaxOnServiceCharges = 0, @LocationId = @LocationId,
+            @InvoiceId = @TopId OUTPUT, @GeneratedInvoiceNumber = @TopNo OUTPUT, @GeneratedPublicId = @TopPub OUTPUT, @VoucherId = @TopVoucher OUTPUT;
+        IF @TopId IS NULL OR @TopId <= 0 RAISERROR('The top-up invoice could not be created.', 16, 1);
+
+        UPDATE d SET d.Amount = s.Amount, d.RefId = s.RefId, d.RefNo = s.RefNo, d.CustomerId = s.CustomerId
+          FROM dbo.WN_SecurityDeposits d JOIN @Snap s ON s.Id = d.Id
+         WHERE ISNULL(d.Amount, -1) <> ISNULL(s.Amount, -1) OR ISNULL(d.RefId, -1) <> ISNULL(s.RefId, -1) OR ISNULL(d.RefNo, '') <> ISNULL(s.RefNo, '') OR ISNULL(d.CustomerId, '') <> ISNULL(s.CustomerId, '');
+        DELETE FROM dbo.WN_SecurityDeposits WHERE BookingId = @BookingId AND Id NOT IN (SELECT Id FROM @Snap);
+
+        UPDATE dbo.WN_SecurityDepositAdjustments
+           SET Status = 'Approved', DecidedById = @DecidedById, DecidedOn = @Now, DecisionNote = NULLIF(LTRIM(RTRIM(@Note)), ''),
+               TopUpInvoiceId = @TopId, TopUpInvoiceNumber = @TopNo, FeeReceiptId = @ReceiptId, VoucherId = @VoucherId, TopUpDueOn = @TopUpDueOn
+         WHERE Id = @Id;
+
+        -- (e) audit
+        INSERT INTO dbo.WN_AuditLog (EntityName, RecordId, Operation, OldValues, NewValues, ChangedByUserId, ChangedByUserEmail, ChangedAt, SourceApp)
+        VALUES (N'WN_SecurityDepositAdjustments', CAST(@Id AS NVARCHAR(64)), 'U', N'{"Status":"Pending"}',
+                CONCAT(N'{"Status":"Approved","BookingId":', @BookingId, N',"Invoice":"', @InvNo, N'","Amount":', @Amount, N',"FeeReceipt":"', @Code,
+                       N'","VoucherId":', @VoucherId, N',"TopUpInvoice":"', @TopNo, N'","TopUpDueOn":"', CONVERT(NVARCHAR(10), @TopUpDueOn, 23), N'"}'),
+                @DecidedById, @DecidedByEmail, @Now, N'WebAPI'),
+               (N'WN_Invoices', CAST(@TopId AS NVARCHAR(64)), 'I', NULL,
+                CONCAT(N'{"InvoiceNumber":"', @TopNo, N'","Kind":"Security deposit top-up","SecurityDepositAmount":', @Amount, N',"DueOn":"', CONVERT(NVARCHAR(10), @TopUpDueOn, 23),
+                       N'","Reason":"Deposit used to pay invoice ', @InvNo, N' (adjustment #', @Id, N')"}'),
+                @DecidedById, @DecidedByEmail, @Now, N'WebAPI');
+
+        COMMIT TRANSACTION;
+        SELECT @Id AS Id, N'Approved' AS Status, @TopId AS TopUpInvoiceId, @TopNo AS TopUpInvoiceNumber, @ReceiptId AS FeeReceiptId, @Code AS FeeReceiptCode, @VoucherId AS VoucherId;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH;
+END
+GO
+
+-- --------------------------------------------------------------------------------------------
+-- Notice-period settlement: the deposit to settle against, after adjustments. Use DepositHeld as the settlement dialog's
+-- DepositHeld (WN_NoticeSettlement_Save takes it as a parameter). Unpaid top-ups are listed so the dialog shows them
+-- as unpaid invoices (WN_NoticeSettlement_GetPreCheck already returns them in its unpaid-invoices list).
+-- Result sets: [0] figures, [1] unpaid top-up invoices.
+-- --------------------------------------------------------------------------------------------
+CREATE OR ALTER PROCEDURE dbo.WN_SDA_NoticeDeposit @NoticeId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @BookingId INT, @ExitDate DATE;
+    SELECT @BookingId = BookingId, @ExitDate = ExitDate FROM dbo.WN_NoticePeriods WITH (NOLOCK) WHERE Id = @NoticeId;
+    IF @BookingId IS NULL RAISERROR('Notice record not found.', 16, 2);
+
+    -- the deposit WN_NoticeSettlement_GetPreCheck reports (contract deposit), less what is still owed back by unpaid top-ups
+    DECLARE @Contract DECIMAL(18,2) = ISNULL((SELECT TOP 1 sd.Amount FROM dbo.WN_SecurityDeposits sd WITH (NOLOCK) WHERE sd.BookingId = @BookingId AND sd.StatusId = 1 ORDER BY sd.Id DESC),
+                                             ISNULL((SELECT SecurityDepositPaid FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @BookingId), 0));
+    DECLARE @PaidId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Paid' ORDER BY Id), 2);
+    DECLARE @CancelledId INT = ISNULL((SELECT TOP 1 Id FROM dbo.OrderStatus WITH (NOLOCK) WHERE LTRIM(RTRIM(Description)) = 'Cancelled' ORDER BY Id), 5);
+    DECLARE @Unpaid DECIMAL(18,2) = ISNULL((SELECT SUM(ROUND(i.GrandTotal - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2))
+                                              FROM dbo.WN_SecurityDepositAdjustments a JOIN dbo.WN_Invoices i ON i.Id = a.TopUpInvoiceId
+                                             WHERE a.BookingId = @BookingId AND a.Status = 'Approved' AND i.StatusId NOT IN (2, 5, 40, @PaidId, @CancelledId)), 0);
+    SELECT @NoticeId AS NoticeId, @BookingId AS BookingId, @ExitDate AS NoticeEndDate, @Contract AS DepositOnRecord,
+           @Unpaid AS UnpaidTopUps, CASE WHEN @Contract - @Unpaid < 0 THEN 0 ELSE @Contract - @Unpaid END AS DepositHeld;
+
+    SELECT i.Id AS InvoiceId, i.InvoiceNumber, i.DueOn, i.GrandTotal, i.PaidTotal, ROUND(i.GrandTotal - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0), 2) AS BalanceDue, a.InvoiceNumber AS ForInvoiceNumber
+      FROM dbo.WN_SecurityDepositAdjustments a JOIN dbo.WN_Invoices i ON i.Id = a.TopUpInvoiceId
+     WHERE a.BookingId = @BookingId AND a.Status = 'Approved' AND i.StatusId NOT IN (2, 5, 40, @PaidId, @CancelledId);
+END
+GO
+PRINT 'SDA_01 done.';
