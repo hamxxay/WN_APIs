@@ -1582,6 +1582,16 @@ namespace WorkNest.API.Controllers
 
                 var rowsAffected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
 
+                // An unpatched WN_Invoices_DeleteUnapproved (before INV_DEL_01) returns @@ROWCOUNT after COMMIT, i.e. 0 even
+                // when it did delete: the invoice is then StatusId 40 / Rejected, which is a successful delete.
+                if (rowsAffected == 0)
+                {
+                    using var check = new SqlCommand(
+                        "SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.WN_Invoices WITH (NOLOCK) WHERE Id = @Id AND StatusId = 40 AND ApprovalStatus = 'Rejected') THEN 1 ELSE 0 END", conn);
+                    check.Parameters.AddWithValue("@Id", id);
+                    if (Convert.ToInt32(await check.ExecuteScalarAsync()) == 1) rowsAffected = 1;
+                }
+
                 if (rowsAffected == 0)
                 {
                     return BadRequest(new { isSuccessful = false, message = "Invoice could not be deleted. It may have already been approved or removed." });
