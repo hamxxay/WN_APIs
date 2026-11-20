@@ -354,6 +354,7 @@ try
     // Custom invoices (api/custom-invoices/*, super admin + permitted admins): dbo.WN_CustomInvoice_* and
     // dbo.WN_UserPermissions_* (script CI_01_custom_invoice); before CI_01 the calls answer 503 "Database update needed".
     builder.Services.AddScoped<ICustomInvoiceRepository, WorkNest.Infrastructure.Repositories.CustomInvoiceRepository>();
+    builder.Services.AddScoped<ISecurityDepositAdjustmentRepository, WorkNest.Infrastructure.Repositories.SecurityDepositAdjustmentRepository>();
     builder.Services.AddScoped<ICustomInvoiceAccessService, CustomInvoiceAccessService>();
     builder.Services.AddScoped<ICustomInvoiceService, CustomInvoiceService>();
     builder.Services.AddScoped<ITransferRepository, TransferRepository>();
