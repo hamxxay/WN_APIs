@@ -3448,6 +3448,7 @@ WHERE q.Id = @Id";
                   LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON s.Id = b.SpaceId
                  WHERE i.StatusId NOT IN ({voids})
                     AND ISNULL(i.StatusId, 0) <> 40
+                    AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus = N'Approved')
                    AND {invLocFilter};
 
                 -- [0] headline numbers (Invoiced / Paid / Owed of the period: invoices whose rent period starts in it, not by issue date)

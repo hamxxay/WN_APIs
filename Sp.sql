@@ -7351,6 +7351,7 @@ BEGIN
                              CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp   -- CP_02: paid so far (Paid = in full; WHT left only = settled)
          CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.GrandTotal, 0) > 0 THEN cp.Settled * (ISNULL(i.GrandTotal, 0) - cp.Deposit) / i.GrandTotal ELSE 0 END AS DECIMAL(18,4)) AS Collected) cc   -- CP_02: collected without the deposit's share
          WHERE i.StatusId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @Void v WHERE v.Id = i.StatusId) AND ISNULL(i.StatusId, 0) <> 40
+           AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus = N'Approved')
            AND (@LocationId IS NULL OR sp.Id IS NOT NULL);
         IF @Metric = N'revenue'
         BEGIN
@@ -7661,6 +7662,7 @@ BEGIN
                          CAST(CASE WHEN p.Id IS NOT NULL THEN ISNULL(i.GrandTotal, 0) WHEN o.Id IS NOT NULL AND ISNULL(i.PaidTotal, 0) > 0 THEN CASE WHEN ISNULL(i.GrandTotal, 0) - ISNULL(i.WHTAmount, 0) - ISNULL(i.PaidTotal, 0) <= 0 THEN ISNULL(i.GrandTotal, 0) ELSE ISNULL(i.PaidTotal, 0) END ELSE 0 END AS DECIMAL(18,4)) AS Settled) cp
      CROSS APPLY (SELECT CAST(CASE WHEN ISNULL(i.GrandTotal, 0) > 0 THEN cp.Settled * (ISNULL(i.GrandTotal, 0) - cp.Deposit) / i.GrandTotal ELSE 0 END AS DECIMAL(18,4)) AS Collected) cc
      WHERE i.StatusId IS NOT NULL AND NOT EXISTS (SELECT 1 FROM @Void v WHERE v.Id = i.StatusId) AND ISNULL(i.StatusId, 0) <> 40
+     AND (i.ApprovalStatus IS NULL OR i.ApprovalStatus = N'Approved')
        AND (@LocationId IS NULL AND @LocationIds IS NULL OR sp.Id IS NOT NULL);
 
     DECLARE @Loc TABLE (Id INT PRIMARY KEY, Name NVARCHAR(200));
