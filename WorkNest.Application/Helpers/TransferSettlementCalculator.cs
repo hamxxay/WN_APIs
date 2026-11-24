@@ -7,7 +7,7 @@ namespace WorkNest.Application.Helpers
     /// Calculates prorated settlement adjustment for space changes:
     /// dailyRate(rate) = rate / 30
     /// daysUsed = effectiveDate - periodStart
-    /// remainingDays = periodEnd - effectiveDate
+    /// remainingDays = periodEnd - effectiveDate + 1 (the period end is a billed day too: Nov 20..30 = 11 days)
     /// creditAtA = remainingDays x dailyRate(A)
     /// repricedAtB = remainingDays x dailyRate(B)
     /// adjustment = repricedAtB - creditAtA
@@ -29,7 +29,8 @@ namespace WorkNest.Application.Helpers
             var effDate = effectiveDate.Date;
 
             int daysUsed = Math.Max(0, (int)(effDate - pStart).TotalDays);
-            int remainingDays = Math.Max(0, (int)(pEnd - effDate).TotalDays);
+            // TRF_01: the period end is inclusive (Nov 1-30 is 30 days), so a move on the 20th leaves 20..30 = 11 days.
+            int remainingDays = Math.Max(0, (int)(pEnd - effDate).TotalDays + 1);
 
             decimal dailyA = DailyRate(oldMonthlyRateA);
             decimal dailyB = DailyRate(newMonthlyRateB);
