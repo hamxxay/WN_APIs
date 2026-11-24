@@ -64,6 +64,29 @@ namespace WorkNest.Infrastructure.Repositories
             return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
         }
 
+        // ---- TRF_02 columns (space transfer) ------------------------------------------------------------------------------------
+
+        private static volatile bool _transferCols;
+        private static long _lastTransferCheckTicks;
+
+        /// <summary>True when script TRF_02 has added PaidRent / PaidServiceCharge / PaidTax / TransferCredit / TransferSettled to WN_BookingSchedule.
+        /// A yes is kept for the process, a no is re-checked every minute, so the code works before and after the script runs.</summary>
+        public static async Task<bool> HasTransferColumnsAsync(SqlConnection c, SqlTransaction? tx, CancellationToken ct = default)
+        {
+            if (_transferCols) return true;
+            long last = Interlocked.Read(ref _lastTransferCheckTicks);
+            if (last != 0 && DateTime.UtcNow.Ticks - last < RecheckEvery.Ticks) return false;
+            await using var cmd = new SqlCommand(@"SELECT CASE WHEN COL_LENGTH(N'dbo.WN_BookingSchedule', N'PaidRent') IS NOT NULL
+                AND COL_LENGTH(N'dbo.WN_BookingSchedule', N'PaidServiceCharge') IS NOT NULL AND COL_LENGTH(N'dbo.WN_BookingSchedule', N'PaidTax') IS NOT NULL
+                AND COL_LENGTH(N'dbo.WN_BookingSchedule', N'TransferCredit') IS NOT NULL AND COL_LENGTH(N'dbo.WN_BookingSchedule', N'TransferSettled') IS NOT NULL
+                THEN 1 ELSE 0 END", c, tx) { CommandTimeout = CommandTimeoutSeconds };
+            bool ok = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct)) == 1;
+            if (ok) _transferCols = true; else Interlocked.Exchange(ref _lastTransferCheckTicks, DateTime.UtcNow.Ticks);
+            return ok;
+        }
+
+        private static decimal? DecN(object? v) => v is null or DBNull ? null : Convert.ToDecimal(v, CultureInfo.InvariantCulture);
+
         // ---- booking facts -----------------------------------------------------------------------------------------------------
 
         public async Task<BookingBillingInfo?> GetBillingInfoAsync(int bookingId, CancellationToken ct = default)
@@ -113,6 +136,8 @@ namespace WorkNest.Infrastructure.Repositories
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 if (await r.ReadAsync(ct)) { info.LocationId = Int(r[0]); info.LocationName = Str(r[1]); }
             }
+            if (await TransferCreditStore.IsAvailableAsync(c, null, ct))
+                info.TransferCreditBalance = await TransferCreditStore.GetBalanceAsync(c, null, bookingId, ct);
             return info;
         }
 
@@ -149,13 +174,15 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task<IReadOnlyList<BookingScheduleRow>> GetRowsAsync(int bookingId, CancellationToken ct = default)
         {
+            var list = new List<BookingScheduleRow>();
+            await using var c = await OpenAsync(ct);
+            bool trf = await HasTransferColumnsAsync(c, null, ct);
             string sql = $@"SELECT s.RowNo, s.PeriodStart, s.PeriodEnd, s.MonthFraction, s.MonthlyRent, s.ServiceCharge, s.RoomRent, s.DiscountType,
                        s.DiscountValue, s.DiscountAmount, s.RentAfterDiscount, s.Tax, s.SecurityDeposit, s.Total, i.Id AS LiveInvoiceId, i.InvoiceNumber
+                       {(trf ? ", s.PaidRent, s.PaidServiceCharge, s.PaidTax, s.TransferCredit, s.TransferSettled" : "")}
                 FROM dbo.WN_BookingSchedule s WITH (NOLOCK)
                 LEFT JOIN dbo.WN_Invoices i WITH (NOLOCK) ON i.Id = s.InvoiceId AND {LiveInvoice}
                 WHERE s.BookingId = @b ORDER BY s.RowNo";
-            var list = new List<BookingScheduleRow>();
-            await using var c = await OpenAsync(ct);
             await using var cmd = new SqlCommand(sql, c) { CommandTimeout = CommandTimeoutSeconds };
             cmd.Parameters.AddWithValue("@b", bookingId);
             await using var r = await cmd.ExecuteReaderAsync(ct);
@@ -171,7 +198,13 @@ namespace WorkNest.Infrastructure.Repositories
                     SecurityDeposit = r["SecurityDeposit"] is DBNull ? null : Dec(r["SecurityDeposit"]), Total = Dec(r["Total"]),
                     InvoiceId = Int(r["LiveInvoiceId"]), InvoiceNumber = Str(r["InvoiceNumber"])
                 };
-                row.Locked = row.InvoiceId != null;
+                if (trf)
+                {
+                    row.PaidRent = DecN(r["PaidRent"]); row.PaidServiceCharge = DecN(r["PaidServiceCharge"]); row.PaidTax = DecN(r["PaidTax"]);
+                    row.TransferCredit = DecN(r["TransferCredit"]);
+                    row.TransferSettled = r["TransferSettled"] is bool ts && ts;
+                }
+                row.Locked = row.InvoiceId != null || row.TransferSettled;
                 row.IsShort = row.MonthFraction < 1m;
                 row.Label = BookingScheduleMath.Label(row.PeriodStart, row.PeriodEnd);
                 list.Add(row);
@@ -225,18 +258,23 @@ namespace WorkNest.Infrastructure.Repositories
 
         public async Task SaveRowsAsync(int bookingId, IReadOnlyList<BookingScheduleRow> rows, CancellationToken ct = default)
         {
+            await using var c = await OpenAsync(ct);
+            bool trf = await HasTransferColumnsAsync(c, null, ct);
+            // A transfer-settled row is never touched (nobody can unlock it); the transfer columns of an existing row are never overwritten by the UPDATE.
             string sql = $@"
                 UPDATE s SET DiscountType = @DiscountType, DiscountValue = @DiscountValue, DiscountAmount = @DiscountAmount,
                              RentAfterDiscount = @RentAfterDiscount, Tax = @Tax, SecurityDeposit = @SecurityDeposit, Total = @Total, InvoiceId = NULL
                 FROM dbo.WN_BookingSchedule s
                 WHERE s.BookingId = @BookingId AND s.RowNo = @RowNo
+                  {(trf ? "AND ISNULL(s.TransferSettled, 0) = 0" : "")}
                   AND (s.InvoiceId IS NULL OR NOT EXISTS (SELECT 1 FROM dbo.WN_Invoices i WITH (NOLOCK) WHERE i.Id = s.InvoiceId AND {LiveInvoice}));
                 IF @@ROWCOUNT = 0 AND NOT EXISTS (SELECT 1 FROM dbo.WN_BookingSchedule WHERE BookingId = @BookingId AND RowNo = @RowNo)
                     INSERT INTO dbo.WN_BookingSchedule (BookingId, RowNo, PeriodStart, PeriodEnd, MonthFraction, MonthlyRent, ServiceCharge, RoomRent,
-                        DiscountType, DiscountValue, DiscountAmount, RentAfterDiscount, Tax, SecurityDeposit, Total, InvoiceId)
+                        DiscountType, DiscountValue, DiscountAmount, RentAfterDiscount, Tax, SecurityDeposit, Total, InvoiceId
+                        {(trf ? ", PaidRent, PaidServiceCharge, PaidTax, TransferCredit, TransferSettled" : "")})
                     VALUES (@BookingId, @RowNo, @PeriodStart, @PeriodEnd, @MonthFraction, @MonthlyRent, @ServiceCharge, @RoomRent,
-                        @DiscountType, @DiscountValue, @DiscountAmount, @RentAfterDiscount, @Tax, @SecurityDeposit, @Total, @InvoiceId);";
-            await using var c = await OpenAsync(ct);
+                        @DiscountType, @DiscountValue, @DiscountAmount, @RentAfterDiscount, @Tax, @SecurityDeposit, @Total, @InvoiceId
+                        {(trf ? ", @PaidRent, @PaidServiceCharge, @PaidTax, @TransferCredit, @TransferSettled" : "")});";
             await using var tx = (SqlTransaction)await c.BeginTransactionAsync(ct);
             try
             {
@@ -259,6 +297,14 @@ namespace WorkNest.Infrastructure.Repositories
                     cmd.Parameters.Add("@SecurityDeposit", SqlDbType.Decimal).Value = (object?)row.SecurityDeposit ?? DBNull.Value;
                     cmd.Parameters.Add("@Total", SqlDbType.Decimal).Value = row.Total;
                     cmd.Parameters.Add("@InvoiceId", SqlDbType.Int).Value = (object?)row.InvoiceId ?? DBNull.Value;
+                    if (trf)
+                    {
+                        cmd.Parameters.Add("@PaidRent", SqlDbType.Decimal).Value = (object?)row.PaidRent ?? DBNull.Value;
+                        cmd.Parameters.Add("@PaidServiceCharge", SqlDbType.Decimal).Value = (object?)row.PaidServiceCharge ?? DBNull.Value;
+                        cmd.Parameters.Add("@PaidTax", SqlDbType.Decimal).Value = (object?)row.PaidTax ?? DBNull.Value;
+                        cmd.Parameters.Add("@TransferCredit", SqlDbType.Decimal).Value = (object?)row.TransferCredit ?? DBNull.Value;
+                        cmd.Parameters.Add("@TransferSettled", SqlDbType.Bit).Value = row.TransferSettled ? 1 : (object)DBNull.Value;
+                    }
                     await cmd.ExecuteNonQueryAsync(ct);
                 }
                 await tx.CommitAsync(ct);

@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -21,7 +22,59 @@ namespace WorkNest.Infrastructure.Repositories
 
         private SqlConnection CreateConnection() => new SqlConnection(_connectionString);
 
-        public async Task<TransferPreviewResponseDto> GetTransferPreviewAsync(int bookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee)
+        /// <summary>TRF_02 has run: both transfer procedures take @PerSeatPrice (checked once a minute until it is there).</summary>
+        private static volatile bool _pricingReady;
+        private static DateTime _pricingCheckedAt = DateTime.MinValue;
+
+        public async Task<bool> IsPerSeatPricingReadyAsync()
+        {
+            if (_pricingReady) return true;
+            if ((DateTime.UtcNow - _pricingCheckedAt).TotalSeconds < 60) return false;
+            _pricingCheckedAt = DateTime.UtcNow;
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(@"SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID(N'dbo.WN_Booking_TransferSpace') AND name = N'@PerSeatPrice') THEN 1 ELSE 0 END", conn);
+            _pricingReady = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+            return _pricingReady;
+        }
+
+        /// <summary>The transfer redesign has run: @ScheduleJson on the procedure and dbo.WN_SpaceTransferRequests (checked once a minute until it is there).</summary>
+        private static volatile bool _redesignReady;
+        private static DateTime _redesignCheckedAt = DateTime.MinValue;
+
+        public async Task<bool> IsRedesignReadyAsync()
+        {
+            if (_redesignReady) return true;
+            if ((DateTime.UtcNow - _redesignCheckedAt).TotalSeconds < 60) return false;
+            _redesignCheckedAt = DateTime.UtcNow;
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(@"SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID(N'dbo.WN_Booking_TransferSpace') AND name = N'@ScheduleJson')
+                                                        AND OBJECT_ID(N'dbo.WN_SpaceTransferRequests', N'U') IS NOT NULL THEN 1 ELSE 0 END", conn);
+            _redesignReady = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+            return _redesignReady;
+        }
+
+        public async Task<int> GetSecurityDepositMonthsAsync(int bookingId)
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand("SELECT ISNULL(SecurityDepositMonths, 0) FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = @id", conn);
+            cmd.Parameters.AddWithValue("@id", bookingId);
+            var v = await cmd.ExecuteScalarAsync();
+            return v == null || v is DBNull ? 0 : Convert.ToInt32(v);
+        }
+
+        private static bool HasColumn(SqlDataReader r, string name)
+        {
+            for (int i = 0; i < r.FieldCount; i++) if (string.Equals(r.GetName(i), name, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        private static decimal? DecOrNull(SqlDataReader r, string name) =>
+            HasColumn(r, name) && !r.IsDBNull(r.GetOrdinal(name)) ? Convert.ToDecimal(r[name]) : null;
+
+        public async Task<TransferPreviewResponseDto> GetTransferPreviewAsync(int bookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee, decimal? perSeatPrice = null)
         {
             var response = new TransferPreviewResponseDto();
 
@@ -36,6 +89,7 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@NewSpaceId", newSpaceId);
             cmd.Parameters.AddWithValue("@EffectiveDate", effectiveDate.Date);
             cmd.Parameters.AddWithValue("@TransferFee", transferFee);
+            if (perSeatPrice is > 0 && await IsPerSeatPricingReadyAsync()) cmd.Parameters.AddWithValue("@PerSeatPrice", perSeatPrice.Value);
 
             await using var reader = await cmd.ExecuteReaderAsync();
 
@@ -86,7 +140,10 @@ namespace WorkNest.Infrastructure.Repositories
                     MonthlyRate = reader.GetDecimal(reader.GetOrdinal("TargetMonthlyRate")),
                     MaxDiscountPercent = reader.GetDecimal(reader.GetOrdinal("TargetMaxDiscountPct")),
                     OfferingType = response.CurrentBooking.OfferingType,
-                    OfferingTypeDiscountCap = reader.GetDecimal(reader.GetOrdinal("OfferingTypeDiscountCap"))
+                    OfferingTypeDiscountCap = reader.GetDecimal(reader.GetOrdinal("OfferingTypeDiscountCap")),
+                    CurrentPerSeatPrice = DecOrNull(reader, "CurrentPerSeatPrice"),   // TRF_02 (null before the script)
+                    ListPerSeatPrice = DecOrNull(reader, "ListPerSeatPrice"),
+                    PerSeatPrice = DecOrNull(reader, "PerSeatPrice")
                 };
 
                 response.DiscountValidation = new DiscountValidationDto
@@ -147,7 +204,7 @@ namespace WorkNest.Infrastructure.Repositories
         }
 
         public async Task<TransferExecuteResponseDto> ExecuteTransferAsync(
-            int oldBookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee, string notes, int? updatedById, string? userEmail)
+            int oldBookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee, string notes, int? updatedById, string? userEmail, TransferExecutionArgs? args = null)
         {
             await using var conn = CreateConnection();
             await conn.OpenAsync();
@@ -163,6 +220,18 @@ namespace WorkNest.Infrastructure.Repositories
             cmd.Parameters.AddWithValue("@Notes", notes);
             cmd.Parameters.AddWithValue("@UpdatedById", (object?)updatedById ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UserEmail", (object?)userEmail ?? DBNull.Value);
+            if (args != null)
+            {
+                if (args.PerSeatPrice is > 0 && await IsPerSeatPricingReadyAsync()) cmd.Parameters.AddWithValue("@PerSeatPrice", args.PerSeatPrice.Value);
+                // The redesign parameters are sent only when the redesign is installed (before it the procedure does not know them).
+                if (await IsRedesignReadyAsync())
+                {
+                    void P(string name, object? v) { if (v != null) cmd.Parameters.AddWithValue(name, v); }
+                    P("@NewDeposit", args.NewDeposit); P("@SettleRent", args.SettleRent); P("@SettleServiceCharge", args.SettleServiceCharge);
+                    P("@SettleTax", args.SettleTax); P("@CreditAmount", args.CreditAmount);
+                    P("@NextBillingDate", args.NextBillingDate?.Date); P("@ScheduleJson", args.ScheduleJson); P("@TransferRequestId", args.TransferRequestId);
+                }
+            }
 
             await using var reader = await cmd.ExecuteReaderAsync();
             if (await reader.ReadAsync())
@@ -294,10 +363,170 @@ namespace WorkNest.Infrastructure.Repositories
                     MaxDiscountPercent = reader.GetDecimal(reader.GetOrdinal("MaxDiscountPercent"))
                 });
             }
+            await reader.CloseAsync();
 
+            // Meeting / conference rooms are booked by the hour: never a target for a monthly booking.
+            var meeting = await MeetingRoomIdsAsync(conn, list.Select(x => x.SpaceId));
+            list.RemoveAll(x => meeting.Contains(x.SpaceId));
             return list;
         }
+
+        private static async Task<HashSet<int>> MeetingRoomIdsAsync(SqlConnection conn, IEnumerable<int> spaceIds)
+        {
+            var ids = spaceIds.Distinct().ToList();
+            var set = new HashSet<int>();
+            if (ids.Count == 0) return set;
+            await using var cmd = new SqlCommand(@"SELECT s.Id FROM dbo.WN_Spaces s WITH (NOLOCK)
+                LEFT JOIN dbo.WN_SpaceTypes st WITH (NOLOCK) ON st.Id = s.SpaceTypeId
+                WHERE s.Id IN (" + string.Join(",", ids) + @")
+                  AND (ISNULL(st.Name, '') LIKE '%Meeting%' OR ISNULL(st.Name, '') LIKE '%Conference%'
+                       OR ISNULL(s.Name, '') LIKE '%Meeting%' OR ISNULL(s.Name, '') LIKE '%Conference%')", conn);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) set.Add(r.GetInt32(0));
+            return set;
+        }
+
+        /// <summary>True when the space is a meeting / conference room (booked by the hour, not a monthly transfer target).</summary>
+        public async Task<bool> IsMeetingRoomAsync(int spaceId)
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            return (await MeetingRoomIdsAsync(conn, new[] { spaceId })).Contains(spaceId);
+        }
     
+        private static volatile bool _requestTableThere;
+        private static DateTime _requestTableCheckedAt = DateTime.MinValue;
+
+        /// <summary>dbo.WN_SpaceTransferRequests exists (checked once a minute until it is there).</summary>
+        private async Task<bool> RequestTableExistsAsync(SqlConnection conn)
+        {
+            if (_requestTableThere) return true;
+            if ((DateTime.UtcNow - _requestTableCheckedAt).TotalSeconds < 60) return false;
+            _requestTableCheckedAt = DateTime.UtcNow;
+            await using var cmd = new SqlCommand("SELECT CASE WHEN OBJECT_ID(N'dbo.WN_SpaceTransferRequests', N'U') IS NOT NULL THEN 1 ELSE 0 END", conn);
+            _requestTableThere = Convert.ToInt32(await cmd.ExecuteScalarAsync()) == 1;
+            return _requestTableThere;
+        }
+
+        public async Task<TransferHistoryPageDto> ListTransferHistoryAsync(string? search, DateTime? from, DateTime? to, int page, int pageSize, IReadOnlyCollection<int>? locationIds)
+        {
+            var res = new TransferHistoryPageDto { Page = page, PageSize = pageSize };
+            if (locationIds != null && locationIds.Count == 0) return res;
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            bool hasReq = await RequestTableExistsAsync(conn);
+
+            var where = new List<string>();
+            if (locationIds != null) where.Add("t.LocationId IN (" + string.Join(",", locationIds.Select(x => x.ToString(System.Globalization.CultureInfo.InvariantCulture))) + ")");
+            if (from != null) where.Add("t.EffectiveDate >= @from");
+            if (to != null) where.Add("t.EffectiveDate <= @to");
+            string? term = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+            if (term != null)
+                where.Add(@"(cust.CustomerName LIKE @like OR ob.CustomerCode LIKE @like OR os.Name LIKE @like OR ns.Name LIKE @like
+                             OR CAST(t.OldBookingId AS varchar(20)) = @term OR CAST(t.NewBookingId AS varchar(20)) = @term)");
+            string whereSql = where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "";
+
+            string reqCols = hasReq
+                ? "r.Id AS RequestId, ru.Name AS RequestedByName, du.Name AS ApprovedByName, r.DecidedAt, r.OldPerSeatPrice, r.PerSeatPrice AS NewPerSeatPrice, r.OldDeposit, r.NewDeposit, r.PrepaidMode,"
+                : "CAST(NULL AS int) AS RequestId, CAST(NULL AS nvarchar(200)) AS RequestedByName, CAST(NULL AS nvarchar(200)) AS ApprovedByName, CAST(NULL AS datetime2) AS DecidedAt, CAST(NULL AS decimal(18,2)) AS OldPerSeatPrice, CAST(NULL AS decimal(18,2)) AS NewPerSeatPrice, CAST(NULL AS decimal(18,2)) AS OldDeposit, CAST(NULL AS decimal(18,2)) AS NewDeposit, CAST(NULL AS varchar(20)) AS PrepaidMode,";
+            string reqJoin = hasReq
+                ? @"LEFT JOIN dbo.WN_SpaceTransferRequests r WITH (NOLOCK) ON r.NewBookingId = t.NewBookingId
+                    LEFT JOIN dbo.WN_Users ru WITH (NOLOCK) ON ru.Id = r.RequestedById
+                    LEFT JOIN dbo.WN_Users du WITH (NOLOCK) ON du.Id = r.DecidedById"
+                : "";
+
+            string fromSql = @"
+                FROM dbo.WN_BookingTransfers t WITH (NOLOCK)
+                LEFT JOIN dbo.WN_Bookings ob WITH (NOLOCK) ON ob.Id = t.OldBookingId
+                LEFT JOIN dbo.WN_Bookings nb WITH (NOLOCK) ON nb.Id = t.NewBookingId
+                LEFT JOIN dbo.WN_Spaces os WITH (NOLOCK) ON os.Id = t.OldSpaceId
+                LEFT JOIN dbo.WN_Spaces ns WITH (NOLOCK) ON ns.Id = t.NewSpaceId
+                LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = t.LocationId
+                LEFT JOIN dbo.WN_Invoices inv WITH (NOLOCK) ON inv.Id = t.SettlementInvoiceId
+                LEFT JOIN dbo.WN_Users iu WITH (NOLOCK) ON iu.Id = t.InitiatedById
+                " + reqJoin + @"
+                OUTER APPLY (
+                    SELECT TOP 1 ISNULL(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(ISNULL(cu.FirstName, '') + ' ' + ISNULL(cu.LastName, ''))), '')) AS CustomerName
+                    FROM dbo.WN_Customers cu WITH (NOLOCK)
+                    WHERE (ob.CustomerCode IS NOT NULL AND ob.CustomerCode <> '' AND cu.Code = ob.CustomerCode) OR cu.UserId = ob.UserId
+                    ORDER BY CASE WHEN ob.CustomerCode IS NOT NULL AND cu.Code = ob.CustomerCode THEN 0 ELSE 1 END, cu.Id
+                ) cust" + whereSql;
+
+            void Bind(SqlCommand c)
+            {
+                if (from != null) c.Parameters.AddWithValue("@from", from.Value.Date);
+                if (to != null) c.Parameters.AddWithValue("@to", to.Value.Date);
+                if (term != null)
+                {
+                    c.Parameters.AddWithValue("@like", "%" + term.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "%");
+                    c.Parameters.AddWithValue("@term", term.TrimStart('#'));
+                }
+            }
+
+            await using (var cnt = new SqlCommand("SELECT COUNT(*) " + fromSql, conn))
+            {
+                Bind(cnt);
+                res.Total = Convert.ToInt32(await cnt.ExecuteScalarAsync());
+            }
+
+            string sql = @"SELECT t.Id, t.EffectiveDate, t.CreatedOn, t.OldBookingId, t.NewBookingId, cust.CustomerName, ob.CustomerCode,
+                       t.LocationId, l.Name AS LocationName, os.Name AS OldSpaceName, ns.Name AS NewSpaceName,
+                       t.OldMonthlyRate, t.NewMonthlyRate, t.Adjustment, t.SettlementOutcome, t.SettlementInvoiceId,
+                       inv.InvoiceNumber AS SettlementInvoiceNumber, inv.GrandTotal AS SettlementInvoiceAmount,
+                       t.TransferFee, t.Notes, iu.Name AS InitiatedByName, t.InitiatedByEmail, nb.TransferCreditBalance AS CreditBalance,
+                       " + reqCols + @" 0 AS _x " + fromSql + @"
+                ORDER BY t.EffectiveDate DESC, t.Id DESC
+                OFFSET @skip ROWS FETCH NEXT @take ROWS ONLY";
+            await using var cmd = new SqlCommand(sql, conn);
+            Bind(cmd);
+            cmd.Parameters.AddWithValue("@skip", (page - 1) * pageSize);
+            cmd.Parameters.AddWithValue("@take", pageSize);
+            await using var r = await cmd.ExecuteReaderAsync();
+            string? S(string c) => r[c] is DBNull ? null : Convert.ToString(r[c]);
+            decimal? D(string c) => r[c] is DBNull ? null : Convert.ToDecimal(r[c]);
+            int? I(string c) => r[c] is DBNull ? null : Convert.ToInt32(r[c]);
+            DateTime? T(string c) => r[c] is DBNull ? null : Convert.ToDateTime(r[c]);
+            while (await r.ReadAsync())
+            {
+                res.Items.Add(new TransferHistoryItemDto
+                {
+                    Id = Convert.ToInt32(r["Id"]),
+                    EffectiveDate = Convert.ToDateTime(r["EffectiveDate"]),
+                    CreatedOn = Convert.ToDateTime(r["CreatedOn"]),
+                    OldBookingId = Convert.ToInt32(r["OldBookingId"]),
+                    NewBookingId = Convert.ToInt32(r["NewBookingId"]),
+                    CustomerName = S("CustomerName"),
+                    CustomerCode = S("CustomerCode"),
+                    LocationId = Convert.ToInt32(r["LocationId"]),
+                    LocationName = S("LocationName"),
+                    OldSpaceName = S("OldSpaceName"),
+                    NewSpaceName = S("NewSpaceName"),
+                    OldMonthlyRate = Dec0(r, "OldMonthlyRate"),
+                    NewMonthlyRate = Dec0(r, "NewMonthlyRate"),
+                    Adjustment = Dec0(r, "Adjustment"),
+                    SettlementOutcome = S("SettlementOutcome"),
+                    SettlementInvoiceId = I("SettlementInvoiceId"),
+                    SettlementInvoiceNumber = S("SettlementInvoiceNumber"),
+                    SettlementInvoiceAmount = D("SettlementInvoiceAmount"),
+                    TransferFee = Dec0(r, "TransferFee"),
+                    Notes = S("Notes"),
+                    InitiatedByName = S("InitiatedByName"),
+                    InitiatedByEmail = S("InitiatedByEmail"),
+                    CreditBalance = D("CreditBalance"),
+                    RequestId = I("RequestId"),
+                    RequestedByName = S("RequestedByName"),
+                    ApprovedByName = S("ApprovedByName"),
+                    DecidedAt = T("DecidedAt"),
+                    OldPerSeatPrice = D("OldPerSeatPrice"),
+                    NewPerSeatPrice = D("NewPerSeatPrice"),
+                    OldDeposit = D("OldDeposit"),
+                    NewDeposit = D("NewDeposit"),
+                    PrepaidMode = S("PrepaidMode")
+                });
+            }
+            return res;
+        }
+
         public async Task<List<ActiveBookingSummaryDto>> GetActiveBookingsAsync(int? locationId, string? search)
         {
             var list = new List<ActiveBookingSummaryDto>();
@@ -722,7 +951,147 @@ namespace WorkNest.Infrastructure.Repositories
             await cmd.ExecuteNonQueryAsync();
             return true;
         }
+    
+        // ---- Space transfer requests (dbo.WN_SpaceTransferRequests) ---------------------------------------------------------
+
+        private const string RequestSelect = @"
+            SELECT a.Id, a.BookingId, a.NewSpaceId, a.EffectiveDate, a.LocationId AS ReqLocationId, a.PlanJson, a.PerSeatPrice, a.OldPerSeatPrice,
+                   a.NewDeposit, a.OldDeposit, a.PrepaidMode, a.DepositDecreaseMode, a.TransferFee, a.Note, a.Status,
+                   a.RequestedById, ru.Name AS RequestedByName, a.RequestedAt, du.Name AS DecidedByName, a.DecidedAt, a.DecisionNote, a.NewBookingId,
+                   os.Name AS OldSpaceName, os.LocationId AS SpaceLocationId, ns.Name AS NewSpaceName, l.Name AS LocationName, cust.CustomerName
+            FROM dbo.WN_SpaceTransferRequests a WITH (NOLOCK)
+            JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = a.BookingId
+            LEFT JOIN dbo.WN_Spaces os WITH (NOLOCK) ON os.Id = b.SpaceId
+            LEFT JOIN dbo.WN_Spaces ns WITH (NOLOCK) ON ns.Id = a.NewSpaceId
+            LEFT JOIN dbo.WN_Locations l WITH (NOLOCK) ON l.Id = ISNULL(a.LocationId, os.LocationId)
+            LEFT JOIN dbo.WN_Users ru WITH (NOLOCK) ON ru.Id = a.RequestedById
+            LEFT JOIN dbo.WN_Users du WITH (NOLOCK) ON du.Id = a.DecidedById
+            OUTER APPLY (
+                SELECT TOP 1 ISNULL(NULLIF(cu.Company, ''), NULLIF(LTRIM(RTRIM(ISNULL(cu.FirstName, '') + ' ' + ISNULL(cu.LastName, ''))), '')) AS CustomerName
+                FROM dbo.WN_Customers cu WITH (NOLOCK)
+                WHERE (b.CustomerCode IS NOT NULL AND b.CustomerCode <> '' AND cu.Code = b.CustomerCode) OR cu.UserId = b.UserId
+                ORDER BY CASE WHEN b.CustomerCode IS NOT NULL AND cu.Code = b.CustomerCode THEN 0 ELSE 1 END, cu.Id
+            ) cust";
+
+        private static decimal Dec0(SqlDataReader r, string c) => r[c] is DBNull ? 0m : Convert.ToDecimal(r[c]);
+
+        private static TransferRequestRecord MapRequest(SqlDataReader r) => new()
+        {
+            PlanJson = Convert.ToString(r["PlanJson"]) ?? "",
+            LocationId = r["ReqLocationId"] is not DBNull ? Convert.ToInt32(r["ReqLocationId"]) : r["SpaceLocationId"] is DBNull ? null : Convert.ToInt32(r["SpaceLocationId"]),
+            RequestedById = r["RequestedById"] is DBNull ? null : Convert.ToInt32(r["RequestedById"]),
+            TransferFee = Dec0(r, "TransferFee"),
+            Dto = new TransferRequestDto
+            {
+                Id = Convert.ToInt32(r["Id"]), BookingId = Convert.ToInt32(r["BookingId"]), NewSpaceId = Convert.ToInt32(r["NewSpaceId"]),
+                CustomerName = r["CustomerName"] as string, OldSpaceName = r["OldSpaceName"] as string, NewSpaceName = r["NewSpaceName"] as string,
+                LocationName = r["LocationName"] as string, EffectiveDate = Convert.ToDateTime(r["EffectiveDate"]),
+                Status = Convert.ToString(r["Status"]) ?? "Pending", RequestedByName = r["RequestedByName"] as string,
+                RequestedAt = DateTime.SpecifyKind(Convert.ToDateTime(r["RequestedAt"]), DateTimeKind.Utc),
+                DecidedByName = r["DecidedByName"] as string,
+                DecidedAt = r["DecidedAt"] is DBNull ? null : DateTime.SpecifyKind(Convert.ToDateTime(r["DecidedAt"]), DateTimeKind.Utc),
+                DecisionNote = r["DecisionNote"] as string, Note = r["Note"] as string,
+                NewBookingId = r["NewBookingId"] is DBNull ? null : Convert.ToInt32(r["NewBookingId"]),
+                OldPerSeatPrice = Dec0(r, "OldPerSeatPrice"), PerSeatPrice = Dec0(r, "PerSeatPrice"),
+                OldDeposit = Dec0(r, "OldDeposit"), NewDeposit = Dec0(r, "NewDeposit"),
+                PrepaidMode = r["PrepaidMode"] as string, DepositDecreaseMode = r["DepositDecreaseMode"] as string
+            }
+        };
+
+        /// <summary>Adds a Pending request; returns null when the booking already has one waiting.</summary>
+        public async Task<int?> InsertTransferRequestAsync(int bookingId, int newSpaceId, DateTime effectiveDate, int? locationId, string planJson,
+            TransferPlanDto plan, string? note, int? requestedById)
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(@"
+                IF EXISTS (SELECT 1 FROM dbo.WN_SpaceTransferRequests WITH (UPDLOCK, HOLDLOCK) WHERE BookingId = @b AND Status = 'Pending')
+                    SELECT CAST(NULL AS INT);
+                ELSE
+                BEGIN
+                    INSERT INTO dbo.WN_SpaceTransferRequests (BookingId, NewSpaceId, EffectiveDate, LocationId, PlanJson, PerSeatPrice, OldPerSeatPrice,
+                        NewDeposit, OldDeposit, PrepaidMode, DepositDecreaseMode, TransferFee, Note, Status, RequestedById)
+                    VALUES (@b, @s, @d, @loc, @json, @p, @op, @nd, @od, @pm, @dm, @fee, @note, 'Pending', @by);
+                    SELECT CAST(SCOPE_IDENTITY() AS INT);
+                END", conn);
+            cmd.Parameters.AddWithValue("@b", bookingId);
+            cmd.Parameters.AddWithValue("@s", newSpaceId);
+            cmd.Parameters.AddWithValue("@d", effectiveDate.Date);
+            cmd.Parameters.AddWithValue("@loc", (object?)locationId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@json", planJson);
+            cmd.Parameters.AddWithValue("@p", plan.PerSeatPrice);
+            cmd.Parameters.AddWithValue("@op", plan.OldPerSeatPrice);
+            cmd.Parameters.AddWithValue("@nd", plan.NewDeposit);
+            cmd.Parameters.AddWithValue("@od", plan.OldDeposit);
+            cmd.Parameters.AddWithValue("@pm", plan.PrepaidMode);
+            cmd.Parameters.AddWithValue("@dm", (object?)plan.DepositDecreaseMode ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@fee", plan.TransferFee);
+            cmd.Parameters.AddWithValue("@note", (object?)note ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@by", (object?)requestedById ?? 0);
+            var v = await cmd.ExecuteScalarAsync();
+            return v is int i ? i : null;
+        }
+
+        public async Task<TransferRequestRecord?> GetTransferRequestAsync(int id)
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(RequestSelect + " WHERE a.Id = @id", conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            await using var r = await cmd.ExecuteReaderAsync();
+            return await r.ReadAsync() ? MapRequest(r) : null;
+        }
+
+        /// <summary>locationIds null = all, empty = nothing; requestedById set = only that user's requests.</summary>
+        public async Task<List<TransferRequestDto>> ListTransferRequestsAsync(bool pendingOnly, IReadOnlyCollection<int>? locationIds, int? requestedById)
+        {
+            var list = new List<TransferRequestDto>();
+            if (locationIds != null && locationIds.Count == 0) return list;
+            var where = new List<string>();
+            if (pendingOnly) where.Add("a.Status = 'Pending'");
+            if (requestedById != null) where.Add("a.RequestedById = @req");
+            if (locationIds != null) where.Add("ISNULL(a.LocationId, os.LocationId) IN (" + string.Join(",", locationIds.Select(x => x.ToString(System.Globalization.CultureInfo.InvariantCulture))) + ")");
+            string sql = RequestSelect + (where.Count > 0 ? " WHERE " + string.Join(" AND ", where) : "")
+                + " ORDER BY CASE WHEN a.Status = 'Pending' THEN 0 ELSE 1 END, a.RequestedAt DESC";
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(sql, conn);
+            if (requestedById != null) cmd.Parameters.AddWithValue("@req", requestedById.Value);
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) list.Add(MapRequest(r).Dto);
+            return list;
+        }
+
+        public async Task<bool> SendBackTransferRequestAsync(int id, int? decidedById, string note)
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(@"UPDATE dbo.WN_SpaceTransferRequests
+                SET Status = 'SentBack', DecidedById = @by, DecidedAt = SYSUTCDATETIME(), DecisionNote = @note
+                WHERE Id = @id AND Status = 'Pending'", conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.Parameters.AddWithValue("@by", (object?)decidedById ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@note", note);
+            return await cmd.ExecuteNonQueryAsync() == 1;
+        }
+
+        public async Task FinalizeApprovalAsync(int id, int? decidedById, string? note, string planJson, TransferPlanDto plan)
+        {
+            await using var conn = CreateConnection();
+            await conn.OpenAsync();
+            await using var cmd = new SqlCommand(@"UPDATE dbo.WN_SpaceTransferRequests
+                SET PlanJson = @json, PerSeatPrice = @p, NewDeposit = @nd, PrepaidMode = @pm, DepositDecreaseMode = @dm,
+                    DecidedById = ISNULL(DecidedById, @by), DecidedAt = ISNULL(DecidedAt, SYSUTCDATETIME()), DecisionNote = ISNULL(@note, DecisionNote)
+                WHERE Id = @id AND Status = 'Approved'", conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.Parameters.AddWithValue("@json", planJson);
+            cmd.Parameters.AddWithValue("@p", plan.PerSeatPrice);
+            cmd.Parameters.AddWithValue("@nd", plan.NewDeposit);
+            cmd.Parameters.AddWithValue("@pm", plan.PrepaidMode);
+            cmd.Parameters.AddWithValue("@dm", (object?)plan.DepositDecreaseMode ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@by", (object?)decidedById ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@note", (object?)note ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync();
+        }
     }
-
-
 }

@@ -278,7 +278,9 @@ namespace WorkNest.Application.Services.BookingSchedules
             if (info?.StartOn == null || info.IsMeetingRoom) return null;
             var group = BookingScheduleMath.FirstInvoiceGroup(rows.ToList(), info.StartOn.Value, info.BillingPeriodMonths);
             if (group.Count == 0) return null;
-            return new ScheduleInvoiceSource { Booking = info, Rows = group, Figures = BookingScheduleMath.Figures(group) };
+            var figures = BookingScheduleMath.Figures(group);
+            TransferCreditMath.Apply(figures, info.TransferCreditBalance);
+            return new ScheduleInvoiceSource { Booking = info, Rows = group, Figures = figures };
         }
 
         public async Task<(bool HasSchedule, ScheduleInvoiceSource? Next)> GetNextInvoiceSourceAsync(int bookingId, CancellationToken ct = default)
@@ -291,7 +293,9 @@ namespace WorkNest.Application.Services.BookingSchedules
             var next = BookingScheduleMath.NextUninvoiced(rows);
             if (next == null) return (true, null);
             var group = new List<BookingScheduleRow> { next };
-            return (true, new ScheduleInvoiceSource { Booking = info, Rows = group, Figures = BookingScheduleMath.Figures(group), AnyRowInvoiced = rows.Any(r => r.Locked) });
+            var figures = BookingScheduleMath.Figures(group);
+            TransferCreditMath.Apply(figures, info.TransferCreditBalance);
+            return (true, new ScheduleInvoiceSource { Booking = info, Rows = group, Figures = figures, AnyRowInvoiced = rows.Any(r => r.Locked) });
         }
 
         public Task<int?> FindLiveInvoiceForPeriodAsync(int bookingId, DateTime start, DateTime end, CancellationToken ct = default) =>

@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.API.Extensions;
 using WorkNest.API.Filters;
 using WorkNest.Application.DTOs.Transfer;
+using WorkNest.Application.Services.Transfers;
 using WorkNest.Application.Interfaces;
 using WorkNest.Common.Responses;
 
@@ -12,7 +13,7 @@ namespace WorkNest.API.Controllers
 {
     [ApiController]
     [Route("api/booking-transfers")]
-    [Authorize(Roles = "sales_executive,SalesExecutive,admin,Admin,super_admin,SuperAdmin")]
+    [Authorize(Roles = "sales_executive,SalesExecutive,admin,Admin,super_admin,SuperAdmin,sales_manager,SalesManager")]
     [ValidateLocationScope]
     public class TransferController : ControllerBase
     {
@@ -26,6 +27,10 @@ namespace WorkNest.API.Controllers
         }
 
         private string? ResolveUserEmail() => User.GetEmail();
+
+        /// <summary>TRF_02: a sales executive (not also admin / super admin) needs the sales manager for a price below the current and the list price.</summary>
+        private bool IsSalesExecutiveOnly() =>
+            (User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive")) && !User.IsAdminOrSuperAdmin();
 
         private async Task<int?> ResolveActorIdAsync()
         {
@@ -48,6 +53,21 @@ namespace WorkNest.API.Controllers
             var result = await _transferService.GetActiveBookingsAsync(locationId, search, allowedLocations);
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
+        /// <summary>Completed same-location transfers, newest first. Same roles and location scope as active-bookings.</summary>
+        [HttpGet("history")]
+        [SalesManagerAllowed]
+        public async Task<IActionResult> History(
+            [FromQuery] string? search,
+            [FromQuery] DateTime? from,
+            [FromQuery] DateTime? to,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 25)
+        {
+            var allowedLocations = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
+            var result = await _transferService.GetHistoryAsync(search, from, to, page, pageSize, allowedLocations);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
+
         /// <summary>
         /// Previews space transfer settlement, discount cap check, and blocking invoices.
         /// </summary>
@@ -56,18 +76,20 @@ namespace WorkNest.API.Controllers
             [FromQuery] int bookingId,
             [FromQuery] int newSpaceId,
             [FromQuery] DateTime? effectiveDate,
-            [FromQuery] decimal transferFee = 0m)
+            [FromQuery] decimal transferFee = 0m,
+            [FromQuery] decimal? perSeatPrice = null)
         {
             var request = new TransferPreviewRequest
             {
                 BookingId = bookingId,
                 NewSpaceId = newSpaceId,
                 EffectiveDate = effectiveDate,
-                TransferFee = transferFee
+                TransferFee = transferFee,
+                PerSeatPrice = perSeatPrice
             };
 
             var allowedLocations = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
-            var result = await _transferService.GetPreviewAsync(request, ResolveUserEmail(), allowedLocations);
+            var result = await _transferService.GetPreviewAsync(request, ResolveUserEmail(), allowedLocations, IsSalesExecutiveOnly());
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
@@ -81,7 +103,7 @@ namespace WorkNest.API.Controllers
                 return BadRequest(ApiResponse.Fail("Request payload is required."));
 
             var allowedLocations = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
-            var result = await _transferService.GetPreviewAsync(request, ResolveUserEmail(), allowedLocations);
+            var result = await _transferService.GetPreviewAsync(request, ResolveUserEmail(), allowedLocations, IsSalesExecutiveOnly());
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
@@ -102,23 +124,28 @@ namespace WorkNest.API.Controllers
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
 
-        /// <summary>
-        /// Executes space transfer transactionally.
-        /// </summary>
+        /// <summary>The plan table of a transfer (nothing is saved): TransferPlanRequest to TransferPlanDto.</summary>
+        [HttpPost("plan")]
+        [SalesManagerAllowed]
+        public async Task<IActionResult> Plan([FromBody] TransferPlanRequest request)
+        {
+            if (request == null) return BadRequest(ApiResponse.Fail("Request payload is required."));
+            var caller = User.ToTransferCaller(await ResolveActorIdAsync());
+            var result = await _transferService.PlanAsync(request, caller);
+            return result.IsSuccessful ? Ok(result) : BadRequest(result);
+        }
+
+        /// <summary>Admin / super admin: the transfer runs. Sales executive: a request waits for the sales manager.</summary>
         [HttpPost("execute")]
-        public async Task<IActionResult> Execute([FromBody] TransferExecuteRequest request)
+        public async Task<IActionResult> Execute([FromBody] TransferPlanRequest request)
         {
             if (request == null)
                 return BadRequest(ApiResponse.Fail("Transfer request payload is required."));
-
-            var actorId = await ResolveActorIdAsync();
-            var userEmail = ResolveUserEmail();
-            var allowedLocations = User.IsLocationBoundRole() ? User.GetLocationIds() : null;
-
-            var result = await _transferService.ExecuteTransferAsync(request, userEmail, actorId, allowedLocations);
+            var caller = User.ToTransferCaller(await ResolveActorIdAsync());
+            var result = await _transferService.ExecuteAsync(request, caller, ResolveUserEmail());
             return result.IsSuccessful ? Ok(result) : BadRequest(result);
         }
-    
+
         // =========================================================================================
         // Phase 2: Branch Transfers & Pending Payments Endpoints
         // =========================================================================================
