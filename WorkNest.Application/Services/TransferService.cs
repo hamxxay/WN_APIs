@@ -46,7 +46,7 @@ namespace WorkNest.Application.Services
                 return ApiResponse.Fail($"Active booking #{request.BookingId} not found.");
 
             // Location-bound check
-            if (allowedLocationIds != null && allowedLocationIds.Count > 0 && !allowedLocationIds.Contains(booking.LocationId))
+            if (allowedLocationIds != null && !allowedLocationIds.Contains(booking.LocationId))
                 return ApiResponse.Fail("You are not authorized to manage bookings for this location.");
 
             var effectiveDate = request.EffectiveDate ?? _clock.Today;
@@ -95,7 +95,7 @@ namespace WorkNest.Application.Services
             if (booking == null)
                 return ApiResponse.Fail($"Active booking #{request.BookingId} not found.");
 
-            if (allowedLocationIds != null && allowedLocationIds.Count > 0 && !allowedLocationIds.Contains(booking.LocationId))
+            if (allowedLocationIds != null && !allowedLocationIds.Contains(booking.LocationId))
                 return ApiResponse.Fail("You are not authorized to manage bookings for this location.");
 
             var effectiveDate = request.EffectiveDate ?? _clock.Today;
@@ -181,7 +181,7 @@ namespace WorkNest.Application.Services
             if (booking == null)
                 return ApiResponse.Fail($"Booking #{bookingId} not found.");
 
-            if (allowedLocationIds != null && allowedLocationIds.Count > 0 && !allowedLocationIds.Contains(booking.LocationId))
+            if (allowedLocationIds != null && !allowedLocationIds.Contains(booking.LocationId))
                 return ApiResponse.Fail("You are not authorized to view spaces for this location.");
 
             var spaces = await _transferRepo.GetAvailableTargetSpacesAsync(
@@ -208,7 +208,7 @@ namespace WorkNest.Application.Services
         public async Task<ApiResponse> GetActiveBookingsAsync(
             int? locationId, string? search, IReadOnlyCollection<int>? allowedLocationIds)
         {
-            if (allowedLocationIds != null && allowedLocationIds.Count > 0)
+            if (allowedLocationIds != null)
             {
                 if (locationId.HasValue && !allowedLocationIds.Contains(locationId.Value))
                 {
@@ -222,7 +222,7 @@ namespace WorkNest.Application.Services
 
             var bookings = await _transferRepo.GetActiveBookingsAsync(locationId, search);
 
-            if (allowedLocationIds != null && allowedLocationIds.Count > 0)
+            if (allowedLocationIds != null)
             {
                 bookings = bookings.Where(b => allowedLocationIds.Contains(b.LocationId)).ToList();
             }
@@ -241,7 +241,7 @@ namespace WorkNest.Application.Services
             if (booking == null)
                 return ApiResponse.Fail($"Booking #{request.BookingId} not found.");
 
-            if (allowedLocationIds != null && allowedLocationIds.Count > 0 && !allowedLocationIds.Contains(booking.LocationId))
+            if (allowedLocationIds != null && !allowedLocationIds.Contains(booking.LocationId))
                 return ApiResponse.Fail("You are not authorized to initiate transfers for this booking's location.");
 
             try
@@ -295,7 +295,7 @@ namespace WorkNest.Application.Services
             try
             {
                 var list = await _transferRepo.ListSendingRequestsAsync(companyId, locationId, userRole);
-                if (allowedLocationIds != null && allowedLocationIds.Count > 0 && userRole != "super_admin")
+                if (allowedLocationIds != null && userRole != "super_admin")
                 {
                     list = list.Where(r => allowedLocationIds.Contains(r.FromLocationId)).ToList();
                 }
@@ -329,7 +329,7 @@ namespace WorkNest.Application.Services
             try
             {
                 var list = await _transferRepo.ListIncomingRequestsAsync(companyId, locationId, userRole);
-                if (allowedLocationIds != null && allowedLocationIds.Count > 0 && userRole != "super_admin")
+                if (allowedLocationIds != null && userRole != "super_admin")
                 {
                     list = list.Where(r => allowedLocationIds.Contains(r.ToLocationId)).ToList();
                 }
@@ -408,7 +408,7 @@ namespace WorkNest.Application.Services
             try
             {
                 var list = await _transferRepo.ListPendingPaymentsAsync(companyId, locationId, userRole);
-                if (allowedLocationIds != null && allowedLocationIds.Count > 0 && userRole != "super_admin")
+                if (allowedLocationIds != null && userRole != "super_admin")
                 {
                     list = list.Where(p => allowedLocationIds.Contains(p.FromLocationId) || allowedLocationIds.Contains(p.ToLocationId)).ToList();
                 }
