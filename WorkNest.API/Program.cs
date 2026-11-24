@@ -387,6 +387,10 @@ try
     builder.Services.AddHttpClient(WorkNest.API.Security.FirebaseTokenVerifier.HttpClientName)
         .ConfigurePrimaryHttpMessageHandler(WorkNest.API.Security.FirebaseTokenVerifier.CreateKeysHandler);
     builder.Services.AddSingleton<WorkNest.API.Security.FirebaseTokenVerifier>();
+    // WhatsApp Cloud API (graph.facebook.com): the same IPv4-first connect as Firebase. With the default client a broken IPv6
+    // route used up the whole 20 s timeout, so about 1 in 3 bot replies failed with "WhatsApp could not be reached".
+    builder.Services.AddHttpClient(WorkNest.Infrastructure.ExternalServices.WhatsApp.WhatsAppCloudClient.HttpClientName)
+        .ConfigurePrimaryHttpMessageHandler(WorkNest.API.Security.FirebaseTokenVerifier.CreateKeysHandler);
     builder.Services.AddHostedService<UnifiPollingService>();
     builder.Services.AddHostedService<GwnPollingService>();   // GwnPolling switch; Gwn:Enabled
     builder.Services.AddHostedService<WhatsAppFollowUpService>();   // WhatsAppFollowUp switch; WhatsApp:FollowUpQuietSeconds (120) / FollowUpTickSeconds (30)

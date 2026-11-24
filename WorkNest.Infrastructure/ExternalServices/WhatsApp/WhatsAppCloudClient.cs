@@ -14,6 +14,9 @@ namespace WorkNest.Infrastructure.ExternalServices.WhatsApp
     /// </summary>
     public class WhatsAppCloudClient : IWhatsAppClient
     {
+        /// <summary>The named HttpClient (Program.cs): IPv4 first with short connect timeouts.</summary>
+        public const string HttpClientName = "WhatsApp";
+
         private readonly IHttpClientFactory _http;
         private readonly IConfiguration _config;
         private readonly ILogger<WhatsAppCloudClient> _logger;
@@ -80,7 +83,7 @@ namespace WorkNest.Infrastructure.ExternalServices.WhatsApp
             var version = string.IsNullOrWhiteSpace(_config["WhatsApp:GraphVersion"]) ? "v23.0" : _config["WhatsApp:GraphVersion"];
             try
             {
-                var client = _http.CreateClient();
+                var client = _http.CreateClient(HttpClientName);
                 client.Timeout = TimeSpan.FromSeconds(20);
                 using var req = new HttpRequestMessage(HttpMethod.Post, $"https://graph.facebook.com/{version}/{PhoneNumberId}/messages")
                 {
