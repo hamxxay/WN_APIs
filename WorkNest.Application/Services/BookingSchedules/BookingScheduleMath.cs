@@ -56,6 +56,10 @@ namespace WorkNest.Application.Services.BookingSchedules
         public decimal GrandTotal { get; set; }
         public decimal RoomRentExclTax { get; set; }
         public List<int> RowNos { get; set; } = new();
+        /// <summary>TRF_02: transfer credit already taken off these figures (inside Discount, RentAfterDiscount, RoomRentExclTax and GrandTotal).</summary>
+        public decimal TransferCredit { get; set; }
+        /// <summary>TRF_02: at least one row bills only its difference from what was paid on the old booking.</summary>
+        public bool HasDifferenceRows { get; set; }
     }
 
     /// <summary>
@@ -179,7 +183,7 @@ namespace WorkNest.Application.Services.BookingSchedules
                     bool same = type == NormalizeDiscountType(cur.DiscountType)
                         && Math.Abs(inp.DiscountValue - cur.DiscountValue) < 0.005m
                         && Math.Abs((dep ?? 0m) - (cur.SecurityDeposit ?? 0m)) < 0.005m;
-                    if (!same) return (null, $"{cur.Label} is already invoiced ({cur.InvoiceNumber}) and cannot be changed.");
+                    if (!same) return (null, $"{cur.Label} is already invoiced ({cur.InvoiceNumber ?? "settled by the space transfer"}) and cannot be changed.");
                 }
                 else
                 {
@@ -198,7 +202,8 @@ namespace WorkNest.Application.Services.BookingSchedules
             RowNo = r.RowNo, DiscountType = r.DiscountType, DiscountValue = r.DiscountValue, SecurityDeposit = r.SecurityDeposit,
             Label = r.Label, PeriodStart = r.PeriodStart, PeriodEnd = r.PeriodEnd, MonthFraction = r.MonthFraction, IsShort = r.IsShort,
             MonthlyRent = r.MonthlyRent, ServiceCharge = r.ServiceCharge, RoomRent = r.RoomRent, DiscountAmount = r.DiscountAmount,
-            RentAfterDiscount = r.RentAfterDiscount, Tax = r.Tax, Total = r.Total, InvoiceId = r.InvoiceId, InvoiceNumber = r.InvoiceNumber, Locked = r.Locked
+            RentAfterDiscount = r.RentAfterDiscount, Tax = r.Tax, Total = r.Total, InvoiceId = r.InvoiceId, InvoiceNumber = r.InvoiceNumber, Locked = r.Locked,
+            PaidRent = r.PaidRent, PaidServiceCharge = r.PaidServiceCharge, PaidTax = r.PaidTax, TransferSettled = r.TransferSettled, TransferCredit = r.TransferCredit
         };
 
         // ---- the first invoice window / grouping -------------------------------------------------------------------------------
@@ -235,6 +240,33 @@ namespace WorkNest.Application.Services.BookingSchedules
             return group;
         }
 
+        /// <summary>What one month bills (TRF_02). An ordinary row bills itself. A space-transfer row with an amount already paid on the old
+        /// booking bills only the difference: rent = (rentAfterDiscount - paidRent) with no discount, service charge = serviceCharge -
+        /// paidServiceCharge, tax = tax - paidTax. Net (rent + tax) of 0 or less bills nothing (that credit was booked when the transfer ran).
+        /// When a part is negative but the net is positive, the whole net is billed as rent with no service charge or tax. A settled row bills nothing.</summary>
+        public static (decimal Rent, decimal Discount, decimal RentAfterDiscount, decimal ServiceCharge, decimal Tax, decimal Deposit, decimal Total) Billed(BookingScheduleRow r)
+        {
+            decimal dep = r.SecurityDeposit ?? 0m;
+            if (r.TransferSettled) return (0m, 0m, 0m, 0m, 0m, 0m, 0m);
+            if (r.PaidRent is null && r.PaidTax is null)
+                return (r.MonthlyRent, r.DiscountAmount, r.RentAfterDiscount, r.ServiceCharge, r.Tax, dep, Round2(r.RentAfterDiscount + r.Tax + dep));
+            decimal radDiff = Round2(r.RentAfterDiscount - (r.PaidRent ?? 0m));
+            decimal scDiff = Round2(r.ServiceCharge - (r.PaidServiceCharge ?? 0m));
+            decimal taxDiff = Round2(r.Tax - (r.PaidTax ?? 0m));
+            decimal net = Round2(radDiff + taxDiff);
+            if (net <= 0m) return (0m, 0m, 0m, 0m, 0m, dep, dep);
+            if (radDiff < 0m || scDiff < 0m || taxDiff < 0m) { radDiff = net; scDiff = 0m; taxDiff = 0m; }
+            if (scDiff > radDiff) scDiff = radDiff;
+            return (radDiff, 0m, radDiff, scDiff, taxDiff, dep, Round2(radDiff + taxDiff + dep));
+        }
+
+        /// <summary>TRF_02: a row that bills only its difference (it has amounts paid on the old booking and is not settled).</summary>
+        public static bool IsDifferenceRow(BookingScheduleRow r) => !r.TransferSettled && (r.PaidRent != null || r.PaidTax != null);
+
+        /// <summary>TRF_02: (rentAfterDiscount + tax) - (paidRent + paidTax); negative = credit to the client.</summary>
+        public static decimal Difference(BookingScheduleRow r) =>
+            Round2(r.RentAfterDiscount + r.Tax - (r.PaidRent ?? 0m) - (r.PaidTax ?? 0m));
+
         /// <summary>The next row to bill: the first un-invoiced row. Null when every month is invoiced.</summary>
         public static BookingScheduleRow? NextUninvoiced(IReadOnlyList<BookingScheduleRow> rows) =>
             rows.OrderBy(r => r.RowNo).FirstOrDefault(r => !r.Locked);
@@ -244,19 +276,21 @@ namespace WorkNest.Application.Services.BookingSchedules
         {
             if (group == null || group.Count == 0) throw new ArgumentException("No rows to invoice.", nameof(group));
             var ordered = group.OrderBy(r => r.RowNo).ToList();
+            var billed = ordered.Select(Billed).ToList();   // difference rows bill their difference, settled rows nothing
             var f = new ScheduleInvoiceFigures
             {
                 PeriodStart = ordered.Min(r => r.PeriodStart).Date,
                 PeriodEnd = ordered.Max(r => r.PeriodEnd).Date,
-                Rent = Round2(ordered.Sum(r => r.MonthlyRent)),
-                Discount = Round2(ordered.Sum(r => r.DiscountAmount)),
-                RentAfterDiscount = Round2(ordered.Sum(r => r.RentAfterDiscount)),
-                ServiceCharge = Round2(ordered.Sum(r => r.ServiceCharge)),
-                Tax = Round2(ordered.Sum(r => r.Tax)),
-                Deposit = Round2(ordered.Sum(r => r.SecurityDeposit ?? 0m)),
-                GrandTotal = Round2(ordered.Sum(r => r.Total)),
+                Rent = Round2(billed.Sum(b => b.Rent)),
+                Discount = Round2(billed.Sum(b => b.Discount)),
+                RentAfterDiscount = Round2(billed.Sum(b => b.RentAfterDiscount)),
+                ServiceCharge = Round2(billed.Sum(b => b.ServiceCharge)),
+                Tax = Round2(billed.Sum(b => b.Tax)),
+                Deposit = Round2(billed.Sum(b => b.Deposit)),
+                GrandTotal = Round2(billed.Sum(b => b.Total)),
                 MonthsExact = ordered.Sum(r => r.MonthFraction),
-                RowNos = ordered.Select(r => r.RowNo).ToList()
+                RowNos = ordered.Select(r => r.RowNo).ToList(),
+                HasDifferenceRows = ordered.Any(IsDifferenceRow)
             };
             f.Months = Math.Max(1, (int)Math.Round(f.MonthsExact, MidpointRounding.AwayFromZero));
             f.RoomRentExclTax = Math.Max(0m, f.RentAfterDiscount - f.ServiceCharge);

@@ -86,6 +86,16 @@ namespace WorkNest.API.Services
         /// The CreateCustomInvoice request of "generate next invoice" for one schedule month: rent line net of the discount (DiscountTotal sent
         /// separately), a security deposit line when the row has one, service charge and tax in the header fields.
         /// </summary>
+        /// <summary>The rent line text: "Rent for ..." or, for a space-transfer month that bills only its difference, the difference wording.</summary>
+        public static string RentDescription(ScheduleInvoiceFigures f) => f.HasDifferenceRows
+            ? $"Rent difference for {f.PeriodStart:MMM d, yyyy} to {f.PeriodEnd:MMM d, yyyy} (new space, less already paid)"
+            : $"Rent for {f.PeriodStart:MMM d, yyyy} to {f.PeriodEnd:MMM d, yyyy}";
+
+        /// <summary>The transfer credit sentence added to the notes ("" when none was taken). The rent line is already net of it.</summary>
+        public static string CreditNote(ScheduleInvoiceFigures f) => f.TransferCredit > 0m
+            ? $" | Transfer credit (space transfer) of PKR {f.TransferCredit:N2} deducted from the rent"
+            : "";
+
         public static CreateCustomInvoiceDto NextInvoiceDto(ScheduleInvoiceSource src, int bookingId, int userId, string spaceName, int secMonths,
             DateTime today, int dueDays)
         {
@@ -97,7 +107,7 @@ namespace WorkNest.API.Services
                 UserId = userId,
                 IssuedOn = today,
                 DueOn = today.AddDays(dueDays),
-                Notes = $"Cycle Billing Invoice for Booking #{bookingId} - {spaceName}",
+                Notes = $"Cycle Billing Invoice for Booking #{bookingId} - {spaceName}{CreditNote(f)}",
                 SendEmail = true,
                 BillingPeriodStart = f.PeriodStart,
                 BillingPeriodEnd = f.PeriodEnd,
@@ -122,7 +132,7 @@ namespace WorkNest.API.Services
             if (f.RentAfterDiscount > 0)
                 dto.Lines.Add(new CreateCustomInvoiceLineDto
                 {
-                    Description = $"Rent for {f.PeriodStart:MMM d, yyyy} to {f.PeriodEnd:MMM d, yyyy}",
+                    Description = RentDescription(f),
                     Quantity = 1, UnitPrice = f.RentAfterDiscount, DiscountAmount = 0m, TaxRate = 0m, ChargeTypeId = 1
                 });
             if (f.Deposit > 0)
@@ -134,7 +144,7 @@ namespace WorkNest.API.Services
             if (dto.Lines.Count == 0)
                 dto.Lines.Add(new CreateCustomInvoiceLineDto
                 {
-                    Description = $"Rent for {f.PeriodStart:MMM d, yyyy} to {f.PeriodEnd:MMM d, yyyy}",
+                    Description = RentDescription(f),
                     Quantity = 1, UnitPrice = 0m, DiscountAmount = 0m, TaxRate = 0m, ChargeTypeId = 1
                 });
             return dto;
@@ -181,6 +191,10 @@ namespace WorkNest.API.Services
         Skipped
     }
 
+    /// <summary>What a rent-schedule billing attempt did: the outcome, a message for "nothing billed", and the invoice when one was made or linked.</summary>
+    public sealed record RentScheduleJobResult(RentScheduleJobOutcome Outcome, string? Message = null, int? InvoiceId = null, string? InvoiceNumber = null,
+        decimal Total = 0m, DateTime? PeriodStart = null, DateTime? PeriodEnd = null);
+
     /// <summary>
     /// Billing Automation for a booking that has rent schedule rows: bills the next un-invoiced row instead of dbo.WN_Invoice_CreateRecurring.
     /// Same invoice as that procedure makes (InvoiceTypeId 2, PendingApproval, "INV-REC-" number, service charge + tax header fields, ST invoice) but the
@@ -190,25 +204,36 @@ namespace WorkNest.API.Services
     public static class RentScheduleJobInvoicer
     {
         public static async Task<RentScheduleJobOutcome> TryBillNextRowAsync(SqlConnection conn, string connectionString, IBookingScheduleService schedule,
-            int bookingId, DateTime today, Microsoft.Extensions.Logging.ILogger log, CancellationToken ct)
+            int bookingId, DateTime today, Microsoft.Extensions.Logging.ILogger log, CancellationToken ct) =>
+            (await TryBillNextRowDetailedAsync(conn, connectionString, schedule, bookingId, today, log, ct)).Outcome;
+
+        /// <summary>
+        /// Same as <see cref="TryBillNextRowAsync"/> but tells what was made (the on-demand "generate recurring invoice" answers with it).
+        /// <paramref name="requireInvoicedMonth"/>: refuse to bill the first month of a table that has no invoiced month yet (the first invoice
+        /// has its own path), answered as <see cref="RentScheduleJobOutcome.Skipped"/> with a message.
+        /// </summary>
+        public static async Task<RentScheduleJobResult> TryBillNextRowDetailedAsync(SqlConnection conn, string connectionString, IBookingScheduleService schedule,
+            int bookingId, DateTime today, Microsoft.Extensions.Logging.ILogger log, CancellationToken ct, bool requireInvoicedMonth = false)
         {
             // Cheap look first (no lock for the many bookings without a table).
-            if (!(await schedule.GetNextInvoiceSourceAsync(bookingId, ct)).HasSchedule) return RentScheduleJobOutcome.NotScheduled;
+            if (!(await schedule.GetNextInvoiceSourceAsync(bookingId, ct)).HasSchedule) return new(RentScheduleJobOutcome.NotScheduled);
 
             await using var guard = await RentScheduleLock.AcquireAsync(connectionString, bookingId, 15000, ct);
             if (guard == null)
             {
                 log.LogInformation("Booking {BookingId} is being billed from its rent schedule by another path. Skipping.", bookingId);
-                return RentScheduleJobOutcome.Skipped;
+                return new(RentScheduleJobOutcome.Skipped, "This booking is being invoiced right now - try again in a moment.");
             }
 
             var (has, next) = await schedule.GetNextInvoiceSourceAsync(bookingId, ct);
-            if (!has) return RentScheduleJobOutcome.NotScheduled;
+            if (!has) return new(RentScheduleJobOutcome.NotScheduled);
             if (next == null)
             {
                 log.LogInformation("Booking {BookingId}: every month of the rent schedule is invoiced.", bookingId);
-                return RentScheduleJobOutcome.Skipped;
+                return new(RentScheduleJobOutcome.Skipped, "Every month of this booking's rent schedule is already invoiced; there is no further period to invoice.");
             }
+            if (requireInvoicedMonth && !next.AnyRowInvoiced)
+                return new(RentScheduleJobOutcome.Skipped, "Send the first invoice first: the rent schedule has no invoiced month yet.");
 
             var f = next.Figures;
             var b = next.Booking;
@@ -227,7 +252,7 @@ namespace WorkNest.API.Services
                         await RentScheduleBookingRepository.MarkRowsInvoicedAsync(conn, null, bookingId, f.RowNos, existing.Value, ct);
                         log.LogInformation("Invoice {InvoiceId} already exists for booking {BookingId} period {Start:yyyy-MM-dd} to {End:yyyy-MM-dd}; linked to the rent schedule row.", existing, bookingId, f.PeriodStart, f.PeriodEnd);
                     }
-                    return RentScheduleJobOutcome.Skipped;
+                    return new(RentScheduleJobOutcome.Skipped, existing != null ? "This period was already invoiced; the invoice is now linked to the rent schedule." : "An invoice already exists for this period.", existing);
                 }
             }
 
@@ -235,7 +260,7 @@ namespace WorkNest.API.Services
             string number = baseNumber;
             for (int seq = 2; await InvoiceNumberExistsAsync(conn, number, ct); seq++) number = $"{baseNumber}-R{seq}";
             var due = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
-            string notes = $"Recurring Invoice for Period {f.PeriodStart:yyyy-MM-dd} to {f.PeriodEnd:yyyy-MM-dd}";
+            string notes = $"Recurring Invoice for Period {f.PeriodStart:yyyy-MM-dd} to {f.PeriodEnd:yyyy-MM-dd}{RentScheduleInvoiceShape.CreditNote(f)}";
 
             using var tx = conn.BeginTransaction();
             try
@@ -292,9 +317,19 @@ namespace WorkNest.API.Services
                     await st.ExecuteNonQueryAsync(ct);
                 }
 
+                // Transfer credit (space transfer): already inside f (Discount, RentAfterDiscount, RoomRentExclTax, GrandTotal), so the header, the rent line and
+                // the voucher (AR = GrandTotal = rent + service + tax + deposit) agree. Taken off the balance in THIS transaction; 0 rows = the balance changed, roll back.
+                if (f.TransferCredit > 0m)
+                {
+                    if (!await TransferCreditStore.IsAvailableAsync(conn, tx, ct)
+                        || await TransferCreditStore.ConsumeAsync(conn, tx, bookingId, f.TransferCredit, invoiceId, $"Applied to invoice {generatedNumber}", ct) == null)
+                        throw new InvalidOperationException($"The transfer credit of booking {bookingId} changed meanwhile; nothing was billed.");
+                    await TransferCreditStore.SetRowCreditsAsync(conn, tx, bookingId, TransferCreditMath.SplitOverRows(next.Rows, f.TransferCredit), ct);
+                }
+
                 short sort = 1;
                 if (f.RentAfterDiscount > 0 || f.Deposit <= 0)
-                    await InsertLineAsync(conn, tx, invoiceId, 1, $"Rent for {f.PeriodStart:MMM d, yyyy} to {f.PeriodEnd:MMM d, yyyy}", 1m, f.RentAfterDiscount, sort++, ct);
+                    await InsertLineAsync(conn, tx, invoiceId, 1, RentScheduleInvoiceShape.RentDescription(f), 1m, f.RentAfterDiscount, sort++, ct);
                 if (f.Deposit > 0)
                     await InsertLineAsync(conn, tx, invoiceId, 2, $"Security Deposit (Refundable - {b.SpaceName ?? "Workspace"})", 1m, f.Deposit, sort++, ct);
 
@@ -343,7 +378,7 @@ namespace WorkNest.API.Services
 
                 await tx.CommitAsync(ct);
                 log.LogInformation("Generated rent schedule invoice {InvoiceNo} (ID: {InvoiceId}) for Booking {BookingId}, rows {Rows}. Total: PKR {Total}.", generatedNumber, invoiceId, bookingId, string.Join(",", f.RowNos), f.GrandTotal);
-                return RentScheduleJobOutcome.Billed;
+                return new(RentScheduleJobOutcome.Billed, null, invoiceId, generatedNumber, f.GrandTotal, f.PeriodStart, f.PeriodEnd);
             }
             catch
             {

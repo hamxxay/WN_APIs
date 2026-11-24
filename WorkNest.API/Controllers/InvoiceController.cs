@@ -1349,7 +1349,9 @@ namespace WorkNest.API.Controllers
                     var statusVal = (await chkCmd.ExecuteScalarAsync())?.ToString();
                     if (string.Equals(statusVal, "PendingApproval", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (force)
+                        bool canApprove = User.IsInRole("admin") || User.IsInRole("Admin") || User.IsInRole("super_admin") || User.IsInRole("SuperAdmin")
+                            || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
+                        if (force && canApprove && await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Invoice, id.ToString()))
                         {
                             var currentUserId = await ResolveUserIdAsync(conn);
                             using var appCmd = new SqlCommand("dbo.WN_Invoices_DirectApprove", conn) { CommandType = CommandType.StoredProcedure };
@@ -1359,7 +1361,24 @@ namespace WorkNest.API.Controllers
                         }
                         else
                         {
-                            return BadRequest(new { isSuccessful = false, message = "This recurring invoice is pending approval and cannot be emailed until approved. Pass ?force=true to approve and send." });
+                            string? number = null;
+                            using (var numCmd = new SqlCommand("SELECT InvoiceNumber FROM dbo.WN_Invoices WHERE Id = @id", conn))
+                            {
+                                numCmd.Parameters.AddWithValue("@id", id);
+                                number = (await numCmd.ExecuteScalarAsync()) as string;
+                            }
+                            var label = string.IsNullOrWhiteSpace(number) ? "This invoice" : $"Invoice {number}";
+                            return Conflict(new
+                            {
+                                isSuccessful = false,
+                                errorCode = "INVOICE_PENDING_APPROVAL",
+                                invoiceId = id,
+                                invoiceNumber = number,
+                                canApprove,
+                                message = canApprove
+                                    ? $"{label} is already created and is waiting for approval, so it has not been emailed. Approve it to send it to the customer."
+                                    : $"{label} is already created and is waiting for approval, so it has not been emailed. Ask an admin or sales executive to approve it in Invoice Approvals."
+                            });
                         }
                     }
                 }
@@ -1476,7 +1495,7 @@ namespace WorkNest.API.Controllers
         /// <summary>
         /// Approves exactly one PendingApproval invoice.
         /// Rejects if not viewed, not PendingApproval, viewed by another user, or caller's location does not match.
-        /// Super admins receive 403 Forbidden on approve (queue review only).
+        /// Super admins may approve too (any location).
         /// Dispatches the email immediately upon approval.
         /// </summary>
         [HttpPost("api/invoice/{id:int}/approve")]
@@ -1485,12 +1504,6 @@ namespace WorkNest.API.Controllers
         public async Task<IActionResult> ApproveInvoice(int id)
         {
             if (id <= 0) return BadRequest(new { isSuccessful = false, message = "Invalid invoice ID." });
-
-            // Super admins may view the queue only (403 on approve)
-            if (User.IsSuperAdmin())
-            {
-                return StatusCode(403, new { isSuccessful = false, message = "Super admins may review the approval queue, but approvals must be performed by the assigned location sales executive or admin." });
-            }
 
             if (!await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Invoice, id.ToString()))
                 return StatusCode(403, new { isSuccessful = false, message = "Location mismatch. You cannot approve invoices outside your assigned location." });
@@ -2293,6 +2306,55 @@ namespace WorkNest.API.Controllers
                 if (!new[] { 1, 2, 5, 33 }.Contains(bookingStatusId))
                 {
                     return BadRequest(new { isSuccessful = false, message = $"Booking #{bookingId} is not in an active status (Current status ID: {bookingStatusId})." });
+                }
+
+                // Rent schedule: a booking with rent schedule rows bills its next un-invoiced row (never the procedure, which would price the month
+                // from the booking and ignore the table, a transfer's paid amounts and the transfer credit). A period sent in the request is ignored then.
+                var recurringSchedule = ScheduleService;
+                if (recurringSchedule != null)
+                {
+                    var scheduled = await WorkNest.API.Services.RentScheduleJobInvoicer.TryBillNextRowDetailedAsync(conn, GetConnectionString(), recurringSchedule, bookingId,
+                        _clock.Today, HttpContext.RequestServices.GetRequiredService<ILogger<InvoiceController>>(), HttpContext.RequestAborted, requireInvoicedMonth: true);
+                    if (scheduled.Outcome == WorkNest.API.Services.RentScheduleJobOutcome.Billed || (scheduled.Outcome == WorkNest.API.Services.RentScheduleJobOutcome.Skipped && scheduled.InvoiceId != null))
+                    {
+                        int sid = scheduled.InvoiceId!.Value;
+                        bool linkedOnly = scheduled.Outcome != WorkNest.API.Services.RentScheduleJobOutcome.Billed;
+                        string approval = "PendingApproval";
+                        bool mailed = false;
+                        string mailMsg = "";
+                        if (!linkedOnly && request?.AutoApproveAndSend == true)
+                        {
+                            var uid = await ResolveUserIdAsync(conn);
+                            using (var appCmd = new SqlCommand("dbo.WN_Invoices_DirectApprove", conn) { CommandType = CommandType.StoredProcedure })
+                            {
+                                appCmd.Parameters.AddWithValue("@Id", sid);
+                                appCmd.Parameters.AddWithValue("@UserId", (object?)uid ?? DBNull.Value);
+                                await appCmd.ExecuteNonQueryAsync();
+                            }
+                            approval = "Approved";
+                            var sent = await SendInvoiceEmailCoreAsync(sid, conn);
+                            mailed = sent.Success;
+                            mailMsg = sent.Message;
+                        }
+                        return Ok(new
+                        {
+                            isSuccessful = true,
+                            alreadyExisted = linkedOnly,
+                            invoiceId = sid,
+                            invoiceNumber = scheduled.InvoiceNumber,
+                            totalAmount = scheduled.Total,
+                            billingPeriodStart = scheduled.PeriodStart,
+                            billingPeriodEnd = scheduled.PeriodEnd,
+                            approvalStatus = approval,
+                            emailSent = mailed,
+                            emailMessage = string.IsNullOrWhiteSpace(mailMsg) ? null : mailMsg,
+                            message = linkedOnly ? scheduled.Message
+                                : mailed ? $"Recurring invoice {scheduled.InvoiceNumber} generated from the rent schedule, approved, and sent successfully."
+                                : $"Recurring invoice {scheduled.InvoiceNumber} generated from the rent schedule and placed in PendingApproval queue."
+                        });
+                    }
+                    if (scheduled.Outcome == WorkNest.API.Services.RentScheduleJobOutcome.Skipped)
+                        return BadRequest(new { isSuccessful = false, message = scheduled.Message ?? "Nothing to invoice from the rent schedule." });
                 }
 
                 // 2. Determine Period Start & End

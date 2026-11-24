@@ -8,8 +8,26 @@ namespace WorkNest.Application.Interfaces
     public interface ITransferRepository
     {
         // Phase 1: Same-Location Space Change
-        Task<TransferPreviewResponseDto> GetTransferPreviewAsync(int bookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee);
-        Task<TransferExecuteResponseDto> ExecuteTransferAsync(int oldBookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee, string notes, int? updatedById, string? userEmail);
+        Task<TransferPreviewResponseDto> GetTransferPreviewAsync(int bookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee, decimal? perSeatPrice = null);
+        Task<TransferExecuteResponseDto> ExecuteTransferAsync(int oldBookingId, int newSpaceId, DateTime effectiveDate, decimal transferFee, string notes, int? updatedById, string? userEmail, TransferExecutionArgs? args = null);
+        /// <summary>The procedures take @PerSeatPrice (TRF_02).</summary>
+        Task<bool> IsPerSeatPricingReadyAsync();
+        /// <summary>The redesign has run: @ScheduleJson on WN_Booking_TransferSpace and the table WN_TransferRequests.</summary>
+        Task<bool> IsRedesignReadyAsync();
+        /// <summary>True for a meeting / conference room (not a monthly transfer target).</summary>
+        Task<bool> IsMeetingRoomAsync(int spaceId);
+        Task<int> GetSecurityDepositMonthsAsync(int bookingId);
+        /// <summary>Adds a Pending request; null when the booking already has one waiting.</summary>
+        Task<int?> InsertTransferRequestAsync(int bookingId, int newSpaceId, DateTime effectiveDate, int? locationId, string planJson, TransferPlanDto plan, string? note, int? requestedById);
+        Task<TransferRequestRecord?> GetTransferRequestAsync(int id);
+        /// <summary>locationIds null = all; empty = nothing. requestedById set = only that user's.</summary>
+        Task<List<TransferRequestDto>> ListTransferRequestsAsync(bool pendingOnly, IReadOnlyCollection<int>? locationIds, int? requestedById);
+        /// <summary>Pending to SentBack in one UPDATE (false when no longer Pending).</summary>
+        Task<bool> SendBackTransferRequestAsync(int id, int? decidedById, string note);
+        /// <summary>After the procedure approved it: stores the deciding user, the note and the final values.</summary>
+        Task FinalizeApprovalAsync(int id, int? decidedById, string? note, string planJson, TransferPlanDto plan);
+        /// <summary>Completed transfers, newest first. locationIds null = all; empty = nothing.</summary>
+        Task<TransferHistoryPageDto> ListTransferHistoryAsync(string? search, DateTime? from, DateTime? to, int page, int pageSize, IReadOnlyCollection<int>? locationIds);
         Task<ActiveBookingSummaryDto?> GetBookingSummaryAsync(int bookingId);
         Task<TargetSpaceSummaryDto?> GetTargetSpaceSummaryAsync(int spaceId);
         Task<List<TargetSpaceSummaryDto>> GetAvailableTargetSpacesAsync(int locationId, DateTime effectiveDate, DateTime endDate, int excludeBookingId);

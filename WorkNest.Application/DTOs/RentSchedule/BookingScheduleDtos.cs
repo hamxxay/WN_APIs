@@ -43,6 +43,15 @@ namespace WorkNest.Application.DTOs.RentSchedule
         public int? InvoiceId { get; set; }
         public string? InvoiceNumber { get; set; }
         public bool Locked { get; set; }
+        /// <summary>TRF_02 (space transfer): the part of this month already paid on the old booking (its rent after discount, service
+        /// charge and tax for these days). Null on ordinary rows. The month then bills only the difference (BookingScheduleMath.Billed).</summary>
+        public decimal? PaidRent { get; set; }
+        public decimal? PaidServiceCharge { get; set; }
+        public decimal? PaidTax { get; set; }
+        /// <summary>TRF_02: settled when the transfer ran (one settlement invoice or credit), so it is never billed.</summary>
+        public bool TransferSettled { get; set; }
+        /// <summary>TRF_02: transfer credit taken off the invoice of this month.</summary>
+        public decimal? TransferCredit { get; set; }
     }
 
     public class BookingScheduleTotals

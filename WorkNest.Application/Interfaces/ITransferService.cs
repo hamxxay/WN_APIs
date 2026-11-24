@@ -10,8 +10,15 @@ namespace WorkNest.Application.Interfaces
     {
         // Phase 1
         Task<ApiResponse> GetActiveBookingsAsync(int? locationId, string? search, IReadOnlyCollection<int>? allowedLocationIds);
-        Task<ApiResponse> GetPreviewAsync(TransferPreviewRequest request, string? userEmail, IReadOnlyCollection<int>? allowedLocationIds);
-        Task<ApiResponse> ExecuteTransferAsync(TransferExecuteRequest request, string? userEmail, int? actorId, IReadOnlyCollection<int>? allowedLocationIds);
+        Task<ApiResponse> GetHistoryAsync(string? search, DateTime? from, DateTime? to, int page, int pageSize, IReadOnlyCollection<int>? allowedLocationIds);
+        Task<ApiResponse> GetPreviewAsync(TransferPreviewRequest request, string? userEmail, IReadOnlyCollection<int>? allowedLocationIds, bool salesExecutiveOnly = false);
+        Task<ApiResponse> PlanAsync(TransferPlanRequest request, WorkNest.Application.Services.Transfers.TransferCaller caller);
+        Task<ApiResponse> ExecuteAsync(TransferPlanRequest request, WorkNest.Application.Services.Transfers.TransferCaller caller, string? userEmail);
+        Task<ApiResponse> ListRequestsAsync(WorkNest.Application.Services.Transfers.TransferCaller caller, bool pendingOnly);
+        Task<ApiResponse> GetRequestAsync(WorkNest.Application.Services.Transfers.TransferCaller caller, int id);
+        Task<ApiResponse> RecalculateRequestAsync(WorkNest.Application.Services.Transfers.TransferCaller caller, int id, TransferDecisionRequest? decision);
+        Task<ApiResponse> ApproveRequestAsync(WorkNest.Application.Services.Transfers.TransferCaller caller, int id, TransferDecisionRequest? decision, string? userEmail);
+        Task<ApiResponse> SendBackRequestAsync(WorkNest.Application.Services.Transfers.TransferCaller caller, int id, string? note);
         Task<ApiResponse> GetAvailableTargetSpacesAsync(int bookingId, DateTime effectiveDate, IReadOnlyCollection<int>? allowedLocationIds);
         Task<byte[]> GenerateAddendumPdfAsync(int oldBookingId, int newBookingId, int newSpaceId, DateTime effectiveDate, string note);
 

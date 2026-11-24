@@ -17,6 +17,8 @@ namespace WorkNest.Application.Interfaces
         public decimal DiscountPercentage { get; set; }
         public int BillingPeriodMonths { get; set; } = 3;
         public decimal SecurityDepositRequired { get; set; }
+        /// <summary>TRF_02: transfer credit left on this booking (WN_Bookings.TransferCreditBalance), 0 before the script runs.</summary>
+        public decimal TransferCreditBalance { get; set; }
         public decimal ResolvedSecurityDeposit { get; set; }
         public int Seats { get; set; } = 1;
         public decimal SupportRate { get; set; } = 2000m;

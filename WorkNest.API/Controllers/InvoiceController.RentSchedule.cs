@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using WorkNest.API.Services;
 using WorkNest.Application.Interfaces;
 using WorkNest.Application.Services;
+using WorkNest.Application.Services.BookingSchedules;
+using WorkNest.Infrastructure.Repositories;
 
 namespace WorkNest.API.Controllers
 {
@@ -51,9 +53,53 @@ namespace WorkNest.API.Controllers
                 return Ok(new { isSuccessful = true, message = "This period was already invoiced; the invoice is now linked to the rent schedule.", invoiceId = existing.Value });
             }
 
-            var result = await CreateCustomInvoice(dto);
-            var invoiceId = RentScheduleInvoiceShape.InvoiceIdOf(result);
-            if (invoiceId == null) return result;
+            // Transfer credit (space transfer): the figures (and so the dto) already have it taken off. CreateCustomInvoice runs its own transaction inside
+            // WN_CreateCustomInvoice, so the credit is reserved first (guarded UPDATE + movement row) and handed back if no invoice comes out; never spent twice.
+            int? creditMovementId = null;
+            if (f.TransferCredit > 0m)
+            {
+                try
+                {
+                    await using var cc = new Microsoft.Data.SqlClient.SqlConnection(GetConnectionString());
+                    await cc.OpenAsync();
+                    if (!await TransferCreditStore.IsAvailableAsync(cc, null)
+                        || (creditMovementId = await TransferCreditStore.ConsumeAsync(cc, null, bookingId, f.TransferCredit, null, "Reserved for the invoice being created")) == null)
+                        return Conflict(new { isSuccessful = false, message = "The booking's transfer credit changed while the invoice was being prepared. Open the invoice again." });
+                }
+                catch (Exception ex)
+                {
+                    return StatusCode(500, new { isSuccessful = false, message = $"The transfer credit could not be reserved: {ex.Message}" });
+                }
+            }
+
+            IActionResult result;
+            int? invoiceId;
+            try
+            {
+                result = await CreateCustomInvoice(dto);
+                invoiceId = RentScheduleInvoiceShape.InvoiceIdOf(result);
+            }
+            catch
+            {
+                await ReleaseCreditAsync(bookingId, f, creditMovementId);
+                throw;
+            }
+            if (invoiceId == null)
+            {
+                await ReleaseCreditAsync(bookingId, f, creditMovementId);
+                return result;
+            }
+            if (creditMovementId != null)
+            {
+                try
+                {
+                    await using var cc = new Microsoft.Data.SqlClient.SqlConnection(GetConnectionString());
+                    await cc.OpenAsync();
+                    await TransferCreditStore.LinkMovementAsync(cc, null, creditMovementId.Value, invoiceId.Value);
+                    await TransferCreditStore.SetRowCreditsAsync(cc, null, bookingId, TransferCreditMath.SplitOverRows(src.Rows, f.TransferCredit));
+                }
+                catch (Exception ex) { Console.WriteLine($"[RentSchedule] transfer credit link failed: {ex.Message}"); }
+            }
             bool linked = false;
             try { linked = await svc.MarkInvoicedAsync(bookingId, f.RowNos, invoiceId.Value); } catch (Exception ex) { Console.WriteLine($"[RentSchedule] link failed: {ex.Message}"); }
             if (!linked)
@@ -69,6 +115,18 @@ namespace WorkNest.API.Controllers
                 return StatusCode(500, new { isSuccessful = false, invoiceId = invoiceId.Value,
                     message = $"Invoice {invoiceId} was created but could not be linked to the rent schedule rows. Do not create it again: calling generate next invoice again links it." });
             return result;
+        }
+
+        private async Task ReleaseCreditAsync(int bookingId, ScheduleInvoiceFigures f, int? movementId)
+        {
+            if (movementId == null) return;
+            try
+            {
+                await using var cc = new Microsoft.Data.SqlClient.SqlConnection(GetConnectionString());
+                await cc.OpenAsync();
+                await TransferCreditStore.ReleaseAsync(cc, null, bookingId, f.TransferCredit, movementId.Value);
+            }
+            catch (Exception ex) { Console.WriteLine($"[RentSchedule] transfer credit release failed (movement {movementId}): {ex.Message}"); }
         }
 
         /// <summary>
