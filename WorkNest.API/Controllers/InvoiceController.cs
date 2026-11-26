@@ -1265,7 +1265,7 @@ namespace WorkNest.API.Controllers
                 return (false, "Invoice not found.");
 
             if (string.IsNullOrWhiteSpace(targetEmail))
-                return (false, "Customer email is missing for this invoice.");
+                return (false, CustomerEmailMissingMessage);
 
             // One Bill location: make sure the invoice is on EzPay before the PDF / email are made.
             var oneBillNumber = await _oneBill.EnsureAsync(id);
@@ -1353,6 +1353,9 @@ namespace WorkNest.API.Controllers
                             || User.IsInRole("sales_executive") || User.IsInRole("SalesExecutive");
                         if (force && canApprove && await RecordScopeAttribute.AllowsAsync(HttpContext, RecordKind.Invoice, id.ToString()))
                         {
+                            var noEmail = await FindMissingCustomerEmailAsync(conn, id);
+                            if (noEmail != null)
+                                return Conflict(CustomerEmailMissingBody(id, noEmail.Value, "approve and send it again"));
                             var currentUserId = await ResolveUserIdAsync(conn);
                             using var appCmd = new SqlCommand("dbo.WN_Invoices_DirectApprove", conn) { CommandType = CommandType.StoredProcedure };
                             appCmd.Parameters.AddWithValue("@Id", id);
@@ -1386,6 +1389,11 @@ namespace WorkNest.API.Controllers
                 var res = await SendInvoiceEmailCoreAsync(id, conn);
                 if (!res.Success)
                 {
+                    if (res.Message == CustomerEmailMissingMessage)
+                    {
+                        var c = await FindMissingCustomerEmailAsync(conn, id);
+                        return Conflict(CustomerEmailMissingBody(id, c ?? (null, null), "send it again"));
+                    }
                     return Ok(new { isSuccessful = false, message = $"Invoice email delivery failed ({res.Message}). Queued for background retry." });
                 }
 
@@ -1484,7 +1492,17 @@ namespace WorkNest.API.Controllers
                 cmd.Parameters.AddWithValue("@UserId", userId.Value);
 
                 var affected = Convert.ToInt32(await cmd.ExecuteScalarAsync());
-                return Ok(new { isSuccessful = true, message = "Invoice marked as viewed.", viewed = affected > 0 });
+                // The approval screen warns before approving when the invoice could not be emailed (no customer email).
+                var noEmail = await FindMissingCustomerEmailAsync(conn, id);
+                return Ok(new
+                {
+                    isSuccessful = true,
+                    message = "Invoice marked as viewed.",
+                    viewed = affected > 0,
+                    customerEmailMissing = noEmail != null,
+                    customerCode = noEmail?.Code,
+                    customerName = noEmail?.Name
+                });
             }
             catch (Exception ex)
             {
@@ -1516,6 +1534,11 @@ namespace WorkNest.API.Controllers
                     return Unauthorized(new { isSuccessful = false, message = "User record not found." });
 
                 await SetAuditContextAsync(conn);
+
+                // No customer email: stop before approving (the invoice would be approved but never reach the customer).
+                var noEmail = await FindMissingCustomerEmailAsync(conn, id);
+                if (noEmail != null)
+                    return Conflict(CustomerEmailMissingBody(id, noEmail.Value, "approve it again"));
 
                 using var cmd = new SqlCommand("dbo.WN_Invoices_ApproveSingle", conn);
                 cmd.CommandType = CommandType.StoredProcedure;
@@ -1555,7 +1578,9 @@ namespace WorkNest.API.Controllers
                     isSuccessful = true,
                     message = sendResult.Success
                         ? "Invoice approved and email sent successfully."
-                        : $"Invoice approved, but email delivery failed ({sendResult.Message}). Queued for background retry."
+                        : sendResult.Message == CustomerEmailMissingMessage
+                            ? "Invoice approved, but the customer has no email address, so it was not sent. Add the email in Customers, then use Send email on the invoice."
+                            : $"Invoice approved, but email delivery failed ({sendResult.Message}). Queued for background retry."
                 });
             }
             catch (Exception ex)
@@ -2841,6 +2866,46 @@ namespace WorkNest.API.Controllers
                 return StatusCode(500, new { isSuccessful = false, message = ex.Message });
             }
         }
+
+        /// <summary>The "no customer email" result of SendInvoiceEmailCoreAsync (nothing is queued: a retry cannot succeed).</summary>
+        private const string CustomerEmailMissingMessage = "Customer email is missing for this invoice.";
+
+        /// <summary>
+        /// The customer of an invoice when its customer record (WN_Customers, the only address invoices are emailed to) has no email;
+        /// null when it has one or the invoice is unknown. Same source as dbo.WN_GetInvoiceEmailData.
+        /// </summary>
+        private static async Task<(string? Code, string? Name)?> FindMissingCustomerEmailAsync(SqlConnection conn, int invoiceId)
+        {
+            string email, name;
+            using (var cmd = new SqlCommand("dbo.WN_GetInvoiceEmailData", conn) { CommandType = CommandType.StoredProcedure })
+            {
+                cmd.Parameters.AddWithValue("@InvoiceId", invoiceId);
+                using var r = await cmd.ExecuteReaderAsync();
+                if (!await r.ReadAsync()) return null;
+                string Get(string col) { try { var o = r.GetOrdinal(col); return r.IsDBNull(o) ? "" : Convert.ToString(r.GetValue(o)) ?? ""; } catch (IndexOutOfRangeException) { return ""; } }
+                email = Get("TargetEmail");
+                name = Get("CustomerName");
+            }
+            if (!string.IsNullOrWhiteSpace(email)) return null;
+            string? code = null;
+            using (var cc = new SqlCommand(@"SELECT TOP 1 COALESCE(NULLIF(b.CustomerCode, ''), NULLIF(i.CustomerCode, ''))
+                FROM dbo.WN_Invoices i WITH (NOLOCK) LEFT JOIN dbo.WN_Bookings b WITH (NOLOCK) ON b.Id = i.BookingId WHERE i.Id = @id", conn))
+            {
+                cc.Parameters.AddWithValue("@id", invoiceId);
+                try { code = await cc.ExecuteScalarAsync() as string; } catch (SqlException) { code = null; }
+            }
+            return (string.IsNullOrWhiteSpace(code) ? null : code, string.IsNullOrWhiteSpace(name) || name == "Valued Customer" ? null : name);
+        }
+
+        private static object CustomerEmailMissingBody(int invoiceId, (string? Code, string? Name) c, string action) => new
+        {
+            isSuccessful = false,
+            errorCode = "CUSTOMER_EMAIL_MISSING",
+            invoiceId,
+            customerCode = c.Code,
+            customerName = c.Name,
+            message = $"{(c.Name ?? "This customer")} has no email address on their customer record, so the invoice cannot be emailed. Add the email in Customers, then {action}."
+        };
 
         private async Task QueueInvoiceDeliveryFailureAsync(int invoiceId, int? bookingId, string? targetEmail, string lastError, SqlConnection conn)
         {
