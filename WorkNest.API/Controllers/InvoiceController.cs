@@ -2332,6 +2332,8 @@ namespace WorkNest.API.Controllers
                 {
                     return BadRequest(new { isSuccessful = false, message = $"Booking #{bookingId} is not in an active status (Current status ID: {bookingStatusId})." });
                 }
+                if (await WorkNest.Infrastructure.Repositories.DayPassSql.IsDayPassAsync(conn, bookingId))
+                    return BadRequest(new { isSuccessful = false, message = "A day pass is paid once and has no recurring invoices." });
 
                 // Rent schedule: a booking with rent schedule rows bills its next un-invoiced row (never the procedure, which would price the month
                 // from the booking and ignore the table, a transfer's paid amounts and the transfer credit). A period sent in the request is ignored then.

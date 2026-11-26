@@ -360,6 +360,10 @@ try
     builder.Services.AddScoped<ITransferRepository, TransferRepository>();
     builder.Services.AddScoped<ITransferService, TransferService>();
     builder.Services.AddScoped<ITransferAddendumPdfService, TransferAddendumPdfService>();
+    // Day pass (api/day-passes; script DP_01_day_pass): before the script the endpoints answer 503 "Day passes are not set up on this server yet".
+    builder.Services.AddScoped<IDayPassRepository, WorkNest.Infrastructure.Repositories.DayPassRepository>();
+    builder.Services.AddScoped<IDayPassService, DayPassService>();
+    builder.Services.AddSingleton<IDayPassReceiptPdf, DayPassReceiptPdf>();
 
     // Notice Period & Settlement
     builder.Services.AddScoped<INoticePeriodRepository, WorkNest.Infrastructure.Repositories.NoticePeriodRepository>();
@@ -399,6 +403,7 @@ try
     builder.Services.AddHostedService<ApprovalExpiryService>();   // hourly: expires approvals whose link ran out (APPROVAL_01); quiet before the script
     builder.Services.AddHostedService<OneBillSyncService>();   // OneBill:Enabled (off by default)
     builder.Services.AddHostedService<MonthlyFeeReceiptService>();
+    builder.Services.AddHostedService<DayPassAccessService>();   // removes door access when a day pass ends (HikSync:Enabled server only; Hik Sync switch)
     builder.Services.AddHostedService<TransferExpiryBackgroundService>();   // FeeReceipts:MonthlyEnabled (on by default)
 
     // â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

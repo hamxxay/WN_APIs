@@ -30,6 +30,7 @@ namespace WorkNest.Application.Services
         private readonly ILogger<BookingEmployeeService> _logger;
         private readonly IHikEnrollmentService _hik;
         private readonly IHikAccessSuspensionService _suspension;
+        private readonly IDayPassRepository? _dayPass;   // Day pass bookings: reception-only passes have no door access, seats are the pass's
 
         /// <summary>One capture at a time per booked room (the customer stands at the room's machine). In-process only.</summary>
         private static readonly ConcurrentDictionary<int, SemaphoreSlim> RoomLocks = new();
@@ -38,8 +39,10 @@ namespace WorkNest.Application.Services
         public const string SuspendedMessage = "Door access is suspended until the overdue challan is paid.";
 
         public BookingEmployeeService(IBookingEmployeeRepository repo, IAttendantService attendants, IDbRepository db,
-            IBusinessClock clock, ILogger<BookingEmployeeService> logger, IHikEnrollmentService hik, IHikAccessSuspensionService suspension)
+            IBusinessClock clock, ILogger<BookingEmployeeService> logger, IHikEnrollmentService hik, IHikAccessSuspensionService suspension,
+            IDayPassRepository? dayPass = null)
         {
+            _dayPass = dayPass;
             _hik = hik;
             _suspension = suspension;
             _repo = repo;
@@ -204,6 +207,7 @@ namespace WorkNest.Application.Services
             {
                 var assignError = await AssignToRoomAsync(bookingDetailId, personId, customerId, userId, removeRequestOnFailure: booking.BookingId);
                 if (assignError != null) return Bad(assignError);
+                await LogDayPassAsync(s.DayPassId, "AccessAdded", personId, userId, "added by the customer");
             }
             return result switch
             {
@@ -240,11 +244,24 @@ namespace WorkNest.Application.Services
                         personId, booking.BookingId, machines.Error ?? string.Join("; ", machines.Devices.Where(d => !d.Ok && !d.Queued).Select(d => $"{d.Device}: {d.Error}")));
             }
             await _repo.RemoveRequestsAsync(booking.BookingId, personId);
+            await LogDayPassAsync(s.DayPassId, "AccessRemoved", personId, userId, "removed by the customer");
 
             return new BookingEmployeeOutcome
             {
                 Message = isActive ? "Employee removed and their door access cancelled." : "Employee removed."
             };
+        }
+
+        /// <summary>History of a day pass (AccessAdded / AccessRemoved); never fails the request.</summary>
+        private async Task LogDayPassAsync(int? dayPassId, string action, int personId, int userId, string how)
+        {
+            if (dayPassId is not int id || _dayPass == null) return;
+            try
+            {
+                var name = await _dayPass.GetPersonNameAsync(personId) ?? ("Person " + personId);
+                await _dayPass.AddHistoryAsync(id, action, name + ": " + how, userId, null);
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Day pass history ({Action}) could not be written", action); }
         }
 
         // ---- Customer: e-mail of an employee (the app's door login) ---------------------------------------
@@ -528,6 +545,7 @@ namespace WorkNest.Application.Services
             public List<BookingAttendantDetailDto> Active { get; set; } = new();
             public List<BookingEmployeeRequestRow> Pending { get; set; } = new();
             public int Seats { get; set; }
+            public int? DayPassId { get; set; }
             public string? Reason { get; set; }
             public bool CanManage => Reason == null;
             /// <summary>Seats used: Pending requests + people on the room, each person once.</summary>
@@ -552,6 +570,15 @@ namespace WorkNest.Application.Services
                 s.Active = (await _attendants.GetBookingAttendantsAsync(detailId))
                     .GroupBy(a => a.PersonId).Select(g => g.First()).ToList();
                 s.Seats = (await _attendants.CheckCapacityBeforeAssignAsync(detailId)).RoomCapacity;
+            }
+            // A day pass: no door access on a reception-only pass, and only the seats of the pass (not the whole room's).
+            var pass = _dayPass == null ? null : await _dayPass.GetByBookingAsync(booking.BookingId);
+            if (pass != null)
+            {
+                s.DayPassId = pass.DayPassId;
+                if (s.Reason == null && string.Equals(pass.AccessMode, "reception", StringComparison.OrdinalIgnoreCase))
+                    s.Reason = "This day pass has reception access only: door access is not included.";
+                if (pass.Seats > 0) s.Seats = Math.Min(s.Seats, pass.Seats);
             }
             var onRoom = s.Active.Select(a => a.PersonId).ToHashSet();
             s.Pending = requests
