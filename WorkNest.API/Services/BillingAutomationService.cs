@@ -211,6 +211,9 @@ namespace WorkNest.API.Services
 
                 try
                 {
+                    // A day pass is paid once: never billed again (WN_Billing_GetDueBookings leaves it out after DP_01; this is the second guard).
+                    if (await WorkNest.Infrastructure.Repositories.DayPassSql.IsDayPassAsync(conn, b.BookingId, null, stoppingToken)) continue;
+
                     // Calculate Next Billing Period
                     DateTime nextPeriodStart = b.NextBillingDate ?? (b.CurrentPeriodEnd?.AddDays(1) ?? b.ContractStart);
                     

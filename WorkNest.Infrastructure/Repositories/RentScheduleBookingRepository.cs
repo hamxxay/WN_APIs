@@ -461,6 +461,8 @@ namespace WorkNest.Infrastructure.Repositories
                 where.Add("sp.LocationId IN (" + string.Join(",", locationIds.Select(i => i.ToString(CultureInfo.InvariantCulture))) + ")");
             if (search != null)
                 where.Add("(cust.CustomerName LIKE @q OR b.CustomerCode LIKE @q OR sp.Name LIKE @q OR l.Name LIKE @q OR CAST(b.Id AS VARCHAR(12)) = @id)");
+            await using var c = await OpenAsync(ct);
+            if (await DayPassSql.HasColumnAsync(c, ct)) where.Add("ISNULL(b.BookingKind, N'') <> N'DayPass'");   // a day pass has no rent schedule
             string sql = @"
                 SELECT TOP 500 b.Id, cust.CustomerName, b.CustomerCode, sp.Name AS SpaceName, st.Name AS SpaceTypeName, sp.LocationId, l.Name AS LocationName,
                        b.StartOn, b.EndOn, LTRIM(RTRIM(os.Description)) AS StatusName,
@@ -479,7 +481,6 @@ namespace WorkNest.Infrastructure.Repositories
                 ) cust
                 WHERE " + string.Join(" AND ", where) + @"
                 ORDER BY CASE WHEN CAST(b.EndOn AS DATE) >= CAST(GETDATE() AS DATE) THEN 0 ELSE 1 END, b.StartOn DESC, b.Id DESC";
-            await using var c = await OpenAsync(ct);
             await using var cmd = new SqlCommand(sql, c) { CommandTimeout = CommandTimeoutSeconds };
             if (search != null)
             {
